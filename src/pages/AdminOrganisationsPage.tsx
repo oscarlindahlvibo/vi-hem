@@ -9,7 +9,7 @@ import {
   EmptyState, LoadingPage, SearchInput,
 } from '../components/ui';
 import { formatDate } from '../lib/utils';
-import { Organisation } from '../types';
+import type { Organisation, Profile, Role } from '../types';
 
 const PLAN_LABELS: Record<string, string> = {
   trial: 'Testperiod',
@@ -49,10 +49,52 @@ interface OrgFormData {
   active: boolean;
 }
 
+interface LocalTestUser extends Profile {
+  password: string;
+}
+
+interface UserFormData {
+  name: string;
+  email: string;
+  phone: string;
+  role: Exclude<Role, 'superadmin'>;
+}
+
 const defaultForm: OrgFormData = {
   name: '', slug: '', contact_email: '', contact_phone: '',
   plan: 'trial', max_users: '10', max_apartments: '5', active: true,
 };
+
+const defaultUserForm: UserFormData = {
+  name: '',
+  email: '',
+  phone: '',
+  role: 'admin',
+};
+
+const localTestMode = import.meta.env.DEV && import.meta.env.VITE_ENABLE_LOCAL_SUPERADMIN === 'true';
+const localOrgsKey = 'vihem.localOrgs';
+const localUsersKey = 'vihem.localUsers';
+
+function readLocalOrgs(): Organisation[] {
+  return JSON.parse(localStorage.getItem(localOrgsKey) || '[]') as Organisation[];
+}
+
+function writeLocalOrgs(orgs: Organisation[]) {
+  localStorage.setItem(localOrgsKey, JSON.stringify(orgs));
+}
+
+function readLocalUsers(): LocalTestUser[] {
+  return JSON.parse(localStorage.getItem(localUsersKey) || '[]') as LocalTestUser[];
+}
+
+function writeLocalUsers(users: LocalTestUser[]) {
+  localStorage.setItem(localUsersKey, JSON.stringify(users));
+}
+
+function createTempPassword() {
+  return `ViHem${Math.random().toString(36).slice(2, 8)}!`;
+}
 
 interface AdminOrganisationsPageProps { onNavigate: (page: string) => void; }
 
@@ -66,11 +108,32 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [form, setForm] = useState<OrgFormData>(defaultForm);
+  const [localUsers, setLocalUsers] = useState<LocalTestUser[]>([]);
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [selectedOrg, setSelectedOrg] = useState<Organisation | null>(null);
+  const [userForm, setUserForm] = useState<UserFormData>(defaultUserForm);
+  const [userSaveError, setUserSaveError] = useState('');
+  const [savingUser, setSavingUser] = useState(false);
+  const [createdCredentials, setCreatedCredentials] = useState<{ email: string; password: string } | null>(null);
 
   useEffect(() => { fetchOrgs(); }, []);
 
   const fetchOrgs = async () => {
     setLoading(true);
+    if (localTestMode) {
+      const localOrgs = readLocalOrgs();
+      const users = readLocalUsers();
+      setOrgs(localOrgs);
+      setLocalUsers(users);
+      setStats(localOrgs.map(org => ({
+        id: org.id,
+        member_count: users.filter(u => u.organisation_id === org.id).length,
+        apartment_count: 0,
+      })));
+      setLoading(false);
+      return;
+    }
+
     const { data } = await supabase
       .from('organisations')
       .select('*')
@@ -119,11 +182,36 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         slug: form.slug.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
         contact_email: form.contact_email,
         contact_phone: form.contact_phone,
-        plan: form.plan,
+        plan: form.plan as Organisation['plan'],
         max_users: parseInt(form.max_users) || 10,
         max_apartments: parseInt(form.max_apartments) || 5,
         active: form.active,
       };
+      if (localTestMode) {
+        const currentOrgs = readLocalOrgs();
+        const savedOrg: Organisation = editingOrg
+          ? { ...editingOrg, ...payload }
+          : {
+              ...payload,
+              id: crypto.randomUUID(),
+              plan: payload.plan,
+              plan_expires_at: null,
+              logo_url: '',
+              settings: {},
+              created_at: new Date().toISOString(),
+            };
+        const nextOrgs = editingOrg
+          ? currentOrgs.map(org => org.id === editingOrg.id ? savedOrg : org)
+          : [...currentOrgs, savedOrg];
+
+        writeLocalOrgs(nextOrgs);
+        setShowModal(false);
+        setEditingOrg(null);
+        setForm(defaultForm);
+        fetchOrgs();
+        return;
+      }
+
       if (editingOrg) {
         const { error } = await supabase.from('organisations').update(payload).eq('id', editingOrg.id);
         if (error) throw error;
@@ -161,6 +249,61 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
     setEditingOrg(null);
     setSaveError('');
     setShowModal(true);
+  };
+
+  const openCreateUser = (org: Organisation) => {
+    setSelectedOrg(org);
+    setUserForm({
+      ...defaultUserForm,
+      email: org.contact_email || '',
+    });
+    setUserSaveError('');
+    setShowUserModal(true);
+  };
+
+  const handleCreateUser = async () => {
+    if (!selectedOrg || !localTestMode) return;
+    setUserSaveError('');
+    setSavingUser(true);
+    try {
+      if (!userForm.name.trim()) throw new Error('Ange namn.');
+      if (!userForm.email.trim()) throw new Error('Ange e-post.');
+
+      const users = readLocalUsers();
+      if (users.some(user => user.email.toLowerCase() === userForm.email.trim().toLowerCase())) {
+        throw new Error('Det finns redan en lokal testanvändare med den e-posten.');
+      }
+
+      const password = createTempPassword();
+      const now = new Date().toISOString();
+      const nextUser: LocalTestUser = {
+        id: crypto.randomUUID(),
+        name: userForm.name.trim(),
+        email: userForm.email.trim(),
+        phone: userForm.phone.trim(),
+        role: userForm.role,
+        active: true,
+        avatar_url: '',
+        organisation_id: selectedOrg.id,
+        auth_method: 'password',
+        bankid_personal_number: null,
+        bankid_linked_at: null,
+        created_at: now,
+        updated_at: now,
+        password,
+      };
+
+      writeLocalUsers([...users, nextUser]);
+      setCreatedCredentials({ email: nextUser.email, password });
+      setShowUserModal(false);
+      setSelectedOrg(null);
+      setUserForm(defaultUserForm);
+      fetchOrgs();
+    } catch (err: any) {
+      setUserSaveError(err.message || 'Kunde inte skapa användare.');
+    } finally {
+      setSavingUser(false);
+    }
   };
 
   const filtered = orgs.filter(
@@ -305,6 +448,33 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                         {org.contact_phone && <span>{org.contact_phone}</span>}
                         <span>Skapad {formatDate(org.created_at)}</span>
                       </div>
+
+                      {localTestMode && (
+                        <div className="mt-4">
+                          <div className="mb-2 flex items-center justify-between">
+                            <p className="text-xs font-medium text-slate-500">
+                              Testanvändare
+                            </p>
+                            <Button size="sm" variant="outline" onClick={() => openCreateUser(org)}>
+                              <Plus className="w-3.5 h-3.5" />
+                              Lägg till användare
+                            </Button>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {localUsers.filter(user => user.organisation_id === org.id).length === 0 ? (
+                              <span className="text-xs text-slate-400">Inga användare skapade än</span>
+                            ) : (
+                              localUsers
+                                .filter(user => user.organisation_id === org.id)
+                                .map(user => (
+                                  <Badge key={user.id} className="bg-slate-100 text-slate-700">
+                                    {user.name} · {user.role}
+                                  </Badge>
+                                ))
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Edit button */}
@@ -429,6 +599,94 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             </Button>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={showUserModal}
+        onClose={() => { setShowUserModal(false); setSelectedOrg(null); setUserForm(defaultUserForm); }}
+        title={selectedOrg ? `Ny användare i ${selectedOrg.name}` : 'Ny användare'}
+      >
+        <div className="space-y-4">
+          <Input
+            label="Namn"
+            value={userForm.name}
+            onChange={e => setUserForm({ ...userForm, name: e.target.value })}
+            placeholder="T.ex. Anna Svensson"
+          />
+          <Input
+            label="E-post"
+            type="email"
+            value={userForm.email}
+            onChange={e => setUserForm({ ...userForm, email: e.target.value })}
+            placeholder="anna@exempel.se"
+          />
+          <Input
+            label="Telefon"
+            value={userForm.phone}
+            onChange={e => setUserForm({ ...userForm, phone: e.target.value })}
+            placeholder="070-123 45 67"
+          />
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Roll</label>
+            <select
+              value={userForm.role}
+              onChange={e => setUserForm({ ...userForm, role: e.target.value as UserFormData['role'] })}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="admin">Admin</option>
+              <option value="staff">Personal</option>
+              <option value="tenant">Hyresgäst</option>
+            </select>
+          </div>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+            I lokalt testläge sparas användaren i din webbläsare och kan användas direkt på login-sidan.
+          </div>
+          {userSaveError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
+              {userSaveError}
+            </div>
+          )}
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="secondary" onClick={() => { setShowUserModal(false); setSelectedOrg(null); setUserForm(defaultUserForm); }}>
+              Avbryt
+            </Button>
+            <Button variant="primary" onClick={handleCreateUser} loading={savingUser}>
+              Skapa användare
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!createdCredentials}
+        onClose={() => setCreatedCredentials(null)}
+        title="Testanvändare skapad"
+      >
+        {createdCredentials && (
+          <div className="space-y-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <p className="text-sm font-semibold text-green-900 mb-1">Användaren kan logga in direkt.</p>
+              <p className="text-sm text-green-800">Logga ut från superadmin och använd uppgifterna nedan.</p>
+            </div>
+            <div className="grid gap-2">
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-1">E-post</p>
+                <code className="block bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm select-all">
+                  {createdCredentials.email}
+                </code>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-1">Lösenord</p>
+                <code className="block bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm select-all">
+                  {createdCredentials.password}
+                </code>
+              </div>
+            </div>
+            <Button variant="primary" className="w-full" onClick={() => setCreatedCredentials(null)}>
+              Stäng
+            </Button>
+          </div>
+        )}
       </Modal>
     </div>
   );

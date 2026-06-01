@@ -13,6 +13,55 @@
   personal3@demo.se    = fd57eb2b-ada5-4f13-a97d-52ffad784f75
 */
 
+-- AUTH USERS + PROFILES
+INSERT INTO auth.users (id, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, role, aud)
+VALUES
+  ('23ae8600-fab7-4d0d-890f-3a576ce51c9a', 'admin@demo.se', crypt('Admin1234!', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), 'authenticated', 'authenticated'),
+  ('66486f3e-15d7-46f6-983b-d85042684d82', 'personal@demo.se', crypt('Personal1234!', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), 'authenticated', 'authenticated'),
+  ('46c28820-910e-4d24-9db8-d58c7d6adee0', 'personal2@demo.se', crypt('Personal1234!', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), 'authenticated', 'authenticated'),
+  ('3a1e7c59-7538-4d06-a756-7acf3624af0c', 'hyresgast@demo.se', crypt('Hyresgast1234!', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), 'authenticated', 'authenticated'),
+  ('a684490c-66dd-4e63-af4a-823e5da67647', 'hyresgast2@demo.se', crypt('Hyresgast1234!', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), 'authenticated', 'authenticated'),
+  ('5ec6ee46-1e33-4d05-baf2-3c03c1eaec39', 'hyresgast3@demo.se', crypt('Hyresgast1234!', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), 'authenticated', 'authenticated'),
+  ('064322b7-14ab-4b0e-801b-e47f364e62b7', 'hyresgast4@demo.se', crypt('Hyresgast1234!', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), 'authenticated', 'authenticated'),
+  ('a34dc2c5-a3d0-4284-b75e-a3407c7be6e2', 'hyresgast5@demo.se', crypt('Hyresgast1234!', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), 'authenticated', 'authenticated'),
+  ('fd57eb2b-ada5-4f13-a97d-52ffad784f75', 'personal3@demo.se', crypt('Personal1234!', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), 'authenticated', 'authenticated')
+ON CONFLICT (id) DO UPDATE SET
+  email = EXCLUDED.email,
+  encrypted_password = EXCLUDED.encrypted_password,
+  email_confirmed_at = EXCLUDED.email_confirmed_at,
+  updated_at = now();
+
+UPDATE auth.users
+SET
+  confirmation_token = COALESCE(confirmation_token, ''),
+  recovery_token = COALESCE(recovery_token, ''),
+  email_change_token_new = COALESCE(email_change_token_new, ''),
+  email_change_token_current = COALESCE(email_change_token_current, ''),
+  email_change = COALESCE(email_change, ''),
+  phone_change = COALESCE(phone_change, ''),
+  phone_change_token = COALESCE(phone_change_token, ''),
+  reauthentication_token = COALESCE(reauthentication_token, '')
+WHERE email LIKE '%demo.se';
+
+INSERT INTO profiles (id, name, email, phone, role, active)
+VALUES
+  ('23ae8600-fab7-4d0d-890f-3a576ce51c9a', 'Anna Lindqvist', 'admin@demo.se', '070-100 00 01', 'admin', true),
+  ('66486f3e-15d7-46f6-983b-d85042684d82', 'Erik Johansson', 'personal@demo.se', '070-100 00 02', 'staff', true),
+  ('46c28820-910e-4d24-9db8-d58c7d6adee0', 'Maja Svensson', 'personal2@demo.se', '070-100 00 03', 'staff', true),
+  ('3a1e7c59-7538-4d06-a756-7acf3624af0c', 'Lars Andersson', 'hyresgast@demo.se', '070-200 00 01', 'tenant', true),
+  ('a684490c-66dd-4e63-af4a-823e5da67647', 'Karin Nilsson', 'hyresgast2@demo.se', '070-200 00 02', 'tenant', true),
+  ('5ec6ee46-1e33-4d05-baf2-3c03c1eaec39', 'Peter Gustafsson', 'hyresgast3@demo.se', '070-200 00 03', 'tenant', true),
+  ('064322b7-14ab-4b0e-801b-e47f364e62b7', 'Sara Eriksson', 'hyresgast4@demo.se', '070-200 00 04', 'tenant', true),
+  ('a34dc2c5-a3d0-4284-b75e-a3407c7be6e2', 'Johan Pettersson', 'hyresgast5@demo.se', '070-200 00 05', 'tenant', true),
+  ('fd57eb2b-ada5-4f13-a97d-52ffad784f75', 'Maria Olsson', 'personal3@demo.se', '070-100 00 04', 'staff', true)
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  email = EXCLUDED.email,
+  phone = EXCLUDED.phone,
+  role = EXCLUDED.role,
+  active = EXCLUDED.active,
+  updated_at = now();
+
 -- PROPERTIES
 INSERT INTO properties (id, name, address, city, zip, description, emergency_info, contact_info) VALUES
   ('10000000-0000-0000-0000-000000000001', 'Björkgatan 12', 'Björkgatan 12', 'Stockholm', '113 25',

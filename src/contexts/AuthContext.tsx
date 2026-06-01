@@ -33,6 +33,40 @@ const AuthContext = createContext<AuthContextType>({
   bankIDAvailable: false,
 });
 
+const LOCAL_SUPERADMIN_STORAGE_KEY = 'vihem.localSuperadmin';
+const LOCAL_USER_STORAGE_KEY = 'vihem.localUserId';
+const LOCAL_USERS_KEY = 'vihem.localUsers';
+const localSuperadminEmail = import.meta.env.VITE_LOCAL_SUPERADMIN_EMAIL;
+const localSuperadminPassword = import.meta.env.VITE_LOCAL_SUPERADMIN_PASSWORD;
+const localSuperadminEnabled =
+  import.meta.env.DEV &&
+  import.meta.env.VITE_ENABLE_LOCAL_SUPERADMIN === 'true' &&
+  Boolean(localSuperadminEmail && localSuperadminPassword);
+
+const localSuperadminProfile: Profile = {
+  id: 'local-superadmin',
+  name: 'Lokal Superadmin',
+  email: localSuperadminEmail || 'superadmin@vihem.local',
+  phone: '',
+  role: 'superadmin',
+  active: true,
+  avatar_url: '',
+  organisation_id: null,
+  auth_method: 'password',
+  bankid_personal_number: null,
+  bankid_linked_at: null,
+  created_at: new Date(0).toISOString(),
+  updated_at: new Date(0).toISOString(),
+};
+
+interface LocalTestUser extends Profile {
+  password: string;
+}
+
+function readLocalUsers(): LocalTestUser[] {
+  return JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || '[]') as LocalTestUser[];
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,6 +81,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
+    if (localSuperadminEnabled && localStorage.getItem(LOCAL_SUPERADMIN_STORAGE_KEY) === 'true') {
+      setUser(localSuperadminProfile);
+      setLoading(false);
+      return;
+    }
+
+    if (localSuperadminEnabled) {
+      const localUserId = localStorage.getItem(LOCAL_USER_STORAGE_KEY);
+      const localUser = readLocalUsers().find(user => user.id === localUserId && user.active);
+      if (localUser) {
+        const { password: _password, ...profile } = localUser;
+        setUser(profile);
+        setLoading(false);
+        return;
+      }
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         fetchProfile(session.user.id).then(profile => {
@@ -73,6 +124,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   async function signIn(email: string, password: string) {
+    if (
+      localSuperadminEnabled &&
+      email.trim().toLowerCase() === localSuperadminEmail.toLowerCase() &&
+      password === localSuperadminPassword
+    ) {
+      localStorage.setItem(LOCAL_SUPERADMIN_STORAGE_KEY, 'true');
+      localStorage.removeItem(LOCAL_USER_STORAGE_KEY);
+      setUser(localSuperadminProfile);
+      return { error: null };
+    }
+
+    if (localSuperadminEnabled) {
+      const localUser = readLocalUsers().find(user =>
+        user.active &&
+        user.email.toLowerCase() === email.trim().toLowerCase() &&
+        user.password === password
+      );
+      if (localUser) {
+        const { password: _password, ...profile } = localUser;
+        localStorage.removeItem(LOCAL_SUPERADMIN_STORAGE_KEY);
+        localStorage.setItem(LOCAL_USER_STORAGE_KEY, localUser.id);
+        setUser(profile);
+        return { error: null };
+      }
+    }
+
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: error.message };
     return { error: null };
@@ -105,7 +182,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signOut() {
+    localStorage.removeItem(LOCAL_SUPERADMIN_STORAGE_KEY);
+    localStorage.removeItem(LOCAL_USER_STORAGE_KEY);
     await supabase.auth.signOut();
+    setUser(null);
   }
 
   return (

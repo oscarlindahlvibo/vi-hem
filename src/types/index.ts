@@ -158,6 +158,7 @@ export type WOStatus = 'new' | 'assigned' | 'started' | 'paused' | 'waiting_mate
 
 export interface WorkOrder {
   id: string;
+  organisation_id: string | null;
   title: string;
   description: string;
   category: string;
@@ -210,6 +211,7 @@ export interface WorkOrderComment {
 
 export type TimeCategory = 'general' | 'work_order' | 'maintenance' | 'customer_project' | 'admin' | 'travel' | 'shopping' | 'standby' | 'other';
 export type TimeStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
+export type TimeEntryType = 'work' | 'break';
 
 export interface TimeEntry {
   id: string;
@@ -219,6 +221,8 @@ export interface TimeEntry {
   property_id: string | null;
   customer_project_id: string | null;
   category: TimeCategory;
+  entry_type: TimeEntryType;
+  customer_name: string | null;
   start_time: string;
   end_time: string | null;
   break_minutes: number;
@@ -291,6 +295,7 @@ export interface News {
   title: string;
   content: string;
   image_url: string;
+  organisation_id: string | null;
   target_type: 'all' | 'property' | 'staircase' | 'tenant';
   target_id: string | null;
   published_at: string | null;

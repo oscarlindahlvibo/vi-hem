@@ -5,7 +5,6 @@ import {
   Card,
   Badge,
   Button,
-  Modal,
   Input,
   Textarea,
   Select,
@@ -14,13 +13,14 @@ import {
   LoadingPage,
 } from '../components/ui';
 import { formatDate, NEWS_TARGET_LABELS } from '../lib/utils';
-import { News, Profile } from '../types';
-import { Newspaper, Plus, Edit2, Eye, Calendar } from 'lucide-react';
+import type { News, Property } from '../types';
+import { Newspaper, Plus, Edit2, Calendar } from 'lucide-react';
 
 interface NewsPageProps { onNavigate: (page: string) => void; }
 export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
   const { user } = useAuth();
   const [news, setNews] = useState<News[]>([]);
+  const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingNews, setEditingNews] = useState<News | null>(null);
@@ -30,16 +30,18 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
   // Form state
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
-  const [newTarget, setNewTarget] = useState('all');
+  const [newTarget, setNewTarget] = useState<'all' | 'property'>('all');
+  const [newTargetId, setNewTargetId] = useState('');
   const [newStatus, setNewStatus] = useState('published');
   const [newPublishedAt, setNewPublishedAt] = useState('');
   const [newImageUrl, setNewImageUrl] = useState('');
 
-  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+  const canManageNews = user?.role === 'staff' || user?.role === 'admin' || user?.role === 'superadmin';
 
   useEffect(() => {
     fetchNews();
-  }, [statusFilter]);
+    if (canManageNews) fetchProperties();
+  }, [statusFilter, user?.id]);
 
   const fetchNews = async () => {
     try {
@@ -49,11 +51,11 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
         .select('*')
         .order('published_at', { ascending: false });
 
-      if (!isAdmin) {
+      if (!canManageNews) {
         // Tenants see only published news
         query = query.eq('status', 'published');
       } else if (statusFilter !== 'all') {
-        // Admins can filter by status
+        // Staff can filter by status
         query = query.eq('status', statusFilter);
       }
 
@@ -68,10 +70,26 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
     }
   };
 
+  const fetchProperties = async () => {
+    const { data, error } = await supabase
+      .from('properties')
+      .select('*')
+      .eq('active', true)
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching properties:', error);
+      return;
+    }
+
+    setProperties(data || []);
+  };
+
   const resetForm = () => {
     setNewTitle('');
     setNewContent('');
     setNewTarget('all');
+    setNewTargetId('');
     setNewStatus('published');
     setNewPublishedAt('');
     setNewImageUrl('');
@@ -80,16 +98,22 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
 
   const createNews = async () => {
     if (!newTitle.trim() || !newContent.trim()) return;
+    if (newTarget === 'property' && !newTargetId) {
+      alert('Välj en fastighet för nyheten.');
+      return;
+    }
 
     try {
       const newsData = {
         title: newTitle,
         content: newContent,
         target_type: newTarget,
+        target_id: newTarget === 'property' ? newTargetId || null : null,
         status: newStatus,
         published_at: newPublishedAt || new Date().toISOString(),
         image_url: newImageUrl || null,
         created_by: user?.id,
+        organisation_id: user?.organisation_id || null,
         created_at: new Date().toISOString(),
       };
 
@@ -107,6 +131,10 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
 
   const updateNews = async () => {
     if (!editingNews || !newTitle.trim() || !newContent.trim()) return;
+    if (newTarget === 'property' && !newTargetId) {
+      alert('Välj en fastighet för nyheten.');
+      return;
+    }
 
     try {
       const { error } = await supabase
@@ -115,6 +143,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
           title: newTitle,
           content: newContent,
           target_type: newTarget,
+          target_id: newTarget === 'property' ? newTargetId || null : null,
           status: newStatus,
           published_at: newPublishedAt || new Date().toISOString(),
           image_url: newImageUrl || null,
@@ -149,9 +178,10 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
     setEditingNews(item);
     setNewTitle(item.title);
     setNewContent(item.content);
-    setNewTarget(item.target_type);
+    setNewTarget(item.target_type === 'property' ? 'property' : 'all');
+    setNewTargetId(item.target_type === 'property' ? item.target_id || '' : '');
     setNewStatus(item.status);
-    setNewPublishedAt(item.published_at);
+    setNewPublishedAt(item.published_at || '');
     setNewImageUrl(item.image_url || '');
     setShowCreateModal(true);
   };
@@ -179,7 +209,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
         title="Nyheter"
         icon={Newspaper}
         action={
-          isAdmin && (
+          canManageNews && (
             <Button
               onClick={() => {
                 resetForm();
@@ -197,7 +227,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Filter */}
-        {isAdmin && (
+        {canManageNews && (
           <div className="mb-8">
             <Select
               label="Status"
@@ -215,10 +245,10 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
 
         {news.length === 0 ? (
           <EmptyState
-            icon={Newspaper}
+            icon={<Newspaper className="w-12 h-12" />}
             title="Inga nyheter"
             description={
-              isAdmin
+              canManageNews
                 ? 'Skapa din första nyhet'
                 : 'Det finns inga nyheter att visa'
             }
@@ -245,7 +275,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-2">
                       <Newspaper className="w-5 h-5 text-blue-600" />
-                      {isAdmin && (
+                      {canManageNews && (
                         <Badge
                           className={getStatusColor(item.status)}
                           text={
@@ -259,7 +289,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                       )}
                     </div>
 
-                    {isAdmin && (
+                    {canManageNews && (
                       <div className="flex gap-2">
                         <Button
                           variant="ghost"
@@ -320,7 +350,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                     </div>
                   )}
 
-                  {isAdmin && (
+                  {canManageNews && (
                     <div className="pt-4 border-t border-gray-200">
                       <div className="text-sm text-gray-600 space-y-1">
                         <p>
@@ -329,6 +359,9 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                             {NEWS_TARGET_LABELS[
                               item.target_type as keyof typeof NEWS_TARGET_LABELS
                             ] || item.target_type}
+                            {item.target_type === 'property' && item.target_id
+                              ? `: ${properties.find(property => property.id === item.target_id)?.name || 'Vald fastighet'}`
+                              : ''}
                           </span>
                         </p>
                       </div>
@@ -381,12 +414,13 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                     </label>
                     <Select
                       value={newTarget}
-                      onChange={(e: any) => setNewTarget(e.target.value)}
+                      onChange={(e: any) => {
+                        setNewTarget(e.target.value);
+                        if (e.target.value === 'all') setNewTargetId('');
+                      }}
                       options={[
-                        { value: 'all', label: 'Alla' },
-                        { value: 'tenants', label: 'Hyresgäster' },
-                        { value: 'staff', label: 'Personal' },
-                        { value: 'admin', label: 'Administratörer' },
+                        { value: 'all', label: 'Alla hyresgäster i organisationen' },
+                        { value: 'property', label: 'Särskild fastighet' },
                       ]}
                     />
                   </div>
@@ -406,6 +440,30 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                     />
                   </div>
                 </div>
+
+                {newTarget === 'property' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Fastighet
+                    </label>
+                    <Select
+                      value={newTargetId}
+                      onChange={(e: any) => setNewTargetId(e.target.value)}
+                      options={[
+                        { value: '', label: 'Välj fastighet' },
+                        ...properties.map(property => ({
+                          value: property.id,
+                          label: `${property.name} · ${property.address}`,
+                        })),
+                      ]}
+                    />
+                    {properties.length === 0 && (
+                      <p className="text-xs text-amber-700 mt-1">
+                        Ingen fastighet hittades i organisationen.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">

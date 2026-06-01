@@ -129,6 +129,10 @@ UPDATE contract_signatures SET organisation_id = '00000000-0000-0000-0000-000000
 -- ── Tighten organisations RLS ──────────────────────────────────────────────
 -- Replace the open read policy with a membership-scoped one
 DROP POLICY IF EXISTS "Authenticated users can read organisations" ON organisations;
+DROP POLICY IF EXISTS "Members can read own organisation" ON organisations;
+DROP POLICY IF EXISTS "Superadmin can read all organisations" ON organisations;
+DROP POLICY IF EXISTS "Superadmin can insert organisations" ON organisations;
+DROP POLICY IF EXISTS "Superadmin can update organisations" ON organisations;
 
 CREATE POLICY "Members can read own organisation"
   ON organisations FOR SELECT
@@ -139,3 +143,19 @@ CREATE POLICY "Members can read own organisation"
       WHERE id = auth.uid() AND organisation_id IS NOT NULL
     )
   );
+
+CREATE POLICY "Superadmin can read all organisations"
+  ON organisations FOR SELECT
+  TO authenticated
+  USING (get_my_role() = 'superadmin');
+
+CREATE POLICY "Superadmin can insert organisations"
+  ON organisations FOR INSERT
+  TO authenticated
+  WITH CHECK (get_my_role() = 'superadmin');
+
+CREATE POLICY "Superadmin can update organisations"
+  ON organisations FOR UPDATE
+  TO authenticated
+  USING (get_my_role() = 'superadmin')
+  WITH CHECK (get_my_role() = 'superadmin');

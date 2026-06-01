@@ -1,12 +1,22 @@
 /*
-  # Fix superadmin profile to match new auth user id
+  # Ensure superadmin profile exists
 */
--- Remove old profile with wrong id
-DELETE FROM profiles WHERE email = 'superadmin@demo.se' AND id = 'aaaaaaaa-0000-0000-0000-000000000001';
-
--- Ensure the new profile has correct role and org (upsert by email lookup)
-UPDATE profiles
-SET role = 'superadmin',
-    active = true,
-    organisation_id = '00000000-0000-0000-0000-000000000001'
-WHERE email = 'superadmin@demo.se';
+INSERT INTO profiles (id, name, email, phone, role, active, organisation_id, auth_method)
+VALUES (
+  'aaaaaaaa-0000-0000-0000-000000000001',
+  'Superadmin',
+  'superadmin@demo.se',
+  '',
+  'superadmin',
+  true,
+  '00000000-0000-0000-0000-000000000001',
+  'password'
+)
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  email = EXCLUDED.email,
+  role = EXCLUDED.role,
+  active = EXCLUDED.active,
+  organisation_id = EXCLUDED.organisation_id,
+  auth_method = EXCLUDED.auth_method,
+  updated_at = now();

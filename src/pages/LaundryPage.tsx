@@ -23,13 +23,13 @@ import {
   Plus,
 } from 'lucide-react';
 
-interface SlotWithBooking extends LaundrySlot {
+interface SlotWithBooking extends Omit<LaundrySlot, 'booking'> {
   booking?: LaundryBooking | null;
   isTaken?: boolean;
   isPast?: boolean;
 }
 
-interface MyBooking extends LaundryBooking {
+interface MyBooking extends Omit<LaundryBooking, 'slot'> {
   slot?: {
     date: string;
     start_time: string;

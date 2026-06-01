@@ -31,7 +31,6 @@ import type {
   WOPriority,
   Profile,
   Property,
-  TimeEntry,
 } from '../types';
 import {
   Plus,
@@ -52,12 +51,14 @@ import type { TimeCategory } from '../types';
 
 type FilterView = 'all' | 'mine' | 'new' | 'urgent';
 
-interface WOWithRelations extends WorkOrder {
-  property?: Property;
+type WorkOrderPerson = Pick<Profile, 'name'>;
+
+interface WOWithRelations extends Omit<WorkOrder, 'property' | 'apartment' | 'tenant' | 'assigned' | 'creator'> {
+  property?: Pick<Property, 'name' | 'address'>;
   apartment?: { apartment_number: string };
-  tenant?: Profile;
-  assigned?: Profile;
-  creator?: Profile;
+  tenant?: WorkOrderPerson;
+  assigned?: WorkOrderPerson;
+  creator?: WorkOrderPerson;
 }
 
 const WO_STATUSES: WOStatus[] = [
@@ -161,7 +162,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setWorkOrders(data || []);
+      setWorkOrders((data || []) as unknown as WOWithRelations[]);
     } catch (err) {
       console.error('Error fetching work orders:', err);
     } finally {
@@ -253,6 +254,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
           due_date: createForm.due_date || null,
           assigned_to: createForm.assigned_to || null,
           created_by: user.id,
+          organisation_id: user.organisation_id || null,
         },
       ]);
 
@@ -345,16 +347,18 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
 
   async function checkActiveTimeEntry() {
     if (!user) return;
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const { data } = await supabase
       .from('time_entries')
       .select('id, work_order_id')
       .eq('user_id', user.id)
       .eq('status', 'draft')
-      .gte('start_time', today)
+      .gte('start_time', today.toISOString())
       .is('end_time', null)
-      .maybeSingle();
-    setActiveTimeEntry(data || null);
+      .order('start_time', { ascending: false })
+      .limit(1);
+    setActiveTimeEntry(data?.[0] || null);
   }
 
   async function handleStampIn() {
@@ -363,6 +367,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
       setStampingIn(true);
       const { error } = await supabase.from('time_entries').insert({
         user_id: user.id,
+        organisation_id: user.organisation_id || null,
         work_order_id: selectedWorkOrder.id,
         category: stampCategory,
         start_time: new Date().toISOString(),
@@ -388,22 +393,29 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
     if (!activeTimeEntry) return;
     try {
       setStampingIn(true);
-      const { data: entry } = await supabase
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const { data: openEntries } = await supabase
         .from('time_entries')
-        .select('start_time, break_minutes')
-        .eq('id', activeTimeEntry.id)
-        .single();
-      if (!entry) return;
+        .select('id, start_time, break_minutes, entry_type')
+        .eq('user_id', user.id)
+        .eq('status', 'draft')
+        .gte('start_time', today.toISOString())
+        .is('end_time', null);
       const endTime = new Date().toISOString();
-      const totalMinutes = Math.max(
-        Math.floor((Date.now() - new Date(entry.start_time).getTime()) / 60000) - (entry.break_minutes || 0),
-        0
-      );
-      await supabase
-        .from('time_entries')
-        .update({ end_time: endTime, total_minutes: totalMinutes, status: 'submitted' })
-        .eq('id', activeTimeEntry.id);
+      await Promise.all((openEntries || []).map(async entry => {
+        const breakMinutes = entry.entry_type === 'break' ? 0 : entry.break_minutes || 0;
+        const totalMinutes = Math.max(
+          Math.floor((Date.now() - new Date(entry.start_time).getTime()) / 60000) - breakMinutes,
+          0
+        );
+        await supabase
+          .from('time_entries')
+          .update({ end_time: endTime, total_minutes: totalMinutes, status: 'submitted' })
+          .eq('id', entry.id);
+      }));
       setActiveTimeEntry(null);
+      await checkActiveTimeEntry();
       await fetchTimeLogged();
     } catch (err) {
       console.error('Failed to stamp out:', err);
@@ -455,7 +467,20 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
   if (authLoading) return <LoadingPage />;
 
   const filtered = filteredWorkOrders();
-  const statusGroups = viewMode === 'kanban' ? workOrdersByStatus() : {};
+  const statusGroups: Record<WOStatus, WOWithRelations[]> = viewMode === 'kanban'
+    ? workOrdersByStatus()
+    : {
+        new: [],
+        assigned: [],
+        started: [],
+        paused: [],
+        waiting_material: [],
+        waiting_tenant: [],
+        waiting_contractor: [],
+        ready_for_check: [],
+        completed: [],
+        cancelled: [],
+      };
 
   return (
     <div className="space-y-6">

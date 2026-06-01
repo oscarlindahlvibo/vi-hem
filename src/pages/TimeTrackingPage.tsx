@@ -37,9 +37,21 @@ import {
   ChevronRight,
   AlertCircle,
   Send,
+  Coffee,
+  Repeat2,
+  Briefcase,
+  MessageSquare,
 } from 'lucide-react';
 
 type TimeStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
+type TimeEntryKind = 'work' | 'break';
+
+interface DailyWorkSummary {
+  id: string;
+  user_id: string;
+  work_date: string;
+  comment: string;
+}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -53,6 +65,12 @@ function toLocalDatetimeValue(iso: string) {
 function calcMinutes(start: string, end: string, breakMins: number) {
   const ms = new Date(end).getTime() - new Date(start).getTime();
   return Math.max(Math.floor(ms / 60000) - breakMins, 0);
+}
+
+function localDateKey(value: string | Date) {
+  const d = typeof value === 'string' ? new Date(value) : value;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 const STATUS_LABEL: Record<TimeStatus, string> = {
@@ -74,6 +92,7 @@ export function TimeTrackingPage({ onNavigate: _onNavigate }: { onNavigate: (pag
 // ─── Staff view ───────────────────────────────────────────────────────────────
 
 type StaffTab = 'list' | 'calendar';
+type WorkOrderSummary = Pick<WorkOrder, 'id' | 'title' | 'status'>;
 
 function StaffTimeView({ user }: { user: Profile }) {
   const [tab, setTab] = useState<StaffTab>('list');
@@ -81,7 +100,8 @@ function StaffTimeView({ user }: { user: Profile }) {
   const [currentEntry, setCurrentEntry] = useState<TimeEntry | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
+  const [workOrders, setWorkOrders] = useState<WorkOrderSummary[]>([]);
+  const [dailySummaries, setDailySummaries] = useState<Record<string, DailyWorkSummary>>({});
 
   // Month navigation for calendar tab
   const now = new Date();
@@ -96,8 +116,11 @@ function StaffTimeView({ user }: { user: Profile }) {
 
   // Modals
   const [showStampModal, setShowStampModal] = useState(false);
+  const [stampMode, setStampMode] = useState<'start' | 'switch'>('start');
   const [showManualModal, setShowManualModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showEndDayModal, setShowEndDayModal] = useState(false);
+  const [showDayCommentModal, setShowDayCommentModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
   const [selectedDayEntries, setSelectedDayEntries] = useState<TimeEntry[] | null>(null);
   const [selectedDay, setSelectedDay] = useState('');
@@ -119,13 +142,15 @@ function StaffTimeView({ user }: { user: Profile }) {
     setLoading(true);
     try {
       // Always load current open draft
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
       const { data: current } = await supabase
         .from('time_entries').select('*')
         .eq('user_id', user.id).eq('status', 'draft')
-        .gte('start_time', `${todayStr}T00:00:00`).is('end_time', null)
-        .maybeSingle();
-      setCurrentEntry(current || null);
+        .gte('start_time', todayStart.toISOString()).is('end_time', null)
+        .order('start_time', { ascending: false })
+        .limit(1);
+      setCurrentEntry(current?.[0] || null);
 
       // Load entries for the displayed month
       const year = tab === 'calendar' ? calYear : parseInt(listMonth.split('-')[0]);
@@ -141,6 +166,17 @@ function StaffTimeView({ user }: { user: Profile }) {
         .order('start_time', { ascending: false });
       setEntries(entriesData || []);
 
+      const { data: summariesData } = await supabase
+        .from('daily_work_summaries')
+        .select('*')
+        .eq('user_id', user.id)
+        .gte('work_date', localDateKey(new Date(year, month, 1)))
+        .lte('work_date', localDateKey(new Date(year, month + 1, 0)));
+      setDailySummaries((summariesData || []).reduce((acc, summary) => {
+        acc[summary.work_date] = summary as DailyWorkSummary;
+        return acc;
+      }, {} as Record<string, DailyWorkSummary>));
+
       const { data: wos } = await supabase
         .from('work_orders').select('id, title, status')
         .in('status', ['new', 'assigned', 'started', 'paused']);
@@ -150,9 +186,48 @@ function StaffTimeView({ user }: { user: Profile }) {
     }
   }
 
-  async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string) {
+  async function finishOpenEntries() {
+    const end = new Date().toISOString();
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const { data: openEntries, error } = await supabase
+      .from('time_entries')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('status', 'draft')
+      .gte('start_time', todayStart.toISOString())
+      .is('end_time', null)
+      .order('start_time', { ascending: true });
+
+    if (error) throw error;
+
+    await Promise.all((openEntries || []).map(async entry => {
+      const breakMinutes = entry.entry_type === 'break' ? 0 : entry.break_minutes;
+      const total = calcMinutes(entry.start_time, end, breakMinutes);
+      const { error: updateError } = await supabase.from('time_entries').update({
+        end_time: end,
+        total_minutes: total,
+        status: 'submitted',
+      }).eq('id', entry.id);
+      if (updateError) throw updateError;
+    }));
+  }
+
+  async function saveDayComment(workDate: string, comment: string) {
+    await supabase.from('daily_work_summaries').upsert({
+      user_id: user.id,
+      work_date: workDate,
+      comment,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,work_date' });
+  }
+
+  async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string) {
     await supabase.from('time_entries').insert({
       user_id: user.id, work_order_id: workOrderId || null, category,
+      organisation_id: user.organisation_id || null,
+      entry_type: 'work',
+      customer_name: customerName || null,
       start_time: new Date().toISOString(), end_time: null,
       break_minutes: 0, total_minutes: 0, comment: comment || '', status: 'draft',
     });
@@ -160,14 +235,52 @@ function StaffTimeView({ user }: { user: Profile }) {
     fetchData();
   }
 
-  async function handleStampOut() {
+  async function handleSwitchJob(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string) {
     if (!currentEntry) return;
-    const end = new Date().toISOString();
-    const total = calcMinutes(currentEntry.start_time, end, currentEntry.break_minutes);
-    await supabase.from('time_entries').update({
-      end_time: end, total_minutes: total, status: 'submitted',
-    }).eq('id', currentEntry.id);
+    await finishOpenEntries();
+    await supabase.from('time_entries').insert({
+      user_id: user.id,
+      organisation_id: user.organisation_id || null,
+      work_order_id: workOrderId || null,
+      category,
+      entry_type: 'work',
+      customer_name: customerName || null,
+      start_time: new Date().toISOString(),
+      end_time: null,
+      break_minutes: 0,
+      total_minutes: 0,
+      comment: comment || '',
+      status: 'draft',
+    });
+    setShowStampModal(false);
+    fetchData();
+  }
+
+  async function handleStartBreak() {
+    if (!currentEntry) return;
+    await finishOpenEntries();
+    await supabase.from('time_entries').insert({
+      user_id: user.id,
+      organisation_id: user.organisation_id || null,
+      category: 'general',
+      entry_type: 'break',
+      start_time: new Date().toISOString(),
+      end_time: null,
+      break_minutes: 0,
+      total_minutes: 0,
+      comment: 'Rast',
+      status: 'draft',
+    });
+    fetchData();
+  }
+
+  async function handleStampOut(dayComment?: string) {
+    if (!currentEntry) return;
+    await finishOpenEntries();
+    const comment = dayComment?.trim();
+    if (comment) await saveDayComment(localDateKey(new Date()), comment);
     setCurrentEntry(null);
+    setShowEndDayModal(false);
     fetchData();
   }
 
@@ -176,6 +289,7 @@ function StaffTimeView({ user }: { user: Profile }) {
     const status = payload.submitNow ? 'submitted' : 'draft';
     const data: any = {
       user_id: user.id,
+      organisation_id: user.organisation_id || null,
       category: payload.category,
       start_time: payload.start_time,
       end_time: payload.end_time || null,
@@ -185,6 +299,8 @@ function StaffTimeView({ user }: { user: Profile }) {
         : 0,
       comment: payload.comment || '',
       work_order_id: payload.work_order_id || null,
+      entry_type: payload.entry_type || 'work',
+      customer_name: payload.customer_name || null,
       status,
     };
     if (isNew) {
@@ -205,7 +321,7 @@ function StaffTimeView({ user }: { user: Profile }) {
   const STANDARD_DAY_MINUTES = 8 * 60; // 8h = 480 min
 
   const entriesByDay = entries.reduce((acc, e) => {
-    const day = new Date(e.start_time).toISOString().split('T')[0];
+    const day = localDateKey(e.start_time);
     if (!acc[day]) acc[day] = [];
     acc[day].push(e);
     return acc;
@@ -213,16 +329,22 @@ function StaffTimeView({ user }: { user: Profile }) {
 
   function dayTotals(dayEntries: TimeEntry[]) {
     const work = dayEntries
-      .filter(e => e.end_time)
+      .filter(e => e.end_time && e.entry_type !== 'break')
       .reduce((s, e) => s + (e.total_minutes || 0), 0);
-    const breaks = dayEntries.reduce((s, e) => s + (e.break_minutes || 0), 0);
+    const breaks = dayEntries.reduce((s, e) => {
+      if (e.entry_type === 'break') return s + (e.total_minutes || 0);
+      return s + (e.break_minutes || 0);
+    }, 0);
     return { work, breaks };
   }
 
   // ── Month-level totals ──────────────────────────────────────────────────────
-  const completedEntries = entries.filter(e => e.end_time);
+  const completedEntries = entries.filter(e => e.end_time && e.entry_type !== 'break');
   const totalWork = completedEntries.reduce((s, e) => s + (e.total_minutes || 0), 0);
-  const totalBreaks = entries.reduce((s, e) => s + (e.break_minutes || 0), 0);
+  const totalBreaks = entries.reduce((s, e) => {
+    if (e.entry_type === 'break') return s + (e.total_minutes || 0);
+    return s + (e.break_minutes || 0);
+  }, 0);
   const workDays = Object.values(entriesByDay).filter(d => d.some(e => e.end_time)).length;
   const expectedMinutes = workDays * STANDARD_DAY_MINUTES;
   const overtime = Math.max(totalWork - expectedMinutes, 0);
@@ -232,6 +354,11 @@ function StaffTimeView({ user }: { user: Profile }) {
     .toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' });
 
   const calYM = `${calYear}-${String(calMonth + 1).padStart(2, '0')}`;
+  const [listYear, listMonthNumber] = listMonth.split('-').map(Number);
+  const monthDayKeys = Array.from(
+    { length: new Date(listYear, listMonthNumber, 0).getDate() },
+    (_, i) => localDateKey(new Date(listYear, listMonthNumber - 1, i + 1))
+  ).reverse();
 
   return (
     <div className="space-y-6 min-h-screen bg-slate-50 -m-4 lg:-m-6 p-4 lg:p-6">
@@ -243,36 +370,53 @@ function StaffTimeView({ user }: { user: Profile }) {
             <Button onClick={() => setShowManualModal(true)} variant="secondary" className="gap-2">
               <Plus className="w-4 h-4" /> Registrera tid
             </Button>
-            <Button onClick={() => setShowStampModal(true)} variant="primary" className="gap-2">
-              <Play className="w-4 h-4" /> Stämpla in
-            </Button>
+            {!currentEntry && (
+              <Button onClick={() => { setStampMode('start'); setShowStampModal(true); }} variant="primary" className="gap-2">
+                <Play className="w-4 h-4" /> Stämpla in
+              </Button>
+            )}
           </div>
         }
       />
 
       {/* Active clock */}
       {currentEntry ? (
-        <Card className="p-5 bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
-          <div className="flex items-center justify-between">
+        <Card className={`p-5 ${currentEntry.entry_type === 'break' ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-green-100 rounded-xl">
-                <Clock className="w-6 h-6 text-green-600" />
+              <div className={`p-3 rounded-xl ${currentEntry.entry_type === 'break' ? 'bg-amber-100' : 'bg-emerald-100'}`}>
+                {currentEntry.entry_type === 'break'
+                  ? <Coffee className="w-6 h-6 text-amber-700" />
+                  : <Clock className="w-6 h-6 text-emerald-700" />}
               </div>
               <div>
-                <p className="text-xs text-green-600 font-semibold uppercase tracking-wide">Aktiv tidrapportering</p>
-                <p className="text-3xl font-bold text-green-900 font-mono">
+                <p className={`text-xs font-semibold uppercase tracking-wide ${currentEntry.entry_type === 'break' ? 'text-amber-700' : 'text-emerald-700'}`}>
+                  {currentEntry.entry_type === 'break' ? 'Aktiv rast' : 'Aktiv tidrapportering'}
+                </p>
+                <p className={`text-3xl font-bold font-mono ${currentEntry.entry_type === 'break' ? 'text-amber-950' : 'text-emerald-950'}`}>
                   {String(Math.floor(elapsedSeconds / 3600)).padStart(2, '0')}:
                   {String(Math.floor((elapsedSeconds % 3600) / 60)).padStart(2, '0')}:
                   {String(elapsedSeconds % 60).padStart(2, '0')}
                 </p>
-                <p className="text-xs text-green-700 mt-0.5">
+                <p className={`text-xs mt-0.5 ${currentEntry.entry_type === 'break' ? 'text-amber-700' : 'text-emerald-700'}`}>
                   {TIME_CATEGORY_LABELS[currentEntry.category]} · Startade {new Date(currentEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+                  {currentEntry.customer_name && ` · ${currentEntry.customer_name}`}
                 </p>
               </div>
             </div>
-            <Button onClick={handleStampOut} variant="danger" className="gap-2">
-              <Square className="w-4 h-4" /> Stämpla ut
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => { setStampMode('switch'); setShowStampModal(true); }} variant="secondary" className="gap-2">
+                <Repeat2 className="w-4 h-4" /> Byt jobb
+              </Button>
+              {currentEntry.entry_type !== 'break' && (
+                <Button onClick={handleStartBreak} variant="secondary" className="gap-2">
+                  <Coffee className="w-4 h-4" /> Byt till rast
+                </Button>
+              )}
+              <Button onClick={() => setShowEndDayModal(true)} variant="danger" className="gap-2">
+                <Square className="w-4 h-4" /> Stämpla ut
+              </Button>
+            </div>
           </div>
         </Card>
       ) : (
@@ -287,7 +431,7 @@ function StaffTimeView({ user }: { user: Profile }) {
                 <p className="text-xs text-slate-400">Tryck Stämpla in för att börja</p>
               </div>
             </div>
-            <Button onClick={() => setShowStampModal(true)} variant="primary" className="gap-2">
+            <Button onClick={() => { setStampMode('start'); setShowStampModal(true); }} variant="primary" className="gap-2">
               <Play className="w-4 h-4" /> Stämpla in
             </Button>
           </div>
@@ -322,16 +466,17 @@ function StaffTimeView({ user }: { user: Profile }) {
             <StatCard label="Poster" value={entries.length} icon={<BarChart3 className="w-5 h-5" />} color="text-teal-600 bg-teal-50" />
           </div>
 
-          {loading ? <LoadingPage /> : entries.length === 0 ? (
-            <EmptyState icon={<Clock className="w-12 h-12" />} title="Inga tidsposter" description="Inga registrerade tider för den valda månaden." />
-          ) : (
-            <div className="space-y-2">
-              {entries.map(entry => (
-                <EntryCard
-                  key={entry.id}
-                  entry={entry}
-                  onEdit={() => { setEditingEntry(entry); setShowEditModal(true); }}
-                  showEdit={entry.status !== 'approved'}
+          {loading ? <LoadingPage /> : (
+            <div className="space-y-3">
+              {monthDayKeys.map(dayKey => (
+                <DayWorkCard
+                  key={dayKey}
+                  dayKey={dayKey}
+                  entries={entriesByDay[dayKey] || []}
+                  summary={dailySummaries[dayKey]}
+                  onEditEntry={(entry) => { setEditingEntry(entry); setShowEditModal(true); }}
+                  onAddEntry={() => { setSelectedDay(dayKey); setShowManualModal(true); }}
+                  onEditComment={() => { setSelectedDay(dayKey); setShowDayCommentModal(true); }}
                 />
               ))}
             </div>
@@ -381,7 +526,7 @@ function StaffTimeView({ user }: { user: Profile }) {
                 const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                 const dayEntries = entriesByDay[dateStr] || [];
                 const { work, breaks } = dayTotals(dayEntries);
-                const isToday = dateStr === new Date().toISOString().split('T')[0];
+                const isToday = dateStr === localDateKey(new Date());
                 const isWeekend = ((new Date(calYear, calMonth, day).getDay() + 6) % 7) >= 5;
                 const hasActive = dayEntries.some(e => !e.end_time);
                 const hasPending = dayEntries.some(e => e.status === 'submitted');
@@ -470,8 +615,29 @@ function StaffTimeView({ user }: { user: Profile }) {
       <StampInModal
         open={showStampModal}
         onClose={() => setShowStampModal(false)}
-        onSubmit={handleStampIn}
+        onSubmit={stampMode === 'switch' ? handleSwitchJob : handleStampIn}
         workOrders={workOrders}
+        title={stampMode === 'switch' ? 'Byt jobb' : 'Stämpla in'}
+        submitLabel={stampMode === 'switch' ? 'Byt jobb' : 'Stämpla in'}
+      />
+
+      <EndDayModal
+        open={showEndDayModal}
+        onClose={() => setShowEndDayModal(false)}
+        defaultComment={dailySummaries[localDateKey(new Date())]?.comment || ''}
+        onSubmit={(comment) => handleStampOut(comment)}
+      />
+
+      <DayCommentModal
+        open={showDayCommentModal}
+        dayKey={selectedDay}
+        defaultComment={dailySummaries[selectedDay]?.comment || ''}
+        onClose={() => setShowDayCommentModal(false)}
+        onSubmit={async (comment) => {
+          await saveDayComment(selectedDay, comment);
+          setShowDayCommentModal(false);
+          fetchData();
+        }}
       />
 
       {/* ── Manual entry modal ── */}
@@ -499,6 +665,99 @@ function StaffTimeView({ user }: { user: Profile }) {
   );
 }
 
+// ─── Month list day card ──────────────────────────────────────────────────────
+
+function DayWorkCard({ dayKey, entries, summary, onEditEntry, onAddEntry, onEditComment }: {
+  dayKey: string;
+  entries: TimeEntry[];
+  summary?: DailyWorkSummary;
+  onEditEntry: (entry: TimeEntry) => void;
+  onAddEntry: () => void;
+  onEditComment: () => void;
+}) {
+  const sortedEntries = [...entries].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+  const workMinutes = sortedEntries
+    .filter(entry => entry.entry_type !== 'break' && entry.end_time)
+    .reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
+  const breakMinutes = sortedEntries.reduce((sum, entry) => {
+    if (entry.entry_type === 'break') return sum + (entry.total_minutes || 0);
+    return sum + (entry.break_minutes || 0);
+  }, 0);
+  const weekday = new Date(`${dayKey}T12:00:00`).toLocaleDateString('sv-SE', { weekday: 'long' });
+  const dayLabel = new Date(`${dayKey}T12:00:00`).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+  const isToday = dayKey === localDateKey(new Date());
+
+  return (
+    <Card className={`p-4 ${isToday ? 'border-blue-200 bg-blue-50/40' : ''}`}>
+      <div className="flex flex-col lg:flex-row lg:items-start gap-4">
+        <div className="lg:w-36 flex-shrink-0">
+          <p className="text-sm font-bold text-slate-800 capitalize">{weekday}</p>
+          <p className="text-xs text-slate-500">{dayLabel}</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {workMinutes > 0 && <Badge className="bg-emerald-100 text-emerald-700">{formatMinutes(workMinutes)}</Badge>}
+            {breakMinutes > 0 && <Badge className="bg-amber-100 text-amber-700">Rast {formatMinutes(breakMinutes)}</Badge>}
+            {entries.some(entry => !entry.end_time) && <Badge className="bg-blue-100 text-blue-700">Pågående</Badge>}
+          </div>
+        </div>
+
+        <div className="flex-1 min-w-0 space-y-3">
+          {sortedEntries.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-400">
+              Ingen registrerad tid
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {sortedEntries.map(entry => (
+                <div key={entry.id} className="flex items-start gap-3 rounded-lg border border-slate-100 bg-white px-3 py-2">
+                  <div className={`mt-0.5 p-1.5 rounded-lg ${entry.entry_type === 'break' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                    {entry.entry_type === 'break' ? <Coffee className="w-3.5 h-3.5" /> : <Briefcase className="w-3.5 h-3.5" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-slate-800">
+                        {new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+                        {entry.end_time ? `-${new Date(entry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}` : '-pågår'}
+                      </span>
+                      <span className="text-xs text-slate-500">{entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
+                      {entry.work_order?.title && <span className="text-xs text-slate-500 truncate">· {entry.work_order.title}</span>}
+                      {entry.customer_name && <span className="text-xs text-slate-500 truncate">· Kund: {entry.customer_name}</span>}
+                    </div>
+                    {entry.comment && <p className="text-xs text-slate-500 mt-0.5">{entry.comment}</p>}
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-sm font-bold text-slate-800">{formatMinutes(entry.total_minutes || 0)}</p>
+                    {entry.status !== 'approved' && (
+                      <button onClick={() => onEditEntry(entry)} className="text-xs text-blue-600 hover:text-blue-700 font-medium">Redigera</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="rounded-lg bg-slate-50 border border-slate-100 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Dagens kommentar</p>
+                <p className={`text-sm mt-1 ${summary?.comment ? 'text-slate-700' : 'text-slate-400'}`}>
+                  {summary?.comment || 'Ingen kommentar ännu'}
+                </p>
+              </div>
+              <button onClick={onEditComment} className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 flex-shrink-0">
+                <MessageSquare className="w-3.5 h-3.5" /> Kommentar
+              </button>
+            </div>
+          </div>
+
+          <Button variant="ghost" size="sm" onClick={onAddEntry} className="gap-2">
+            <Plus className="w-4 h-4" /> Lägg till tid
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 // ─── Entry card ────────────────────────────────────────────────────────────────
 
 function EntryCard({ entry, onEdit, showEdit }: { entry: any; onEdit: () => void; showEdit: boolean }) {
@@ -510,9 +769,12 @@ function EntryCard({ entry, onEdit, showEdit }: { entry: any; onEdit: () => void
             <Badge className={getTimeStatusColor(entry.status)}>
               {STATUS_LABEL[entry.status as TimeStatus] || entry.status}
             </Badge>
-            <span className="text-xs text-slate-500">{TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
+            <span className="text-xs text-slate-500">{entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
             {entry.work_order?.title && (
               <span className="text-xs text-slate-500 truncate">· {entry.work_order.title}</span>
+            )}
+            {entry.customer_name && (
+              <span className="text-xs text-slate-500 truncate">· Kund: {entry.customer_name}</span>
             )}
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -545,29 +807,35 @@ function EntryCard({ entry, onEdit, showEdit }: { entry: any; onEdit: () => void
 
 // ─── Stamp in modal ────────────────────────────────────────────────────────────
 
-function StampInModal({ open, onClose, onSubmit, workOrders }: {
+function StampInModal({ open, onClose, onSubmit, workOrders, title = 'Stämpla in', submitLabel = 'Stämpla in' }: {
   open: boolean; onClose: () => void;
-  onSubmit: (cat: TimeCategory, woId?: string, comment?: string) => void;
-  workOrders: WorkOrder[];
+  onSubmit: (cat: TimeCategory, woId?: string, comment?: string, customerName?: string) => void;
+  workOrders: WorkOrderSummary[];
+  title?: string;
+  submitLabel?: string;
 }) {
   const [category, setCategory] = useState<TimeCategory>('general');
   const [workOrderId, setWorkOrderId] = useState('');
+  const [customerName, setCustomerName] = useState('');
   const [comment, setComment] = useState('');
 
-  function reset() { setCategory('general'); setWorkOrderId(''); setComment(''); }
+  function reset() { setCategory('general'); setWorkOrderId(''); setCustomerName(''); setComment(''); }
 
   return (
-    <Modal open={open} onClose={() => { onClose(); reset(); }} title="Stämpla in">
+    <Modal open={open} onClose={() => { onClose(); reset(); }} title={title}>
       <div className="space-y-4">
         <Select label="Kategori" value={category} onChange={e => setCategory(e.target.value as TimeCategory)}
           options={Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))} />
         <Select label="Arbetsorder (valfritt)" value={workOrderId} onChange={e => setWorkOrderId(e.target.value)}
           options={[{ value: '', label: 'Ingen' }, ...workOrders.map(wo => ({ value: wo.id, label: wo.title }))]} />
+        {category === 'customer_project' && (
+          <Input label="Kund" value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Ex. Vibogruppen, BRF Eken..." />
+        )}
         <Textarea label="Kommentar (valfritt)" value={comment} onChange={e => setComment(e.target.value)} rows={2} />
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={() => { onClose(); reset(); }} className="flex-1">Avbryt</Button>
-          <Button variant="primary" onClick={() => { onSubmit(category, workOrderId || undefined, comment); reset(); }} className="flex-1 gap-2">
-            <Play className="w-4 h-4" /> Stämpla in
+          <Button variant="primary" onClick={() => { onSubmit(category, workOrderId || undefined, comment, customerName); reset(); }} className="flex-1 gap-2">
+            <Play className="w-4 h-4" /> {submitLabel}
           </Button>
         </div>
       </div>
@@ -582,7 +850,7 @@ interface EntryFormPayload extends Partial<TimeEntry> { submitNow?: boolean; }
 function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, defaultDate }: {
   open: boolean; onClose: () => void;
   onSubmit: (payload: EntryFormPayload) => void;
-  workOrders: WorkOrder[];
+  workOrders: WorkOrderSummary[];
   entry?: TimeEntry;
   title: string;
   defaultDate?: string;
@@ -596,7 +864,9 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
     : (entry?.end_time ? toLocalDatetimeValue(entry.end_time) : '');
 
   const [category, setCategory] = useState<TimeCategory>(entry?.category || 'general');
+  const [entryType, setEntryType] = useState<TimeEntryKind>(entry?.entry_type || 'work');
   const [workOrderId, setWorkOrderId] = useState(entry?.work_order_id || '');
+  const [customerName, setCustomerName] = useState(entry?.customer_name || '');
   const [startTime, setStartTime] = useState(defaultStart);
   const [endTime, setEndTime] = useState(defaultEnd);
   const [breakMins, setBreakMins] = useState(entry?.break_minutes ?? 30);
@@ -606,7 +876,9 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
   useEffect(() => {
     if (open) {
       setCategory(entry?.category || 'general');
+      setEntryType(entry?.entry_type || 'work');
       setWorkOrderId(entry?.work_order_id || '');
+      setCustomerName(entry?.customer_name || '');
       setStartTime(defaultStart);
       setEndTime(defaultEnd);
       setBreakMins(entry?.break_minutes ?? 30);
@@ -615,7 +887,7 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
   }, [open, entry?.id]);
 
   const previewMins = startTime && endTime
-    ? calcMinutes(new Date(startTime).toISOString(), new Date(endTime).toISOString(), breakMins)
+    ? calcMinutes(new Date(startTime).toISOString(), new Date(endTime).toISOString(), entryType === 'break' ? 0 : breakMins)
     : null;
 
   const isValid = !!startTime;
@@ -625,10 +897,12 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
   function buildPayload(submitNow: boolean): EntryFormPayload {
     return {
       category,
+      entry_type: entryType,
       start_time: new Date(startTime).toISOString(),
       end_time: endTime ? new Date(endTime).toISOString() : undefined,
-      break_minutes: breakMins,
+      break_minutes: entryType === 'break' ? 0 : breakMins,
       work_order_id: workOrderId || null,
+      customer_name: customerName || null,
       comment,
       submitNow,
     };
@@ -638,10 +912,23 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
     <Modal open={open} onClose={onClose} title={title} size="lg">
       <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Select label="Typ" value={entryType} onChange={e => setEntryType(e.target.value as TimeEntryKind)}
+            options={[
+              { value: 'work', label: 'Arbete' },
+              { value: 'break', label: 'Rast' },
+            ]} />
           <Select label="Kategori" value={category} onChange={e => setCategory(e.target.value as TimeCategory)}
             options={Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))} />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Select label="Arbetsorder (valfritt)" value={workOrderId} onChange={e => setWorkOrderId(e.target.value)}
             options={[{ value: '', label: 'Ingen' }, ...workOrders.map(wo => ({ value: wo.id, label: wo.title }))]} />
+          {category === 'customer_project' ? (
+            <Input label="Kund" value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Ex. Vibogruppen, BRF Eken..." />
+          ) : (
+            <div />
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -649,8 +936,10 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
           <Input label="Slut (valfritt om pågående)" type="datetime-local" value={endTime} onChange={e => setEndTime(e.target.value)} />
         </div>
 
-        <Input label="Rast (minuter)" type="number" min={0} max={480} value={breakMins}
-          onChange={e => setBreakMins(Math.max(0, parseInt(e.target.value) || 0))} />
+        {entryType === 'work' && (
+          <Input label="Rast (minuter)" type="number" min={0} max={480} value={breakMins}
+            onChange={e => setBreakMins(Math.max(0, parseInt(e.target.value) || 0))} />
+        )}
 
         {previewMins !== null && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between">
@@ -679,6 +968,71 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
             <Send className="w-4 h-4" />
             {isRejected ? 'Skicka in igen' : 'Skicka för godkännande'}
           </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function EndDayModal({ open, onClose, onSubmit, defaultComment }: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (comment: string) => void;
+  defaultComment: string;
+}) {
+  const [comment, setComment] = useState(defaultComment);
+
+  useEffect(() => {
+    if (open) setComment(defaultComment);
+  }, [open, defaultComment]);
+
+  return (
+    <Modal open={open} onClose={onClose} title="Stämpla ut för dagen">
+      <div className="space-y-4">
+        <Textarea
+          label="Vad har utförts idag?"
+          value={comment}
+          onChange={e => setComment(e.target.value)}
+          rows={4}
+          placeholder="Sammanfatta dagens arbete..."
+        />
+        <div className="flex gap-3 pt-2">
+          <Button variant="secondary" onClick={onClose} className="flex-1">Avbryt</Button>
+          <Button variant="danger" onClick={() => onSubmit(comment)} className="flex-1 gap-2">
+            <Square className="w-4 h-4" /> Stämpla ut
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function DayCommentModal({ open, onClose, onSubmit, defaultComment, dayKey }: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (comment: string) => void;
+  defaultComment: string;
+  dayKey: string;
+}) {
+  const [comment, setComment] = useState(defaultComment);
+
+  useEffect(() => {
+    if (open) setComment(defaultComment);
+  }, [open, defaultComment]);
+
+  return (
+    <Modal open={open} onClose={onClose} title={dayKey ? `Dagens kommentar ${formatDate(dayKey)}` : 'Dagens kommentar'}>
+      <div className="space-y-4">
+        <Textarea
+          label="Vad utfördes den här dagen?"
+          value={comment}
+          onChange={e => setComment(e.target.value)}
+          rows={4}
+          placeholder="Sammanfatta arbete, avvikelser eller annat viktigt..."
+        />
+        <div className="flex gap-3 pt-2">
+          <Button variant="secondary" onClick={onClose} className="flex-1">Avbryt</Button>
+          <Button variant="primary" onClick={() => onSubmit(comment)} className="flex-1">Spara kommentar</Button>
         </div>
       </div>
     </Modal>
@@ -718,13 +1072,13 @@ function AdminTimeView({ user }: { user: Profile }) {
     setLoading(true);
     try {
       const { start, end } = monthRange(monthFilter);
-      const { data } = await supabase.from('time_entries').select('user_id, total_minutes, status')
+      const { data } = await supabase.from('time_entries').select('user_id, total_minutes, status, entry_type')
         .gte('start_time', start).lt('start_time', end);
 
       const s: Record<string, { total: number; approved: number; pending: number; rejected: number }> = {};
       staffMembers.forEach(st => { s[st.id] = { total: 0, approved: 0, pending: 0, rejected: 0 }; });
       data?.forEach(e => {
-        if (s[e.user_id]) {
+        if (s[e.user_id] && e.entry_type !== 'break') {
           s[e.user_id].total += e.total_minutes || 0;
           if (e.status === 'approved') s[e.user_id].approved += e.total_minutes || 0;
           else if (e.status === 'submitted') s[e.user_id].pending += e.total_minutes || 0;
@@ -780,15 +1134,18 @@ function AdminTimeView({ user }: { user: Profile }) {
   const daysInCalMonth = new Date(calYear, calMonth + 1, 0).getDate();
   const firstDayOfWeek = (new Date(calYear, calMonth, 1).getDay() + 6) % 7;
   const calEntriesByDay = staffEntries.reduce((acc, e) => {
-    const day = new Date(e.start_time).toISOString().split('T')[0];
+    const day = localDateKey(e.start_time);
     if (!acc[day]) acc[day] = [];
     acc[day].push(e);
     return acc;
   }, {} as Record<string, TimeEntry[]>);
   const calMonthName = new Date(calYear, calMonth, 1).toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' });
 
-  const modalTotalWork = staffEntries.filter(e => e.end_time).reduce((s, e) => s + (e.total_minutes || 0), 0);
-  const modalTotalBreaks = staffEntries.reduce((s, e) => s + (e.break_minutes || 0), 0);
+  const modalTotalWork = staffEntries.filter(e => e.end_time && e.entry_type !== 'break').reduce((s, e) => s + (e.total_minutes || 0), 0);
+  const modalTotalBreaks = staffEntries.reduce((s, e) => {
+    if (e.entry_type === 'break') return s + (e.total_minutes || 0);
+    return s + (e.break_minutes || 0);
+  }, 0);
   const workDays = Object.values(calEntriesByDay).filter(d => d.some(e => e.end_time)).length;
   const modalOvertime = Math.max(modalTotalWork - workDays * 480, 0);
 
@@ -889,7 +1246,8 @@ function AdminTimeView({ user }: { user: Profile }) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap mb-1">
                         <Badge className={getTimeStatusColor(entry.status)}>{STATUS_LABEL[entry.status as TimeStatus] || entry.status}</Badge>
-                        <span className="text-xs text-slate-500">{TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
+                        <span className="text-xs text-slate-500">{entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
+                        {entry.customer_name && <span className="text-xs text-slate-500">· Kund: {entry.customer_name}</span>}
                       </div>
                       <p className="text-xs text-slate-500">
                         {new Date(entry.start_time).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' })}
@@ -936,7 +1294,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                 {Array.from({ length: daysInCalMonth }, (_, i) => i + 1).map(day => {
                   const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                   const dayEntries = calEntriesByDay[dateStr] || [];
-                  const work = dayEntries.filter(e => e.end_time).reduce((s, e) => s + (e.total_minutes || 0), 0);
+                  const work = dayEntries.filter(e => e.end_time && e.entry_type !== 'break').reduce((s, e) => s + (e.total_minutes || 0), 0);
                   const hasPending = dayEntries.some(e => e.status === 'submitted');
                   const isWeekend = ((new Date(calYear, calMonth, day).getDay() + 6) % 7) >= 5;
                   return (

@@ -119,12 +119,12 @@ export const WO_CATEGORIES = [
   'Övrigt',
 ];
 
-export function formatDate(date: string | null | undefined): string {
+export function formatDate(date: string | Date | null | undefined): string {
   if (!date) return '–';
   return new Date(date).toLocaleDateString('sv-SE');
 }
 
-export function formatDateTime(date: string | null | undefined): string {
+export function formatDateTime(date: string | Date | null | undefined): string {
   if (!date) return '–';
   return new Date(date).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' });
 }

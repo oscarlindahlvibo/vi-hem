@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Building2, Mail, Lock, Eye, EyeOff, ShieldCheck } from 'lucide-react';
-import { Button, Input } from './ui';
+import { Button } from './ui';
 
 export function LoginPage() {
   const { signIn, signInWithBankID, bankIDAvailable } = useAuth();
@@ -29,13 +29,6 @@ export function LoginPage() {
     setBankIDLoading(false);
   }
 
-  const demoAccounts = [
-    { label: 'Superadmin', email: 'superadmin@demo.se', password: 'Superadmin1234!' },
-    { label: 'Admin', email: 'admin@demo.se', password: 'Admin1234!' },
-    { label: 'Personal', email: 'personal@demo.se', password: 'Personal1234!' },
-    { label: 'Hyresgäst', email: 'hyresgast@demo.se', password: 'Hyresgast1234!' },
-  ];
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
@@ -43,7 +36,7 @@ export function LoginPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-lg">
             <Building2 className="w-9 h-9 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-white">FastighetsApp</h1>
+          <h1 className="text-3xl font-bold text-white">VI-HEM</h1>
           <p className="text-slate-400 mt-2">Fastighetsportalen – logga in för att fortsätta</p>
         </div>
 
@@ -126,24 +119,6 @@ export function LoginPage() {
               Logga in
             </Button>
           </form>
-
-          <div className="mt-6 pt-6 border-t border-slate-200">
-            <p className="text-xs text-slate-500 text-center mb-3 font-medium">Demokonton</p>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {demoAccounts.map(acc => (
-                <button
-                  key={acc.email}
-                  onClick={() => { setEmail(acc.email); setPassword(acc.password); }}
-                  className="flex flex-col items-center py-2.5 px-2 border border-slate-200 rounded-xl hover:bg-slate-50 hover:border-blue-300 transition-all text-center group"
-                >
-                  <div className="w-7 h-7 bg-blue-100 group-hover:bg-blue-200 rounded-full flex items-center justify-center text-blue-700 font-bold text-xs mb-1 transition-colors">
-                    {acc.label.charAt(0)}
-                  </div>
-                  <span className="text-xs font-medium text-slate-600">{acc.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
 
           <div className="mt-4 flex items-center justify-center gap-1.5 text-xs text-slate-400">
             <ShieldCheck className="w-3.5 h-3.5" />

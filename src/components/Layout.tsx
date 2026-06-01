@@ -69,7 +69,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
               <Building2 className="w-5 h-5 text-white" />
             </div>
             <div>
-              <p className="text-sm font-bold text-slate-800">FastighetsApp</p>
+              <p className="text-sm font-bold text-slate-800">VI-HEM</p>
               <p className="text-xs text-slate-500">Fastighetsportalen</p>
             </div>
           </div>
@@ -124,7 +124,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
             <Building2 className="w-4 h-4 text-white" />
           </div>
-          <span className="font-bold text-slate-800 text-sm">FastighetsApp</span>
+          <span className="font-bold text-slate-800 text-sm">VI-HEM</span>
         </div>
         <div className="flex items-center gap-2">
           {notificationCount > 0 && (
@@ -149,7 +149,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
                 <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
                   <Building2 className="w-4 h-4 text-white" />
                 </div>
-                <span className="font-bold text-slate-800">FastighetsApp</span>
+                <span className="font-bold text-slate-800">VI-HEM</span>
               </div>
               <button onClick={() => setMobileMenuOpen(false)} className="p-1.5 rounded-lg hover:bg-slate-100">
                 <X className="w-5 h-5 text-slate-600" />

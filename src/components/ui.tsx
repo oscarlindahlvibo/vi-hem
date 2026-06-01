@@ -1,14 +1,15 @@
 import React from 'react';
 
 interface BadgeProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   className?: string;
+  text?: string;
 }
 
-export function Badge({ children, className = '' }: BadgeProps) {
+export function Badge({ children, className = '', text }: BadgeProps) {
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${className}`}>
-      {children}
+      {children ?? text}
     </span>
   );
 }
@@ -164,16 +165,22 @@ export function Modal({ open, onClose, title, children, size = 'md' }: ModalProp
 }
 
 interface EmptyStateProps {
-  icon?: React.ReactNode;
+  icon?: React.ReactNode | React.ComponentType<{ className?: string }>;
   title: string;
   description?: string;
   action?: React.ReactNode;
 }
 
 export function EmptyState({ icon, title, description, action }: EmptyStateProps) {
+  const Icon = typeof icon === 'function' ? icon : null;
+  const iconNode = Icon ? <Icon className="w-12 h-12" /> : (icon as React.ReactNode);
   return (
     <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-      {icon && <div className="mb-4 text-slate-300">{icon}</div>}
+      {icon && (
+        <div className="mb-4 text-slate-300">
+          {iconNode}
+        </div>
+      )}
       <h3 className="text-base font-medium text-slate-600">{title}</h3>
       {description && <p className="mt-1 text-sm text-slate-400 max-w-sm">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
@@ -253,9 +260,10 @@ interface PageHeaderProps {
   subtitle?: string;
   action?: React.ReactNode;
   backButton?: () => void;
+  icon?: React.ComponentType<{ className?: string }>;
 }
 
-export function PageHeader({ title, subtitle, action, backButton }: PageHeaderProps) {
+export function PageHeader({ title, subtitle, action, backButton, icon: Icon }: PageHeaderProps) {
   return (
     <div className="flex items-start justify-between mb-6">
       <div className="flex items-center gap-3">
@@ -267,7 +275,10 @@ export function PageHeader({ title, subtitle, action, backButton }: PageHeaderPr
           </button>
         )}
         <div>
-          <h1 className="text-xl font-bold text-slate-800">{title}</h1>
+          <h1 className="flex items-center gap-2 text-xl font-bold text-slate-800">
+            {Icon && <Icon className="w-5 h-5 text-blue-600" />}
+            {title}
+          </h1>
           {subtitle && <p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}
         </div>
       </div>

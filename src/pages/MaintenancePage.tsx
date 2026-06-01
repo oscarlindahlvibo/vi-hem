@@ -51,11 +51,13 @@ type FilterStatus = 'all' | MRStatus;
 type FilterCategory = 'all' | MRCategory;
 type FilterPriority = 'all' | MRPriority;
 
-interface MRWithRelations extends MaintenanceRequest {
-  tenant?: Profile;
+type ProfileSummary = Pick<Profile, 'id' | 'name' | 'email' | 'phone' | 'role'>;
+
+interface MRWithRelations extends Omit<MaintenanceRequest, 'tenant' | 'property' | 'apartment' | 'assigned'> {
+  tenant?: ProfileSummary;
   property?: { name: string };
   apartment?: { apartment_number: string };
-  assigned?: Profile;
+  assigned?: ProfileSummary | null;
 }
 
 export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
@@ -175,7 +177,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
       const { data, error } = await query;
 
       if (error) throw error;
-      setRequests(data || []);
+      setRequests((data || []) as unknown as MRWithRelations[]);
     } catch (err) {
       console.error('Error fetching requests:', err);
     } finally {
@@ -192,7 +194,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
         .eq('active', true);
 
       if (error) throw error;
-      setStaffMembers(data || []);
+      setStaffMembers((data || []) as Profile[]);
     } catch (err) {
       console.error('Error fetching staff members:', err);
     }
@@ -221,9 +223,9 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
 
       // Filter internal comments for tenants
       if (isTenant) {
-        setComments((data || []).filter(c => !c.internal));
+        setComments(((data || []).filter(c => !c.internal)) as unknown as MaintenanceRequestComment[]);
       } else {
-        setComments(data || []);
+        setComments((data || []) as unknown as MaintenanceRequestComment[]);
       }
     } catch (err) {
       console.error('Error fetching comments:', err);
@@ -358,7 +360,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
       setSelectedRequest({
         ...selectedRequest,
         assigned_to: assignedTo,
-        assigned: staff,
+        assigned: staff as ProfileSummary | null,
       });
       await fetchRequests();
     } catch (err) {
@@ -393,16 +395,18 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
 
   async function checkActiveEntry() {
     if (!user) return;
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const { data } = await supabase
       .from('time_entries')
       .select('id, maintenance_request_id')
       .eq('user_id', user.id)
       .eq('status', 'draft')
-      .gte('start_time', today)
+      .gte('start_time', today.toISOString())
       .is('end_time', null)
-      .maybeSingle();
-    setActiveEntry(data || null);
+      .order('start_time', { ascending: false })
+      .limit(1);
+    setActiveEntry(data?.[0] || null);
   }
 
   async function handleStampIn() {
@@ -411,6 +415,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
       setStampingIn(true);
       const { error } = await supabase.from('time_entries').insert({
         user_id: user.id,
+        organisation_id: user.organisation_id || null,
         maintenance_request_id: selectedRequest.id,
         property_id: selectedRequest.property_id || null,
         category: stampCategory,
@@ -436,22 +441,29 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
     if (!activeEntry) return;
     try {
       setStampingIn(true);
-      const { data: entry } = await supabase
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const { data: openEntries } = await supabase
         .from('time_entries')
-        .select('start_time, break_minutes')
-        .eq('id', activeEntry.id)
-        .single();
-      if (!entry) return;
+        .select('id, start_time, break_minutes, entry_type')
+        .eq('user_id', user.id)
+        .eq('status', 'draft')
+        .gte('start_time', today.toISOString())
+        .is('end_time', null);
       const endTime = new Date().toISOString();
-      const totalMinutes = Math.max(
-        Math.floor((Date.now() - new Date(entry.start_time).getTime()) / 60000) - (entry.break_minutes || 0),
-        0
-      );
-      await supabase
-        .from('time_entries')
-        .update({ end_time: endTime, total_minutes: totalMinutes, status: 'submitted' })
-        .eq('id', activeEntry.id);
+      await Promise.all((openEntries || []).map(async entry => {
+        const breakMinutes = entry.entry_type === 'break' ? 0 : entry.break_minutes || 0;
+        const totalMinutes = Math.max(
+          Math.floor((Date.now() - new Date(entry.start_time).getTime()) / 60000) - breakMinutes,
+          0
+        );
+        await supabase
+          .from('time_entries')
+          .update({ end_time: endTime, total_minutes: totalMinutes, status: 'submitted' })
+          .eq('id', entry.id);
+      }));
       setActiveEntry(null);
+      await checkActiveEntry();
     } catch (err) {
       console.error('Failed to stamp out:', err);
     } finally {
