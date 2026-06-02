@@ -133,6 +133,7 @@ export function TerminationPage({ onNavigate: _onNavigate }: TerminationPageProp
 
       const { error } = await supabase.from('termination_requests').insert([
         {
+          organisation_id: user?.organisation_id,
           tenant_id: user?.id,
           tenancy_id: activeTenancy.id,
           requested_move_out_date: requestMoveOutDate,

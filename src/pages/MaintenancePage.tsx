@@ -36,6 +36,7 @@ import type {
 } from '../types';
 import {
   Plus,
+  Archive,
   Wrench,
   MessageSquare,
   Clock,
@@ -50,6 +51,10 @@ import {
 type FilterStatus = 'all' | MRStatus;
 type FilterCategory = 'all' | MRCategory;
 type FilterPriority = 'all' | MRPriority;
+type FilterAssignee = 'all' | 'mine';
+type MaintenanceListTab = 'active' | 'archived';
+
+const ARCHIVED_MR_STATUSES: MRStatus[] = ['done', 'closed'];
 
 type ProfileSummary = Pick<Profile, 'id' | 'name' | 'email' | 'phone' | 'role'>;
 
@@ -68,6 +73,8 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [filterCategory, setFilterCategory] = useState<FilterCategory>('all');
   const [filterPriority, setFilterPriority] = useState<FilterPriority>('all');
+  const [filterAssignee, setFilterAssignee] = useState<FilterAssignee>('all');
+  const [listTab, setListTab] = useState<MaintenanceListTab>('active');
   const [selectedRequest, setSelectedRequest] = useState<MRWithRelations | null>(
     null
   );
@@ -146,6 +153,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
       let query = supabase.from('maintenance_requests').select(
         `
         id,
+        organisation_id,
         tenant_id,
         property_id,
         apartment_id,
@@ -240,13 +248,25 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
 
     try {
       setSubmittingRequest(true);
+      const { data: tenancy, error: tenancyError } = await supabase
+        .from('tenancies')
+        .select('organisation_id, property_id, apartment_id')
+        .eq('tenant_id', user.id)
+        .eq('status', 'active')
+        .order('start_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (tenancyError) throw tenancyError;
+
       const { data, error } = await supabase
         .from('maintenance_requests')
         .insert([
           {
+            organisation_id: tenancy?.organisation_id || user.organisation_id || null,
             tenant_id: user.id,
-            property_id: null, // Will be fetched from tenant's tenancy
-            apartment_id: null,
+            property_id: tenancy?.property_id || null,
+            apartment_id: tenancy?.apartment_id || null,
             title: newRequestForm.title,
             description: newRequestForm.description,
             category: newRequestForm.category,
@@ -500,6 +520,8 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
 
   // Filter requests for display
   const filteredRequests = requests.filter(req => {
+    const isArchived = ARCHIVED_MR_STATUSES.includes(req.status);
+    const matchesTab = listTab === 'archived' ? isArchived : !isArchived;
     const matchesSearch =
       req.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       req.description.toLowerCase().includes(searchQuery.toLowerCase());
@@ -508,11 +530,21 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
       filterCategory === 'all' || req.category === filterCategory;
     const matchesPriority =
       filterPriority === 'all' || req.priority === filterPriority;
+    const matchesAssignee =
+      filterAssignee === 'all' || req.assigned_to === user?.id;
 
     return (
-      matchesSearch && matchesStatus && matchesCategory && matchesPriority
+      matchesTab && matchesSearch && matchesStatus && matchesCategory && matchesPriority && matchesAssignee
     );
   });
+
+  const activeCount = requests.filter((req) => !ARCHIVED_MR_STATUSES.includes(req.status)).length;
+  const archivedCount = requests.filter((req) => ARCHIVED_MR_STATUSES.includes(req.status)).length;
+  const statusFilterOptions = Object.entries(MR_STATUS_LABELS)
+    .filter(([status]) => listTab === 'archived'
+      ? ARCHIVED_MR_STATUSES.includes(status as MRStatus)
+      : !ARCHIVED_MR_STATUSES.includes(status as MRStatus))
+    .map(([value, label]) => ({ value, label }));
 
   if (authLoading || loading) {
     return <LoadingPage />;
@@ -903,10 +935,41 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
             </Button>
           </div>
 
+          <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setListTab('active');
+                setFilterStatus('all');
+              }}
+              className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                listTab === 'active' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Wrench className="w-4 h-4" />
+              Aktiva
+              <span className={listTab === 'active' ? 'text-blue-100' : 'text-slate-400'}>{activeCount}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setListTab('archived');
+                setFilterStatus('all');
+              }}
+              className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                listTab === 'archived' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Archive className="w-4 h-4" />
+              Arkiverade
+              <span className={listTab === 'archived' ? 'text-blue-100' : 'text-slate-400'}>{archivedCount}</span>
+            </button>
+          </div>
+
           {/* Filter Panel */}
           {showFilters && (
             <Card className="p-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 <SearchInput
                   value={searchQuery}
                   onChange={setSearchQuery}
@@ -919,10 +982,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                   onChange={e => setFilterStatus(e.target.value as FilterStatus)}
                   options={[
                     { value: 'all', label: 'Alla' },
-                    ...Object.entries(MR_STATUS_LABELS).map(([k, v]) => ({
-                      value: k,
-                      label: v,
-                    })),
+                    ...statusFilterOptions,
                   ]}
                 />
 
@@ -955,6 +1015,16 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                     })),
                   ]}
                 />
+
+                <Select
+                  label="Visning"
+                  value={filterAssignee}
+                  onChange={e => setFilterAssignee(e.target.value as FilterAssignee)}
+                  options={[
+                    { value: 'all', label: 'Alla felanmälningar' },
+                    { value: 'mine', label: 'Tilldelade till mig' },
+                  ]}
+                />
               </div>
             </Card>
           )}
@@ -964,45 +1034,99 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
               icon={<Wrench className="w-12 h-12" />}
               title="Inga felanmälningar"
               description={
-                searchQuery || filterStatus !== 'all'
+                searchQuery || filterStatus !== 'all' || filterAssignee !== 'all'
                   ? 'Inga felanmälningar matchar dina filter'
-                  : 'Inga felanmälningar registrerade'
+                  : listTab === 'archived'
+                    ? 'Inga arkiverade felanmälningar registrerade'
+                    : 'Inga aktiva felanmälningar registrerade'
               }
             />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Titel
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Hyresgäst
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Fastighet
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Kategori
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Prioritet
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Status
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Datum
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Tilldelad
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {filteredRequests.map(req => (
-                    <tr
+            <>
+              <div className="grid gap-3 md:hidden">
+                {filteredRequests.map(req => (
+                  <Card
+                    key={req.id}
+                    className="p-4 cursor-pointer hover:shadow-md transition-all"
+                    onClick={() => {
+                      setSelectedRequest(req);
+                      setShowDetailModal(true);
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-semibold text-slate-900 leading-snug break-words">{req.title}</h3>
+                        <p className="mt-1 text-sm text-slate-500 break-words">
+                          {req.property?.name || 'Ingen fastighet'}
+                        </p>
+                      </div>
+                      <ChevronDown className="-rotate-90 w-4 h-4 text-slate-400 shrink-0 mt-1" />
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Badge className={getMRStatusColor(req.status)}>
+                        {MR_STATUS_LABELS[req.status]}
+                      </Badge>
+                      <Badge className={getMRPriorityColor(req.priority)}>
+                        {MR_PRIORITY_LABELS[req.priority]}
+                      </Badge>
+                    </div>
+
+                    <div className="mt-4 grid gap-2 text-sm text-slate-600">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <User className="w-4 h-4 text-slate-400 shrink-0" />
+                        <span className="truncate">{req.tenant?.name || 'Okänd hyresgäst'}</span>
+                      </div>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Wrench className="w-4 h-4 text-slate-400 shrink-0" />
+                        <span className="truncate">{MR_CATEGORY_LABELS[req.category]}</span>
+                      </div>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                        <span>{formatDateTime(req.created_at)}</span>
+                      </div>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <ClipboardList className="w-4 h-4 text-slate-400 shrink-0" />
+                        <span className="truncate">{req.assigned?.name || 'Ej tilldelad'}</span>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Titel
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Hyresgäst
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Fastighet
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Kategori
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Prioritet
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Status
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Datum
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Tilldelad
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {filteredRequests.map(req => (
+                      <tr
                       key={req.id}
                       className="hover:bg-slate-50 cursor-pointer transition-colors"
                       onClick={() => {
@@ -1040,11 +1164,12 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                       <td className="px-4 py-3 text-slate-600">
                         {req.assigned?.name || '–'}
                       </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
 
           {/* Detail Modal for Staff */}

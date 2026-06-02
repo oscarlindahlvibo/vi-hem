@@ -29,6 +29,7 @@ import {
   Plus,
   CheckCircle,
   BarChart3,
+  Users,
   Timer,
   Edit2,
   Calendar,
@@ -85,8 +86,43 @@ const STATUS_LABEL: Record<TimeStatus, string> = {
 export function TimeTrackingPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
   const { user, loading: authLoading } = useAuth();
   if (authLoading || !user) return <LoadingPage />;
-  if (user.role === 'admin' || user.role === 'superadmin') return <AdminTimeView user={user} />;
+  if (user.role === 'admin' || user.role === 'superadmin') return <AdminCombinedTimeView user={user} />;
   return <StaffTimeView user={user} />;
+}
+
+type AdminMainTimeTab = 'own' | 'staff';
+
+function AdminCombinedTimeView({ user }: { user: Profile }) {
+  const [tab, setTab] = useState<AdminMainTimeTab>('own');
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-1">
+        <button
+          type="button"
+          onClick={() => setTab('own')}
+          className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+            tab === 'own' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          Min tid
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('staff')}
+          className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+            tab === 'staff' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          Personalens tid
+        </button>
+      </div>
+
+      {tab === 'own' ? <StaffTimeView user={user} /> : <AdminTimeView user={user} />}
+    </div>
+  );
 }
 
 // ─── Staff view ───────────────────────────────────────────────────────────────

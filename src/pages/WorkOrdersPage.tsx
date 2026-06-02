@@ -34,6 +34,7 @@ import type {
 } from '../types';
 import {
   Plus,
+  Archive,
   ClipboardList,
   Filter,
   LayoutGrid,
@@ -50,6 +51,7 @@ import { TIME_CATEGORY_LABELS } from '../lib/utils';
 import type { TimeCategory } from '../types';
 
 type FilterView = 'all' | 'mine' | 'new' | 'urgent';
+type WorkOrderListTab = 'active' | 'archived';
 
 type WorkOrderPerson = Pick<Profile, 'name'>;
 
@@ -74,6 +76,8 @@ const WO_STATUSES: WOStatus[] = [
   'cancelled',
 ];
 
+const ARCHIVED_WO_STATUSES: WOStatus[] = ['completed', 'cancelled'];
+
 export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
   const { user, loading: authLoading } = useAuth();
   const [workOrders, setWorkOrders] = useState<WOWithRelations[]>([]);
@@ -82,6 +86,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
   const [filterStatus, setFilterStatus] = useState<WOStatus | 'all'>('all');
   const [filterPriority, setFilterPriority] = useState<WOPriority | 'all'>('all');
   const [filterView, setFilterView] = useState<FilterView>('all');
+  const [listTab, setListTab] = useState<WorkOrderListTab>('active');
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<WOWithRelations | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -426,6 +431,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
 
   function filteredWorkOrders() {
     return workOrders.filter((wo) => {
+      const isArchived = ARCHIVED_WO_STATUSES.includes(wo.status);
+      const matchesTab = listTab === 'archived' ? isArchived : !isArchived;
       const matchesSearch = wo.title.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = filterStatus === 'all' || wo.status === filterStatus;
       const matchesPriority = filterPriority === 'all' || wo.priority === filterPriority;
@@ -439,7 +446,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
         matchesView = wo.priority === 'urgent' || wo.priority === 'high';
       }
 
-      return matchesSearch && matchesStatus && matchesPriority && matchesView;
+      return matchesTab && matchesSearch && matchesStatus && matchesPriority && matchesView;
     });
   }
 
@@ -467,6 +474,16 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
   if (authLoading) return <LoadingPage />;
 
   const filtered = filteredWorkOrders();
+  const activeCount = workOrders.filter((wo) => !ARCHIVED_WO_STATUSES.includes(wo.status)).length;
+  const archivedCount = workOrders.filter((wo) => ARCHIVED_WO_STATUSES.includes(wo.status)).length;
+  const statusFilterOptions = WO_STATUSES
+    .filter((status) => listTab === 'archived'
+      ? ARCHIVED_WO_STATUSES.includes(status)
+      : !ARCHIVED_WO_STATUSES.includes(status))
+    .map((s) => ({ value: s, label: WO_STATUS_LABELS[s] }));
+  const visibleStatuses = WO_STATUSES.filter((status) => listTab === 'archived'
+    ? ARCHIVED_WO_STATUSES.includes(status)
+    : !ARCHIVED_WO_STATUSES.includes(status));
   const statusGroups: Record<WOStatus, WOWithRelations[]> = viewMode === 'kanban'
     ? workOrdersByStatus()
     : {
@@ -497,6 +514,39 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
         }
       />
 
+      <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-1">
+        <button
+          type="button"
+          onClick={() => {
+            setListTab('active');
+            setFilterStatus('all');
+            setFilterView('all');
+          }}
+          className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+            listTab === 'active' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          <ClipboardList className="w-4 h-4" />
+          Aktiva
+          <span className={listTab === 'active' ? 'text-blue-100' : 'text-slate-400'}>{activeCount}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setListTab('archived');
+            setFilterStatus('all');
+            setFilterView('all');
+          }}
+          className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+            listTab === 'archived' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          <Archive className="w-4 h-4" />
+          Arkiverade
+          <span className={listTab === 'archived' ? 'text-blue-100' : 'text-slate-400'}>{archivedCount}</span>
+        </button>
+      </div>
+
       {/* Filter bar */}
       <div className="space-y-3 md:space-y-0 md:flex md:items-center md:gap-3 flex-wrap">
         <SearchInput
@@ -517,7 +567,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
           <Select
             options={[
               { value: 'all', label: 'Alla statusar' },
-              ...WO_STATUSES.map((s) => ({ value: s, label: WO_STATUS_LABELS[s] })),
+              ...statusFilterOptions,
             ]}
             value={filterStatus}
             onChange={(e) => setFilterStatus((e.target.value as any) || 'all')}
@@ -539,10 +589,10 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
 
           <Select
             options={[
-              { value: 'all', label: 'Alla' },
-              { value: 'mine', label: 'Mina' },
-              { value: 'new', label: 'Ny' },
-              { value: 'urgent', label: 'Akuta' },
+              { value: 'all', label: 'Alla arbetsordrar' },
+              { value: 'mine', label: 'Tilldelade till mig' },
+              { value: 'new', label: 'Nya arbetsordrar' },
+              { value: 'urgent', label: 'Akuta arbetsordrar' },
             ]}
             value={filterView}
             onChange={(e) => setFilterView((e.target.value as any) || 'all')}
@@ -577,7 +627,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
             label="Status"
             options={[
               { value: 'all', label: 'Alla statusar' },
-              ...WO_STATUSES.map((s) => ({ value: s, label: WO_STATUS_LABELS[s] })),
+              ...statusFilterOptions,
             ]}
             value={filterStatus}
             onChange={(e) => setFilterStatus((e.target.value as any) || 'all')}
@@ -597,12 +647,12 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
           />
 
           <Select
-            label="Visa"
+            label="Visning"
             options={[
-              { value: 'all', label: 'Alla' },
-              { value: 'mine', label: 'Mina' },
-              { value: 'new', label: 'Ny' },
-              { value: 'urgent', label: 'Akuta' },
+              { value: 'all', label: 'Alla arbetsordrar' },
+              { value: 'mine', label: 'Tilldelade till mig' },
+              { value: 'new', label: 'Nya arbetsordrar' },
+              { value: 'urgent', label: 'Akuta arbetsordrar' },
             ]}
             value={filterView}
             onChange={(e) => setFilterView((e.target.value as any) || 'all')}
@@ -644,9 +694,13 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
         <EmptyState
           icon={<ClipboardList className="w-12 h-12" />}
           title="Inga arbetsordrar"
-          description="Det finns inga arbetsordrar som matchar dina filter."
+          description={
+            listTab === 'archived'
+              ? 'Det finns inga arkiverade arbetsordrar som matchar dina filter.'
+              : 'Det finns inga aktiva arbetsordrar som matchar dina filter.'
+          }
           action={
-            isStaff ? (
+            isStaff && listTab === 'active' ? (
               <Button onClick={() => setShowCreateModal(true)} variant="primary" size="sm">
                 <Plus className="w-4 h-4" />
                 Skapa arbetsorder
@@ -655,71 +709,122 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
           }
         />
       ) : viewMode === 'list' ? (
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Titel</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Kategori</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Prioritet</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Fastighet</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Tilldelad</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Förfallodatum</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-slate-600">Åtgärder</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((wo) => (
-                  <tr
-                    key={wo.id}
-                    className="border-b border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
-                    onClick={() => {
-                      setSelectedWorkOrder(wo);
-                      setNewDetailStatus(wo.status);
-                      setNewAssignedTo(wo.assigned_to || '');
-                      setShowDetailModal(true);
-                    }}
-                  >
-                    <td className="px-4 py-3 text-sm font-medium text-slate-900">{wo.title}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{wo.category}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <Badge className={getWOPriorityColor(wo.priority)}>
-                        {WO_PRIORITY_LABELS[wo.priority]}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <Badge className={getWOStatusColor(wo.status)}>
-                        {WO_STATUS_LABELS[wo.status]}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-600">
-                      {wo.property?.name || '–'}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-600">
-                      {wo.assigned?.name || '–'}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-600">
-                      {wo.due_date ? formatDate(wo.due_date) : '–'}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <ChevronRight className="w-4 h-4 text-slate-400 inline" />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <>
+          <div className="grid gap-3 md:hidden">
+            {filtered.map((wo) => (
+              <Card
+                key={wo.id}
+                className="p-4 cursor-pointer hover:shadow-md transition-all"
+                onClick={() => {
+                  setSelectedWorkOrder(wo);
+                  setNewDetailStatus(wo.status);
+                  setNewAssignedTo(wo.assigned_to || '');
+                  setShowDetailModal(true);
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-slate-900 leading-snug break-words">{wo.title}</h3>
+                    <p className="mt-1 text-sm text-slate-500 break-words">
+                      {wo.property?.name || 'Ingen fastighet'}
+                    </p>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-400 shrink-0 mt-1" />
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Badge className={getWOStatusColor(wo.status)}>
+                    {WO_STATUS_LABELS[wo.status]}
+                  </Badge>
+                  <Badge className={getWOPriorityColor(wo.priority)}>
+                    {WO_PRIORITY_LABELS[wo.priority]}
+                  </Badge>
+                </div>
+
+                <div className="mt-4 grid gap-2 text-sm text-slate-600">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <ClipboardList className="w-4 h-4 text-slate-400 shrink-0" />
+                    <span className="truncate">{wo.category}</span>
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <User className="w-4 h-4 text-slate-400 shrink-0" />
+                    <span className="truncate">{wo.assigned?.name || 'Ej tilldelad'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
+                    <span>{wo.due_date ? formatDate(wo.due_date) : 'Inget förfallodatum'}</span>
+                  </div>
+                </div>
+              </Card>
+            ))}
           </div>
-        </Card>
+
+          <Card className="hidden md:block overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Titel</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Kategori</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Prioritet</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Fastighet</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Tilldelad</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Förfallodatum</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-slate-600">Åtgärder</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((wo) => (
+                    <tr
+                      key={wo.id}
+                      className="border-b border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
+                      onClick={() => {
+                        setSelectedWorkOrder(wo);
+                        setNewDetailStatus(wo.status);
+                        setNewAssignedTo(wo.assigned_to || '');
+                        setShowDetailModal(true);
+                      }}
+                    >
+                      <td className="px-4 py-3 text-sm font-medium text-slate-900">{wo.title}</td>
+                      <td className="px-4 py-3 text-sm text-slate-600">{wo.category}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <Badge className={getWOPriorityColor(wo.priority)}>
+                          {WO_PRIORITY_LABELS[wo.priority]}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <Badge className={getWOStatusColor(wo.status)}>
+                          {WO_STATUS_LABELS[wo.status]}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-600">
+                        {wo.property?.name || '–'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-600">
+                        {wo.assigned?.name || '–'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-600">
+                        {wo.due_date ? formatDate(wo.due_date) : '–'}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <ChevronRight className="w-4 h-4 text-slate-400 inline" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </>
       ) : (
         <div className="space-y-4">
-          <div className="overflow-x-auto pb-4">
-            <div className="flex gap-4 min-w-max">
-              {WO_STATUSES.map((status) => (
+          <div className="md:overflow-x-auto pb-4">
+            <div className="flex flex-col md:flex-row gap-4 md:min-w-max">
+              {visibleStatuses.map((status) => (
                 <div
                   key={status}
-                  className="flex-shrink-0 w-80 bg-slate-50 rounded-xl border border-slate-200 p-4"
+                  className="w-full md:w-80 md:flex-shrink-0 bg-slate-50 rounded-xl border border-slate-200 p-4"
                 >
                   <h3 className="font-semibold text-slate-800 mb-3 flex items-center justify-between">
                     {WO_STATUS_LABELS[status]}

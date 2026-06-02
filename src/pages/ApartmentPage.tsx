@@ -29,6 +29,7 @@ import {
 } from '../components/ui';
 import { formatDate, formatCurrency } from '../lib/utils';
 import { BANKID_ENABLED } from '../lib/bankid';
+import { buildGeneratedDocument } from '../lib/generatedDocuments';
 import { Tenancy, Apartment, Property } from '../types';
 
 interface ContactInfo {
@@ -113,12 +114,41 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
         alert('BankID-signering är inte aktiverat ännu. Kontakta administratören.');
         return;
       }
-      await supabase.from('contract_signatures').update({
+      const signedAt = new Date().toISOString();
+      let generatedDocumentId = signingContract.document_id || null;
+
+      if (!signingContract.document_id && tenancy && apartment) {
+        const documentPayload = buildGeneratedDocument({
+          title: `Signerat hyresavtal - ${user?.name || 'Hyresgast'}`,
+          fileName: `signerat-hyresavtal-${apartment.apartment_number || signingContract.id}.pdf`,
+          documentType: 'contract',
+          description: `Signerat hyresavtal for ${property?.address || 'bostad'}${apartment.apartment_number ? `, lgh ${apartment.apartment_number}` : ''}.`,
+          body: `${signingContract.contract_content || ''}
+
+SIGNERING
+Hyresgast: ${signature}
+Signerat: ${new Date(signedAt).toLocaleString('sv-SE')}
+Signeringsmetod: Namnunderskrift`,
+          organisationId: user?.organisation_id,
+          tenantId: user?.id,
+          propertyId: apartment.property_id,
+          apartmentId: apartment.id,
+          createdBy: user?.id,
+        });
+        const { data: documentData, error: documentError } = await supabase.from('documents').insert(documentPayload).select('id').single();
+        if (documentError) throw documentError;
+        generatedDocumentId = documentData.id;
+      }
+
+      const { error: contractError } = await supabase.from('contract_signatures').update({
         tenant_signature: signature,
-        tenant_signed_at: new Date().toISOString(),
+        tenant_signed_at: signedAt,
         tenant_signature_method: 'name',
         status: 'signed',
+        document_id: generatedDocumentId,
       }).eq('id', signingContract.id);
+
+      if (contractError) throw contractError;
       setShowSignModal(false);
       setSignature('');
       setSigningContract(null);

@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import type { Role } from '../types';
+import { Button, Input, Modal } from './ui';
 import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
-  ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe
+  ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound
 } from 'lucide-react';
 
 interface NavItem {
@@ -25,6 +27,12 @@ interface LayoutProps {
 export function Layout({ children, currentPage, onNavigate, notificationCount = 0 }: LayoutProps) {
   const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
 
   const navItems: NavItem[] = [
     // ── Tenant ────────────────────────────────────────────────────────────
@@ -58,6 +66,41 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
   };
 
   const roleLabel = user?.role === 'tenant' ? 'Hyresgäst' : user?.role === 'staff' ? 'Personal' : user?.role === 'admin' ? 'Admin' : 'Superadmin';
+
+  const resetPasswordForm = () => {
+    setNewPassword('');
+    setConfirmPassword('');
+    setPasswordError('');
+    setPasswordSuccess('');
+  };
+
+  const handleChangePassword = async () => {
+    setPasswordError('');
+    setPasswordSuccess('');
+
+    if (newPassword.length < 8) {
+      setPasswordError('Lösenordet måste vara minst 8 tecken.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Lösenorden matchar inte.');
+      return;
+    }
+
+    setPasswordLoading(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setPasswordLoading(false);
+
+    if (error) {
+      setPasswordError(error.message);
+      return;
+    }
+
+    setPasswordSuccess('Lösenordet är uppdaterat.');
+    setNewPassword('');
+    setConfirmPassword('');
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -111,6 +154,13 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
               </button>
             )}
           </div>
+          <button
+            onClick={() => setPasswordModalOpen(true)}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors"
+          >
+            <KeyRound className="w-4 h-4" />
+            Byt lösenord
+          </button>
           <button onClick={signOut} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors">
             <LogOut className="w-4 h-4" />
             Logga ut
@@ -180,6 +230,16 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
               ))}
             </nav>
             <div className="px-3 py-4 border-t border-slate-200">
+              <button
+                onClick={() => {
+                  setPasswordModalOpen(true);
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-slate-600 hover:bg-slate-100"
+              >
+                <KeyRound className="w-4 h-4" />
+                Byt lösenord
+              </button>
               <button onClick={signOut} className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
                 <LogOut className="w-4 h-4" />
                 Logga ut
@@ -195,6 +255,54 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
           {children}
         </div>
       </main>
+
+      <Modal
+        open={passwordModalOpen}
+        onClose={() => {
+          setPasswordModalOpen(false);
+          resetPasswordForm();
+        }}
+        title="Byt lösenord"
+      >
+        <div className="space-y-4">
+          <Input
+            label="Nytt lösenord"
+            type="password"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+          />
+          <Input
+            label="Bekräfta lösenord"
+            type="password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+          />
+          {passwordError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
+              {passwordError}
+            </div>
+          )}
+          {passwordSuccess && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800">
+              {passwordSuccess}
+            </div>
+          )}
+          <div className="flex gap-3 justify-end pt-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setPasswordModalOpen(false);
+                resetPasswordForm();
+              }}
+            >
+              Stäng
+            </Button>
+            <Button variant="primary" onClick={handleChangePassword} loading={passwordLoading}>
+              Uppdatera
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

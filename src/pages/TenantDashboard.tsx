@@ -59,6 +59,8 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
           .select('*, apartment:apartments(apartment_number), property:properties(address, name)')
           .eq('tenant_id', user.id)
           .eq('status', 'active')
+          .order('start_date', { ascending: false })
+          .limit(1)
           .maybeSingle();
 
         if (tenancyError) throw tenancyError;
@@ -91,16 +93,17 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
             : Promise.resolve({ data: [], error: null }),
         ]);
 
-        if (mrRes.error) throw mrRes.error;
-        if (laundryRes.error) throw laundryRes.error;
-        if (newsRes.error) throw newsRes.error;
+        if (mrRes.error) console.error('Error fetching tenant maintenance requests:', mrRes.error);
+        if (laundryRes.error) console.error('Error fetching tenant laundry bookings:', laundryRes.error);
+        if (newsRes.error) console.error('Error fetching tenant news:', newsRes.error);
+        if (contractRes.error) console.error('Error fetching tenant pending contracts:', contractRes.error);
 
         setData({
           tenancy: tenancyData,
-          maintenanceRequests: mrRes.data || [],
-          laundryBookings: laundryRes.data || [],
-          news: newsRes.data || [],
-          pendingContracts: contractRes.data || [],
+          maintenanceRequests: mrRes.error ? [] : mrRes.data || [],
+          laundryBookings: laundryRes.error ? [] : laundryRes.data || [],
+          news: newsRes.error ? [] : newsRes.data || [],
+          pendingContracts: contractRes.error ? [] : contractRes.data || [],
           loading: false,
           error: null,
         });
@@ -143,7 +146,7 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
   const propertyAddress = (data.tenancy?.property as any)?.address || '—';
 
   const today = new Date();
-  const nextDueDate = new Date(today.getFullYear(), today.getMonth() + (today.getDate() > 15 ? 2 : 1), 15);
+  const nextDueDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
 
   const monthlyRent = data.tenancy?.monthly_rent || 0;
   const openMR = data.maintenanceRequests.filter(
@@ -171,17 +174,17 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="max-w-6xl mx-auto px-4 py-8">
+      <div className="max-w-6xl mx-auto px-3 sm:px-4 py-5 sm:py-8">
         {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-start justify-between mb-6">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-900 mb-1">Hej, {tenantName}!</h1>
-              <p className="text-slate-500">
+        <div className="mb-6 sm:mb-8">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-1 break-words">Hej, {tenantName}!</h1>
+              <p className="text-sm sm:text-base text-slate-500 leading-relaxed break-words">
                 {propertyName} &mdash; Lägenhet {apartmentNumber} &mdash; {propertyAddress}
               </p>
             </div>
-            <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
               <Home className="h-6 w-6 text-blue-600" />
             </div>
           </div>
@@ -190,13 +193,13 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
           {data.pendingContracts.length > 0 && (
             <button
               onClick={() => onNavigate('apartment')}
-              className="w-full mb-6 flex items-center justify-between gap-4 bg-amber-50 border-2 border-amber-300 rounded-xl px-5 py-4 hover:bg-amber-100 transition-colors text-left group"
+              className="w-full mb-6 flex items-start justify-between gap-3 bg-amber-50 border-2 border-amber-300 rounded-xl px-4 sm:px-5 py-4 hover:bg-amber-100 transition-colors text-left group"
             >
-              <div className="flex items-start gap-4">
+              <div className="flex items-start gap-3 sm:gap-4 min-w-0">
                 <div className="w-10 h-10 bg-amber-200 rounded-xl flex items-center justify-center flex-shrink-0">
                   <PenLine className="h-5 w-5 text-amber-800" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="font-semibold text-amber-900">
                     {data.pendingContracts.length === 1
                       ? 'Du har ett hyresavtal som väntar på din signatur'
@@ -211,7 +214,7 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
             </button>
           )}
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <StatCard
               label="Månadshyra"
               value={formatCurrency(monthlyRent)}
@@ -267,15 +270,15 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
                       className="p-4 hover:shadow-md transition-shadow cursor-pointer"
                       onClick={() => onNavigate('maintenance')}
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-start gap-3 flex-1">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
                           {getStatusIcon(mr.status)}
                           <div className="flex-1 min-w-0">
                             <h3 className="font-semibold text-slate-900 truncate">{mr.title}</h3>
                             <p className="text-xs text-slate-500 mt-1">{formatDate(new Date(mr.created_at))}</p>
                           </div>
                         </div>
-                        <Badge className={getMRStatusBadgeClass(mr.status)}>
+                        <Badge className={`${getMRStatusBadgeClass(mr.status)} self-start`}>
                           {MR_STATUS_LABELS[mr.status as keyof typeof MR_STATUS_LABELS] || mr.status}
                         </Badge>
                       </div>
@@ -315,20 +318,20 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
                       className="p-4 hover:shadow-md transition-shadow cursor-pointer"
                       onClick={() => onNavigate('laundry')}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
                           <Clock className="h-5 w-5 text-blue-500 flex-shrink-0" />
-                          <div>
+                          <div className="min-w-0">
                             <p className="font-medium text-slate-900 text-sm">Tvätttid bokad</p>
                             {(booking.slot as any)?.date && (
-                              <p className="text-xs text-slate-500">
+                              <p className="text-xs text-slate-500 break-words">
                                 {formatDate(new Date((booking.slot as any).date))}
                                 {(booking.slot as any)?.start_time && ` • ${(booking.slot as any).start_time}`}
                               </p>
                             )}
                           </div>
                         </div>
-                        <Badge className="bg-green-100 text-green-700">Bokad</Badge>
+                        <Badge className="bg-green-100 text-green-700 self-start sm:self-auto">Bokad</Badge>
                       </div>
                     </Card>
                   ))}

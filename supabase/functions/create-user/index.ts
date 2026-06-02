@@ -80,6 +80,13 @@ Deno.serve(async (req: Request) => {
         ? (organisation_id ?? callerProfile.organisation_id)
         : callerProfile.organisation_id;
 
+    if (!targetOrgId) {
+      return new Response(JSON.stringify({ error: "Organisation saknas för användaren." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Admins cannot create superadmins
     if (callerProfile.role === "admin" && role === "superadmin") {
       return new Response(JSON.stringify({ error: "Forbidden: admins cannot create superadmins" }), {
@@ -93,6 +100,39 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
+
+    const [{ data: org, error: orgError }, { count: userCount, error: countError }] = await Promise.all([
+      adminClient
+        .from("organisations")
+        .select("max_users")
+        .eq("id", targetOrgId)
+        .maybeSingle(),
+      adminClient
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("organisation_id", targetOrgId),
+    ]);
+
+    if (orgError || !org) {
+      return new Response(JSON.stringify({ error: "Organisationen kunde inte hittas." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (countError) {
+      return new Response(JSON.stringify({ error: "Kunde inte kontrollera användarkvoten." }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if ((userCount ?? 0) >= org.max_users) {
+      return new Response(JSON.stringify({ error: `Licensgränsen för användare är nådd (${org.max_users} st).` }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Generate a secure temporary password
     const tempPassword = generatePassword();
@@ -123,7 +163,8 @@ Deno.serve(async (req: Request) => {
       auth_method: "password",
     });
 
-    // Send password reset email so user sets their own password securely
+    // Create a recovery link for production email integrations. The temporary
+    // password is still returned so admins can share it securely when needed.
     await adminClient.auth.admin.generateLink({
       type: "recovery",
       email,
@@ -135,7 +176,7 @@ Deno.serve(async (req: Request) => {
         success: true,
         user_id: newAuthUser.user!.id,
         temp_password: tempPassword,
-        message: "Användare skapad. Lösenordsåterställningsmail skickas till " + email,
+        message: "Användare skapad med tillfälligt lösenord för " + email,
       }),
       {
         status: 200,

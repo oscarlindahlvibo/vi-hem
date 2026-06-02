@@ -19,6 +19,8 @@ interface AuthContextType {
    */
   linkBankID: (personalNumber: string, linkedAt: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  passwordRecovery: boolean;
+  finishPasswordRecovery: () => Promise<void>;
   /** Whether the BankID integration is configured and available */
   bankIDAvailable: boolean;
 }
@@ -30,6 +32,8 @@ const AuthContext = createContext<AuthContextType>({
   signInWithBankID: async () => ({ error: 'BankID är inte aktiverat.' }),
   linkBankID: async () => ({ error: null }),
   signOut: async () => {},
+  passwordRecovery: false,
+  finishPasswordRecovery: async () => {},
   bankIDAvailable: false,
 });
 
@@ -70,6 +74,10 @@ function readLocalUsers(): LocalTestUser[] {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [passwordRecovery, setPasswordRecovery] = useState(
+    window.location.pathname === '/reset-password' ||
+      window.location.hash.includes('type=recovery')
+  );
 
   async function fetchProfile(userId: string) {
     const { data } = await supabase
@@ -110,7 +118,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecovery(true);
+        setLoading(false);
+      } else if (event === 'SIGNED_IN' && session?.user) {
         (async () => {
           const profile = await fetchProfile(session.user.id);
           setUser(profile);
@@ -188,8 +199,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }
 
+  async function finishPasswordRecovery() {
+    setPasswordRecovery(false);
+    window.history.replaceState({}, document.title, window.location.origin);
+    await signOut();
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signInWithBankID, linkBankID, signOut, bankIDAvailable: BANKID_ENABLED }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signInWithBankID, linkBankID, signOut, passwordRecovery, finishPasswordRecovery, bankIDAvailable: BANKID_ENABLED }}>
       {children}
     </AuthContext.Provider>
   );

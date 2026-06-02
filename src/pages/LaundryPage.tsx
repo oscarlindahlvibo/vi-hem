@@ -5,13 +5,16 @@ import {
   Card,
   Badge,
   Button,
+  Input,
   Modal,
   PageHeader,
   EmptyState,
   LoadingPage,
+  Select,
+  Textarea,
 } from '../components/ui';
 import { formatDate } from '../lib/utils';
-import type { LaundryRoom, LaundrySlot, LaundryBooking } from '../types';
+import type { LaundryRoom, LaundrySlot, LaundryBooking, Property } from '../types';
 import {
   WashingMachine,
   Calendar,
@@ -46,24 +49,39 @@ const SLOT_TIMES = [
   { start: '19:00', end: '22:00' },
 ];
 
+const INITIAL_LAUNDRY_ROOM_FORM = {
+  property_id: '',
+  name: '',
+  description: '',
+  max_bookings_per_tenant: '3',
+  weeks_to_generate: '8',
+};
+
 export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
   const { user, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
   const [rooms, setRooms] = useState<LaundryRoom[]>([]);
+  const [properties, setProperties] = useState<Property[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string>('');
   const [weekOffset, setWeekOffset] = useState(0);
   const [slots, setSlots] = useState<SlotWithBooking[]>([]);
   const [myBookings, setMyBookings] = useState<MyBooking[]>([]);
+  const [createRoomModalOpen, setCreateRoomModalOpen] = useState(false);
+  const [createRoomLoading, setCreateRoomLoading] = useState(false);
+  const [createRoomForm, setCreateRoomForm] = useState(INITIAL_LAUNDRY_ROOM_FORM);
   const [confirmModal, setConfirmModal] = useState<{
     open: boolean;
     slot: SlotWithBooking | null;
     day: string;
   }>({ open: false, slot: null, day: '' });
+  const [bookingModalError, setBookingModalError] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [bookingInProgress, setBookingInProgress] = useState(false);
   const [cancellingBookingId, setCancellingBookingId] = useState('');
   const [mobileViewDay, setMobileViewDay] = useState(0);
+  const canViewAllLaundryRooms = user?.role === 'staff' || user?.role === 'admin' || user?.role === 'superadmin';
+  const canManageLaundryRooms = user?.role === 'admin' || user?.role === 'superadmin';
 
   // Get week range for current offset
   const getWeekRange = (offset: number) => {
@@ -91,8 +109,18 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
 
   const weekDays = getWeekDays();
 
-  // Format date as YYYY-MM-DD
-  const formatDateString = (d: Date) => d.toISOString().split('T')[0];
+  const formatDateString = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const addDays = (date: Date, days: number) => {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
+  };
 
   // Fetch laundry rooms
   useEffect(() => {
@@ -100,24 +128,75 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
 
     const fetchRooms = async () => {
       try {
-        const { data, error: err } = await supabase
+        let query = supabase
           .from('laundry_rooms')
           .select('*')
           .eq('active', true)
           .order('name');
 
+        if (!canViewAllLaundryRooms) {
+          const { data: tenancies, error: tenancyErr } = await supabase
+            .from('tenancies')
+            .select('property_id')
+            .eq('tenant_id', user.id)
+            .eq('status', 'active');
+
+          if (tenancyErr) throw tenancyErr;
+
+          const propertyIds = [...new Set((tenancies || []).map((tenancy) => tenancy.property_id).filter(Boolean))];
+          if (propertyIds.length === 0) {
+            setRooms([]);
+            setSelectedRoomId('');
+            return;
+          }
+
+          query = query.in('property_id', propertyIds);
+        }
+
+        const { data, error: err } = await query;
+
         if (err) throw err;
         if (data && data.length > 0) {
           setRooms(data as LaundryRoom[]);
           setSelectedRoomId(data[0].id);
+        } else {
+          setRooms([]);
+          setSelectedRoomId('');
         }
       } catch (e) {
         console.error('Error fetching laundry rooms:', e);
+      } finally {
+        setLoading(false);
       }
     };
 
     fetchRooms();
-  }, [authLoading, user]);
+  }, [authLoading, user?.id, canViewAllLaundryRooms]);
+
+  useEffect(() => {
+    if (authLoading || !user || !canManageLaundryRooms) return;
+
+    const fetchProperties = async () => {
+      const { data, error: err } = await supabase
+        .from('properties')
+        .select('*')
+        .eq('active', true)
+        .order('name');
+
+      if (err) {
+        console.error('Error fetching properties:', err);
+        return;
+      }
+
+      setProperties((data || []) as Property[]);
+      setCreateRoomForm((current) => ({
+        ...current,
+        property_id: current.property_id || data?.[0]?.id || '',
+      }));
+    };
+
+    fetchProperties();
+  }, [authLoading, user, canManageLaundryRooms]);
 
   // Fetch slots and bookings
   useEffect(() => {
@@ -220,15 +299,24 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
     try {
       setBookingInProgress(true);
       setError('');
+      setSuccess('');
+      setBookingModalError('');
 
       // Check max bookings
-      const activeCount = myBookings.filter((b) => b.status === 'active').length;
       const room = rooms.find((r) => r.id === selectedRoomId);
-      if (activeCount >= (room?.max_bookings_per_tenant || 2)) {
-        setError(
-          `Du kan inte boka fler än ${room?.max_bookings_per_tenant || 2} tvättpass samtidigt.`
+      const maxBookings = room?.max_bookings_per_tenant || 3;
+      const { count: activeCount, error: countErr } = await supabase
+        .from('laundry_bookings')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', user.id)
+        .eq('status', 'active');
+
+      if (countErr) throw countErr;
+
+      if ((activeCount ?? myBookings.filter((b) => b.status === 'active').length) >= maxBookings) {
+        setBookingModalError(
+          `Du har uppnått max antal bokningar (${maxBookings} aktiva tvättpass). Avboka en tid innan du bokar en ny.`
         );
-        setConfirmModal({ open: false, slot: null, day: '' });
         return;
       }
 
@@ -241,33 +329,52 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
         .maybeSingle();
 
       if (existingBooking) {
-        setError('Denna tid är redan bokad. Försök igen.');
-        setConfirmModal({ open: false, slot: null, day: '' });
+        setBookingModalError('Denna tid är redan bokad. Välj en annan tid.');
         return;
       }
 
       // Insert booking
-      const { error: bookingErr } = await supabase
+      const { data: bookingData, error: bookingErr } = await supabase
         .from('laundry_bookings')
         .insert({
           laundry_slot_id: confirmModal.slot.id,
           tenant_id: user.id,
           status: 'active',
-        });
+        })
+        .select('*')
+        .single();
 
       if (bookingErr) throw bookingErr;
 
+      const newBooking = bookingData as LaundryBooking;
+      const bookedSlot = confirmModal.slot;
+      const myBooking: MyBooking = {
+        ...newBooking,
+        slot: {
+          date: bookedSlot.date,
+          start_time: bookedSlot.start_time,
+          end_time: bookedSlot.end_time,
+          laundry_room: room,
+        },
+      };
+
+      setSlots((current) =>
+        current.map((slot) =>
+          slot.id === bookedSlot.id
+            ? { ...slot, booking: newBooking, isTaken: false }
+            : slot
+        )
+      );
+      setMyBookings((current) => [myBooking, ...current]);
       setSuccess('Bokning bekräftad!');
       setConfirmModal({ open: false, slot: null, day: '' });
-
-      // Refresh bookings
-      setTimeout(() => {
-        setSelectedRoomId(selectedRoomId);
-        setSuccess('');
-      }, 1500);
+      setTimeout(() => setSuccess(''), 2000);
     } catch (e) {
       console.error('Error booking slot:', e);
-      setError('Något gick fel. Försök igen.');
+      const message = e && typeof e === 'object' && 'code' in e && (e as { code?: string }).code === '23505'
+        ? 'Denna tid hann bli bokad av någon annan. Välj en annan tid.'
+        : 'Något gick fel. Försök igen.';
+      setBookingModalError(message);
     } finally {
       setBookingInProgress(false);
     }
@@ -288,9 +395,16 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
 
       if (err) throw err;
 
+      setMyBookings((current) => current.filter((booking) => booking.id !== bookingId));
+      setSlots((current) =>
+        current.map((slot) =>
+          slot.booking?.id === bookingId
+            ? { ...slot, booking: null, isTaken: slot.is_blocked }
+            : slot
+        )
+      );
       setSuccess('Bokning avbokad.');
       setTimeout(() => {
-        setSelectedRoomId(selectedRoomId);
         setSuccess('');
       }, 1500);
     } catch (e) {
@@ -301,19 +415,226 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
     }
   };
 
+  const handleCreateLaundryRoom = async () => {
+    if (!user || !canManageLaundryRooms) return;
+
+    const name = createRoomForm.name.trim();
+    const description = createRoomForm.description.trim();
+    const maxBookings = Number(createRoomForm.max_bookings_per_tenant);
+    const weeksToGenerate = Number(createRoomForm.weeks_to_generate);
+
+    if (!createRoomForm.property_id) {
+      setError('Välj en fastighet först.');
+      return;
+    }
+
+    if (!name) {
+      setError('Ange ett namn på tvättstugan.');
+      return;
+    }
+
+    if (!Number.isFinite(maxBookings) || maxBookings < 1 || maxBookings > 10) {
+      setError('Max antal aktiva bokningar måste vara mellan 1 och 10.');
+      return;
+    }
+
+    if (!Number.isFinite(weeksToGenerate) || weeksToGenerate < 1 || weeksToGenerate > 52) {
+      setError('Antal veckor med tider måste vara mellan 1 och 52.');
+      return;
+    }
+
+    try {
+      setCreateRoomLoading(true);
+      setError('');
+
+      const { data: roomData, error: roomErr } = await supabase
+        .from('laundry_rooms')
+        .insert({
+          property_id: createRoomForm.property_id,
+          organisation_id: user.organisation_id,
+          name,
+          description,
+          machines: [],
+          max_bookings_per_tenant: maxBookings,
+          active: true,
+        })
+        .select('*')
+        .single();
+
+      if (roomErr) throw roomErr;
+
+      const today = new Date();
+      const slotRows = Array.from({ length: weeksToGenerate * 7 }).flatMap((_, dayIndex) => {
+        const date = formatDateString(addDays(today, dayIndex));
+        return SLOT_TIMES.map((slot) => ({
+          laundry_room_id: roomData.id,
+          date,
+          start_time: slot.start,
+          end_time: slot.end,
+          is_blocked: false,
+        }));
+      });
+
+      const { error: slotsErr } = await supabase
+        .from('laundry_slots')
+        .insert(slotRows);
+
+      if (slotsErr) throw slotsErr;
+
+      setRooms((current) => [...current, roomData as LaundryRoom].sort((a, b) => a.name.localeCompare(b.name)));
+      setSelectedRoomId(roomData.id);
+      setWeekOffset(0);
+      setMobileViewDay(0);
+      setCreateRoomForm({
+        ...INITIAL_LAUNDRY_ROOM_FORM,
+        property_id: createRoomForm.property_id,
+      });
+      setCreateRoomModalOpen(false);
+      setSuccess('Tvättstugan skapades med bokningsbara tider.');
+      setTimeout(() => setSuccess(''), 2000);
+    } catch (e) {
+      console.error('Error creating laundry room:', e);
+      setError('Kunde inte skapa tvättstugan. Kontrollera behörighet och försök igen.');
+    } finally {
+      setCreateRoomLoading(false);
+    }
+  };
+
   if (authLoading || loading) return <LoadingPage />;
 
   if (!user) return null;
 
+  const closeConfirmModal = () => {
+    setConfirmModal({ open: false, slot: null, day: '' });
+    setBookingModalError('');
+  };
+
+  const createRoomAction = canManageLaundryRooms ? (
+    <Button variant="primary" onClick={() => setCreateRoomModalOpen(true)}>
+      <Plus className="w-4 h-4" />
+      Ny tvättstuga
+    </Button>
+  ) : null;
+
+  const createRoomModal = (
+    <Modal
+      open={createRoomModalOpen}
+      onClose={() => setCreateRoomModalOpen(false)}
+      title="Skapa tvättstuga"
+    >
+      <div className="space-y-4">
+        {properties.length === 0 ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            Du behöver skapa en fastighet i organisationen innan du kan lägga till en tvättstuga.
+          </div>
+        ) : (
+          <>
+            <Select
+              label="Fastighet"
+              value={createRoomForm.property_id}
+              onChange={(event) =>
+                setCreateRoomForm((current) => ({ ...current, property_id: event.target.value }))
+              }
+              options={properties.map((property) => ({
+                value: property.id,
+                label: `${property.name}${property.address ? `, ${property.address}` : ''}`,
+              }))}
+            />
+
+            <Input
+              label="Namn"
+              value={createRoomForm.name}
+              onChange={(event) =>
+                setCreateRoomForm((current) => ({ ...current, name: event.target.value }))
+              }
+              placeholder="Ex. Tvättstuga A"
+            />
+
+            <Textarea
+              label="Beskrivning"
+              value={createRoomForm.description}
+              onChange={(event) =>
+                setCreateRoomForm((current) => ({ ...current, description: event.target.value }))
+              }
+              rows={3}
+              placeholder="Ex. Källarplan, ingång från gården"
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input
+                label="Max aktiva bokningar"
+                type="number"
+                min={1}
+                max={10}
+                value={createRoomForm.max_bookings_per_tenant}
+                onChange={(event) =>
+                  setCreateRoomForm((current) => ({
+                    ...current,
+                    max_bookings_per_tenant: event.target.value,
+                  }))
+                }
+                hint="Per hyresgäst samtidigt"
+              />
+              <Input
+                label="Skapa tider i veckor"
+                type="number"
+                min={1}
+                max={52}
+                value={createRoomForm.weeks_to_generate}
+                onChange={(event) =>
+                  setCreateRoomForm((current) => ({
+                    ...current,
+                    weeks_to_generate: event.target.value,
+                  }))
+                }
+                hint="Standard är 8 veckor framåt"
+              />
+            </div>
+          </>
+        )}
+
+        <div className="flex gap-3 justify-end pt-4">
+          <Button variant="outline" onClick={() => setCreateRoomModalOpen(false)}>
+            Avbryt
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleCreateLaundryRoom}
+            loading={createRoomLoading}
+            disabled={properties.length === 0}
+          >
+            Skapa
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+
   if (rooms.length === 0) {
     return (
       <div className="p-4 md:p-6">
-        <PageHeader title="Tvättbokning" />
+        <PageHeader title="Tvättbokning" action={createRoomAction} />
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-600">
+            {success}
+          </div>
+        )}
         <EmptyState
           icon={<WashingMachine className="w-12 h-12" />}
           title="Ingen tvättstuga tillgänglig"
-          description="Det finns ingen tvättstuga konfigurerad för denna fastighet."
+          description={
+            canManageLaundryRooms
+              ? 'Skapa en tvättstuga och generera bokningsbara tider för organisationen.'
+              : 'Det finns ingen tvättstuga konfigurerad för denna fastighet.'
+          }
         />
+        {createRoomModal}
       </div>
     );
   }
@@ -322,7 +643,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
-      <PageHeader title="Tvättbokning" subtitle="Boka tvättstuga" />
+      <PageHeader title="Tvättbokning" subtitle="Boka tvättstuga" action={createRoomAction} />
 
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
@@ -474,6 +795,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
                                 slot,
                                 day: `${day.toLocaleDateString('sv-SE', { weekday: 'long' })} ${formatDate(slot.date)}`,
                               });
+                              setBookingModalError('');
                             }
                           }}
                           disabled={!isClickable}
@@ -541,6 +863,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
                             slot,
                             day: `${weekDays[mobileViewDay].toLocaleDateString('sv-SE', { weekday: 'long' })} ${formatDate(slot.date)}`,
                           });
+                          setBookingModalError('');
                         }
                       }}
                       className={`p-4 transition-all ${isClickable ? 'cursor-pointer hover:shadow-md active:scale-95' : 'cursor-not-allowed opacity-60'}`}
@@ -570,7 +893,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
       {/* Confirmation modal */}
       <Modal
         open={confirmModal.open}
-        onClose={() => setConfirmModal({ open: false, slot: null, day: '' })}
+        onClose={closeConfirmModal}
         title="Bekräfta bokning"
       >
         <div className="space-y-4">
@@ -586,10 +909,16 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
             </div>
           )}
 
+          {bookingModalError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+              {bookingModalError}
+            </div>
+          )}
+
           <div className="flex gap-3 justify-end pt-4">
             <Button
               variant="outline"
-              onClick={() => setConfirmModal({ open: false, slot: null, day: '' })}
+              onClick={closeConfirmModal}
             >
               Avbryt
             </Button>
@@ -603,6 +932,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
           </div>
         </div>
       </Modal>
+      {createRoomModal}
     </div>
   );
 }

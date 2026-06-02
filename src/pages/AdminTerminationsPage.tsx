@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { FileX, Calendar, CheckCircle } from 'lucide-react';
+import { FileX, Calendar, CheckCircle, Plus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import {
   Card,
   Badge,
   Button,
+  Input,
   Modal,
   Textarea,
   PageHeader,
@@ -32,6 +34,7 @@ const TERMINATION_STATUS_COLORS: Record<string, string> = {
 
 interface AdminTerminationsPageProps { onNavigate: (page: string) => void; }
 export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminationsPageProps) {
+  const { user } = useAuth();
   const [terminationRequests, setTerminationRequests] = useState<TerminationRequest[]>([]);
   const [tenancies, setTenancies] = useState<Tenancy[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -41,8 +44,20 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
   const [statusFilter, setStatusFilter] = useState('');
   const [selectedRequest, setSelectedRequest] = useState<TerminationRequest | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [savingCreate, setSavingCreate] = useState(false);
+  const [createError, setCreateError] = useState('');
   const [internalNotes, setInternalNotes] = useState('');
   const [newStatus, setNewStatus] = useState('');
+  const [createForm, setCreateForm] = useState({
+    tenancy_id: '',
+    requested_move_out_date: '',
+    new_address: '',
+    message: '',
+    internal_notes: '',
+    status: 'received',
+    update_tenancy: true,
+  });
 
   useEffect(() => {
     fetchData();
@@ -86,11 +101,89 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
   const getPropertyInfo = (propertyId: string | null) =>
     propertyId ? properties.find((p) => p.id === propertyId) : undefined;
 
+  const activeTenancies = tenancies
+    .filter((tenancy) => tenancy.status === 'active')
+    .sort((a, b) => {
+      const tenantA = getProfileInfo(a.tenant_id)?.name || '';
+      const tenantB = getProfileInfo(b.tenant_id)?.name || '';
+      return tenantA.localeCompare(tenantB, 'sv-SE');
+    });
+
+  const resetCreateForm = () => {
+    setCreateForm({
+      tenancy_id: '',
+      requested_move_out_date: '',
+      new_address: '',
+      message: '',
+      internal_notes: '',
+      status: 'received',
+      update_tenancy: true,
+    });
+    setCreateError('');
+    setSavingCreate(false);
+  };
+
   const handleOpenDetail = (request: TerminationRequest) => {
     setSelectedRequest(request);
     setInternalNotes(request.internal_notes || '');
     setNewStatus(request.status);
     setShowDetailModal(true);
+  };
+
+  const handleCreateTermination = async () => {
+    const tenancy = getTenancyInfo(createForm.tenancy_id);
+    if (!user || !tenancy) {
+      setCreateError('Välj ett hyresförhållande.');
+      return;
+    }
+
+    if (!createForm.requested_move_out_date) {
+      setCreateError('Ange utflyttningsdatum.');
+      return;
+    }
+
+    try {
+      setSavingCreate(true);
+      setCreateError('');
+
+      const { error: insertError } = await supabase
+        .from('termination_requests')
+        .insert({
+          organisation_id: user.organisation_id,
+          tenant_id: tenancy.tenant_id,
+          tenancy_id: tenancy.id,
+          requested_move_out_date: createForm.requested_move_out_date,
+          new_address: createForm.new_address,
+          message: createForm.message || 'Uppsägning registrerad av admin efter besked utanför appen.',
+          status: createForm.status,
+          internal_notes: createForm.internal_notes,
+          confirmed_by: user.id,
+          confirmed_at: new Date().toISOString(),
+        });
+
+      if (insertError) throw insertError;
+
+      if (createForm.update_tenancy) {
+        const { error: tenancyError } = await supabase
+          .from('tenancies')
+          .update({
+            status: 'terminated',
+            end_date: createForm.requested_move_out_date,
+          })
+          .eq('id', tenancy.id);
+
+        if (tenancyError) throw tenancyError;
+      }
+
+      resetCreateForm();
+      setShowCreateModal(false);
+      fetchData();
+    } catch (error: any) {
+      console.error('Error creating termination:', error);
+      setCreateError(error.message || 'Kunde inte skapa uppsägningen.');
+    } finally {
+      setSavingCreate(false);
+    }
   };
 
   const handleSaveNotes = async () => {
@@ -129,6 +222,12 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
         <PageHeader
           title="Uppsägningar"
           subtitle="Hantera hyresgästers uppsägningsärenden"
+          action={
+            <Button variant="primary" onClick={() => setShowCreateModal(true)} className="gap-2">
+              <Plus className="w-4 h-4" />
+              Registrera uppsägning
+            </Button>
+          }
         />
 
         <div className="flex items-center gap-3 mb-6">
@@ -221,6 +320,116 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
           </Card>
         )}
       </div>
+
+      <Modal
+        open={showCreateModal}
+        onClose={() => { setShowCreateModal(false); resetCreateForm(); }}
+        title="Registrera uppsägning"
+        size="lg"
+      >
+        <div className="space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Hyresförhållande</label>
+            <select
+              value={createForm.tenancy_id}
+              onChange={(e) => setCreateForm({ ...createForm, tenancy_id: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">Välj hyresgäst och lägenhet</option>
+              {activeTenancies.map((tenancy) => {
+                const tenant = getProfileInfo(tenancy.tenant_id);
+                const apt = getApartmentInfo(tenancy.apartment_id);
+                const prop = getPropertyInfo(tenancy.property_id || apt?.property_id || null);
+                return (
+                  <option key={tenancy.id} value={tenancy.id}>
+                    {tenant?.name || 'Okänd hyresgäst'} — {prop?.name || 'Fastighet'} Lgh {apt?.apartment_number || '—'}
+                  </option>
+                );
+              })}
+            </select>
+            {activeTenancies.length === 0 && (
+              <p className="text-xs text-slate-500 mt-1">Det finns inga aktiva hyresförhållanden att säga upp.</p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input
+              label="Utflyttningsdatum"
+              type="date"
+              value={createForm.requested_move_out_date}
+              onChange={(e) => setCreateForm({ ...createForm, requested_move_out_date: e.target.value })}
+            />
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
+              <select
+                value={createForm.status}
+                onChange={(e) => setCreateForm({ ...createForm, status: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="received">Mottagen</option>
+                <option value="processing">Under handläggning</option>
+                <option value="approved">Godkänd</option>
+                <option value="closed">Stängd</option>
+              </select>
+            </div>
+          </div>
+
+          <Input
+            label="Ny adress"
+            value={createForm.new_address}
+            onChange={(e) => setCreateForm({ ...createForm, new_address: e.target.value })}
+            placeholder="Valfritt"
+          />
+
+          <Textarea
+            label="Meddelande / hur uppsägningen inkom"
+            value={createForm.message}
+            onChange={(e) => setCreateForm({ ...createForm, message: e.target.value })}
+            placeholder="T.ex. Uppsägning mottagen via e-post eller telefon."
+            rows={3}
+          />
+
+          <Textarea
+            label="Intern anteckning"
+            value={createForm.internal_notes}
+            onChange={(e) => setCreateForm({ ...createForm, internal_notes: e.target.value })}
+            placeholder="Valfritt, visas bara internt"
+            rows={3}
+          />
+
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={createForm.update_tenancy}
+              onChange={(e) => setCreateForm({ ...createForm, update_tenancy: e.target.checked })}
+              className="w-4 h-4 mt-0.5 rounded border-slate-300"
+            />
+            <span className="text-sm text-slate-700">
+              Markera hyresförhållandet som uppsagt och sätt slutdatum till utflyttningsdatum.
+            </span>
+          </label>
+
+          {createError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
+              {createError}
+            </div>
+          )}
+
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="secondary" onClick={() => { setShowCreateModal(false); resetCreateForm(); }}>
+              Avbryt
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleCreateTermination}
+              loading={savingCreate}
+              disabled={activeTenancies.length === 0}
+            >
+              Registrera
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={showDetailModal}

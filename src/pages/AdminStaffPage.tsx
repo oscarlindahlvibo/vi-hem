@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Users, Plus, Edit2, ShieldCheck, KeyRound } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { createUserAccount, resetUserPassword } from '../lib/userAdmin';
 import {
   Card,
   Badge,
@@ -38,6 +39,8 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [createdCredentials, setCreatedCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
+  const [resetCredentials, setResetCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
+  const [resettingUserId, setResettingUserId] = useState('');
   const [staffFormData, setStaffFormData] = useState({
     name: '',
     email: '',
@@ -94,27 +97,13 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
         resetForm();
         fetchStaff();
       } else {
-        // Create new user via Edge Function (creates Supabase Auth user + profile)
-        const { data: { session } } = await supabase.auth.getSession();
-        const res = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-user`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${session?.access_token}`,
-            },
-            body: JSON.stringify({
-              name: staffFormData.name,
-              email: staffFormData.email,
-              phone: staffFormData.phone,
-              role: staffFormData.role,
-              organisation_id: user?.organisation_id,
-            }),
-          }
-        );
-        const result = await res.json();
-        if (!res.ok) throw new Error(result.error || 'Kunde inte skapa användare');
+        const result = await createUserAccount({
+          name: staffFormData.name,
+          email: staffFormData.email,
+          phone: staffFormData.phone,
+          role: staffFormData.role as Profile['role'],
+          organisation_id: user?.organisation_id,
+        });
         setShowStaffModal(false);
         resetForm();
         fetchStaff();
@@ -147,11 +136,14 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   };
 
   const handleResetPassword = async (staffMember: Profile) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(staffMember.email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-    if (!error) {
-      alert(`Lösenordsåterställningsmail skickat till ${staffMember.email}`);
+    try {
+      setResettingUserId(staffMember.id);
+      const result = await resetUserPassword(staffMember.id);
+      setResetCredentials({ email: result.email, tempPassword: result.temp_password });
+    } catch (err: any) {
+      alert(err.message || 'Kunde inte återställa lösenordet');
+    } finally {
+      setResettingUserId('');
     }
   };
 
@@ -235,7 +227,8 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                           <button
                             onClick={() => handleResetPassword(staffMember)}
                             title="Skicka lösenordsåterställning"
-                            className="p-2 hover:bg-slate-100 rounded-lg inline-block transition-colors"
+                            disabled={resettingUserId === staffMember.id}
+                            className="p-2 hover:bg-slate-100 rounded-lg inline-block transition-colors disabled:opacity-50"
                           >
                             <KeyRound className="w-4 h-4 text-slate-500" />
                           </button>
@@ -309,9 +302,8 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
           )}
           {!editingStaff && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-              Ett konto skapas med ett tillfälligt lösenord. Användaren får ett
-              e-postmeddelande med instruktioner om att sätta sitt eget lösenord.
-              Lösenordet lagras krypterat (bcrypt) i Supabase Auth.
+              Ett konto skapas med ett tillfälligt lösenord. Dela lösenordet säkert
+              och be användaren byta det efter inloggning.
             </div>
           )}
           {saveError && (
@@ -341,8 +333,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
             <div className="bg-green-50 border border-green-200 rounded-lg p-4">
               <p className="text-sm font-semibold text-green-900 mb-1">Kontot har skapats!</p>
               <p className="text-sm text-green-800">
-                En lösenordsåterställningslänk har skickats till <strong>{createdCredentials.email}</strong>.
-                Användaren klickar på länken för att sätta sitt eget lösenord.
+                Användaren kan logga in med <strong>{createdCredentials.email}</strong> och lösenordet nedan.
               </p>
             </div>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
@@ -358,6 +349,29 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
               </code>
             </div>
             <Button variant="primary" className="w-full" onClick={() => setCreatedCredentials(null)}>
+              Stäng
+            </Button>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!resetCredentials}
+        onClose={() => setResetCredentials(null)}
+        title="Lösenord återställt"
+      >
+        {resetCredentials && (
+          <div className="space-y-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <p className="text-sm font-semibold text-green-900 mb-1">Nytt tillfälligt lösenord skapat</p>
+              <p className="text-sm text-green-800">
+                Dela lösenordet säkert med <strong>{resetCredentials.email}</strong> och be användaren byta det efter inloggning.
+              </p>
+            </div>
+            <code className="block bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm font-mono text-slate-900 select-all">
+              {resetCredentials.tempPassword}
+            </code>
+            <Button variant="primary" className="w-full" onClick={() => setResetCredentials(null)}>
               Stäng
             </Button>
           </div>

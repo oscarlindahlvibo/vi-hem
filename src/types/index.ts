@@ -7,6 +7,7 @@ export interface Organisation {
   plan: 'trial' | 'starter' | 'professional' | 'enterprise';
   plan_expires_at: string | null;
   max_users: number;
+  max_properties: number;
   max_apartments: number;
   contact_email: string;
   contact_phone: string;
@@ -36,6 +37,7 @@ export interface Profile {
 
 export interface Property {
   id: string;
+  organisation_id: string | null;
   name: string;
   address: string;
   city: string;
@@ -122,9 +124,10 @@ export type MRStatus = 'received' | 'assigned' | 'started' | 'waiting_material' 
 
 export interface MaintenanceRequest {
   id: string;
+  organisation_id: string | null;
   tenant_id: string;
-  property_id: string;
-  apartment_id: string;
+  property_id: string | null;
+  apartment_id: string | null;
   title: string;
   description: string;
   category: MRCategory;
@@ -239,6 +242,7 @@ export interface TimeEntry {
 
 export interface LaundryRoom {
   id: string;
+  organisation_id: string | null;
   property_id: string;
   name: string;
   description: string;
@@ -274,6 +278,7 @@ export interface LaundryBooking {
 
 export interface Document {
   id: string;
+  organisation_id: string | null;
   title: string;
   file_url: string;
   file_name: string;
@@ -307,6 +312,7 @@ export interface News {
 
 export interface TerminationRequest {
   id: string;
+  organisation_id: string | null;
   tenant_id: string;
   tenancy_id: string | null;
   requested_move_out_date: string;
@@ -323,8 +329,11 @@ export interface TerminationRequest {
 
 export interface ChatThread {
   id: string;
-  tenant_id: string;
+  organisation_id: string | null;
+  tenant_id: string | null;
   assigned_to: string | null;
+  chat_type: 'tenant_support' | 'direct' | 'group';
+  created_by: string | null;
   subject: string;
   status: 'open' | 'closed' | 'archived';
   maintenance_request_id: string | null;
@@ -332,8 +341,17 @@ export interface ChatThread {
   created_at: string;
   tenant?: Profile;
   assigned?: Profile;
+  participants?: ChatParticipant[];
   messages?: ChatMessage[];
   unread_count?: number;
+}
+
+export interface ChatParticipant {
+  id: string;
+  thread_id: string;
+  user_id: string;
+  created_at: string;
+  user?: Profile;
 }
 
 export interface ChatMessage {

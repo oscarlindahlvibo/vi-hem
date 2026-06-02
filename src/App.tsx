@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Layout } from './components/Layout';
 import { LoginPage } from './components/LoginPage';
+import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { LoadingPage } from './components/ui';
 import { supabase } from './lib/supabase';
 
@@ -26,9 +27,20 @@ import { InspectionsPage } from './pages/InspectionsPage';
 import { AdminOrganisationsPage } from './pages/AdminOrganisationsPage';
 
 function AppInner() {
-  const { user, loading } = useAuth();
+  const { user, loading, passwordRecovery } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [notificationCount, setNotificationCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) {
+      setCurrentPage('dashboard');
+      setNotificationCount(0);
+      return;
+    }
+
+    setCurrentPage(user.role === 'superadmin' ? 'admin-organisations' : 'dashboard');
+    setNotificationCount(0);
+  }, [user?.id, user?.role]);
 
   useEffect(() => {
     if (!user) return;
@@ -62,6 +74,8 @@ function AppInner() {
     );
   }
 
+  if (passwordRecovery) return <ResetPasswordPage />;
+
   if (!user) return <LoginPage />;
 
   const navigate = (page: string) => {
@@ -75,6 +89,11 @@ function AppInner() {
   const isStaff = user.role === 'staff' || isAdmin;
   const isTenant = user.role === 'tenant';
 
+  const renderDashboard = () => {
+    if (isTenant) return <TenantDashboard onNavigate={navigate} />;
+    return <StaffDashboard onNavigate={navigate} />;
+  };
+
   function renderPage() {
     // Superadmin sees only the organisations page
     if (isSuperadmin) {
@@ -83,10 +102,10 @@ function AppInner() {
 
     switch (currentPage) {
       case 'dashboard':
-        if (isTenant) return <TenantDashboard onNavigate={navigate} />;
-        return <StaffDashboard onNavigate={navigate} />;
+        return renderDashboard();
 
       case 'apartment':
+        if (!isTenant) return renderDashboard();
         return <ApartmentPage onNavigate={navigate} />;
 
       case 'maintenance':
@@ -97,7 +116,7 @@ function AppInner() {
         return <WorkOrdersPage onNavigate={navigate} />;
 
       case 'timetracking':
-        if (!isStaff) return null;
+        if (!isStaff) return renderDashboard();
         return <TimeTrackingPage onNavigate={navigate} />;
 
       case 'laundry':
@@ -113,39 +132,38 @@ function AppInner() {
         return <ChatPage onNavigate={navigate} />;
 
       case 'termination':
-        if (!isTenant) return null;
+        if (!isTenant) return renderDashboard();
         return <TerminationPage onNavigate={navigate} />;
 
       case 'notifications':
         return <NotificationsPage onNavigate={navigate} />;
 
       case 'admin-properties':
-        if (!isAdmin) return null;
+        if (!isAdmin) return renderDashboard();
         return <AdminPropertiesPage onNavigate={navigate} />;
 
       case 'admin-tenants':
-        if (!isAdmin) return null;
+        if (!isAdmin) return renderDashboard();
         return <AdminTenantsPage onNavigate={navigate} />;
 
       case 'admin-staff':
-        if (!isAdmin) return null;
+        if (!isAdmin) return renderDashboard();
         return <AdminStaffPage onNavigate={navigate} />;
 
       case 'admin-payroll':
-        if (!isAdmin) return null;
+        if (!isAdmin) return renderDashboard();
         return <AdminPayrollPage onNavigate={navigate} />;
 
       case 'admin-terminations':
-        if (!isAdmin) return null;
+        if (!isAdmin) return renderDashboard();
         return <AdminTerminationsPage onNavigate={navigate} />;
 
       case 'inspections':
-        if (!isStaff) return null;
+        if (!isStaff) return renderDashboard();
         return <InspectionsPage onNavigate={navigate} />;
 
       default:
-        if (isTenant) return <TenantDashboard onNavigate={navigate} />;
-        return <StaffDashboard onNavigate={navigate} />;
+        return renderDashboard();
     }
   }
 

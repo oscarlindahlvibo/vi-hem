@@ -25,16 +25,17 @@ const PLAN_COLORS: Record<string, string> = {
   enterprise: 'bg-amber-100 text-amber-700',
 };
 
-const PLAN_LIMITS: Record<string, { users: number; apartments: number }> = {
-  trial:        { users: 10,  apartments: 5   },
-  starter:      { users: 25,  apartments: 25  },
-  professional: { users: 100, apartments: 200 },
-  enterprise:   { users: 500, apartments: 999 },
+const PLAN_LIMITS: Record<string, { users: number; properties: number; apartments: number }> = {
+  trial:        { users: 10,  properties: 3,   apartments: 5   },
+  starter:      { users: 25,  properties: 10,  apartments: 25  },
+  professional: { users: 100, properties: 50,  apartments: 200 },
+  enterprise:   { users: 500, properties: 250, apartments: 999 },
 };
 
 interface OrgStats {
   id: string;
   member_count: number;
+  property_count: number;
   apartment_count: number;
 }
 
@@ -45,6 +46,7 @@ interface OrgFormData {
   contact_phone: string;
   plan: string;
   max_users: string;
+  max_properties: string;
   max_apartments: string;
   active: boolean;
 }
@@ -62,7 +64,7 @@ interface UserFormData {
 
 const defaultForm: OrgFormData = {
   name: '', slug: '', contact_email: '', contact_phone: '',
-  plan: 'trial', max_users: '10', max_apartments: '5', active: true,
+  plan: 'trial', max_users: '10', max_properties: '3', max_apartments: '5', active: true,
 };
 
 const defaultUserForm: UserFormData = {
@@ -128,6 +130,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       setStats(localOrgs.map(org => ({
         id: org.id,
         member_count: users.filter(u => u.organisation_id === org.id).length,
+        property_count: 0,
         apartment_count: 0,
       })));
       setLoading(false);
@@ -144,13 +147,15 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       // Fetch member and apartment counts for each org
       const orgStats = await Promise.all(
         data.map(async (org) => {
-          const [membersRes, aptsRes] = await Promise.all([
+          const [membersRes, propsRes, aptsRes] = await Promise.all([
             supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
+            supabase.from('properties').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
             supabase.from('apartments').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
           ]);
           return {
             id: org.id,
             member_count: membersRes.count ?? 0,
+            property_count: propsRes.count ?? 0,
             apartment_count: aptsRes.count ?? 0,
           };
         })
@@ -161,14 +166,15 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
   };
 
   const getStats = (orgId: string): OrgStats =>
-    stats.find(s => s.id === orgId) ?? { id: orgId, member_count: 0, apartment_count: 0 };
+    stats.find(s => s.id === orgId) ?? { id: orgId, member_count: 0, property_count: 0, apartment_count: 0 };
 
   const handlePlanChange = (plan: string) => {
-    const limits = PLAN_LIMITS[plan] ?? { users: 10, apartments: 5 };
+    const limits = PLAN_LIMITS[plan] ?? { users: 10, properties: 3, apartments: 5 };
     setForm(prev => ({
       ...prev,
       plan,
       max_users: String(limits.users),
+      max_properties: String(limits.properties),
       max_apartments: String(limits.apartments),
     }));
   };
@@ -184,6 +190,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         contact_phone: form.contact_phone,
         plan: form.plan as Organisation['plan'],
         max_users: parseInt(form.max_users) || 10,
+        max_properties: parseInt(form.max_properties) || 3,
         max_apartments: parseInt(form.max_apartments) || 5,
         active: form.active,
       };
@@ -236,6 +243,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       contact_email: org.contact_email, contact_phone: org.contact_phone,
       plan: org.plan,
       max_users: String(org.max_users),
+      max_properties: String(org.max_properties ?? 3),
       max_apartments: String(org.max_apartments),
       active: org.active,
     });
@@ -353,6 +361,10 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             <p className="text-2xl font-bold text-blue-600">{stats.reduce((s, o) => s + o.member_count, 0)}</p>
           </Card>
           <Card className="p-4">
+            <p className="text-xs text-slate-500 mb-1">Totalt fastigheter</p>
+            <p className="text-2xl font-bold text-indigo-600">{stats.reduce((s, o) => s + o.property_count, 0)}</p>
+          </Card>
+          <Card className="p-4">
             <p className="text-xs text-slate-500 mb-1">Totalt lägenheter</p>
             <p className="text-2xl font-bold text-teal-600">{stats.reduce((s, o) => s + o.apartment_count, 0)}</p>
           </Card>
@@ -369,8 +381,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             {filtered.map((org) => {
               const s = getStats(org.id);
               const userPct = org.max_users > 0 ? (s.member_count / org.max_users) * 100 : 0;
+              const propertyPct = org.max_properties > 0 ? (s.property_count / org.max_properties) * 100 : 0;
               const aptPct = org.max_apartments > 0 ? (s.apartment_count / org.max_apartments) * 100 : 0;
               const userWarning = userPct >= 90;
+              const propertyWarning = propertyPct >= 90;
+              const propertyAtLimit = s.property_count >= org.max_properties;
               const aptWarning = aptPct >= 90;
               const aptAtLimit = s.apartment_count >= org.max_apartments;
 
@@ -400,7 +415,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                       <p className="text-xs text-slate-500 font-mono mb-3">{org.slug}</p>
 
                       {/* Quota bars */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         {/* Users quota */}
                         <div>
                           <div className="flex items-center justify-between mb-1">
@@ -417,6 +432,28 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                               style={{ width: `${Math.min(userPct, 100)}%` }}
                             />
                           </div>
+                        </div>
+
+                        {/* Properties quota */}
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-slate-500 flex items-center gap-1">
+                              <Building2 className="w-3 h-3" /> Fastigheter
+                              {propertyAtLimit && <AlertTriangle className="w-3 h-3 text-red-500" />}
+                            </span>
+                            <span className={`text-xs font-medium ${propertyWarning ? 'text-red-600' : 'text-slate-600'}`}>
+                              {s.property_count} / {org.max_properties}
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${propertyAtLimit ? 'bg-red-500' : propertyWarning ? 'bg-amber-400' : 'bg-indigo-400'}`}
+                              style={{ width: `${Math.min(propertyPct, 100)}%` }}
+                            />
+                          </div>
+                          {propertyAtLimit && (
+                            <p className="text-xs text-red-600 mt-0.5">Fastighetskvoten är nådd</p>
+                          )}
                         </div>
 
                         {/* Apartments quota */}
@@ -551,7 +588,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <Input
                 label="Max användare"
@@ -560,6 +597,15 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                 onChange={e => setForm({ ...form, max_users: e.target.value })}
               />
               <p className="text-xs text-slate-400 mt-0.5">Personal + admins + hyresgäster</p>
+            </div>
+            <div>
+              <Input
+                label="Max fastigheter"
+                type="number"
+                value={form.max_properties}
+                onChange={e => setForm({ ...form, max_properties: e.target.value })}
+              />
+              <p className="text-xs text-slate-400 mt-0.5">Antal fastighetskort</p>
             </div>
             <div>
               <Input

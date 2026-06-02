@@ -1,33 +1,53 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Archive, ChevronRight, MessageCircle, Plus, Send, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  Card,
   Button,
+  EmptyState,
   Input,
+  LoadingPage,
   Modal,
   PageHeader,
-  EmptyState,
-  LoadingPage,
 } from '../components/ui';
 import { formatDateTime } from '../lib/utils';
-import { ChatThread, ChatMessage } from '../types';
-import { MessageCircle, Send, Plus, ChevronRight, X, Archive } from 'lucide-react';
+import type { ChatMessage, ChatThread, Profile } from '../types';
 
-interface ChatPageProps { onNavigate: (page: string) => void; }
+interface ChatPageProps {
+  onNavigate: (page: string) => void;
+}
+
+type ChatMode = 'tenant' | 'staff' | 'group';
+
+type ThreadUser = Pick<Profile, 'id' | 'name' | 'email' | 'role'>;
+
+type ChatThreadWithRelations = ChatThread & {
+  tenant?: ThreadUser | null;
+  participants?: {
+    id: string;
+    user_id: string;
+    user?: ThreadUser | null;
+  }[];
+};
+
 export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
   const { user } = useAuth();
-  const [threads, setThreads] = useState<ChatThread[]>([]);
-  const [selectedThread, setSelectedThread] = useState<ChatThread | null>(null);
+  const [threads, setThreads] = useState<ChatThreadWithRelations[]>([]);
+  const [selectedThread, setSelectedThread] = useState<ChatThreadWithRelations | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [availableUsers, setAvailableUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [creatingThread, setCreatingThread] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [chatMode, setChatMode] = useState<ChatMode>('tenant');
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [newSubject, setNewSubject] = useState('');
   const [newMessage, setNewMessage] = useState('');
   const [messageText, setMessageText] = useState('');
   const [statusFilter, setStatusFilter] = useState<'open' | 'closed' | 'all'>('all');
-  const [searchTenant, setSearchTenant] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [showMobileMessages, setShowMobileMessages] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -35,42 +55,82 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
 
   useEffect(() => {
     fetchThreads();
-  }, [statusFilter]);
+  }, [statusFilter, user?.id]);
 
   useEffect(() => {
-    if (selectedThread) {
-      fetchMessages(selectedThread.id);
-      markThreadAsRead(selectedThread.id);
-    }
-  }, [selectedThread]);
+    if (isStaff) fetchAvailableUsers();
+  }, [isStaff, user?.organisation_id]);
+
+  useEffect(() => {
+    if (!selectedThread) return;
+    fetchMessages(selectedThread.id);
+    markThreadAsRead(selectedThread.id);
+  }, [selectedThread?.id]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const fetchThreads = async () => {
+    if (!user) return;
+
     try {
       setLoading(true);
       let query = supabase
         .from('chat_threads')
-        .select('id, tenant_id, subject, last_message_at, status, tenant:profiles!chat_threads_tenant_id_fkey(id, name, email)')
+        .select(`
+          id,
+          organisation_id,
+          tenant_id,
+          assigned_to,
+          chat_type,
+          created_by,
+          subject,
+          status,
+          maintenance_request_id,
+          last_message_at,
+          created_at,
+          tenant:profiles!chat_threads_tenant_id_fkey(id, name, email, role),
+          participants:chat_participants(id, user_id, user:profiles!chat_participants_user_id_fkey(id, name, email, role))
+        `)
         .order('last_message_at', { ascending: false });
 
       if (!isStaff) {
-        query = query.eq('tenant_id', user?.id);
+        query = query.eq('tenant_id', user.id).eq('chat_type', 'tenant_support');
       }
+
       if (isStaff && statusFilter !== 'all') {
         query = query.eq('status', statusFilter);
       }
 
       const { data, error } = await query;
       if (error) throw error;
-      setThreads((data || []) as any);
+
+      setThreads((data || []) as ChatThreadWithRelations[]);
     } catch (error) {
       console.error('Error fetching threads:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchAvailableUsers = async () => {
+    if (!user?.organisation_id) return;
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('organisation_id', user.organisation_id)
+      .eq('active', true)
+      .in('role', ['tenant', 'staff', 'admin'])
+      .order('name');
+
+    if (error) {
+      console.error('Error fetching chat users:', error);
+      return;
+    }
+
+    setAvailableUsers((data || []) as Profile[]);
   };
 
   const fetchMessages = async (threadId: string) => {
@@ -81,8 +141,9 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
         .select('id, thread_id, sender_id, message, created_at, read_at, sender:profiles!chat_messages_sender_id_fkey(id, name)')
         .eq('thread_id', threadId)
         .order('created_at', { ascending: true });
+
       if (error) throw error;
-      setMessages((data || []) as any);
+      setMessages((data || []) as ChatMessage[]);
     } catch (error) {
       console.error('Error fetching messages:', error);
     } finally {
@@ -103,48 +164,166 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
     }
   };
 
+  const getThreadParticipants = (thread: ChatThreadWithRelations) =>
+    (thread.participants || [])
+      .map((participant) => participant.user)
+      .filter(Boolean) as ThreadUser[];
+
+  const getThreadTitle = (thread: ChatThreadWithRelations) => {
+    if (!isStaff) return thread.subject;
+    if (thread.chat_type === 'tenant_support') return thread.tenant?.name || 'Okänd hyresgäst';
+
+    const otherParticipants = getThreadParticipants(thread).filter((participant) => participant.id !== user?.id);
+    if (thread.chat_type === 'group') return thread.subject || otherParticipants.map((participant) => participant.name).join(', ');
+    return otherParticipants[0]?.name || thread.subject || 'Direktchatt';
+  };
+
+  const getThreadSubtitle = (thread: ChatThreadWithRelations) => {
+    if (thread.chat_type === 'group') return `${getThreadParticipants(thread).length} deltagare`;
+    if (thread.chat_type === 'direct') return 'Personalchatt';
+    return thread.subject;
+  };
+
+  const filteredThreads = searchQuery
+    ? threads.filter((thread) =>
+        getThreadTitle(thread).toLowerCase().includes(searchQuery.toLowerCase()) ||
+        thread.subject.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : threads;
+
+  const selectableUsers = isStaff
+    ? availableUsers.filter((candidate) => {
+        if (candidate.id === user?.id) return false;
+        if (chatMode === 'tenant') return candidate.role === 'tenant';
+        if (chatMode === 'staff') return candidate.role !== 'tenant';
+        return true;
+      })
+    : [];
+
+  const toggleSelectedUser = (userId: string) => {
+    setSelectedUserIds((current) =>
+      current.includes(userId)
+        ? current.filter((id) => id !== userId)
+        : [...current, userId]
+    );
+  };
+
+  const resetCreateModal = () => {
+    setShowCreateModal(false);
+    setCreateError('');
+    setCreatingThread(false);
+    setChatMode('tenant');
+    setSelectedUserIds([]);
+    setNewSubject('');
+    setNewMessage('');
+  };
+
   const createThread = async () => {
-    if (!newSubject.trim() || !newMessage.trim()) return;
+    if (!user || !newSubject.trim() || !newMessage.trim()) return;
+
     try {
+      setCreatingThread(true);
+      setCreateError('');
+
+      const selectedUsers = availableUsers.filter((candidate) => selectedUserIds.includes(candidate.id));
+      const tenantRecipients = selectedUsers.filter((candidate) => candidate.role === 'tenant');
+      const staffRecipients = selectedUsers.filter((candidate) => candidate.role !== 'tenant');
+
+      if (isStaff && selectedUserIds.length === 0) {
+        setCreateError('Välj minst en mottagare.');
+        return;
+      }
+
+      if (isStaff && chatMode === 'tenant' && (selectedUserIds.length !== 1 || tenantRecipients.length !== 1)) {
+        setCreateError('Välj exakt en hyresgäst.');
+        return;
+      }
+
+      if (isStaff && chatMode === 'staff' && (selectedUserIds.length !== 1 || tenantRecipients.length > 0)) {
+        setCreateError('Välj exakt en person i personalen.');
+        return;
+      }
+
+      if (isStaff && chatMode === 'group' && selectedUserIds.length < 2) {
+        setCreateError('Välj minst två deltagare för en gruppchatt.');
+        return;
+      }
+
+      if (isStaff && chatMode === 'group' && tenantRecipients.length > 1) {
+        setCreateError('En gruppchatt kan inte innehålla flera hyresgäster.');
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const tenantRecipient = tenantRecipients[0];
+      const threadType = isStaff
+        ? chatMode === 'group'
+          ? 'group'
+          : chatMode === 'staff'
+            ? 'direct'
+            : 'tenant_support'
+        : 'tenant_support';
+
       const { data: threadData, error: threadError } = await supabase
         .from('chat_threads')
         .insert({
-          tenant_id: user?.id,
-          subject: newSubject,
+          tenant_id: isStaff ? tenantRecipient?.id || null : user.id,
+          assigned_to: isStaff && staffRecipients.length === 1 ? staffRecipients[0].id : null,
+          organisation_id: user.organisation_id,
+          chat_type: threadType,
+          created_by: user.id,
+          subject: newSubject.trim(),
           status: 'open',
-          last_message_at: new Date().toISOString(),
+          last_message_at: now,
         })
-        .select()
+        .select('id')
         .single();
+
       if (threadError) throw threadError;
 
-      await supabase.from('chat_messages').insert({
+      const participantIds = new Set<string>([user.id]);
+      if (isStaff) selectedUserIds.forEach((id) => participantIds.add(id));
+
+      const { error: participantError } = await supabase
+        .from('chat_participants')
+        .insert([...participantIds].map((userId) => ({ thread_id: threadData.id, user_id: userId })));
+
+      if (participantError) throw participantError;
+
+      const { error: messageError } = await supabase.from('chat_messages').insert({
         thread_id: threadData.id,
-        sender_id: user?.id,
-        message: newMessage,
+        sender_id: user.id,
+        message: newMessage.trim(),
       });
 
-      setNewSubject('');
-      setNewMessage('');
-      setShowCreateModal(false);
+      if (messageError) throw messageError;
+
+      resetCreateModal();
       fetchThreads();
     } catch (error) {
       console.error('Error creating thread:', error);
+      setCreateError('Kunde inte skapa chatten. Försök igen.');
+    } finally {
+      setCreatingThread(false);
     }
   };
 
   const sendMessage = async () => {
-    if (!messageText.trim() || !selectedThread) return;
+    if (!messageText.trim() || !selectedThread || !user) return;
+
     try {
-      await supabase.from('chat_messages').insert({
+      const { error: messageError } = await supabase.from('chat_messages').insert({
         thread_id: selectedThread.id,
-        sender_id: user?.id,
-        message: messageText,
+        sender_id: user.id,
+        message: messageText.trim(),
       });
+      if (messageError) throw messageError;
+
       await supabase
         .from('chat_threads')
         .update({ last_message_at: new Date().toISOString() })
         .eq('id', selectedThread.id);
+
       setMessageText('');
       fetchMessages(selectedThread.id);
       fetchThreads();
@@ -163,12 +342,6 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
     }
   };
 
-  const filteredThreads = isStaff && searchTenant
-    ? threads.filter((t: any) =>
-        t.tenant?.name?.toLowerCase().includes(searchTenant.toLowerCase())
-      )
-    : threads;
-
   if (loading && threads.length === 0) return <LoadingPage />;
 
   return (
@@ -176,25 +349,22 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
       <div className="max-w-7xl mx-auto px-4 py-6">
         <PageHeader
           title="Meddelanden"
-          subtitle={isStaff ? 'Konversationer med hyresgäster' : 'Dina meddelanden med fastighetskontoret'}
+          subtitle={isStaff ? 'Konversationer med hyresgäster och kollegor' : 'Dina meddelanden med fastighetskontoret'}
           action={
-            !isStaff ? (
-              <Button onClick={() => setShowCreateModal(true)} variant="primary" className="gap-2">
-                <Plus size={18} />
-                Ny konversation
-              </Button>
-            ) : undefined
+            <Button onClick={() => setShowCreateModal(true)} variant="primary" className="gap-2">
+              <Plus size={18} />
+              {isStaff ? 'Ny chatt' : 'Ny konversation'}
+            </Button>
           }
         />
 
         <div className="flex gap-0 bg-white rounded-xl border border-slate-200 overflow-hidden" style={{ height: 'calc(100vh - 220px)', minHeight: '500px' }}>
-          {/* Left: Thread list */}
           <div className={`${showMobileMessages ? 'hidden' : 'flex'} md:flex flex-col w-full md:w-80 border-r border-slate-200`}>
             {isStaff && (
               <div className="p-3 border-b border-slate-200 space-y-2">
                 <select
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as any)}
+                  onChange={(event) => setStatusFilter(event.target.value as 'open' | 'closed' | 'all')}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="all">Alla</option>
@@ -202,9 +372,9 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
                   <option value="closed">Stängda</option>
                 </select>
                 <Input
-                  placeholder="Sök hyresgäst..."
-                  value={searchTenant}
-                  onChange={(e) => setSearchTenant(e.target.value)}
+                  placeholder="Sök konversation..."
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
                 />
               </div>
             )}
@@ -220,7 +390,7 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100">
-                  {filteredThreads.map((thread: any) => (
+                  {filteredThreads.map((thread) => (
                     <button
                       key={thread.id}
                       onClick={() => { setSelectedThread(thread); setShowMobileMessages(true); }}
@@ -228,12 +398,8 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-slate-900 truncate text-sm">
-                            {isStaff ? (thread.tenant?.name || 'Okänd hyresgäst') : thread.subject}
-                          </p>
-                          {isStaff && (
-                            <p className="text-xs text-slate-500 truncate">{thread.subject}</p>
-                          )}
+                          <p className="font-semibold text-slate-900 truncate text-sm">{getThreadTitle(thread)}</p>
+                          <p className="text-xs text-slate-500 truncate">{getThreadSubtitle(thread)}</p>
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-xs text-slate-400">{formatDateTime(thread.last_message_at)}</span>
                             <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${thread.status === 'open' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
@@ -250,11 +416,9 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
             </div>
           </div>
 
-          {/* Right: Message view */}
           <div className={`${showMobileMessages ? 'flex' : 'hidden'} md:flex flex-1 flex-col`}>
             {selectedThread ? (
               <>
-                {/* Thread header */}
                 <div className="border-b border-slate-200 px-4 py-3 flex items-center justify-between bg-white">
                   <div>
                     <button
@@ -265,11 +429,11 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
                     </button>
                     <h2 className="font-semibold text-slate-900 text-sm">{selectedThread.subject}</h2>
                     <p className="text-xs text-slate-500">
-                      {(selectedThread as any).tenant?.name || 'Okänd'}
+                      {isStaff ? getThreadTitle(selectedThread) : 'Fastighetskontoret'}
                     </p>
                   </div>
                   <div className="flex gap-1">
-                    {isStaff && (
+                    {isStaff && selectedThread.status === 'open' && (
                       <Button variant="secondary" size="sm" onClick={() => closeThread(selectedThread.id)} className="gap-1">
                         <Archive size={14} />
                         Stäng
@@ -281,7 +445,6 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
                   </div>
                 </div>
 
-                {/* Messages */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
                   {messagesLoading ? (
                     <div className="flex items-center justify-center h-32">
@@ -296,7 +459,7 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
                       />
                     </div>
                   ) : (
-                    messages.map((msg: any) => {
+                    messages.map((msg) => {
                       const isOwn = msg.sender_id === user?.id;
                       return (
                         <div key={msg.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
@@ -316,26 +479,26 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
                   <div ref={messagesEndRef} />
                 </div>
 
-                {/* Input */}
                 <div className="border-t border-slate-200 p-3 bg-white">
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      placeholder="Skriv ett meddelande..."
+                      placeholder={selectedThread.status === 'open' ? 'Skriv ett meddelande...' : 'Konversationen är stängd'}
                       value={messageText}
-                      onChange={(e) => setMessageText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
+                      disabled={selectedThread.status !== 'open'}
+                      onChange={(event) => setMessageText(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
                           sendMessage();
                         }
                       }}
-                      className="flex-1 px-4 py-2 border border-slate-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="flex-1 px-4 py-2 border border-slate-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
                     />
                     <Button
                       onClick={sendMessage}
                       variant="primary"
-                      disabled={!messageText.trim()}
+                      disabled={!messageText.trim() || selectedThread.status !== 'open'}
                       className="rounded-full aspect-square px-3"
                     >
                       <Send size={16} />
@@ -356,32 +519,101 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
         </div>
       </div>
 
-      {/* Create Thread Modal */}
-      <Modal open={showCreateModal} onClose={() => setShowCreateModal(false)} title="Ny konversation">
+      <Modal open={showCreateModal} onClose={resetCreateModal} title={isStaff ? 'Ny chatt' : 'Ny konversation'} size="lg">
         <div className="space-y-4">
+          {isStaff && (
+            <>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { value: 'tenant', label: 'Hyresgäst' },
+                  { value: 'staff', label: 'Personal' },
+                  { value: 'group', label: 'Grupp' },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      setChatMode(option.value as ChatMode);
+                      setSelectedUserIds([]);
+                      setCreateError('');
+                    }}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${chatMode === option.value ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="rounded-lg border border-slate-200 max-h-56 overflow-y-auto">
+                {selectableUsers.length === 0 ? (
+                  <p className="p-4 text-sm text-slate-500">Inga mottagare att välja.</p>
+                ) : (
+                  selectableUsers.map((candidate) => {
+                    const checked = selectedUserIds.includes(candidate.id);
+                    const singleSelect = chatMode !== 'group';
+                    return (
+                      <label key={candidate.id} className="flex items-center gap-3 p-3 border-b border-slate-100 last:border-b-0 cursor-pointer hover:bg-slate-50">
+                        <input
+                          type={singleSelect ? 'radio' : 'checkbox'}
+                          checked={checked}
+                          onChange={() => {
+                            setSelectedUserIds(singleSelect ? [candidate.id] : selectedUserIds);
+                            if (!singleSelect) toggleSelectedUser(candidate.id);
+                          }}
+                          className="w-4 h-4"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium text-slate-800 truncate">{candidate.name}</span>
+                          <span className="block text-xs text-slate-500 truncate">
+                            {candidate.email} · {candidate.role === 'tenant' ? 'Hyresgäst' : candidate.role === 'admin' ? 'Admin' : 'Personal'}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+
+              {chatMode === 'group' && (
+                <p className="text-xs text-slate-500">
+                  Gruppchattar kan innehålla personal och högst en hyresgäst. Hyresgäster kan aldrig starta eller delta i chattar med andra hyresgäster.
+                </p>
+              )}
+            </>
+          )}
+
           <Input
             label="Ämne"
             placeholder="Ange ämne för konversationen"
             value={newSubject}
-            onChange={(e) => setNewSubject(e.target.value)}
+            onChange={(event) => setNewSubject(event.target.value)}
           />
+
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Meddelande</label>
             <textarea
               placeholder="Skriv ditt meddelande här..."
               value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
+              onChange={(event) => setNewMessage(event.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
               rows={4}
             />
           </div>
+
+          {createError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
+              {createError}
+            </div>
+          )}
+
           <div className="flex gap-3 pt-1">
-            <Button variant="secondary" onClick={() => setShowCreateModal(false)} className="flex-1">
+            <Button variant="secondary" onClick={resetCreateModal} className="flex-1">
               Avbryt
             </Button>
             <Button
               variant="primary"
               onClick={createThread}
+              loading={creatingThread}
               disabled={!newSubject.trim() || !newMessage.trim()}
               className="flex-1"
             >

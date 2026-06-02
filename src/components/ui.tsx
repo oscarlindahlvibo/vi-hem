@@ -219,12 +219,12 @@ interface StatCardProps {
 
 export function StatCard({ label, value, icon, color = 'text-blue-600 bg-blue-50', onClick }: StatCardProps) {
   return (
-    <Card className={`p-4 ${onClick ? 'cursor-pointer hover:shadow-md transition-all' : ''}`} onClick={onClick}>
-      <div className="flex items-center gap-3">
-        <div className={`p-2.5 rounded-xl ${color}`}>{icon}</div>
-        <div>
-          <p className="text-2xl font-bold text-slate-800">{value}</p>
-          <p className="text-xs text-slate-500 font-medium mt-0.5">{label}</p>
+    <Card className={`p-4 min-w-0 ${onClick ? 'cursor-pointer hover:shadow-md transition-all' : ''}`} onClick={onClick}>
+      <div className="flex items-center gap-3 min-w-0">
+        <div className={`p-2.5 rounded-xl flex-shrink-0 ${color}`}>{icon}</div>
+        <div className="min-w-0">
+          <p className="text-xl sm:text-2xl font-bold text-slate-800 break-words leading-tight">{value}</p>
+          <p className="text-xs text-slate-500 font-medium mt-1 leading-snug break-words">{label}</p>
         </div>
       </div>
     </Card>

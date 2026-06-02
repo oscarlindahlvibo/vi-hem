@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Plus, Edit2, Home, Mail, Phone } from 'lucide-react';
+import { Users, Plus, Edit2, Home, Mail, Phone, KeyRound } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { createUserAccount, resetUserPassword } from '../lib/userAdmin';
 import {
   Card,
   Badge,
@@ -17,6 +19,7 @@ import { Profile, Tenancy, Apartment, Property } from '../types';
 
 interface AdminTenantsPageProps { onNavigate: (page: string) => void; }
 export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPageProps) {
+  const { user } = useAuth();
   const [tenants, setTenants] = useState<Profile[]>([]);
   const [tenancies, setTenancies] = useState<Tenancy[]>([]);
   const [apartments, setApartments] = useState<Apartment[]>([]);
@@ -27,6 +30,11 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
   const [editingTenant, setEditingTenant] = useState<Profile | null>(null);
   const [showTenantModal, setShowTenantModal] = useState(false);
   const [showLinkTenancyModal, setShowLinkTenancyModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [createdCredentials, setCreatedCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
+  const [resetCredentials, setResetCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
+  const [resettingUserId, setResettingUserId] = useState('');
   const [tenantFormData, setTenantFormData] = useState({
     name: '',
     email: '',
@@ -100,52 +108,56 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
   };
 
   const handleSaveTenant = async () => {
+    setSaving(true);
+    setSaveError('');
     try {
       if (editingTenant) {
-        await supabase
+        const { error } = await supabase
           .from('profiles')
           .update({ name: tenantFormData.name, phone: tenantFormData.phone, active: tenantFormData.active })
           .eq('id', editingTenant.id);
+        if (error) throw error;
       } else {
-        // Create profile
-        const { data: newProfile, error: profileError } = await supabase
-          .from('profiles')
-          .insert({
-            name: tenantFormData.name,
-            email: tenantFormData.email,
-            phone: tenantFormData.phone,
-            role: 'tenant',
-            active: true,
-          })
-          .select()
-          .single();
-
-        if (profileError) throw profileError;
+        const newAccount = await createUserAccount({
+          name: tenantFormData.name,
+          email: tenantFormData.email,
+          phone: tenantFormData.phone,
+          role: 'tenant',
+          organisation_id: user?.organisation_id,
+        });
 
         // Create tenancy if apartment selected
-        if (newProfile && tenantFormData.apartment_id && tenantFormData.start_date) {
-          await supabase.from('tenancies').insert({
-            tenant_id: newProfile.id,
+        if (newAccount.user_id && tenantFormData.apartment_id && tenantFormData.start_date) {
+          const { error: tenancyError } = await supabase.from('tenancies').insert({
+            tenant_id: newAccount.user_id,
             apartment_id: tenantFormData.apartment_id,
             property_id: tenantFormData.property_id || null,
+            organisation_id: user?.organisation_id,
             start_date: tenantFormData.start_date,
             monthly_rent: parseFloat(tenantFormData.monthly_rent) || 0,
             status: 'active',
           });
+          if (tenancyError) throw tenancyError;
 
           // Mark apartment as rented
-          await supabase
+          const { error: apartmentError } = await supabase
             .from('apartments')
             .update({ status: 'rented' })
             .eq('id', tenantFormData.apartment_id);
+          if (apartmentError) throw apartmentError;
         }
+
+        setCreatedCredentials({ email: tenantFormData.email, tempPassword: newAccount.temp_password });
       }
       setShowTenantModal(false);
       setEditingTenant(null);
       setTenantFormData({ name: '', email: '', phone: '', active: true, property_id: '', apartment_id: '', start_date: '', monthly_rent: '' });
       fetchData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving tenant:', error);
+      setSaveError(error.message || 'Kunde inte spara hyresgästen');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -157,6 +169,7 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
         tenant_id: selectedTenant.id,
         apartment_id: linkTenancyFormData.apartment_id,
         property_id: apt?.property_id || null,
+        organisation_id: user?.organisation_id,
         start_date: linkTenancyFormData.start_date,
         monthly_rent: parseFloat(linkTenancyFormData.monthly_rent),
         status: 'active',
@@ -182,6 +195,18 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
     });
     setEditingTenant(tenant);
     setShowTenantModal(true);
+  };
+
+  const handleResetPassword = async (tenant: Profile) => {
+    try {
+      setResettingUserId(tenant.id);
+      const result = await resetUserPassword(tenant.id);
+      setResetCredentials({ email: result.email, tempPassword: result.temp_password });
+    } catch (err: any) {
+      alert(err.message || 'Kunde inte återställa lösenordet');
+    } finally {
+      setResettingUserId('');
+    }
   };
 
   if (loading) return <LoadingPage />;
@@ -235,6 +260,7 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
                         <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Telefon</th>
                         <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Status</th>
                         <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Aktiva avtal</th>
+                        <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Åtgärd</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -254,6 +280,19 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
                           </td>
                           <td className="py-3 px-4 text-sm font-medium text-slate-700">
                             {countActiveTenancies(tenant.id)}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleResetPassword(tenant);
+                              }}
+                              disabled={resettingUserId === tenant.id}
+                              title="Återställ lösenord"
+                              className="p-2 hover:bg-slate-100 rounded-lg inline-block transition-colors disabled:opacity-50"
+                            >
+                              <KeyRound className="w-4 h-4 text-slate-500" />
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -294,12 +333,22 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
                     </div>
                   </div>
                 </div>
-                <button
-                  onClick={() => openEditTenantModal(selectedTenant)}
-                  className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-                >
-                  <Edit2 className="w-4 h-4 text-slate-600" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleResetPassword(selectedTenant)}
+                    disabled={resettingUserId === selectedTenant.id}
+                    title="Återställ lösenord"
+                    className="p-2 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <KeyRound className="w-4 h-4 text-slate-600" />
+                  </button>
+                  <button
+                    onClick={() => openEditTenantModal(selectedTenant)}
+                    className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                  >
+                    <Edit2 className="w-4 h-4 text-slate-600" />
+                  </button>
+                </div>
               </div>
 
               <Button
@@ -485,8 +534,14 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
           {!editingTenant && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="text-sm text-blue-800">
-                Hyresgästen måste bjudas in separat för att skapa ett användarkonto.
+                Ett konto skapas med ett tillfälligt lösenord. Hyresgästen kan byta lösenord efter inloggning.
               </p>
+            </div>
+          )}
+
+          {saveError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
+              {saveError}
             </div>
           )}
 
@@ -494,7 +549,9 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
             <Button variant="secondary" onClick={() => { setShowTenantModal(false); setEditingTenant(null); }}>
               Avbryt
             </Button>
-            <Button variant="primary" onClick={handleSaveTenant}>Spara</Button>
+            <Button variant="primary" onClick={handleSaveTenant} loading={saving}>
+              {editingTenant ? 'Spara' : 'Skapa konto'}
+            </Button>
           </div>
         </div>
       </Modal>
@@ -541,6 +598,56 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
             <Button variant="primary" onClick={handleLinkTenancy}>Länka</Button>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={!!createdCredentials}
+        onClose={() => setCreatedCredentials(null)}
+        title="Hyresgästkonto skapat"
+      >
+        {createdCredentials && (
+          <div className="space-y-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <p className="text-sm font-semibold text-green-900 mb-1">Kontot har skapats</p>
+              <p className="text-sm text-green-800">
+                Hyresgästen kan logga in med <strong>{createdCredentials.email}</strong> och lösenordet nedan.
+              </p>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <p className="text-xs font-semibold text-amber-900 uppercase mb-2">Tillfälligt lösenord</p>
+              <p className="text-xs text-amber-700 mb-2">Dela lösenordet säkert och be hyresgästen byta det efter inloggning.</p>
+              <code className="block bg-white border border-amber-200 rounded px-3 py-2 text-sm font-mono text-amber-900 select-all">
+                {createdCredentials.tempPassword}
+              </code>
+            </div>
+            <Button variant="primary" className="w-full" onClick={() => setCreatedCredentials(null)}>
+              Stäng
+            </Button>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!resetCredentials}
+        onClose={() => setResetCredentials(null)}
+        title="Lösenord återställt"
+      >
+        {resetCredentials && (
+          <div className="space-y-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <p className="text-sm font-semibold text-green-900 mb-1">Nytt tillfälligt lösenord skapat</p>
+              <p className="text-sm text-green-800">
+                Dela lösenordet säkert med <strong>{resetCredentials.email}</strong>.
+              </p>
+            </div>
+            <code className="block bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm font-mono text-slate-900 select-all">
+              {resetCredentials.tempPassword}
+            </code>
+            <Button variant="primary" className="w-full" onClick={() => setResetCredentials(null)}>
+              Stäng
+            </Button>
+          </div>
+        )}
       </Modal>
     </div>
   );

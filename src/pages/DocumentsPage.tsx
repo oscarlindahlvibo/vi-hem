@@ -114,6 +114,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
     if (!newTitle.trim()) return;
     try {
       const { error } = await supabase.from('documents').insert({
+        organisation_id: user?.organisation_id || null,
         title: newTitle,
         document_type: newType,
         visibility: newVisibility,

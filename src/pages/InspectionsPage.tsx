@@ -15,6 +15,7 @@ import {
   SearchInput,
 } from '../components/ui';
 import { formatDate } from '../lib/utils';
+import { buildGeneratedDocument } from '../lib/generatedDocuments';
 import {
   ClipboardCheck,
   Plus,
@@ -78,7 +79,6 @@ const DEFAULT_ROOMS = [
 // Default apartment contract data
 const DEFAULT_APARTMENT_CONTRACT: Record<string, any> = {
   notice_months: 3,
-  rent_due_day: 1,
   heat_included: true,
   hot_water_included: true,
   water_included: true,
@@ -107,7 +107,6 @@ const DEFAULT_PREMISES_CONTRACT: Record<string, any> = {
   contract_term_months: 24,
   auto_renew: true,
   auto_renew_months: 12,
-  rent_due_day: 1,
   vat_included: false,
   vat_rate: 25,
   index_clause: true,
@@ -168,7 +167,7 @@ Uppsägningstid: ${data.notice_months} månader för båda parter.
 
 §4 HYRA
 Månadshyra: ${tenancy?.monthly_rent || '___'} kr
-Hyran betalas senast den ${data.rent_due_day}:a varje månad.
+Hyran betalas senast den sista dagen i månaden före hyresmånaden.
 ${data.deposit_amount ? `Deposition: ${data.deposit_amount} kr (motsvarar ${data.deposit_months} månads hyra).` : `Deposition: ${data.deposit_months} månads hyra.`}
 
 §5 I HYRAN INGÅR
@@ -236,7 +235,7 @@ Uppsägningstid: ${data.notice_months} månader.
 
 §4 HYRA
 Månadshyra: ${tenancy?.monthly_rent || '___'} kr ${data.vat_included ? `+ moms ${data.vat_rate}%` : '(exkl. moms om ej moms tillkommer)'}
-Hyran betalas senast den ${data.rent_due_day}:a varje månad.
+Hyran betalas senast den sista dagen i månaden före hyresmånaden.
 Deposition: ${data.deposit_amount ? `${data.deposit_amount} kr` : `${data.deposit_months} månaders hyra`}.
 
 §5 INDEXKLAUSUL
@@ -390,6 +389,69 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
     }
   };
 
+  const buildInspectionDocumentBody = (inspection: any, tenancy: any) => {
+    const tenant = tenancy?.tenant as any;
+    const apt = tenancy?.apartment as any;
+    const prop = tenancy?.property as any;
+    const rooms = Array.isArray(inspection.rooms) ? inspection.rooms : [];
+    const roomRows = rooms.map((room: any) =>
+      `${room.name || 'Rum'}: ${CONDITION_LABELS[room.condition] || room.condition || '-'}${room.notes ? ` - ${room.notes}` : ''}`
+    ).join('\n');
+    const photoCount = (inspection.photo_urls?.length || 0) + rooms.reduce((sum: number, room: any) => sum + (room.photos?.length || 0), 0);
+
+    return `BESIKTNINGSPROTOKOLL
+
+Hyresgast: ${tenant?.name || '-'}
+Fastighet: ${prop?.address || '-'}${prop?.city ? `, ${prop.city}` : ''}
+Lagenhet: ${apt?.apartment_number || '-'}
+Typ: ${INSPECTION_TYPE_LABELS[inspection.inspection_type] || inspection.inspection_type}
+Datum: ${formatDate(inspection.inspection_date)}
+Hyresgast narvarande: ${inspection.tenant_present ? 'Ja' : 'Nej'}
+Overgripande skick: ${CONDITION_LABELS[inspection.overall_condition] || inspection.overall_condition}
+Besiktad av: ${user?.name || ''}
+
+RUM OCH SKICK
+${roomRows || 'Inga rum registrerade.'}
+
+ANTECKNINGAR
+${inspection.notes || 'Inga anteckningar.'}
+
+ATGARD KRAVS
+${inspection.action_required || 'Ingen atgard registrerad.'}
+
+Foton bifogade i systemet: ${photoCount}
+`;
+  };
+
+  const createOrUpdateInspectionDocument = async (inspection: any, tenancy: any) => {
+    const tenant = tenancy?.tenant as any;
+    const apt = tenancy?.apartment as any;
+    const prop = tenancy?.property as any;
+    const title = `${INSPECTION_TYPE_LABELS[inspection.inspection_type] || 'Besiktning'} - ${tenant?.name || 'Hyresgast'}`;
+    const documentPayload = buildGeneratedDocument({
+      title,
+      fileName: `besiktning-${apt?.apartment_number || inspection.id}.pdf`,
+      documentType: 'inspection',
+      description: `Besiktningsprotokoll for ${prop?.address || 'fastighet'}${apt?.apartment_number ? `, lgh ${apt.apartment_number}` : ''}.`,
+      body: buildInspectionDocumentBody(inspection, tenancy),
+      organisationId: user?.organisation_id,
+      tenantId: tenant?.id,
+      propertyId: tenancy?.property_id,
+      apartmentId: tenancy?.apartment_id,
+      createdBy: user?.id,
+    });
+
+    if (inspection.document_id) {
+      const { error } = await supabase.from('documents').update(documentPayload).eq('id', inspection.document_id);
+      if (error) throw error;
+      return inspection.document_id;
+    }
+
+    const { data, error } = await supabase.from('documents').insert(documentPayload).select('id').single();
+    if (error) throw error;
+    return data.id;
+  };
+
   // ─── Inspection save ──────────────────────────────────────────────────────
   const handleSaveInspection = async (status: 'draft' | 'completed') => {
     if (!inspectionForm.tenancy_id) return;
@@ -411,10 +473,20 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
         photo_urls: inspectionForm.photo_urls,
         status,
       };
+      let savedInspection = selectedInspection ? { ...selectedInspection, ...payload } : null;
       if (selectedInspection) {
-        await supabase.from('apartment_inspections').update(payload).eq('id', selectedInspection.id);
+        const { data, error } = await supabase.from('apartment_inspections').update(payload).eq('id', selectedInspection.id).select('*').single();
+        if (error) throw error;
+        savedInspection = data;
       } else {
-        await supabase.from('apartment_inspections').insert(payload);
+        const { data, error } = await supabase.from('apartment_inspections').insert(payload).select('*').single();
+        if (error) throw error;
+        savedInspection = data;
+      }
+
+      if (status === 'completed' && savedInspection) {
+        const documentId = await createOrUpdateInspectionDocument(savedInspection, tenancy);
+        await supabase.from('apartment_inspections').update({ document_id: documentId }).eq('id', savedInspection.id);
       }
       setShowInspectionModal(false);
       resetInspectionForm();
@@ -870,10 +942,6 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
                     <input type="number" min={1} max={12} value={cd.notice_months} onChange={e => setcd('notice_months', Number(e.target.value))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Hyra förfaller dag</label>
-                    <input type="number" min={1} max={28} value={cd.rent_due_day} onChange={e => setcd('rent_due_day', Number(e.target.value))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Deposition (månader)</label>
                     <input type="number" min={0} max={6} value={cd.deposit_months} onChange={e => setcd('deposit_months', Number(e.target.value))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
@@ -955,10 +1023,6 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Förlängning (mån)</label>
                     <input type="number" min={1} value={cd.auto_renew_months} onChange={e => setcd('auto_renew_months', Number(e.target.value))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Hyra förfaller dag</label>
-                    <input type="number" min={1} max={28} value={cd.rent_due_day} onChange={e => setcd('rent_due_day', Number(e.target.value))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Deposition (månader)</label>
