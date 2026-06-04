@@ -813,10 +813,16 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                           <p className="text-xs font-medium text-slate-500">
                             {localTestMode ? 'Testanvändare' : 'Användare'}
                           </p>
-                          <Button size="sm" variant="outline" onClick={() => openCreateUser(org)}>
-                            <Plus className="w-3.5 h-3.5" />
-                            Lägg till användare
-                          </Button>
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <Button size="sm" variant="outline" onClick={() => openEdit(org)}>
+                              <ClipboardCheck className="w-3.5 h-3.5" />
+                              Moduler och kvoter
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => openCreateUser(org)}>
+                              <Plus className="w-3.5 h-3.5" />
+                              Lägg till användare
+                            </Button>
+                          </div>
                         </div>
                         {localTestMode && (
                           <div className="flex flex-wrap gap-2">
