@@ -42,7 +42,11 @@ export function LoginPage() {
       redirectTo: `${window.location.origin}/reset-password`,
     });
     if (error) {
-      setError(error.message);
+      setError(
+        error.message.toLowerCase().includes('sending')
+          ? 'Kunde inte skicka återställningsmejl. Kontrollera att e-postservern är konfigurerad.'
+          : error.message
+      );
     } else {
       setResetSent(true);
     }

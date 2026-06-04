@@ -402,12 +402,12 @@ function StaffTimeView({ user }: { user: Profile }) {
         title="Tidrapportering"
         subtitle="Stämpla in, rapportera tid och se din månadsöversikt"
         action={
-          <div className="flex gap-2">
-            <Button onClick={() => setShowManualModal(true)} variant="secondary" className="gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button onClick={() => setShowManualModal(true)} variant="secondary" className="gap-2 w-full sm:w-auto">
               <Plus className="w-4 h-4" /> Registrera tid
             </Button>
             {!currentEntry && (
-              <Button onClick={() => { setStampMode('start'); setShowStampModal(true); }} variant="primary" className="gap-2">
+              <Button onClick={() => { setStampMode('start'); setShowStampModal(true); }} variant="primary" className="gap-2 w-full sm:w-auto">
                 <Play className="w-4 h-4" /> Stämpla in
               </Button>
             )}
@@ -457,17 +457,17 @@ function StaffTimeView({ user }: { user: Profile }) {
         </Card>
       ) : (
         <Card className="p-5 border-dashed border-slate-300 bg-slate-50">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
               <div className="p-3 bg-slate-100 rounded-xl">
                 <Timer className="w-6 h-6 text-slate-400" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-medium text-slate-600">Ingen aktiv stämpling</p>
                 <p className="text-xs text-slate-400">Tryck Stämpla in för att börja</p>
               </div>
             </div>
-            <Button onClick={() => { setStampMode('start'); setShowStampModal(true); }} variant="primary" className="gap-2">
+            <Button onClick={() => { setStampMode('start'); setShowStampModal(true); }} variant="primary" className="gap-2 w-full sm:w-auto">
               <Play className="w-4 h-4" /> Stämpla in
             </Button>
           </div>
@@ -475,16 +475,16 @@ function StaffTimeView({ user }: { user: Profile }) {
       )}
 
       {/* Tab bar */}
-      <div className="flex gap-1 bg-white border border-slate-200 rounded-xl p-1 w-fit">
+      <div className="flex gap-1 bg-white border border-slate-200 rounded-xl p-1 w-full sm:w-fit">
         <button
           onClick={() => setTab('list')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'list' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+          className={`flex flex-1 sm:flex-none items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'list' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
         >
           <List className="w-4 h-4" /> Lista
         </button>
         <button
           onClick={() => setTab('calendar')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'calendar' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+          className={`flex flex-1 sm:flex-none items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'calendar' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
         >
           <Calendar className="w-4 h-4" /> Månadsvy
         </button>
@@ -1200,7 +1200,44 @@ function AdminTimeView({ user }: { user: Profile }) {
 
       {loading ? <LoadingPage /> : (
         <Card>
-          <div className="overflow-x-auto">
+          <div className="md:hidden divide-y divide-slate-100">
+            {staffMembers.length === 0 ? (
+              <div className="px-4 py-8 text-center text-slate-400">Ingen personal</div>
+            ) : staffMembers.map(staff => {
+              const d = summary[staff.id] || { total: 0, approved: 0, pending: 0, rejected: 0 };
+              return (
+                <button
+                  type="button"
+                  key={staff.id}
+                  onClick={() => openStaffModal(staff)}
+                  className="block w-full p-4 text-left hover:bg-slate-50 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-800 break-words">{staff.name}</p>
+                      <p className="mt-1 text-sm text-slate-500">Total {formatMinutes(d.total)}</p>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={e => { e.stopPropagation(); openStaffModal(staff); }}>Granska</Button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                    <div className="rounded-lg bg-green-50 px-2 py-2 text-center text-green-700">
+                      <p className="font-semibold">{formatMinutes(d.approved)}</p>
+                      <p>Godkänd</p>
+                    </div>
+                    <div className={`rounded-lg px-2 py-2 text-center ${d.pending > 0 ? 'bg-amber-50 text-amber-700' : 'bg-slate-50 text-slate-500'}`}>
+                      <p className="font-semibold">{formatMinutes(d.pending)}</p>
+                      <p>Väntande</p>
+                    </div>
+                    <div className={`rounded-lg px-2 py-2 text-center ${d.rejected > 0 ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-500'}`}>
+                      <p className="font-semibold">{formatMinutes(d.rejected)}</p>
+                      <p>Avvisad</p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
@@ -1240,7 +1277,7 @@ function AdminTimeView({ user }: { user: Profile }) {
       <Modal open={staffModalOpen} onClose={() => setStaffModalOpen(false)} title={selectedStaff?.name || ''} size="xl">
         <div className="space-y-4">
           {/* Summary */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="bg-slate-50 rounded-lg p-3 text-center">
               <p className="text-lg font-bold text-slate-800">{formatMinutes(modalTotalWork)}</p>
               <p className="text-xs text-slate-500">Arbetstid</p>
@@ -1256,11 +1293,11 @@ function AdminTimeView({ user }: { user: Profile }) {
           </div>
 
           {/* Tab */}
-          <div className="flex gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-            <button onClick={() => setAdminTab('list')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${adminTab === 'list' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          <div className="flex gap-1 bg-slate-100 rounded-lg p-1 w-full sm:w-fit">
+            <button onClick={() => setAdminTab('list')} className={`flex flex-1 sm:flex-none items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${adminTab === 'list' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               <List className="w-3.5 h-3.5" /> Lista
             </button>
-            <button onClick={() => setAdminTab('calendar')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${adminTab === 'calendar' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            <button onClick={() => setAdminTab('calendar')} className={`flex flex-1 sm:flex-none items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${adminTab === 'calendar' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               <Calendar className="w-3.5 h-3.5" /> Månadsvy
             </button>
           </div>
@@ -1278,7 +1315,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                 <EmptyState icon={<Clock className="w-10 h-10" />} title="Inga poster" description="Inga tidsrapporter för vald period." />
               ) : staffEntries.map(entry => (
                 <Card key={entry.id} className="p-3">
-                  <div className="flex items-start justify-between">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between min-w-0">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap mb-1">
                         <Badge className={getTimeStatusColor(entry.status)}>{STATUS_LABEL[entry.status as TimeStatus] || entry.status}</Badge>
@@ -1292,7 +1329,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                       </p>
                       {entry.comment && <p className="text-xs text-slate-400 italic mt-0.5">"{entry.comment}"</p>}
                     </div>
-                    <div className="text-right ml-3 flex-shrink-0">
+                    <div className="sm:text-right sm:ml-3 flex-shrink-0">
                       <p className="text-sm font-bold text-slate-800">{formatMinutes(entry.total_minutes || 0)}</p>
                       {entry.status === 'submitted' && (
                         <div className="flex gap-1 mt-1">

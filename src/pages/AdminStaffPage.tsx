@@ -171,7 +171,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
           }
         />
 
-        <div className="mb-6">
+        <div className="mb-6 min-w-0">
           <SearchInput
             placeholder="Sök personal..."
             value={searchQuery}
@@ -187,7 +187,49 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
           />
         ) : (
           <Card>
-            <div className="overflow-x-auto">
+            <div className="md:hidden divide-y divide-slate-100">
+              {filteredStaff.map((staffMember) => (
+                <div key={staffMember.id} className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900 break-words">{staffMember.name}</p>
+                      <p className="mt-1 text-sm text-slate-600 break-all">{staffMember.email}</p>
+                      {staffMember.phone && <p className="mt-0.5 text-sm text-slate-500">{staffMember.phone}</p>}
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        onClick={() => handleResetPassword(staffMember)}
+                        title="Skicka lösenordsåterställning"
+                        disabled={resettingUserId === staffMember.id}
+                        className="p-2 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        <KeyRound className="w-4 h-4 text-slate-500" />
+                      </button>
+                      <button
+                        onClick={() => openEditStaffModal(staffMember)}
+                        className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                      >
+                        <Edit2 className="w-4 h-4 text-slate-600" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Badge className={ROLE_COLORS[staffMember.role] || 'text-slate-600 bg-slate-100'}>
+                      {ROLE_LABELS[staffMember.role] || staffMember.role}
+                    </Badge>
+                    <Badge className={staffMember.active ? 'text-green-700 bg-green-100' : 'text-slate-600 bg-slate-100'}>
+                      {staffMember.active ? 'Aktiv' : 'Inaktiv'}
+                    </Badge>
+                    {staffMember.auth_method === 'bankid' && (
+                      <Badge className="text-teal-700 bg-teal-100 gap-1 flex items-center">
+                        <ShieldCheck className="w-3 h-3" /> BankID
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50">

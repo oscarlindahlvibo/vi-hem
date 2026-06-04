@@ -606,6 +606,20 @@ Foton bifogade i systemet: ${photoCount}
     setShowContractModal(true);
   };
 
+  const sendContractForSigning = async (contract: any) => {
+    await supabase.from('contract_signatures').update({ status: 'pending_tenant' }).eq('id', contract.id);
+    if (contract.tenant?.id) {
+      await supabase.from('notifications').insert({
+        user_id: contract.tenant.id,
+        title: 'Nytt hyresavtal att signera',
+        message: 'Ett hyresavtal har skickats till dig för signering. Gå till Min lägenhet för att granska och signera avtalet.',
+        type: 'info',
+        link: 'apartment',
+      });
+    }
+    fetchAll();
+  };
+
   const handleContractTypeChange = (ct: 'apartment' | 'premises') => {
     setContractType(ct);
     setContractData(ct === 'apartment' ? DEFAULT_APARTMENT_CONTRACT : DEFAULT_PREMISES_CONTRACT);
@@ -656,7 +670,7 @@ Foton bifogade i systemet: ${photoCount}
         />
 
         {/* Tab switcher */}
-        <div className="flex gap-2 mb-6">
+        <div className="grid grid-cols-2 gap-2 mb-6 sm:flex">
           <button onClick={() => setView('inspections')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${view === 'inspections' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}>
             <ClipboardCheck className="w-4 h-4" /> Besiktningar
           </button>
@@ -675,7 +689,43 @@ Foton bifogade i systemet: ${photoCount}
             <EmptyState icon={<ClipboardCheck className="w-12 h-12" />} title="Inga besiktningar" description="Skapa din första besiktning" />
           ) : (
             <Card>
-              <div className="overflow-x-auto">
+              <div className="divide-y divide-slate-100 md:hidden">
+                {filteredInspections.map((insp) => {
+                  const totalPhotos = (insp.photo_urls?.length || 0) + (insp.rooms || []).reduce((s: number, r: any) => s + (r.photos?.length || 0), 0);
+                  return (
+                    <div key={insp.id} className="p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="break-words text-sm font-semibold text-slate-900">{insp.tenancy?.tenant?.name || '—'}</p>
+                          <p className="mt-1 break-words text-sm text-slate-600">
+                            {insp.tenancy?.property?.address || '—'}
+                            {insp.tenancy?.apartment?.apartment_number && <span className="text-slate-400">, Lgh {insp.tenancy.apartment.apartment_number}</span>}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">{INSPECTION_TYPE_LABELS[insp.inspection_type] || insp.inspection_type}</p>
+                        </div>
+                        <Button size="sm" variant="ghost" onClick={() => openEditInspection(insp)} className="flex-shrink-0 gap-1">
+                          <Eye className="w-3.5 h-3.5" /> Öppna
+                        </Button>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{formatDate(insp.inspection_date)}</span>
+                        <Badge className={CONDITION_CLASS[insp.overall_condition] || 'bg-slate-100 text-slate-600'}>
+                          {CONDITION_LABELS[insp.overall_condition] || insp.overall_condition}
+                        </Badge>
+                        <Badge className={insp.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}>
+                          {insp.status === 'completed' ? 'Slutförd' : 'Utkast'}
+                        </Badge>
+                        {totalPhotos > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                            <Image className="w-3.5 h-3.5" /> {totalPhotos}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-slate-200 bg-slate-50">
@@ -737,7 +787,43 @@ Foton bifogade i systemet: ${photoCount}
             <EmptyState icon={<FileText className="w-12 h-12" />} title="Inga hyresavtal" description="Skapa ett nytt hyresavtal" />
           ) : (
             <Card>
-              <div className="overflow-x-auto">
+              <div className="divide-y divide-slate-100 md:hidden">
+                {filteredContracts.map((contract) => (
+                  <div key={contract.id} className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-semibold text-slate-900">{contract.tenant?.name || '—'}</p>
+                        <p className="mt-1 break-words text-sm text-slate-600">
+                          {contract.tenancy?.property?.address || '—'}
+                          {contract.tenancy?.apartment?.apartment_number && <span className="text-slate-400">, Lgh {contract.tenancy.apartment.apartment_number}</span>}
+                        </p>
+                        <span className="mt-2 inline-flex items-center gap-1 text-xs text-slate-500">
+                          {contract.contract_type === 'premises' ? <Building2 className="w-3.5 h-3.5" /> : <Home className="w-3.5 h-3.5" />}
+                          {contract.contract_type === 'premises' ? 'Lokal' : 'Bostad'}
+                        </span>
+                      </div>
+                      <Button size="sm" variant="ghost" onClick={() => openEditContract(contract)} className="flex-shrink-0 gap-1">
+                        <Eye className="w-3.5 h-3.5" /> Öppna
+                      </Button>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">Skapat {formatDate(contract.created_at)}</span>
+                      {contract.valid_until && (
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">Giltigt {formatDate(contract.valid_until)}</span>
+                      )}
+                      <Badge className={CONTRACT_STATUS_CLASS[contract.status] || 'bg-slate-100 text-slate-600'}>
+                        {CONTRACT_STATUS_LABELS[contract.status] || contract.status}
+                      </Badge>
+                    </div>
+                    {contract.status === 'draft' && (
+                      <Button size="sm" variant="secondary" onClick={() => sendContractForSigning(contract)} className="mt-3 w-full gap-1">
+                        <Send className="w-3.5 h-3.5" /> Skicka för signering
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-slate-200 bg-slate-50">
@@ -774,20 +860,7 @@ Foton bifogade i systemet: ${photoCount}
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end gap-2">
                             {contract.status === 'draft' && (
-                              <Button size="sm" variant="secondary" onClick={async () => {
-                                await supabase.from('contract_signatures').update({ status: 'pending_tenant' }).eq('id', contract.id);
-                                // Notify the tenant
-                                if (contract.tenant?.id) {
-                                  await supabase.from('notifications').insert({
-                                    user_id: contract.tenant.id,
-                                    title: 'Nytt hyresavtal att signera',
-                                    message: 'Ett hyresavtal har skickats till dig för signering. Gå till Min lägenhet för att granska och signera avtalet.',
-                                    type: 'info',
-                                    link: 'apartment',
-                                  });
-                                }
-                                fetchAll();
-                              }} className="gap-1">
+                              <Button size="sm" variant="secondary" onClick={() => sendContractForSigning(contract)} className="gap-1">
                                 <Send className="w-3.5 h-3.5" /> Skicka för signering
                               </Button>
                             )}
@@ -838,15 +911,15 @@ Foton bifogade i systemet: ${photoCount}
             <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
               {inspectionForm.rooms.map((room, i) => (
                 <div key={i} className="border border-slate-200 rounded-lg p-3 bg-slate-50">
-                  <div className="flex items-center justify-between mb-2">
-                    <input type="text" value={room.name} onChange={(e) => updateRoomField(i, 'name', e.target.value)} placeholder="Rumsnamn" className="text-sm font-medium text-slate-800 bg-transparent border-0 focus:outline-none flex-1" />
+                  <div className="flex items-center justify-between gap-2 mb-2 min-w-0">
+                    <input type="text" value={room.name} onChange={(e) => updateRoomField(i, 'name', e.target.value)} placeholder="Rumsnamn" className="min-w-0 text-sm font-medium text-slate-800 bg-transparent border-0 focus:outline-none flex-1" />
                     <button onClick={() => removeRoom(i)} className="text-slate-300 hover:text-red-400 ml-2 text-xs">✕</button>
                   </div>
-                  <div className="flex gap-2 mb-2">
-                    <select value={room.condition} onChange={(e) => updateRoomField(i, 'condition', e.target.value)} className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                  <div className="flex flex-col gap-2 mb-2 sm:flex-row">
+                    <select value={room.condition} onChange={(e) => updateRoomField(i, 'condition', e.target.value)} className="w-full sm:w-auto text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
                       {Object.entries(CONDITION_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
-                    <input type="text" value={room.notes} onChange={(e) => updateRoomField(i, 'notes', e.target.value)} placeholder="Noteringar..." className="flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                    <input type="text" value={room.notes} onChange={(e) => updateRoomField(i, 'notes', e.target.value)} placeholder="Noteringar..." className="min-w-0 flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
                   </div>
                   {/* Room photos */}
                   <div className="flex flex-wrap gap-2 mt-1">
@@ -891,10 +964,10 @@ Foton bifogade i systemet: ${photoCount}
           <Textarea label="Allmänna noteringar" value={inspectionForm.notes} onChange={(e) => setInspectionForm({ ...inspectionForm, notes: e.target.value })} placeholder="Övergripande noteringar om lägenheten..." rows={3} />
           <Textarea label="Åtgärder krävs" value={inspectionForm.action_required} onChange={(e) => setInspectionForm({ ...inspectionForm, action_required: e.target.value })} placeholder="Beskriv åtgärder som behöver genomföras..." rows={2} />
 
-          <div className="flex gap-3 pt-2 justify-end">
-            <Button variant="secondary" onClick={() => { setShowInspectionModal(false); resetInspectionForm(); }}>Avbryt</Button>
-            <Button variant="secondary" onClick={() => handleSaveInspection('draft')} loading={savingInspection} disabled={!inspectionForm.tenancy_id}>Spara utkast</Button>
-            <Button variant="primary" onClick={() => handleSaveInspection('completed')} loading={savingInspection} disabled={!inspectionForm.tenancy_id} className="gap-1">
+          <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => { setShowInspectionModal(false); resetInspectionForm(); }} className="w-full sm:w-auto">Avbryt</Button>
+            <Button variant="secondary" onClick={() => handleSaveInspection('draft')} loading={savingInspection} disabled={!inspectionForm.tenancy_id} className="w-full sm:w-auto">Spara utkast</Button>
+            <Button variant="primary" onClick={() => handleSaveInspection('completed')} loading={savingInspection} disabled={!inspectionForm.tenancy_id} className="gap-1 w-full sm:w-auto">
               <CheckCircle className="w-4 h-4" /> Slutför besiktning
             </Button>
           </div>
@@ -909,11 +982,11 @@ Foton bifogade i systemet: ${photoCount}
             {!selectedContract && (
               <div>
                 <p className="text-sm font-medium text-slate-700 mb-2">Avtalstyp</p>
-                <div className="flex gap-3">
-                  <button onClick={() => handleContractTypeChange('apartment')} className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all flex-1 justify-center ${contractType === 'apartment' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <button onClick={() => handleContractTypeChange('apartment')} className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all justify-center ${contractType === 'apartment' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
                     <Home className="w-5 h-5" /> Bostadslägenhet
                   </button>
-                  <button onClick={() => handleContractTypeChange('premises')} className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all flex-1 justify-center ${contractType === 'premises' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                  <button onClick={() => handleContractTypeChange('premises')} className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all justify-center ${contractType === 'premises' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
                     <Building2 className="w-5 h-5" /> Lokal
                   </button>
                 </div>
@@ -936,7 +1009,7 @@ Foton bifogade i systemet: ${photoCount}
               <div className="space-y-4">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2">Hyresvillkor</p>
 
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Uppsägningstid (mån)</label>
                     <input type="number" min={1} max={12} value={cd.notice_months} onChange={e => setcd('notice_months', Number(e.target.value))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -952,7 +1025,7 @@ Foton bifogade i systemet: ${photoCount}
                 </div>
 
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2 pt-1">Ingår i hyran</p>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {[
                     { key: 'heat_included', label: 'Värme' },
                     { key: 'hot_water_included', label: 'Varmvatten' },
@@ -971,7 +1044,7 @@ Foton bifogade i systemet: ${photoCount}
                 </div>
 
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2 pt-1">Egna abonnemang</p>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={!!cd.electricity_own_subscription} onChange={e => setcd('electricity_own_subscription', e.target.checked)} className="w-4 h-4 rounded border-slate-300" />
                     <span className="text-sm text-slate-700">Eget elavtal</span>
@@ -987,7 +1060,7 @@ Foton bifogade i systemet: ${photoCount}
                 )}
 
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2 pt-1">Regler & villkor</p>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {[
                     { key: 'index_clause', label: 'KPI-indexklausul' },
                     { key: 'pets_allowed', label: 'Husdjur tillåtna' },
@@ -1011,7 +1084,7 @@ Foton bifogade i systemet: ${photoCount}
             {contractType === 'premises' && (
               <div className="space-y-4">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2">Hyresvillkor</p>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Uppsägningstid (mån)</label>
                     <input type="number" min={1} max={24} value={cd.notice_months} onChange={e => setcd('notice_months', Number(e.target.value))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -1030,14 +1103,14 @@ Foton bifogade i systemet: ${photoCount}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Input label="Depositionsbelopp (SEK, valfritt)" value={cd.deposit_amount} onChange={e => setcd('deposit_amount', e.target.value)} placeholder="T.ex. 45 000 kr" />
                   <Input label="Tillåten verksamhet" value={cd.permitted_use} onChange={e => setcd('permitted_use', e.target.value)} placeholder="T.ex. kontor, butik..." />
                 </div>
                 <Input label="Öppettider/nyttjandetid (valfritt)" value={cd.operating_hours} onChange={e => setcd('operating_hours', e.target.value)} placeholder="T.ex. mån–fre 07–22, lör–sön 09–18" />
 
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2 pt-1">Indexklausul</p>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={!!cd.index_clause} onChange={e => setcd('index_clause', e.target.checked)} className="w-4 h-4 rounded border-slate-300" />
                     <span className="text-sm text-slate-700">Indexklausul (KPI)</span>
@@ -1055,7 +1128,7 @@ Foton bifogade i systemet: ${photoCount}
                 </div>
 
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2 pt-1">Ingår i hyran</p>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {[
                     { key: 'heat_included', label: 'Värme' },
                     { key: 'electricity_included', label: 'El' },
@@ -1074,7 +1147,7 @@ Foton bifogade i systemet: ${photoCount}
                 )}
 
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2 pt-1">Övrigt</p>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {[
                     { key: 'auto_renew', label: 'Automatisk förlängning' },
                     { key: 'maintenance_tenant', label: 'Hyresgäst ansvar inre underhåll' },
@@ -1100,14 +1173,14 @@ Foton bifogade i systemet: ${photoCount}
               </div>
             )}
 
-            <div className="flex gap-3 pt-2 justify-end">
-              <Button variant="secondary" onClick={() => { setShowContractModal(false); resetContractForm(); }}>Avbryt</Button>
-              <Button variant="secondary" onClick={() => setPreviewContract(true)} disabled={!contractForm.tenancy_id}>
+            <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:flex-wrap sm:justify-end">
+              <Button variant="secondary" onClick={() => { setShowContractModal(false); resetContractForm(); }} className="w-full sm:w-auto">Avbryt</Button>
+              <Button variant="secondary" onClick={() => setPreviewContract(true)} disabled={!contractForm.tenancy_id} className="w-full sm:w-auto">
                 <Eye className="w-4 h-4" /> Förhandsgranska
               </Button>
-              <Button variant="secondary" onClick={() => handleSaveContract('draft')} loading={savingContract} disabled={!contractForm.tenancy_id}>Spara utkast</Button>
+              <Button variant="secondary" onClick={() => handleSaveContract('draft')} loading={savingContract} disabled={!contractForm.tenancy_id} className="w-full sm:w-auto">Spara utkast</Button>
               {(!selectedContract || selectedContract.status === 'draft') && (
-                <Button variant="primary" onClick={() => handleSaveContract('pending_tenant')} loading={savingContract} disabled={!contractForm.tenancy_id} className="gap-1">
+                <Button variant="primary" onClick={() => handleSaveContract('pending_tenant')} loading={savingContract} disabled={!contractForm.tenancy_id} className="gap-1 w-full sm:w-auto">
                   <Send className="w-4 h-4" /> Skicka för signering
                 </Button>
               )}
@@ -1123,11 +1196,11 @@ Foton bifogade i systemet: ${photoCount}
             <div className="border border-slate-200 rounded-lg p-5 bg-white max-h-96 overflow-y-auto">
               <pre className="text-xs text-slate-700 whitespace-pre-wrap font-sans leading-relaxed">{previewText}</pre>
             </div>
-            <div className="flex gap-3 justify-end">
-              <Button variant="secondary" onClick={() => setPreviewContract(false)}>Redigera</Button>
-              <Button variant="secondary" onClick={() => handleSaveContract('draft')} loading={savingContract} disabled={!contractForm.tenancy_id}>Spara utkast</Button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <Button variant="secondary" onClick={() => setPreviewContract(false)} className="w-full sm:w-auto">Redigera</Button>
+              <Button variant="secondary" onClick={() => handleSaveContract('draft')} loading={savingContract} disabled={!contractForm.tenancy_id} className="w-full sm:w-auto">Spara utkast</Button>
               {(!selectedContract || selectedContract.status === 'draft') && (
-                <Button variant="primary" onClick={() => handleSaveContract('pending_tenant')} loading={savingContract} disabled={!contractForm.tenancy_id} className="gap-1">
+                <Button variant="primary" onClick={() => handleSaveContract('pending_tenant')} loading={savingContract} disabled={!contractForm.tenancy_id} className="gap-1 w-full sm:w-auto">
                   <Send className="w-4 h-4" /> Skicka för signering
                 </Button>
               )}

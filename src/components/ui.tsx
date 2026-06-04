@@ -265,8 +265,8 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, subtitle, action, backButton, icon: Icon }: PageHeaderProps) {
   return (
-    <div className="flex items-start justify-between mb-6">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-6 min-w-0">
+      <div className="flex items-center gap-3 min-w-0">
         {backButton && (
           <button onClick={backButton} className="p-2 rounded-lg hover:bg-slate-100 transition-colors text-slate-600">
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -274,15 +274,15 @@ export function PageHeader({ title, subtitle, action, backButton, icon: Icon }: 
             </svg>
           </button>
         )}
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-bold text-slate-800">
+        <div className="min-w-0">
+          <h1 className="flex items-center gap-2 text-xl font-bold text-slate-800 break-words">
             {Icon && <Icon className="w-5 h-5 text-blue-600" />}
             {title}
           </h1>
           {subtitle && <p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}
         </div>
       </div>
-      {action && <div className="flex-shrink-0">{action}</div>}
+      {action && <div className="w-full sm:w-auto sm:flex-shrink-0">{action}</div>}
     </div>
   );
 }

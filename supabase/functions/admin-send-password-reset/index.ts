@@ -66,7 +66,12 @@ Deno.serve(async (req: Request) => {
       redirectTo: redirect_to || `${req.headers.get("origin") ?? ""}/reset-password`,
     });
 
-    if (error) return json({ error: error.message }, 400);
+    if (error) {
+      const message = error.message.toLowerCase().includes("sending")
+        ? "Kunde inte skicka återställningsmejl. Kontrollera SMTP/Postfix-konfigurationen på servern."
+        : error.message;
+      return json({ error: message }, 400);
+    }
 
     return json({ success: true, email: targetProfile.email });
   } catch (err) {

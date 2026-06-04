@@ -57,6 +57,11 @@ const INITIAL_LAUNDRY_ROOM_FORM = {
   weeks_to_generate: '8',
 };
 
+const getTodayWeekdayIndex = () => {
+  const today = new Date().getDay();
+  return today === 0 ? 6 : today - 1;
+};
+
 export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
   const { user, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -79,16 +84,17 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
   const [success, setSuccess] = useState('');
   const [bookingInProgress, setBookingInProgress] = useState(false);
   const [cancellingBookingId, setCancellingBookingId] = useState('');
-  const [mobileViewDay, setMobileViewDay] = useState(0);
+  const [mobileViewDay, setMobileViewDay] = useState(() => getTodayWeekdayIndex());
   const canViewAllLaundryRooms = user?.role === 'staff' || user?.role === 'admin' || user?.role === 'superadmin';
   const canManageLaundryRooms = user?.role === 'admin' || user?.role === 'superadmin';
 
   // Get week range for current offset
   const getWeekRange = (offset: number) => {
     const now = new Date();
-    now.setDate(now.getDate() - now.getDay() + offset * 7);
+    const mondayIndex = (now.getDay() + 6) % 7;
     const start = new Date(now);
-    start.setDate(now.getDate() - now.getDay() + 1); // Monday
+    start.setHours(0, 0, 0, 0);
+    start.setDate(now.getDate() - mondayIndex + offset * 7);
     const end = new Date(start);
     end.setDate(start.getDate() + 6); // Sunday
     return { start, end };
@@ -718,7 +724,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
                 onClick={() => {
                   setSelectedRoomId(room.id);
                   setWeekOffset(0);
-                  setMobileViewDay(0);
+                  setMobileViewDay(getTodayWeekdayIndex());
                 }}
                 className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                   selectedRoomId === room.id
@@ -732,24 +738,32 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
           </div>
 
           {/* Week navigation */}
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setWeekOffset(weekOffset - 1)}
+              className="w-full sm:w-auto"
+              onClick={() => {
+                setWeekOffset(weekOffset - 1);
+                setMobileViewDay(0);
+              }}
             >
               <ChevronLeft className="w-4 h-4" />
               Förra vecka
             </Button>
 
-            <div className="text-sm font-medium text-slate-700">
+            <div className="text-center text-sm font-medium text-slate-700">
               {formatDate(weekStart)} - {formatDate(weekEnd)}
             </div>
 
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setWeekOffset(weekOffset + 1)}
+              className="w-full sm:w-auto"
+              onClick={() => {
+                setWeekOffset(weekOffset + 1);
+                setMobileViewDay(0);
+              }}
             >
               Nästa vecka
               <ChevronRight className="w-4 h-4" />
@@ -868,8 +882,8 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
                       }}
                       className={`p-4 transition-all ${isClickable ? 'cursor-pointer hover:shadow-md active:scale-95' : 'cursor-not-allowed opacity-60'}`}
                     >
-                      <div className="flex items-center justify-between">
-                        <div>
+                      <div className="flex items-center justify-between gap-3 min-w-0">
+                        <div className="min-w-0">
                           <p className="font-medium text-slate-800">
                             {slot.start_time} - {slot.end_time}
                           </p>
