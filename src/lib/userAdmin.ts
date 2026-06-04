@@ -19,6 +19,22 @@ interface ResetPasswordResult {
   temp_password: string;
 }
 
+interface SendPasswordResetResult {
+  email: string;
+}
+
+interface UpdateUserInput {
+  user_id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  active?: boolean;
+}
+
+interface UpdateUserResult {
+  email: string;
+}
+
 async function callUserFunction<T>(functionName: string, body: Record<string, unknown>): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
 
@@ -45,4 +61,15 @@ export function createUserAccount(input: CreateUserInput) {
 
 export function resetUserPassword(userId: string) {
   return callUserFunction<ResetPasswordResult>('admin-reset-password', { user_id: userId });
+}
+
+export function sendUserPasswordResetEmail(userId: string) {
+  return callUserFunction<SendPasswordResetResult>('admin-send-password-reset', {
+    user_id: userId,
+    redirect_to: `${window.location.origin}/reset-password`,
+  });
+}
+
+export function updateUserAccount(input: UpdateUserInput) {
+  return callUserFunction<UpdateUserResult>('admin-update-user', input);
 }

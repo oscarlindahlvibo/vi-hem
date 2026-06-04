@@ -383,3 +383,22 @@ export interface CustomerProject {
   status: 'active' | 'completed' | 'paused' | 'cancelled';
   created_at: string;
 }
+
+export interface PurchaseItem {
+  id: string;
+  organisation_id: string | null;
+  store_name: string;
+  item_name: string;
+  quantity: string;
+  product_url: string;
+  notes: string;
+  priority: 'low' | 'normal' | 'urgent';
+  status: 'open' | 'purchased' | 'cancelled';
+  created_by: string | null;
+  purchased_by: string | null;
+  purchased_at: string | null;
+  created_at: string;
+  updated_at: string;
+  creator?: Profile | null;
+  purchaser?: Profile | null;
+}

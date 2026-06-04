@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Users, Plus, Edit2, Home, Mail, Phone, KeyRound } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { createUserAccount, resetUserPassword } from '../lib/userAdmin';
+import { createUserAccount, sendUserPasswordResetEmail } from '../lib/userAdmin';
 import {
   Card,
   Badge,
@@ -33,7 +33,7 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [createdCredentials, setCreatedCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
-  const [resetCredentials, setResetCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
+  const [resetCredentials, setResetCredentials] = useState<{ email: string } | null>(null);
   const [resettingUserId, setResettingUserId] = useState('');
   const [tenantFormData, setTenantFormData] = useState({
     name: '',
@@ -200,8 +200,8 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
   const handleResetPassword = async (tenant: Profile) => {
     try {
       setResettingUserId(tenant.id);
-      const result = await resetUserPassword(tenant.id);
-      setResetCredentials({ email: result.email, tempPassword: result.temp_password });
+      const result = await sendUserPasswordResetEmail(tenant.id);
+      setResetCredentials({ email: result.email });
     } catch (err: any) {
       alert(err.message || 'Kunde inte återställa lösenordet');
     } finally {
@@ -630,19 +630,16 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
       <Modal
         open={!!resetCredentials}
         onClose={() => setResetCredentials(null)}
-        title="Lösenord återställt"
+        title="Återställningsmejl skickat"
       >
         {resetCredentials && (
           <div className="space-y-4">
             <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <p className="text-sm font-semibold text-green-900 mb-1">Nytt tillfälligt lösenord skapat</p>
+              <p className="text-sm font-semibold text-green-900 mb-1">Mejl skickat</p>
               <p className="text-sm text-green-800">
-                Dela lösenordet säkert med <strong>{resetCredentials.email}</strong>.
+                Ett mejl med länk för att välja nytt lösenord har skickats till <strong>{resetCredentials.email}</strong>.
               </p>
             </div>
-            <code className="block bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm font-mono text-slate-900 select-all">
-              {resetCredentials.tempPassword}
-            </code>
             <Button variant="primary" className="w-full" onClick={() => setResetCredentials(null)}>
               Stäng
             </Button>

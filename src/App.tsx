@@ -15,6 +15,7 @@ import { LaundryPage } from './pages/LaundryPage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { NewsPage } from './pages/NewsPage';
 import { ChatPage } from './pages/ChatPage';
+import { PurchaseListPage } from './pages/PurchaseListPage';
 import { TerminationPage } from './pages/TerminationPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { AdminPropertiesPage } from './pages/AdminPropertiesPage';
@@ -130,6 +131,10 @@ function AppInner() {
 
       case 'chat':
         return <ChatPage onNavigate={navigate} />;
+
+      case 'purchases':
+        if (!isStaff) return renderDashboard();
+        return <PurchaseListPage onNavigate={navigate} />;
 
       case 'termination':
         if (!isTenant) return renderDashboard();

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Building2, Plus, Edit2, Check, X, Globe,
-  Users, Home, ChevronRight, AlertTriangle, Shield,
+  Users, Home, ChevronRight, AlertTriangle, Shield, KeyRound, Mail,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
@@ -10,6 +10,7 @@ import {
 } from '../components/ui';
 import { formatDate } from '../lib/utils';
 import type { Organisation, Profile, Role } from '../types';
+import { createUserAccount, sendUserPasswordResetEmail, updateUserAccount } from '../lib/userAdmin';
 
 const PLAN_LABELS: Record<string, string> = {
   trial: 'Testperiod',
@@ -59,7 +60,7 @@ interface UserFormData {
   name: string;
   email: string;
   phone: string;
-  role: Exclude<Role, 'superadmin'>;
+  role: Role;
 }
 
 const defaultForm: OrgFormData = {
@@ -72,6 +73,13 @@ const defaultUserForm: UserFormData = {
   email: '',
   phone: '',
   role: 'admin',
+};
+
+const defaultInitialAdminForm = {
+  create: true,
+  name: '',
+  email: '',
+  phone: '',
 };
 
 const localTestMode = import.meta.env.DEV && import.meta.env.VITE_ENABLE_LOCAL_SUPERADMIN === 'true';
@@ -102,6 +110,7 @@ interface AdminOrganisationsPageProps { onNavigate: (page: string) => void; }
 
 export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganisationsPageProps) {
   const [orgs, setOrgs] = useState<Organisation[]>([]);
+  const [superadmins, setSuperadmins] = useState<Profile[]>([]);
   const [stats, setStats] = useState<OrgStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -110,6 +119,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [form, setForm] = useState<OrgFormData>(defaultForm);
+  const [initialAdminForm, setInitialAdminForm] = useState(defaultInitialAdminForm);
   const [localUsers, setLocalUsers] = useState<LocalTestUser[]>([]);
   const [showUserModal, setShowUserModal] = useState(false);
   const [selectedOrg, setSelectedOrg] = useState<Organisation | null>(null);
@@ -117,6 +127,18 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
   const [userSaveError, setUserSaveError] = useState('');
   const [savingUser, setSavingUser] = useState(false);
   const [createdCredentials, setCreatedCredentials] = useState<{ email: string; password: string } | null>(null);
+  const [showSuperadminModal, setShowSuperadminModal] = useState(false);
+  const [editingSuperadmin, setEditingSuperadmin] = useState<Profile | null>(null);
+  const [superadminForm, setSuperadminForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    active: true,
+  });
+  const [superadminError, setSuperadminError] = useState('');
+  const [savingSuperadmin, setSavingSuperadmin] = useState(false);
+  const [resettingSuperadminId, setResettingSuperadminId] = useState<string | null>(null);
+  const [resetMessage, setResetMessage] = useState('');
 
   useEffect(() => { fetchOrgs(); }, []);
 
@@ -127,6 +149,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       const users = readLocalUsers();
       setOrgs(localOrgs);
       setLocalUsers(users);
+      setSuperadmins(users.filter(user => user.role === 'superadmin'));
       setStats(localOrgs.map(org => ({
         id: org.id,
         member_count: users.filter(u => u.organisation_id === org.id).length,
@@ -141,6 +164,14 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       .from('organisations')
       .select('*')
       .order('name');
+
+    const { data: superadminData } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('role', 'superadmin')
+      .order('name');
+
+    setSuperadmins((superadminData || []) as Profile[]);
 
     if (data) {
       setOrgs(data);
@@ -182,7 +213,13 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
   const handleSave = async () => {
     setSaveError('');
     setSaving(true);
+    let createdOrgIdForRollback: string | null = null;
     try {
+      if (!editingOrg && initialAdminForm.create) {
+        if (!initialAdminForm.name.trim()) throw new Error('Ange namn på organisationens admin.');
+        if (!initialAdminForm.email.trim()) throw new Error('Ange e-post till organisationens admin.');
+      }
+
       const payload = {
         name: form.name,
         slug: form.slug.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
@@ -196,6 +233,15 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       };
       if (localTestMode) {
         const currentOrgs = readLocalOrgs();
+        const currentUsers = readLocalUsers();
+        if (
+          !editingOrg &&
+          initialAdminForm.create &&
+          currentUsers.some(user => user.email.toLowerCase() === initialAdminForm.email.trim().toLowerCase())
+        ) {
+          throw new Error('Det finns redan en lokal testanvändare med den admin-e-posten.');
+        }
+
         const savedOrg: Organisation = editingOrg
           ? { ...editingOrg, ...payload }
           : {
@@ -212,9 +258,34 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
           : [...currentOrgs, savedOrg];
 
         writeLocalOrgs(nextOrgs);
+
+        if (!editingOrg && initialAdminForm.create) {
+          const password = createTempPassword();
+          const now = new Date().toISOString();
+          const nextAdmin: LocalTestUser = {
+            id: crypto.randomUUID(),
+            name: initialAdminForm.name.trim(),
+            email: initialAdminForm.email.trim().toLowerCase(),
+            phone: initialAdminForm.phone.trim(),
+            role: 'admin',
+            active: true,
+            avatar_url: '',
+            organisation_id: savedOrg.id,
+            auth_method: 'password',
+            bankid_personal_number: null,
+            bankid_linked_at: null,
+            created_at: now,
+            updated_at: now,
+            password,
+          };
+          writeLocalUsers([...currentUsers, nextAdmin]);
+          setCreatedCredentials({ email: nextAdmin.email, password });
+        }
+
         setShowModal(false);
         setEditingOrg(null);
         setForm(defaultForm);
+        setInitialAdminForm(defaultInitialAdminForm);
         fetchOrgs();
         return;
       }
@@ -223,14 +294,35 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         const { error } = await supabase.from('organisations').update(payload).eq('id', editingOrg.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('organisations').insert(payload);
+        const { data: createdOrg, error } = await supabase
+          .from('organisations')
+          .insert(payload)
+          .select('*')
+          .single();
         if (error) throw error;
+        createdOrgIdForRollback = createdOrg?.id ?? null;
+
+        if (initialAdminForm.create && createdOrg) {
+          const result = await createUserAccount({
+            name: initialAdminForm.name,
+            email: initialAdminForm.email,
+            phone: initialAdminForm.phone,
+            role: 'admin',
+            organisation_id: createdOrg.id,
+          });
+          setCreatedCredentials({ email: initialAdminForm.email.trim().toLowerCase(), password: result.temp_password });
+        }
+        createdOrgIdForRollback = null;
       }
       setShowModal(false);
       setEditingOrg(null);
       setForm(defaultForm);
+      setInitialAdminForm(defaultInitialAdminForm);
       fetchOrgs();
     } catch (err: any) {
+      if (createdOrgIdForRollback) {
+        await supabase.from('organisations').delete().eq('id', createdOrgIdForRollback);
+      }
       setSaveError(err.message || 'Ett fel inträffade');
     } finally {
       setSaving(false);
@@ -248,12 +340,14 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       active: org.active,
     });
     setEditingOrg(org);
+    setInitialAdminForm(defaultInitialAdminForm);
     setSaveError('');
     setShowModal(true);
   };
 
   const openCreate = () => {
     setForm(defaultForm);
+    setInitialAdminForm(defaultInitialAdminForm);
     setEditingOrg(null);
     setSaveError('');
     setShowModal(true);
@@ -270,39 +364,51 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
   };
 
   const handleCreateUser = async () => {
-    if (!selectedOrg || !localTestMode) return;
+    if (!selectedOrg) return;
     setUserSaveError('');
     setSavingUser(true);
     try {
       if (!userForm.name.trim()) throw new Error('Ange namn.');
       if (!userForm.email.trim()) throw new Error('Ange e-post.');
 
-      const users = readLocalUsers();
-      if (users.some(user => user.email.toLowerCase() === userForm.email.trim().toLowerCase())) {
-        throw new Error('Det finns redan en lokal testanvändare med den e-posten.');
+      if (localTestMode) {
+        const users = readLocalUsers();
+        if (users.some(user => user.email.toLowerCase() === userForm.email.trim().toLowerCase())) {
+          throw new Error('Det finns redan en lokal testanvändare med den e-posten.');
+        }
+
+        const password = createTempPassword();
+        const now = new Date().toISOString();
+        const nextUser: LocalTestUser = {
+          id: crypto.randomUUID(),
+          name: userForm.name.trim(),
+          email: userForm.email.trim().toLowerCase(),
+          phone: userForm.phone.trim(),
+          role: userForm.role,
+          active: true,
+          avatar_url: '',
+          organisation_id: selectedOrg.id,
+          auth_method: 'password',
+          bankid_personal_number: null,
+          bankid_linked_at: null,
+          created_at: now,
+          updated_at: now,
+          password,
+        };
+
+        writeLocalUsers([...users, nextUser]);
+        setCreatedCredentials({ email: nextUser.email, password });
+      } else {
+        const result = await createUserAccount({
+          name: userForm.name,
+          email: userForm.email,
+          phone: userForm.phone,
+          role: userForm.role,
+          organisation_id: selectedOrg.id,
+        });
+        setCreatedCredentials({ email: userForm.email.trim().toLowerCase(), password: result.temp_password });
       }
 
-      const password = createTempPassword();
-      const now = new Date().toISOString();
-      const nextUser: LocalTestUser = {
-        id: crypto.randomUUID(),
-        name: userForm.name.trim(),
-        email: userForm.email.trim(),
-        phone: userForm.phone.trim(),
-        role: userForm.role,
-        active: true,
-        avatar_url: '',
-        organisation_id: selectedOrg.id,
-        auth_method: 'password',
-        bankid_personal_number: null,
-        bankid_linked_at: null,
-        created_at: now,
-        updated_at: now,
-        password,
-      };
-
-      writeLocalUsers([...users, nextUser]);
-      setCreatedCredentials({ email: nextUser.email, password });
       setShowUserModal(false);
       setSelectedOrg(null);
       setUserForm(defaultUserForm);
@@ -311,6 +417,112 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       setUserSaveError(err.message || 'Kunde inte skapa användare.');
     } finally {
       setSavingUser(false);
+    }
+  };
+
+  const openCreateSuperadmin = () => {
+    setEditingSuperadmin(null);
+    setSuperadminForm({ name: '', email: '', phone: '', active: true });
+    setSuperadminError('');
+    setShowSuperadminModal(true);
+  };
+
+  const openEditSuperadmin = (profile: Profile) => {
+    setEditingSuperadmin(profile);
+    setSuperadminForm({
+      name: profile.name || '',
+      email: profile.email || '',
+      phone: profile.phone || '',
+      active: profile.active !== false,
+    });
+    setSuperadminError('');
+    setShowSuperadminModal(true);
+  };
+
+  const handleSaveSuperadmin = async () => {
+    setSuperadminError('');
+    setSavingSuperadmin(true);
+    try {
+      if (!superadminForm.name.trim()) throw new Error('Ange namn.');
+      if (!superadminForm.email.trim()) throw new Error('Ange e-post.');
+
+      if (localTestMode) {
+        const users = readLocalUsers();
+        if (editingSuperadmin) {
+          const nextUsers = users.map(user => user.id === editingSuperadmin.id ? {
+            ...user,
+            name: superadminForm.name.trim(),
+            email: superadminForm.email.trim().toLowerCase(),
+            phone: superadminForm.phone.trim(),
+            active: superadminForm.active,
+            updated_at: new Date().toISOString(),
+          } : user);
+          writeLocalUsers(nextUsers);
+        } else {
+          const password = createTempPassword();
+          const now = new Date().toISOString();
+          writeLocalUsers([...users, {
+            id: crypto.randomUUID(),
+            name: superadminForm.name.trim(),
+            email: superadminForm.email.trim().toLowerCase(),
+            phone: superadminForm.phone.trim(),
+            role: 'superadmin',
+            active: true,
+            avatar_url: '',
+            organisation_id: null,
+            auth_method: 'password',
+            bankid_personal_number: null,
+            bankid_linked_at: null,
+            created_at: now,
+            updated_at: now,
+            password,
+          }]);
+          setCreatedCredentials({ email: superadminForm.email.trim().toLowerCase(), password });
+        }
+      } else if (editingSuperadmin) {
+        await updateUserAccount({
+          user_id: editingSuperadmin.id,
+          name: superadminForm.name,
+          email: superadminForm.email,
+          phone: superadminForm.phone,
+          active: superadminForm.active,
+        });
+      } else {
+        const result = await createUserAccount({
+          name: superadminForm.name,
+          email: superadminForm.email,
+          phone: superadminForm.phone,
+          role: 'superadmin',
+          organisation_id: null,
+        });
+        setCreatedCredentials({ email: superadminForm.email.trim().toLowerCase(), password: result.temp_password });
+      }
+
+      setShowSuperadminModal(false);
+      setEditingSuperadmin(null);
+      setSuperadminForm({ name: '', email: '', phone: '', active: true });
+      await fetchOrgs();
+    } catch (err: any) {
+      setSuperadminError(err.message || 'Kunde inte spara superadmin.');
+    } finally {
+      setSavingSuperadmin(false);
+    }
+  };
+
+  const handleSendSuperadminReset = async (profile: Profile) => {
+    setResetMessage('');
+    setResettingSuperadminId(profile.id);
+    try {
+      if (localTestMode) {
+        setResetMessage('Lokalt testläge skickar inga e-postmeddelanden.');
+      } else {
+        const result = await sendUserPasswordResetEmail(profile.id);
+        setResetMessage(`Återställningsmejl skickat till ${result.email}.`);
+      }
+    } catch (err: any) {
+      setResetMessage(err.message || 'Kunde inte skicka återställningsmejl.');
+    } finally {
+      setResettingSuperadminId(null);
     }
   };
 
@@ -345,6 +557,74 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             }
           />
         </div>
+
+        <Card className="p-5 mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Shield className="w-5 h-5 text-slate-700" />
+                <h2 className="font-bold text-slate-900">Superadmins</h2>
+              </div>
+              <p className="text-sm text-slate-500">
+                Hantera plattformsadministratörer, e-postadresser och lösenordsåterställning.
+              </p>
+            </div>
+            <Button variant="secondary" onClick={openCreateSuperadmin}>
+              <Plus className="w-4 h-4" />
+              Ny superadmin
+            </Button>
+          </div>
+
+          {resetMessage && (
+            <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+              {resetMessage}
+            </div>
+          )}
+
+          {superadmins.length === 0 ? (
+            <p className="text-sm text-slate-500">Inga superadmins hittades.</p>
+          ) : (
+            <div className="grid gap-3">
+              {superadmins.map((profile) => (
+                <div
+                  key={profile.id}
+                  className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-slate-900 break-words">{profile.name || 'Superadmin'}</p>
+                      <Badge className={profile.active ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}>
+                        {profile.active ? 'Aktiv' : 'Inaktiv'}
+                      </Badge>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
+                      <span className="inline-flex items-center gap-1 break-all">
+                        <Mail className="w-3.5 h-3.5" />
+                        {profile.email}
+                      </span>
+                      {profile.phone && <span>{profile.phone}</span>}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={() => openEditSuperadmin(profile)}>
+                      <Edit2 className="w-3.5 h-3.5" />
+                      Redigera
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => handleSendSuperadminReset(profile)}
+                      loading={resettingSuperadminId === profile.id}
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                      Skicka återställning
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
 
         {/* Summary cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -486,17 +766,17 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                         <span>Skapad {formatDate(org.created_at)}</span>
                       </div>
 
-                      {localTestMode && (
-                        <div className="mt-4">
-                          <div className="mb-2 flex items-center justify-between">
-                            <p className="text-xs font-medium text-slate-500">
-                              Testanvändare
-                            </p>
-                            <Button size="sm" variant="outline" onClick={() => openCreateUser(org)}>
-                              <Plus className="w-3.5 h-3.5" />
-                              Lägg till användare
-                            </Button>
-                          </div>
+                      <div className="mt-4">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <p className="text-xs font-medium text-slate-500">
+                            {localTestMode ? 'Testanvändare' : 'Användare'}
+                          </p>
+                          <Button size="sm" variant="outline" onClick={() => openCreateUser(org)}>
+                            <Plus className="w-3.5 h-3.5" />
+                            Lägg till användare
+                          </Button>
+                        </div>
+                        {localTestMode && (
                           <div className="flex flex-wrap gap-2">
                             {localUsers.filter(user => user.organisation_id === org.id).length === 0 ? (
                               <span className="text-xs text-slate-400">Inga användare skapade än</span>
@@ -510,8 +790,8 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                                 ))
                             )}
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
 
                     {/* Edit button */}
@@ -532,7 +812,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       {/* Create / Edit modal */}
       <Modal
         open={showModal}
-        onClose={() => { setShowModal(false); setEditingOrg(null); }}
+        onClose={() => {
+          setShowModal(false);
+          setEditingOrg(null);
+          setInitialAdminForm(defaultInitialAdminForm);
+        }}
         title={editingOrg ? 'Redigera organisation' : 'Ny organisation'}
       >
         <div className="space-y-4">
@@ -553,7 +837,16 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
               label="Kontakt-e-post"
               type="email"
               value={form.contact_email}
-              onChange={e => setForm({ ...form, contact_email: e.target.value })}
+              onChange={e => {
+                const previousContactEmail = form.contact_email;
+                setForm({ ...form, contact_email: e.target.value });
+                if (!editingOrg) {
+                  setInitialAdminForm(prev => ({
+                    ...prev,
+                    email: !prev.email || prev.email === previousContactEmail ? e.target.value : prev.email,
+                  }));
+                }
+              }}
               placeholder="admin@foretag.se"
             />
             <Input
@@ -630,6 +923,51 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             </label>
           )}
 
+          {!editingOrg && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={initialAdminForm.create}
+                  onChange={e => setInitialAdminForm({ ...initialAdminForm, create: e.target.checked })}
+                  className="mt-1 w-4 h-4 rounded border-slate-300"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-800">Skapa admin för organisationen</span>
+                  <span className="block text-xs text-slate-500">
+                    Adminen kopplas till den nya organisationen och kan sedan skapa fastigheter, personal och hyresgäster.
+                  </span>
+                </span>
+              </label>
+
+              {initialAdminForm.create && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Input
+                    label="Adminnamn"
+                    value={initialAdminForm.name}
+                    onChange={e => setInitialAdminForm({ ...initialAdminForm, name: e.target.value })}
+                    placeholder="T.ex. Anna Administratör"
+                  />
+                  <Input
+                    label="Admin e-post"
+                    type="email"
+                    value={initialAdminForm.email}
+                    onChange={e => setInitialAdminForm({ ...initialAdminForm, email: e.target.value })}
+                    placeholder="admin@foretag.se"
+                  />
+                  <div className="sm:col-span-2">
+                    <Input
+                      label="Admin telefon"
+                      value={initialAdminForm.phone}
+                      onChange={e => setInitialAdminForm({ ...initialAdminForm, phone: e.target.value })}
+                      placeholder="070-123 45 67"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {saveError && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
               {saveError}
@@ -637,11 +975,18 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
           )}
 
           <div className="flex gap-3 justify-end pt-2">
-            <Button variant="secondary" onClick={() => { setShowModal(false); setEditingOrg(null); }}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowModal(false);
+                setEditingOrg(null);
+                setInitialAdminForm(defaultInitialAdminForm);
+              }}
+            >
               Avbryt
             </Button>
             <Button variant="primary" onClick={handleSave} loading={saving}>
-              {editingOrg ? 'Spara ändringar' : 'Skapa organisation'}
+              {editingOrg ? 'Spara ändringar' : initialAdminForm.create ? 'Skapa organisation och admin' : 'Skapa organisation'}
             </Button>
           </div>
         </div>
@@ -685,7 +1030,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             </select>
           </div>
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-            I lokalt testläge sparas användaren i din webbläsare och kan användas direkt på login-sidan.
+            Användaren kopplas till {selectedOrg?.name} och får ett konto med tillfälligt lösenord.
           </div>
           {userSaveError && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
@@ -704,9 +1049,77 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       </Modal>
 
       <Modal
+        open={showSuperadminModal}
+        onClose={() => {
+          setShowSuperadminModal(false);
+          setEditingSuperadmin(null);
+          setSuperadminForm({ name: '', email: '', phone: '', active: true });
+        }}
+        title={editingSuperadmin ? 'Redigera superadmin' : 'Ny superadmin'}
+      >
+        <div className="space-y-4">
+          <Input
+            label="Namn"
+            value={superadminForm.name}
+            onChange={e => setSuperadminForm({ ...superadminForm, name: e.target.value })}
+            placeholder="T.ex. Oscar Lindahl"
+          />
+          <Input
+            label="E-post"
+            type="email"
+            value={superadminForm.email}
+            onChange={e => setSuperadminForm({ ...superadminForm, email: e.target.value })}
+            placeholder="superadmin@foretag.se"
+          />
+          <Input
+            label="Telefon"
+            value={superadminForm.phone}
+            onChange={e => setSuperadminForm({ ...superadminForm, phone: e.target.value })}
+            placeholder="070-123 45 67"
+          />
+          {editingSuperadmin && (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={superadminForm.active}
+                onChange={e => setSuperadminForm({ ...superadminForm, active: e.target.checked })}
+                className="w-4 h-4 rounded border-slate-300"
+              />
+              <span className="text-sm text-slate-700">Aktiv</span>
+            </label>
+          )}
+          {!editingSuperadmin && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+              Kontot skapas som plattformsadministratör utan koppling till en organisation.
+            </div>
+          )}
+          {superadminError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
+              {superadminError}
+            </div>
+          )}
+          <div className="flex gap-3 justify-end pt-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowSuperadminModal(false);
+                setEditingSuperadmin(null);
+                setSuperadminForm({ name: '', email: '', phone: '', active: true });
+              }}
+            >
+              Avbryt
+            </Button>
+            <Button variant="primary" onClick={handleSaveSuperadmin} loading={savingSuperadmin}>
+              {editingSuperadmin ? 'Spara ändringar' : 'Skapa superadmin'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         open={!!createdCredentials}
         onClose={() => setCreatedCredentials(null)}
-        title="Testanvändare skapad"
+        title="Användare skapad"
       >
         {createdCredentials && (
           <div className="space-y-4">

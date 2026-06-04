@@ -74,13 +74,22 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Non-superadmin can only create users in their own organisation
-    const targetOrgId =
-      callerProfile.role === "superadmin"
+    if (role === "superadmin" && callerProfile.role !== "superadmin") {
+      return new Response(JSON.stringify({ error: "Forbidden: only superadmins can create superadmins" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Non-superadmin can only create users in their own organisation.
+    // Superadmin accounts are platform accounts and do not belong to an organisation.
+    const targetOrgId = role === "superadmin"
+      ? null
+      : callerProfile.role === "superadmin"
         ? (organisation_id ?? callerProfile.organisation_id)
         : callerProfile.organisation_id;
 
-    if (!targetOrgId) {
+    if (role !== "superadmin" && !targetOrgId) {
       return new Response(JSON.stringify({ error: "Organisation saknas för användaren." }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -101,37 +110,39 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const [{ data: org, error: orgError }, { count: userCount, error: countError }] = await Promise.all([
-      adminClient
-        .from("organisations")
-        .select("max_users")
-        .eq("id", targetOrgId)
-        .maybeSingle(),
-      adminClient
-        .from("profiles")
-        .select("id", { count: "exact", head: true })
-        .eq("organisation_id", targetOrgId),
-    ]);
+    if (role !== "superadmin") {
+      const [{ data: org, error: orgError }, { count: userCount, error: countError }] = await Promise.all([
+        adminClient
+          .from("organisations")
+          .select("max_users")
+          .eq("id", targetOrgId)
+          .maybeSingle(),
+        adminClient
+          .from("profiles")
+          .select("id", { count: "exact", head: true })
+          .eq("organisation_id", targetOrgId),
+      ]);
 
-    if (orgError || !org) {
-      return new Response(JSON.stringify({ error: "Organisationen kunde inte hittas." }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+      if (orgError || !org) {
+        return new Response(JSON.stringify({ error: "Organisationen kunde inte hittas." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
-    if (countError) {
-      return new Response(JSON.stringify({ error: "Kunde inte kontrollera användarkvoten." }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+      if (countError) {
+        return new Response(JSON.stringify({ error: "Kunde inte kontrollera användarkvoten." }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
-    if ((userCount ?? 0) >= org.max_users) {
-      return new Response(JSON.stringify({ error: `Licensgränsen för användare är nådd (${org.max_users} st).` }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      if ((userCount ?? 0) >= org.max_users) {
+        return new Response(JSON.stringify({ error: `Licensgränsen för användare är nådd (${org.max_users} st).` }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // Generate a secure temporary password

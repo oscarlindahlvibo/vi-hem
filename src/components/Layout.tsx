@@ -6,7 +6,7 @@ import { Button, Input, Modal } from './ui';
 import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
-  ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound
+  ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart
 } from 'lucide-react';
 
 interface NavItem {
@@ -47,6 +47,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     // ── Staff / Admin ──────────────────────────────────────────────────────
     { label: 'Arbetsordrar', icon: <ClipboardList className="w-5 h-5" />, page: 'workorders', roles: ['staff', 'admin'] },
     { label: 'Tidrapportering', icon: <Clock className="w-5 h-5" />, page: 'timetracking', roles: ['staff', 'admin'] },
+    { label: 'Inköpslista', icon: <ShoppingCart className="w-5 h-5" />, page: 'purchases', roles: ['staff', 'admin'] },
     { label: 'Besiktningar & Avtal', icon: <ClipboardCheck className="w-5 h-5" />, page: 'inspections', roles: ['staff', 'admin'] },
     // ── Admin ──────────────────────────────────────────────────────────────
     { label: 'Fastigheter', icon: <Building2 className="w-5 h-5" />, page: 'admin-properties', roles: ['admin'] },
