@@ -260,7 +260,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
 
       {/* Main content */}
       <main className="flex-1 lg:ml-64 pt-16 lg:pt-0">
-        <div className="max-w-7xl mx-auto p-4 lg:p-6">
+        <div className="w-full max-w-[1600px] p-4 lg:p-5 xl:p-6">
           {children}
         </div>
       </main>

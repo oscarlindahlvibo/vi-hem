@@ -143,6 +143,22 @@ const defaultCustomerForm = {
   notes: '',
 };
 
+type ProjectTabId = 'overview' | 'time' | 'materials' | 'change-orders' | 'quotes' | 'self-checks' | 'inspections' | 'deviations' | 'invoice' | 'documents' | 'activity';
+
+const PROJECT_TABS: { key: ProjectTabId; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
+  { key: 'overview', label: 'Översikt', Icon: ClipboardList },
+  { key: 'time', label: 'Tid', Icon: Timer },
+  { key: 'materials', label: 'Material', Icon: Package },
+  { key: 'change-orders', label: 'ÄTA', Icon: Receipt },
+  { key: 'quotes', label: 'Offert', Icon: FileText },
+  { key: 'self-checks', label: 'Egenkontroll', Icon: CheckCircle },
+  { key: 'inspections', label: 'Besiktning', Icon: ClipboardList },
+  { key: 'deviations', label: 'Avvikelser', Icon: AlertTriangle },
+  { key: 'invoice', label: 'Fakturering', Icon: Coins },
+  { key: 'documents', label: 'Dokument', Icon: FolderOpen },
+  { key: 'activity', label: 'Aktivitet', Icon: History },
+];
+
 export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjectsPageProps) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -163,7 +179,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
   const [activity, setActivity] = useState<ProjectActivityLog[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [tab, setTab] = useState<'overview' | 'time' | 'materials' | 'change-orders' | 'quotes' | 'self-checks' | 'inspections' | 'deviations' | 'invoice' | 'documents' | 'activity'>('overview');
+  const [tab, setTab] = useState<ProjectTabId>('overview');
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showTimeModal, setShowTimeModal] = useState(false);
@@ -943,7 +959,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         )}
       />
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[360px_1fr]">
+      <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[320px_minmax(0,1fr)]">
         <div className="space-y-4">
           <SearchInput placeholder="Sök projekt, kund, adress..." value={searchQuery} onChange={setSearchQuery} />
           {filteredProjects.length === 0 ? (
@@ -955,7 +971,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
               />
             </Card>
           ) : (
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:block 2xl:space-y-3">
               {filteredProjects.map(project => {
                 const customer = customers.find(c => c.id === project.customer_id);
                 const projectStaff = assignments.filter(a => a.project_id === project.id);
@@ -1019,7 +1035,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
               </div>
             </Card>
 
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
               <Stat label="Totala timmar" value={hours(totalMinutes)} icon={<Timer className="w-5 h-5" />} />
               <Stat label="Fakturerbar tid" value={money(timeValue)} icon={<Coins className="w-5 h-5" />} />
               <Stat label="Materialvärde" value={money(materialSale)} icon={<Package className="w-5 h-5" />} />
@@ -1035,28 +1051,24 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
             )}
 
             <Card>
-              <div className="flex gap-1 overflow-x-auto border-b border-slate-200 p-2">
-                {[
-                  ['overview', 'Översikt', ClipboardList],
-                  ['time', 'Tid', Timer],
-                  ['materials', 'Material', Package],
-                  ['change-orders', 'ÄTA', Receipt],
-                  ['quotes', 'Offert', FileText],
-                  ['self-checks', 'Egenkontroll', CheckCircle],
-                  ['inspections', 'Besiktning', ClipboardList],
-                  ['deviations', 'Avvikelser', AlertTriangle],
-                  ['invoice', 'Fakturering', Coins],
-                  ['documents', 'Dokument', FolderOpen],
-                  ['activity', 'Aktivitet', History],
-                ].map(([key, label, Icon]) => (
+              <div className="border-b border-slate-200 p-3 xl:hidden">
+                <Select
+                  label="Projektvy"
+                  value={tab}
+                  onChange={(event) => setTab(event.target.value as ProjectTabId)}
+                  options={PROJECT_TABS.map(({ key, label }) => ({ value: key, label }))}
+                />
+              </div>
+              <div className="hidden flex-wrap gap-1 border-b border-slate-200 p-2 xl:flex">
+                {PROJECT_TABS.map(({ key, label, Icon }) => (
                   <button
-                    key={key as string}
-                    onClick={() => setTab(key as typeof tab)}
+                    key={key}
+                    onClick={() => setTab(key)}
                     className={`inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                       tab === key ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    <Icon className="w-4 h-4" /> {label as string}
+                    <Icon className="w-4 h-4" /> {label}
                   </button>
                 ))}
               </div>

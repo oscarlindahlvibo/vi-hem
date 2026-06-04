@@ -101,7 +101,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
   const [staffMembers, setStaffMembers] = useState<Profile[]>([]);
   const [internalNotes, setInternalNotes] = useState('');
   const [newStatus, setNewStatus] = useState<MRStatus | ''>('');
-  const [assignedTo, setAssignedTo] = useState<string | ''>('');
+  const [assignedToIds, setAssignedToIds] = useState<string[]>([]);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [updatingAssignment, setUpdatingAssignment] = useState(false);
   const [savingNotes, setSavingNotes] = useState(false);
@@ -109,8 +109,9 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
 
   // Work order creation from maintenance request
   const [showCreateWOModal, setShowCreateWOModal] = useState(false);
-  const [woForm, setWoForm] = useState({ title: '', description: '', category: WO_CATEGORIES[0], priority: 'normal', assigned_to: '' });
+  const [woForm, setWoForm] = useState({ title: '', description: '', category: WO_CATEGORIES[0], priority: 'normal', assigned_to_ids: [] as string[] });
   const [creatingWO, setCreatingWO] = useState(false);
+  const [createWOError, setCreateWOError] = useState('');
 
   // Stamp-in on maintenance request
   const [showStampModal, setShowStampModal] = useState(false);
@@ -142,7 +143,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
       fetchComments(selectedRequest.id);
       setInternalNotes(selectedRequest.internal_notes || '');
       setNewStatus(selectedRequest.status);
-      setAssignedTo(selectedRequest.assigned_to || '');
+      setAssignedToIds(selectedRequest.assigned_to_ids?.length ? selectedRequest.assigned_to_ids : selectedRequest.assigned_to ? [selectedRequest.assigned_to] : []);
       if (isStaff) checkActiveEntry();
     }
   }, [selectedRequest, showDetailModal]);
@@ -166,6 +167,8 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
         preferred_times,
         contact_info,
         assigned_to,
+        assigned_to_ids,
+        attachments,
         internal_notes,
         created_at,
         updated_at,
@@ -359,28 +362,22 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
   }
 
   async function handleAssignStaff() {
-    if (!selectedRequest || !assignedTo) return;
+    if (!selectedRequest) return;
 
     try {
       setUpdatingAssignment(true);
       const { error } = await supabase
         .from('maintenance_requests')
-        .update({ assigned_to: assignedTo })
+        .update({ assigned_to: assignedToIds[0] || null, assigned_to_ids: assignedToIds })
         .eq('id', selectedRequest.id);
 
       if (error) throw error;
 
-      // Fetch updated staff member
-      const { data: staff } = await supabase
-        .from('profiles')
-        .select('id, name, email, phone, role')
-        .eq('id', assignedTo)
-        .single();
-
       setSelectedRequest({
         ...selectedRequest,
-        assigned_to: assignedTo,
-        assigned: staff as ProfileSummary | null,
+        assigned_to: assignedToIds[0] || null,
+        assigned_to_ids: assignedToIds,
+        assigned: staffMembers.find((staff) => staff.id === assignedToIds[0]) as ProfileSummary | undefined,
       });
       await fetchRequests();
     } catch (err) {
@@ -495,6 +492,8 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
     if (!user || !selectedRequest || !woForm.title) return;
     try {
       setCreatingWO(true);
+      setCreateWOError('');
+      const assignedIds = woForm.assigned_to_ids;
       const { error } = await supabase.from('work_orders').insert({
         title: woForm.title,
         description: woForm.description,
@@ -505,17 +504,45 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
         apartment_id: selectedRequest.apartment_id || null,
         tenant_id: selectedRequest.tenant_id || null,
         maintenance_request_id: selectedRequest.id,
-        assigned_to: woForm.assigned_to || null,
+        assigned_to: assignedIds[0] || null,
+        assigned_to_ids: assignedIds,
         created_by: user.id,
+        organisation_id: user.organisation_id || selectedRequest.organisation_id || null,
       });
       if (error) throw error;
       setShowCreateWOModal(false);
-      setWoForm({ title: '', description: '', category: WO_CATEGORIES[0], priority: 'normal', assigned_to: '' });
-    } catch (err) {
+      setWoForm({ title: '', description: '', category: WO_CATEGORIES[0], priority: 'normal', assigned_to_ids: [] });
+    } catch (err: any) {
       console.error('Failed to create work order:', err);
+      setCreateWOError(err.message || 'Kunde inte skapa arbetsorder från felanmälan.');
     } finally {
       setCreatingWO(false);
     }
+  }
+
+  function assigneeName(id: string) {
+    return staffMembers.find((staff) => staff.id === id)?.name || 'Okänd';
+  }
+
+  function requestAssigneeNames(req: MRWithRelations) {
+    const ids = req.assigned_to_ids?.length ? req.assigned_to_ids : req.assigned_to ? [req.assigned_to] : [];
+    if (ids.length === 0) return req.assigned?.name || 'Ej tilldelad';
+    return ids.map(assigneeName).join(', ');
+  }
+
+  function toggleRequestAssignee(staffId: string) {
+    setAssignedToIds((current) => current.includes(staffId)
+      ? current.filter((id) => id !== staffId)
+      : [...current, staffId]);
+  }
+
+  function toggleWOAssignee(staffId: string) {
+    setWoForm((current) => ({
+      ...current,
+      assigned_to_ids: current.assigned_to_ids.includes(staffId)
+        ? current.assigned_to_ids.filter((id) => id !== staffId)
+        : [...current.assigned_to_ids, staffId],
+    }));
   }
 
   // Filter requests for display
@@ -531,7 +558,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
     const matchesPriority =
       filterPriority === 'all' || req.priority === filterPriority;
     const matchesAssignee =
-      filterAssignee === 'all' || req.assigned_to === user?.id;
+      filterAssignee === 'all' || req.assigned_to === user?.id || req.assigned_to_ids?.includes(user?.id || '');
 
     return (
       matchesTab && matchesSearch && matchesStatus && matchesCategory && matchesPriority && matchesAssignee
@@ -830,7 +857,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                         Tilldelad
                       </h3>
                       <p className="text-sm text-slate-700">
-                        {selectedRequest.assigned?.name || 'Ej tilldelad'}
+                        {requestAssigneeNames(selectedRequest)}
                       </p>
                     </div>
                   </div>
@@ -1087,7 +1114,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                       </div>
                       <div className="flex items-center gap-2 min-w-0">
                         <ClipboardList className="w-4 h-4 text-slate-400 shrink-0" />
-                        <span className="truncate">{req.assigned?.name || 'Ej tilldelad'}</span>
+                        <span className="truncate">{requestAssigneeNames(req)}</span>
                       </div>
                     </div>
                   </Card>
@@ -1162,7 +1189,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                         {formatDateTime(req.created_at)}
                       </td>
                       <td className="px-4 py-3 text-slate-600">
-                        {req.assigned?.name || '–'}
+                        {requestAssigneeNames(req)}
                       </td>
                       </tr>
                     ))}
@@ -1247,7 +1274,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                         Tilldelad
                       </h3>
                       <p className="text-sm text-slate-700">
-                        {selectedRequest.assigned?.name || 'Ej tilldelad'}
+                        {requestAssigneeNames(selectedRequest)}
                       </p>
                     </div>
                   </div>
@@ -1310,18 +1337,20 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                     </div>
 
                     <div>
-                      <Select
-                        label="Tilldela till"
-                        value={assignedTo}
-                        onChange={e => setAssignedTo(e.target.value)}
-                        options={[
-                          { value: '', label: 'Ej tilldelad' },
-                          ...staffMembers.map(s => ({
-                            value: s.id,
-                            label: s.name,
-                          })),
-                        ]}
-                      />
+                      <p className="text-sm font-medium text-slate-700">Tilldela till</p>
+                      <div className="mt-2 grid grid-cols-1 gap-2">
+                        {staffMembers.map((staff) => (
+                          <label key={staff.id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={assignedToIds.includes(staff.id)}
+                              onChange={() => toggleRequestAssignee(staff.id)}
+                              className="rounded border-slate-300 accent-blue-600"
+                            />
+                            <span>{staff.name}</span>
+                          </label>
+                        ))}
+                      </div>
                       <Button
                         variant="primary"
                         size="sm"
@@ -1461,8 +1490,9 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                         description: selectedRequest.description,
                         category: WO_CATEGORIES[0],
                         priority: selectedRequest.priority === 'urgent' ? 'urgent' : 'normal',
-                        assigned_to: selectedRequest.assigned_to || '',
+                        assigned_to_ids: selectedRequest.assigned_to_ids?.length ? selectedRequest.assigned_to_ids : selectedRequest.assigned_to ? [selectedRequest.assigned_to] : [],
                       });
+                      setCreateWOError('');
                       setShowCreateWOModal(true);
                     }}
                   >
@@ -1505,6 +1535,11 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
           {selectedRequest && (
             <Modal open={showCreateWOModal} onClose={() => setShowCreateWOModal(false)} title="Skapa arbetsorder" size="lg">
               <div className="space-y-4">
+                {createWOError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {createWOError}
+                  </div>
+                )}
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-600">
                   Skapar arbetsorder från felanmälan: <span className="font-medium text-slate-800">{selectedRequest.title}</span>
                 </div>
@@ -1536,12 +1571,22 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                     options={Object.entries(WO_PRIORITY_LABELS).map(([k, v]) => ({ value: k, label: v }))}
                   />
                 </div>
-                <Select
-                  label="Tilldelad till (valfritt)"
-                  value={woForm.assigned_to}
-                  onChange={(e) => setWoForm({ ...woForm, assigned_to: e.target.value })}
-                  options={[{ value: '', label: '— Ingen —' }, ...staffMembers.map((s) => ({ value: s.id, label: s.name }))]}
-                />
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-slate-700">Tilldela till</p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {staffMembers.map((staff) => (
+                      <label key={staff.id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={woForm.assigned_to_ids.includes(staff.id)}
+                          onChange={() => toggleWOAssignee(staff.id)}
+                          className="rounded border-slate-300 accent-blue-600"
+                        />
+                        <span>{staff.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
                 <div className="flex gap-3 pt-2">
                   <Button variant="secondary" onClick={() => setShowCreateWOModal(false)} className="flex-1">Avbryt</Button>
                   <Button variant="primary" onClick={handleCreateWorkOrder} loading={creatingWO} disabled={!woForm.title.trim()} className="flex-1 gap-2">

@@ -139,6 +139,8 @@ export interface MaintenanceRequest {
   preferred_times: string;
   contact_info: Record<string, string>;
   assigned_to: string | null;
+  assigned_to_ids: string[];
+  attachments: AttachmentItem[];
   internal_notes: string;
   created_at: string;
   updated_at: string;
@@ -176,12 +178,14 @@ export interface WorkOrder {
   customer_project_id: string | null;
   maintenance_request_id: string | null;
   assigned_to: string | null;
+  assigned_to_ids: string[];
   created_by: string | null;
   started_at: string | null;
   completed_at: string | null;
   due_date: string | null;
   checklist: ChecklistItem[];
   materials: MaterialItem[];
+  attachments: AttachmentItem[];
   created_at: string;
   updated_at: string;
   property?: Property;
@@ -202,6 +206,17 @@ export interface MaterialItem {
   quantity: number;
   unit: string;
   cost?: number;
+}
+
+export interface AttachmentItem {
+  id: string;
+  name: string;
+  url: string;
+  path?: string;
+  type?: string;
+  size?: number;
+  uploaded_at: string;
+  uploaded_by?: string | null;
 }
 
 export interface WorkOrderComment {

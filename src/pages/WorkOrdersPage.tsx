@@ -31,6 +31,8 @@ import type {
   WOPriority,
   Profile,
   Property,
+  Apartment,
+  AttachmentItem,
 } from '../types';
 import {
   Plus,
@@ -46,6 +48,9 @@ import {
   Clock,
   Play,
   Square,
+  Paperclip,
+  CheckSquare,
+  X,
 } from 'lucide-react';
 import { TIME_CATEGORY_LABELS } from '../lib/utils';
 import type { TimeCategory } from '../types';
@@ -62,6 +67,36 @@ interface WOWithRelations extends Omit<WorkOrder, 'property' | 'apartment' | 'te
   assigned?: WorkOrderPerson;
   creator?: WorkOrderPerson;
 }
+
+type CreateWorkOrderForm = {
+  title: string;
+  description: string;
+  category: string;
+  priority: WOPriority;
+  status: WOStatus;
+  property_id: string;
+  apartment_id: string;
+  tenant_id: string;
+  due_date: string;
+  assigned_to_ids: string[];
+  checklist: string[];
+  files: File[];
+};
+
+const defaultCreateForm: CreateWorkOrderForm = {
+  title: '',
+  description: '',
+  category: WO_CATEGORIES[0],
+  priority: 'normal',
+  status: 'new',
+  property_id: '',
+  apartment_id: '',
+  tenant_id: '',
+  due_date: '',
+  assigned_to_ids: [],
+  checklist: [''],
+  files: [],
+};
 
 const WO_STATUSES: WOStatus[] = [
   'new',
@@ -92,6 +127,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [properties, setProperties] = useState<Property[]>([]);
+  const [apartments, setApartments] = useState<Apartment[]>([]);
+  const [tenants, setTenants] = useState<Profile[]>([]);
   const [staffMembers, setStaffMembers] = useState<Profile[]>([]);
   const [comments, setComments] = useState<WorkOrderComment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
@@ -102,25 +139,15 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
   const [showFilters, setShowFilters] = useState(false);
 
   // Create form state
-  const [createForm, setCreateForm] = useState({
-    title: '',
-    description: '',
-    category: WO_CATEGORIES[0],
-    priority: 'normal' as WOPriority,
-    status: 'new' as WOStatus,
-    property_id: '',
-    apartment_id: '',
-    tenant_id: '',
-    due_date: '',
-    assigned_to: '',
-  });
+  const [createForm, setCreateForm] = useState<CreateWorkOrderForm>(defaultCreateForm);
   const [submittingCreate, setSubmittingCreate] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   // Detail modal state
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newDetailStatus, setNewDetailStatus] = useState<WOStatus>('new');
   const [updatingAssignment, setUpdatingAssignment] = useState(false);
-  const [newAssignedTo, setNewAssignedTo] = useState('');
+  const [newAssignedToIds, setNewAssignedToIds] = useState<string[]>([]);
 
   // Stamp-in state (inline, tied to work order detail)
   const [showStampInModal, setShowStampInModal] = useState(false);
@@ -137,6 +164,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
       fetchWorkOrders();
       if (isStaff) {
         fetchProperties();
+        fetchApartments();
+        fetchTenants();
         fetchStaffMembers();
       }
     }
@@ -206,6 +235,36 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
     }
   }
 
+  async function fetchApartments() {
+    try {
+      const { data, error } = await supabase
+        .from('apartments')
+        .select('*')
+        .order('apartment_number');
+
+      if (error) throw error;
+      setApartments(data || []);
+    } catch (err) {
+      console.error('Error fetching apartments:', err);
+    }
+  }
+
+  async function fetchTenants() {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'tenant')
+        .eq('active', true)
+        .order('name');
+
+      if (error) throw error;
+      setTenants(data || []);
+    } catch (err) {
+      console.error('Error fetching tenants:', err);
+    }
+  }
+
   async function fetchComments() {
     if (!selectedWorkOrder) return;
     try {
@@ -246,8 +305,17 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
 
     try {
       setSubmittingCreate(true);
+      setCreateError('');
+      const workOrderId = crypto.randomUUID();
+      const attachments = await uploadWorkOrderFiles(workOrderId, createForm.files, user.id);
+      const checklist = createForm.checklist
+        .map((text) => text.trim())
+        .filter(Boolean)
+        .map((text) => ({ id: crypto.randomUUID(), text, done: false }));
+      const assignedIds = createForm.assigned_to_ids;
       const { error } = await supabase.from('work_orders').insert([
         {
+          id: workOrderId,
           title: createForm.title,
           description: createForm.description,
           category: createForm.category,
@@ -257,32 +325,55 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
           apartment_id: createForm.apartment_id || null,
           tenant_id: createForm.tenant_id || null,
           due_date: createForm.due_date || null,
-          assigned_to: createForm.assigned_to || null,
+          assigned_to: assignedIds[0] || null,
+          assigned_to_ids: assignedIds,
+          checklist,
+          attachments,
           created_by: user.id,
           organisation_id: user.organisation_id || null,
         },
       ]);
 
       if (error) throw error;
-      setCreateForm({
-        title: '',
-        description: '',
-        category: WO_CATEGORIES[0],
-        priority: 'normal',
-        status: 'new',
-        property_id: '',
-        apartment_id: '',
-        tenant_id: '',
-        due_date: '',
-        assigned_to: '',
-      });
+      setCreateForm(defaultCreateForm);
       setShowCreateModal(false);
       await fetchWorkOrders();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error creating work order:', err);
+      setCreateError(err.message || 'Kunde inte skapa arbetsordern. Kontrollera fälten och försök igen.');
     } finally {
       setSubmittingCreate(false);
     }
+  }
+
+  async function uploadWorkOrderFiles(workOrderId: string, files: File[], userId: string): Promise<AttachmentItem[]> {
+    if (files.length === 0) return [];
+
+    const uploaded: AttachmentItem[] = [];
+    for (const file of files) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
+      const path = `work-orders/${workOrderId}/${crypto.randomUUID()}-${safeName}`;
+      const { error } = await supabase.storage
+        .from('work-order-attachments')
+        .upload(path, file, { upsert: false });
+
+      if (error) {
+        throw new Error(`Kunde inte ladda upp ${file.name}: ${error.message}`);
+      }
+
+      const { data } = supabase.storage.from('work-order-attachments').getPublicUrl(path);
+      uploaded.push({
+        id: crypto.randomUUID(),
+        name: file.name,
+        url: data.publicUrl,
+        path,
+        type: file.type,
+        size: file.size,
+        uploaded_at: new Date().toISOString(),
+        uploaded_by: userId,
+      });
+    }
+    return uploaded;
   }
 
   async function addComment() {
@@ -335,13 +426,14 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
 
     try {
       setUpdatingAssignment(true);
+      const assignedIds = newAssignedToIds;
       const { error } = await supabase
         .from('work_orders')
-        .update({ assigned_to: newAssignedTo || null })
+        .update({ assigned_to: assignedIds[0] || null, assigned_to_ids: assignedIds })
         .eq('id', selectedWorkOrder.id);
 
       if (error) throw error;
-      setSelectedWorkOrder({ ...selectedWorkOrder, assigned_to: newAssignedTo || null });
+      setSelectedWorkOrder({ ...selectedWorkOrder, assigned_to: assignedIds[0] || null, assigned_to_ids: assignedIds });
       await fetchWorkOrders();
     } catch (err) {
       console.error('Error updating assignment:', err);
@@ -439,7 +531,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
 
       let matchesView = true;
       if (filterView === 'mine') {
-        matchesView = wo.assigned_to === user?.id;
+        matchesView = wo.assigned_to === user?.id || wo.assigned_to_ids?.includes(user?.id || '');
       } else if (filterView === 'new') {
         matchesView = wo.status === 'new';
       } else if (filterView === 'urgent') {
@@ -474,6 +566,40 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
   if (authLoading) return <LoadingPage />;
 
   const filtered = filteredWorkOrders();
+  const propertyApartments = createForm.property_id
+    ? apartments.filter((apt) => apt.property_id === createForm.property_id)
+    : apartments;
+  const assigneeName = (id: string) => staffMembers.find((staff) => staff.id === id)?.name || 'Okänd';
+  const assigneeNames = (wo: WOWithRelations) => {
+    const ids = wo.assigned_to_ids?.length ? wo.assigned_to_ids : wo.assigned_to ? [wo.assigned_to] : [];
+    if (ids.length === 0) return wo.assigned?.name || 'Ej tilldelad';
+    return ids.map(assigneeName).join(', ');
+  };
+  const toggleCreateAssignee = (staffId: string) => {
+    setCreateForm((current) => ({
+      ...current,
+      assigned_to_ids: current.assigned_to_ids.includes(staffId)
+        ? current.assigned_to_ids.filter((id) => id !== staffId)
+        : [...current.assigned_to_ids, staffId],
+    }));
+  };
+  const toggleDetailAssignee = (staffId: string) => {
+    setNewAssignedToIds((current) => current.includes(staffId)
+      ? current.filter((id) => id !== staffId)
+      : [...current, staffId]);
+  };
+  const updateChecklistItem = (index: number, value: string) => {
+    setCreateForm((current) => ({
+      ...current,
+      checklist: current.checklist.map((item, itemIndex) => itemIndex === index ? value : item),
+    }));
+  };
+  const removeChecklistItem = (index: number) => {
+    setCreateForm((current) => ({
+      ...current,
+      checklist: current.checklist.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
   const activeCount = workOrders.filter((wo) => !ARCHIVED_WO_STATUSES.includes(wo.status)).length;
   const archivedCount = workOrders.filter((wo) => ARCHIVED_WO_STATUSES.includes(wo.status)).length;
   const statusFilterOptions = WO_STATUSES
@@ -718,7 +844,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
                 onClick={() => {
                   setSelectedWorkOrder(wo);
                   setNewDetailStatus(wo.status);
-                  setNewAssignedTo(wo.assigned_to || '');
+                  setNewAssignedToIds(wo.assigned_to_ids?.length ? wo.assigned_to_ids : wo.assigned_to ? [wo.assigned_to] : []);
                   setShowDetailModal(true);
                 }}
               >
@@ -748,7 +874,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
                   </div>
                   <div className="flex items-center gap-2 min-w-0">
                     <User className="w-4 h-4 text-slate-400 shrink-0" />
-                    <span className="truncate">{wo.assigned?.name || 'Ej tilldelad'}</span>
+                    <span className="truncate">{assigneeNames(wo)}</span>
                   </div>
                   <div className="flex items-center gap-2 min-w-0">
                     <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
@@ -782,7 +908,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
                       onClick={() => {
                         setSelectedWorkOrder(wo);
                         setNewDetailStatus(wo.status);
-                        setNewAssignedTo(wo.assigned_to || '');
+                        setNewAssignedToIds(wo.assigned_to_ids?.length ? wo.assigned_to_ids : wo.assigned_to ? [wo.assigned_to] : []);
                         setShowDetailModal(true);
                       }}
                     >
@@ -802,7 +928,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
                         {wo.property?.name || '–'}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-600">
-                        {wo.assigned?.name || '–'}
+                        {assigneeNames(wo)}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-600">
                         {wo.due_date ? formatDate(wo.due_date) : '–'}
@@ -841,7 +967,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
                         onClick={() => {
                           setSelectedWorkOrder(wo);
                           setNewDetailStatus(wo.status);
-                          setNewAssignedTo(wo.assigned_to || '');
+                          setNewAssignedToIds(wo.assigned_to_ids?.length ? wo.assigned_to_ids : wo.assigned_to ? [wo.assigned_to] : []);
                           setShowDetailModal(true);
                         }}
                       >
@@ -856,10 +982,10 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
                             </Badge>
                           </div>
 
-                          {wo.assigned?.name && (
+                          {(wo.assigned_to_ids?.length || wo.assigned?.name) && (
                             <div className="flex items-center gap-1 text-xs text-slate-600">
                               <User className="w-3 h-3" />
-                              {wo.assigned.name}
+                              {assigneeNames(wo)}
                             </div>
                           )}
 
@@ -884,10 +1010,19 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
       {isStaff && (
         <Modal
           open={showCreateModal}
-          onClose={() => setShowCreateModal(false)}
+          onClose={() => {
+            setShowCreateModal(false);
+            setCreateError('');
+          }}
           title="Ny arbetsorder"
+          size="lg"
         >
           <div className="space-y-4">
+            {createError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {createError}
+              </div>
+            )}
             <Input
               label="Titel *"
               required
@@ -934,21 +1069,27 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
               label="Fastighet"
               options={[{ value: '', label: '- Ingen -' }, ...properties.map((p) => ({ value: p.id, label: p.name }))]}
               value={createForm.property_id}
-              onChange={(e) => setCreateForm({ ...createForm, property_id: e.target.value })}
+              onChange={(e) => setCreateForm({ ...createForm, property_id: e.target.value, apartment_id: '' })}
             />
 
-            <Input
-              label="Lägenhetsnummer"
+            <Select
+              label="Lägenhet"
+              options={[
+                { value: '', label: '- Ingen -' },
+                ...propertyApartments.map((apt) => ({
+                  value: apt.id,
+                  label: `${apt.apartment_number}${apt.property?.name ? ` · ${apt.property.name}` : ''}`,
+                })),
+              ]}
               value={createForm.apartment_id}
               onChange={(e) => setCreateForm({ ...createForm, apartment_id: e.target.value })}
-              placeholder="T.ex. 201"
             />
 
-            <Input
-              label="Hyresgäst ID"
+            <Select
+              label="Hyresgäst"
+              options={[{ value: '', label: '- Ingen -' }, ...tenants.map((tenant) => ({ value: tenant.id, label: tenant.name }))]}
               value={createForm.tenant_id}
               onChange={(e) => setCreateForm({ ...createForm, tenant_id: e.target.value })}
-              placeholder="Lägg till hyresgäst om relevant"
             />
 
             <Input
@@ -958,17 +1099,89 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
               onChange={(e) => setCreateForm({ ...createForm, due_date: e.target.value })}
             />
 
-            <Select
-              label="Tilldelad till"
-              options={[{ value: '', label: '- Ingen -' }, ...staffMembers.map((s) => ({ value: s.id, label: s.name }))]}
-              value={createForm.assigned_to}
-              onChange={(e) => setCreateForm({ ...createForm, assigned_to: e.target.value })}
-            />
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-slate-700">Tilldela till</p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {staffMembers.map((staff) => (
+                  <label key={staff.id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={createForm.assigned_to_ids.includes(staff.id)}
+                      onChange={() => toggleCreateAssignee(staff.id)}
+                      className="rounded border-slate-300 accent-blue-600"
+                    />
+                    <span>{staff.name}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-slate-500">Första valda person blir primärt ansvarig, men alla valda visas som tilldelade.</p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium text-slate-700">Checklista</p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setCreateForm({ ...createForm, checklist: [...createForm.checklist, ''] })}
+                >
+                  <Plus className="w-3.5 h-3.5" /> Lägg till rad
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {createForm.checklist.map((item, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <Input
+                      value={item}
+                      onChange={(event) => updateChecklistItem(index, event.target.value)}
+                      placeholder="Ex. Kontrollera lås, dokumentera före/efter..."
+                    />
+                    {createForm.checklist.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeChecklistItem(index)}
+                        className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-slate-700">Bilder/filer</p>
+              <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center text-sm text-slate-600 hover:bg-slate-100">
+                <Paperclip className="mb-2 h-5 w-5 text-slate-400" />
+                Välj bilder eller filer att bifoga
+                <input
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => setCreateForm({ ...createForm, files: Array.from(event.target.files || []) })}
+                />
+              </label>
+              {createForm.files.length > 0 && (
+                <div className="space-y-1">
+                  {createForm.files.map((file) => (
+                    <div key={`${file.name}-${file.size}`} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                      <Paperclip className="h-3.5 w-3.5" />
+                      <span className="truncate">{file.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <div className="flex gap-2 pt-4">
               <Button
                 variant="secondary"
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setCreateError('');
+                }}
               >
                 Avbryt
               </Button>
@@ -1075,22 +1288,29 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
               </div>
 
               {isStaff && (
-                <div>
+                <div className="md:col-span-2">
                   <p className="text-xs font-medium text-slate-500 uppercase">Tilldelad till</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Select
-                      options={[{ value: '', label: '- Ingen -' }, ...staffMembers.map((s) => ({ value: s.id, label: s.name }))]}
-                      value={newAssignedTo}
-                      onChange={(e) => setNewAssignedTo(e.target.value)}
-                      className="text-sm flex-1"
-                    />
+                  <div className="mt-2 space-y-3">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {staffMembers.map((staff) => (
+                        <label key={staff.id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={newAssignedToIds.includes(staff.id)}
+                            onChange={() => toggleDetailAssignee(staff.id)}
+                            className="rounded border-slate-300 accent-blue-600"
+                          />
+                          <span>{staff.name}</span>
+                        </label>
+                      ))}
+                    </div>
                     <Button
                       variant="secondary"
                       size="sm"
                       onClick={updateWorkOrderAssignment}
                       loading={updatingAssignment}
                     >
-                      Uppdatera
+                      Uppdatera tilldelning
                     </Button>
                   </div>
                 </div>
@@ -1100,7 +1320,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
                 <p className="text-xs font-medium text-slate-500 uppercase">Tilldelad</p>
                 <div className="flex items-center gap-2 text-sm text-slate-800 mt-1">
                   <User className="w-4 h-4" />
-                  {selectedWorkOrder.assigned?.name || '–'}
+                  {assigneeNames(selectedWorkOrder)}
                 </div>
               </div>
             </div>
@@ -1109,6 +1329,40 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
               <div>
                 <p className="text-xs font-medium text-slate-500 uppercase mb-2">Beskrivning</p>
                 <p className="text-sm text-slate-600 whitespace-pre-wrap">{selectedWorkOrder.description}</p>
+              </div>
+            )}
+
+            {selectedWorkOrder.checklist?.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-medium uppercase text-slate-500">Checklista</p>
+                <div className="space-y-2">
+                  {selectedWorkOrder.checklist.map((item) => (
+                    <div key={item.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      <CheckSquare className={`h-4 w-4 ${item.done ? 'text-green-600' : 'text-slate-400'}`} />
+                      <span>{item.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {selectedWorkOrder.attachments?.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-medium uppercase text-slate-500">Bilagor</p>
+                <div className="space-y-2">
+                  {selectedWorkOrder.attachments.map((attachment) => (
+                    <a
+                      key={attachment.id}
+                      href={attachment.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-blue-700 hover:bg-blue-50"
+                    >
+                      <Paperclip className="h-4 w-4" />
+                      <span className="truncate">{attachment.name}</span>
+                    </a>
+                  ))}
+                </div>
               </div>
             )}
 

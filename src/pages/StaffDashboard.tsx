@@ -50,11 +50,11 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
             .eq('priority', 'urgent')
             .not('status', 'in', '(done,closed)'),
 
-          // Count my assigned work orders (assigned_to = user.id, status not in 'completed','cancelled')
+          // Count my assigned work orders, including multi-assignee rows.
           supabase
             .from('work_orders')
             .select('id', { count: 'exact', head: true })
-            .eq('assigned_to', user.id)
+            .or(`assigned_to.eq.${user.id},assigned_to_ids.cs.{${user.id}}`)
             .not('status', 'in', '(completed,cancelled)'),
 
           // Count new work orders (status='new')
@@ -77,7 +77,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           supabase
             .from('work_orders')
             .select('*')
-            .eq('assigned_to', user.id)
+            .or(`assigned_to.eq.${user.id},assigned_to_ids.cs.{${user.id}}`)
             .not('status', 'in', '(completed,cancelled)')
             .order('due_date', { ascending: true, nullsFirst: true })
             .limit(5),
