@@ -21,7 +21,7 @@ import {
   TIME_CATEGORY_LABELS,
   getTimeStatusColor,
 } from '../lib/utils';
-import type { TimeEntry, TimeCategory, WorkOrder, Profile } from '../types';
+import type { TimeEntry, TimeCategory, WorkOrder, Profile, CustomerProject } from '../types';
 import {
   Play,
   Square,
@@ -129,6 +129,7 @@ function AdminCombinedTimeView({ user }: { user: Profile }) {
 
 type StaffTab = 'list' | 'calendar';
 type WorkOrderSummary = Pick<WorkOrder, 'id' | 'title' | 'status'>;
+type CustomerProjectSummary = Pick<CustomerProject, 'id' | 'title' | 'name' | 'customer_name' | 'status'>;
 
 function StaffTimeView({ user }: { user: Profile }) {
   const [tab, setTab] = useState<StaffTab>('list');
@@ -137,6 +138,7 @@ function StaffTimeView({ user }: { user: Profile }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [loading, setLoading] = useState(false);
   const [workOrders, setWorkOrders] = useState<WorkOrderSummary[]>([]);
+  const [customerProjects, setCustomerProjects] = useState<CustomerProjectSummary[]>([]);
   const [dailySummaries, setDailySummaries] = useState<Record<string, DailyWorkSummary>>({});
 
   // Month navigation for calendar tab
@@ -181,7 +183,8 @@ function StaffTimeView({ user }: { user: Profile }) {
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
       const { data: current } = await supabase
-        .from('time_entries').select('*')
+        .from('time_entries')
+        .select('*, customer_project:customer_project_id(id, title, name, customer_name)')
         .eq('user_id', user.id).eq('status', 'draft')
         .gte('start_time', todayStart.toISOString()).is('end_time', null)
         .order('start_time', { ascending: false })
@@ -196,7 +199,7 @@ function StaffTimeView({ user }: { user: Profile }) {
 
       const { data: entriesData } = await supabase
         .from('time_entries')
-        .select('*, work_order:work_order_id(id, title)')
+        .select('*, work_order:work_order_id(id, title), customer_project:customer_project_id(id, title, name, customer_name)')
         .eq('user_id', user.id)
         .gte('start_time', startDate).lte('start_time', endDate)
         .order('start_time', { ascending: false });
@@ -217,6 +220,13 @@ function StaffTimeView({ user }: { user: Profile }) {
         .from('work_orders').select('id, title, status')
         .in('status', ['new', 'assigned', 'started', 'paused']);
       setWorkOrders(wos || []);
+
+      const { data: projectsData } = await supabase
+        .from('customer_projects')
+        .select('id, title, name, customer_name, status')
+        .not('status', 'in', '(archived,completed,cancelled)')
+        .order('updated_at', { ascending: false });
+      setCustomerProjects(projectsData || []);
     } finally {
       setLoading(false);
     }
@@ -258,12 +268,18 @@ function StaffTimeView({ user }: { user: Profile }) {
     }, { onConflict: 'user_id,work_date' });
   }
 
-  async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string) {
+  function getCustomerProject(projectId?: string | null) {
+    return customerProjects.find(project => project.id === projectId);
+  }
+
+  async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string) {
+    const project = getCustomerProject(customerProjectId);
     await supabase.from('time_entries').insert({
       user_id: user.id, work_order_id: workOrderId || null, category,
       organisation_id: user.organisation_id || null,
       entry_type: 'work',
-      customer_name: customerName || null,
+      customer_project_id: category === 'customer_project' ? customerProjectId || null : null,
+      customer_name: category === 'customer_project' ? project?.customer_name || customerName || null : customerName || null,
       start_time: new Date().toISOString(), end_time: null,
       break_minutes: 0, total_minutes: 0, comment: comment || '', status: 'draft',
     });
@@ -271,8 +287,9 @@ function StaffTimeView({ user }: { user: Profile }) {
     fetchData();
   }
 
-  async function handleSwitchJob(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string) {
+  async function handleSwitchJob(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string) {
     if (!currentEntry) return;
+    const project = getCustomerProject(customerProjectId);
     await finishOpenEntries();
     await supabase.from('time_entries').insert({
       user_id: user.id,
@@ -280,7 +297,8 @@ function StaffTimeView({ user }: { user: Profile }) {
       work_order_id: workOrderId || null,
       category,
       entry_type: 'work',
-      customer_name: customerName || null,
+      customer_project_id: category === 'customer_project' ? customerProjectId || null : null,
+      customer_name: category === 'customer_project' ? project?.customer_name || customerName || null : customerName || null,
       start_time: new Date().toISOString(),
       end_time: null,
       break_minutes: 0,
@@ -335,6 +353,7 @@ function StaffTimeView({ user }: { user: Profile }) {
         : 0,
       comment: payload.comment || '',
       work_order_id: payload.work_order_id || null,
+      customer_project_id: payload.category === 'customer_project' ? payload.customer_project_id || null : null,
       entry_type: payload.entry_type || 'work',
       customer_name: payload.customer_name || null,
       status,
@@ -436,7 +455,7 @@ function StaffTimeView({ user }: { user: Profile }) {
                 </p>
                 <p className={`text-xs mt-0.5 ${currentEntry.entry_type === 'break' ? 'text-amber-700' : 'text-emerald-700'}`}>
                   {TIME_CATEGORY_LABELS[currentEntry.category]} · Startade {new Date(currentEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
-                  {currentEntry.customer_name && ` · ${currentEntry.customer_name}`}
+                  {timeEntryProjectLabel(currentEntry) && ` · ${timeEntryProjectLabel(currentEntry)}`}
                 </p>
               </div>
             </div>
@@ -653,6 +672,7 @@ function StaffTimeView({ user }: { user: Profile }) {
         onClose={() => setShowStampModal(false)}
         onSubmit={stampMode === 'switch' ? handleSwitchJob : handleStampIn}
         workOrders={workOrders}
+        customerProjects={customerProjects}
         title={stampMode === 'switch' ? 'Byt jobb' : 'Stämpla in'}
         submitLabel={stampMode === 'switch' ? 'Byt jobb' : 'Stämpla in'}
       />
@@ -682,6 +702,7 @@ function StaffTimeView({ user }: { user: Profile }) {
         onClose={() => setShowManualModal(false)}
         onSubmit={(payload) => handleSaveEntry(payload)}
         workOrders={workOrders}
+        customerProjects={customerProjects}
         defaultDate={selectedDay}
         title="Registrera tid"
       />
@@ -693,6 +714,7 @@ function StaffTimeView({ user }: { user: Profile }) {
           onClose={() => { setShowEditModal(false); setEditingEntry(null); }}
           onSubmit={(payload) => handleSaveEntry(payload, editingEntry.id)}
           workOrders={workOrders}
+          customerProjects={customerProjects}
           entry={editingEntry}
           title="Redigera tidpost"
         />
@@ -743,7 +765,9 @@ function DayWorkCard({ dayKey, entries, summary, onEditEntry, onAddEntry, onEdit
             </div>
           ) : (
             <div className="space-y-2">
-              {sortedEntries.map(entry => (
+              {sortedEntries.map(entry => {
+                const projectLabel = timeEntryProjectLabel(entry);
+                return (
                 <div key={entry.id} className="flex items-start gap-3 rounded-lg border border-slate-100 bg-white px-3 py-2">
                   <div className={`mt-0.5 p-1.5 rounded-lg ${entry.entry_type === 'break' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
                     {entry.entry_type === 'break' ? <Coffee className="w-3.5 h-3.5" /> : <Briefcase className="w-3.5 h-3.5" />}
@@ -756,7 +780,7 @@ function DayWorkCard({ dayKey, entries, summary, onEditEntry, onAddEntry, onEdit
                       </span>
                       <span className="text-xs text-slate-500">{entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
                       {entry.work_order?.title && <span className="text-xs text-slate-500 truncate">· {entry.work_order.title}</span>}
-                      {entry.customer_name && <span className="text-xs text-slate-500 truncate">· Kund: {entry.customer_name}</span>}
+                      {projectLabel && <span className="text-xs text-slate-500 truncate">· Projekt: {projectLabel}</span>}
                     </div>
                     {entry.comment && <p className="text-xs text-slate-500 mt-0.5">{entry.comment}</p>}
                   </div>
@@ -767,7 +791,8 @@ function DayWorkCard({ dayKey, entries, summary, onEditEntry, onAddEntry, onEdit
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -797,6 +822,8 @@ function DayWorkCard({ dayKey, entries, summary, onEditEntry, onAddEntry, onEdit
 // ─── Entry card ────────────────────────────────────────────────────────────────
 
 function EntryCard({ entry, onEdit, showEdit }: { entry: any; onEdit: () => void; showEdit: boolean }) {
+  const projectLabel = timeEntryProjectLabel(entry);
+
   return (
     <Card className="p-4">
       <div className="flex items-start justify-between">
@@ -809,8 +836,8 @@ function EntryCard({ entry, onEdit, showEdit }: { entry: any; onEdit: () => void
             {entry.work_order?.title && (
               <span className="text-xs text-slate-500 truncate">· {entry.work_order.title}</span>
             )}
-            {entry.customer_name && (
-              <span className="text-xs text-slate-500 truncate">· Kund: {entry.customer_name}</span>
+            {projectLabel && (
+              <span className="text-xs text-slate-500 truncate">· Projekt: {projectLabel}</span>
             )}
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -843,19 +870,32 @@ function EntryCard({ entry, onEdit, showEdit }: { entry: any; onEdit: () => void
 
 // ─── Stamp in modal ────────────────────────────────────────────────────────────
 
-function StampInModal({ open, onClose, onSubmit, workOrders, title = 'Stämpla in', submitLabel = 'Stämpla in' }: {
+function projectOptionLabel(project: CustomerProjectSummary) {
+  return [project.title || project.name || 'Namnlöst projekt', project.customer_name].filter(Boolean).join(' · ');
+}
+
+function timeEntryProjectLabel(entry: Pick<TimeEntry, 'customer_name'> & { customer_project?: CustomerProjectSummary | null }) {
+  if (entry.customer_project) return projectOptionLabel(entry.customer_project);
+  return entry.customer_name || '';
+}
+
+function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, title = 'Stämpla in', submitLabel = 'Stämpla in' }: {
   open: boolean; onClose: () => void;
-  onSubmit: (cat: TimeCategory, woId?: string, comment?: string, customerName?: string) => void;
+  onSubmit: (cat: TimeCategory, woId?: string, comment?: string, customerName?: string, customerProjectId?: string) => void;
   workOrders: WorkOrderSummary[];
+  customerProjects: CustomerProjectSummary[];
   title?: string;
   submitLabel?: string;
 }) {
   const [category, setCategory] = useState<TimeCategory>('general');
   const [workOrderId, setWorkOrderId] = useState('');
-  const [customerName, setCustomerName] = useState('');
+  const [customerProjectId, setCustomerProjectId] = useState('');
   const [comment, setComment] = useState('');
 
-  function reset() { setCategory('general'); setWorkOrderId(''); setCustomerName(''); setComment(''); }
+  function reset() { setCategory('general'); setWorkOrderId(''); setCustomerProjectId(''); setComment(''); }
+
+  const selectedProject = customerProjects.find(project => project.id === customerProjectId);
+  const requiresProject = category === 'customer_project';
 
   return (
     <Modal open={open} onClose={() => { onClose(); reset(); }} title={title}>
@@ -865,12 +905,25 @@ function StampInModal({ open, onClose, onSubmit, workOrders, title = 'Stämpla i
         <Select label="Arbetsorder (valfritt)" value={workOrderId} onChange={e => setWorkOrderId(e.target.value)}
           options={[{ value: '', label: 'Ingen' }, ...workOrders.map(wo => ({ value: wo.id, label: wo.title }))]} />
         {category === 'customer_project' && (
-          <Input label="Kund" value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Ex. Vibogruppen, BRF Eken..." />
+          <Select
+            label="Kundprojekt"
+            value={customerProjectId}
+            onChange={e => setCustomerProjectId(e.target.value)}
+            options={[
+              { value: '', label: customerProjects.length === 0 ? 'Inga tillgängliga kundprojekt' : 'Välj kundprojekt' },
+              ...customerProjects.map(project => ({ value: project.id, label: projectOptionLabel(project) })),
+            ]}
+          />
         )}
         <Textarea label="Kommentar (valfritt)" value={comment} onChange={e => setComment(e.target.value)} rows={2} />
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={() => { onClose(); reset(); }} className="flex-1">Avbryt</Button>
-          <Button variant="primary" onClick={() => { onSubmit(category, workOrderId || undefined, comment, customerName); reset(); }} className="flex-1 gap-2">
+          <Button
+            variant="primary"
+            onClick={() => { onSubmit(category, workOrderId || undefined, comment, selectedProject?.customer_name || '', customerProjectId || undefined); reset(); }}
+            disabled={requiresProject && !customerProjectId}
+            className="flex-1 gap-2"
+          >
             <Play className="w-4 h-4" /> {submitLabel}
           </Button>
         </div>
@@ -883,10 +936,11 @@ function StampInModal({ open, onClose, onSubmit, workOrders, title = 'Stämpla i
 
 interface EntryFormPayload extends Partial<TimeEntry> { submitNow?: boolean; }
 
-function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, defaultDate }: {
+function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects, entry, title, defaultDate }: {
   open: boolean; onClose: () => void;
   onSubmit: (payload: EntryFormPayload) => void;
   workOrders: WorkOrderSummary[];
+  customerProjects: CustomerProjectSummary[];
   entry?: TimeEntry;
   title: string;
   defaultDate?: string;
@@ -902,7 +956,7 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
   const [category, setCategory] = useState<TimeCategory>(entry?.category || 'general');
   const [entryType, setEntryType] = useState<TimeEntryKind>(entry?.entry_type || 'work');
   const [workOrderId, setWorkOrderId] = useState(entry?.work_order_id || '');
-  const [customerName, setCustomerName] = useState(entry?.customer_name || '');
+  const [customerProjectId, setCustomerProjectId] = useState(entry?.customer_project_id || '');
   const [startTime, setStartTime] = useState(defaultStart);
   const [endTime, setEndTime] = useState(defaultEnd);
   const [breakMins, setBreakMins] = useState(entry?.break_minutes ?? 30);
@@ -914,7 +968,7 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
       setCategory(entry?.category || 'general');
       setEntryType(entry?.entry_type || 'work');
       setWorkOrderId(entry?.work_order_id || '');
-      setCustomerName(entry?.customer_name || '');
+      setCustomerProjectId(entry?.customer_project_id || '');
       setStartTime(defaultStart);
       setEndTime(defaultEnd);
       setBreakMins(entry?.break_minutes ?? 30);
@@ -929,6 +983,8 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
   const isValid = !!startTime;
   const isRejected = entry?.status === 'rejected';
   const isDraft = !entry || entry.status === 'draft';
+  const selectedProject = customerProjects.find(project => project.id === customerProjectId);
+  const requiresProject = category === 'customer_project';
 
   function buildPayload(submitNow: boolean): EntryFormPayload {
     return {
@@ -938,7 +994,8 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
       end_time: endTime ? new Date(endTime).toISOString() : undefined,
       break_minutes: entryType === 'break' ? 0 : breakMins,
       work_order_id: workOrderId || null,
-      customer_name: customerName || null,
+      customer_project_id: category === 'customer_project' ? customerProjectId || null : null,
+      customer_name: category === 'customer_project' ? selectedProject?.customer_name || null : null,
       comment,
       submitNow,
     };
@@ -961,7 +1018,15 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
           <Select label="Arbetsorder (valfritt)" value={workOrderId} onChange={e => setWorkOrderId(e.target.value)}
             options={[{ value: '', label: 'Ingen' }, ...workOrders.map(wo => ({ value: wo.id, label: wo.title }))]} />
           {category === 'customer_project' ? (
-            <Input label="Kund" value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Ex. Vibogruppen, BRF Eken..." />
+            <Select
+              label="Kundprojekt"
+              value={customerProjectId}
+              onChange={e => setCustomerProjectId(e.target.value)}
+              options={[
+                { value: '', label: customerProjects.length === 0 ? 'Inga tillgängliga kundprojekt' : 'Välj kundprojekt' },
+                ...customerProjects.map(project => ({ value: project.id, label: projectOptionLabel(project) })),
+              ]}
+            />
           ) : (
             <div />
           )}
@@ -996,11 +1061,11 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, entry, title, def
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={onClose} className="flex-1">Avbryt</Button>
           {(isDraft || isRejected) && (
-            <Button variant="secondary" onClick={() => onSubmit(buildPayload(false))} disabled={!isValid} className="flex-1">
+            <Button variant="secondary" onClick={() => onSubmit(buildPayload(false))} disabled={!isValid || (requiresProject && !customerProjectId)} className="flex-1">
               Spara utkast
             </Button>
           )}
-          <Button variant="primary" onClick={() => onSubmit(buildPayload(true))} disabled={!isValid || !endTime} className="flex-1 gap-2">
+          <Button variant="primary" onClick={() => onSubmit(buildPayload(true))} disabled={!isValid || !endTime || (requiresProject && !customerProjectId)} className="flex-1 gap-2">
             <Send className="w-4 h-4" />
             {isRejected ? 'Skicka in igen' : 'Skicka för godkännande'}
           </Button>
@@ -1137,7 +1202,7 @@ function AdminTimeView({ user }: { user: Profile }) {
     const { start, end } = monthRange(month);
     const { data } = await supabase
       .from('time_entries')
-      .select('*, work_order:work_order_id(id, title)')
+      .select('*, work_order:work_order_id(id, title), customer_project:customer_project_id(id, title, name, customer_name)')
       .eq('user_id', staffId)
       .gte('start_time', start).lt('start_time', end)
       .order('start_time', { ascending: false });
@@ -1320,7 +1385,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                       <div className="flex items-center gap-2 flex-wrap mb-1">
                         <Badge className={getTimeStatusColor(entry.status)}>{STATUS_LABEL[entry.status as TimeStatus] || entry.status}</Badge>
                         <span className="text-xs text-slate-500">{entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
-                        {entry.customer_name && <span className="text-xs text-slate-500">· Kund: {entry.customer_name}</span>}
+                        {timeEntryProjectLabel(entry) && <span className="text-xs text-slate-500">· Projekt: {timeEntryProjectLabel(entry)}</span>}
                       </div>
                       <p className="text-xs text-slate-500">
                         {new Date(entry.start_time).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' })}

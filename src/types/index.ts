@@ -525,6 +525,7 @@ export interface TimeEntry {
   created_at: string;
   user?: Profile;
   work_order?: WorkOrder;
+  customer_project?: CustomerProject;
   property?: Property;
 }
 
