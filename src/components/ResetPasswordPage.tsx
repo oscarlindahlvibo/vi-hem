@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Building2, Lock, Eye, EyeOff } from 'lucide-react';
+import { Lock, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { AppLogo } from './AppLogo';
 import { Button } from './ui';
 
 export function ResetPasswordPage() {
@@ -43,8 +44,8 @@ export function ResetPasswordPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-lg">
-            <Building2 className="w-9 h-9 text-white" />
+          <div className="inline-flex w-16 h-16 rounded-2xl mb-4 shadow-lg overflow-hidden">
+            <AppLogo className="w-full h-full" />
           </div>
           <h1 className="text-3xl font-bold text-white">VI-HEM</h1>
           <p className="text-slate-400 mt-2">Välj ett nytt lösenord</p>
