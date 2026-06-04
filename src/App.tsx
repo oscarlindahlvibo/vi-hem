@@ -26,11 +26,13 @@ import { AdminTerminationsPage } from './pages/AdminTerminationsPage';
 import { ApartmentPage } from './pages/ApartmentPage';
 import { InspectionsPage } from './pages/InspectionsPage';
 import { AdminOrganisationsPage } from './pages/AdminOrganisationsPage';
+import { CustomerProjectsPage } from './pages/CustomerProjectsPage';
 
 function AppInner() {
   const { user, loading, passwordRecovery } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [notificationCount, setNotificationCount] = useState(0);
+  const [customerProjectsEnabled, setCustomerProjectsEnabled] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -42,6 +44,20 @@ function AppInner() {
     setCurrentPage(user.role === 'superadmin' ? 'admin-organisations' : 'dashboard');
     setNotificationCount(0);
   }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!user?.organisation_id || user.role === 'superadmin') {
+      setCustomerProjectsEnabled(false);
+      return;
+    }
+
+    supabase
+      .from('organisations')
+      .select('customer_projects_enabled')
+      .eq('id', user.organisation_id)
+      .maybeSingle()
+      .then(({ data }) => setCustomerProjectsEnabled(Boolean(data?.customer_projects_enabled)));
+  }, [user?.organisation_id, user?.role]);
 
   useEffect(() => {
     if (!user) return;
@@ -136,6 +152,10 @@ function AppInner() {
         if (!isStaff) return renderDashboard();
         return <PurchaseListPage onNavigate={navigate} />;
 
+      case 'customer-projects':
+        if (!isStaff || !customerProjectsEnabled) return renderDashboard();
+        return <CustomerProjectsPage onNavigate={navigate} />;
+
       case 'termination':
         if (!isTenant) return renderDashboard();
         return <TerminationPage onNavigate={navigate} />;
@@ -173,7 +193,12 @@ function AppInner() {
   }
 
   return (
-    <Layout currentPage={currentPage} onNavigate={navigate} notificationCount={notificationCount}>
+    <Layout
+      currentPage={currentPage}
+      onNavigate={navigate}
+      notificationCount={notificationCount}
+      customerProjectsEnabled={customerProjectsEnabled}
+    >
       {renderPage()}
     </Layout>
   );

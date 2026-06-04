@@ -9,6 +9,8 @@ export interface Organisation {
   max_users: number;
   max_properties: number;
   max_apartments: number;
+  customer_projects_enabled: boolean;
+  max_customer_projects: number;
   contact_email: string;
   contact_phone: string;
   logo_url: string;
@@ -212,6 +214,288 @@ export interface WorkOrderComment {
   user?: Profile;
 }
 
+export type CustomerProjectStatus =
+  | 'draft' | 'quote_created' | 'quote_sent' | 'quote_accepted' | 'planned'
+  | 'in_progress' | 'paused' | 'waiting_customer' | 'waiting_material'
+  | 'ready_for_inspection' | 'inspected_with_remarks' | 'approved'
+  | 'invoiced' | 'completed' | 'archived' | 'cancelled';
+
+export interface ProjectCustomer {
+  id: string;
+  organisation_id: string;
+  customer_type: 'private' | 'company' | 'brf' | 'property_owner' | 'internal';
+  name: string;
+  identity_number: string;
+  contact_person: string;
+  phone: string;
+  email: string;
+  invoice_address: string;
+  project_address: string;
+  reference: string;
+  notes: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerProject {
+  id: string;
+  organisation_id: string;
+  customer_id: string | null;
+  name: string;
+  customer_name: string;
+  title: string;
+  description: string;
+  status: CustomerProjectStatus;
+  project_address: string;
+  project_type: string;
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  billing_type: 'fixed_price' | 'hourly' | 'mixed';
+  project_manager_id: string | null;
+  start_date: string | null;
+  planned_end_date: string | null;
+  budget_amount: number;
+  quoted_amount: number;
+  approved_change_order_amount: number;
+  estimated_cost: number;
+  actual_cost: number;
+  invoiceable_amount: number;
+  invoiced_amount: number;
+  hourly_rate: number;
+  internal_reference: string;
+  external_reference: string;
+  property_id: string | null;
+  apartment_id: string | null;
+  created_by: string | null;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+  customer?: ProjectCustomer;
+  project_manager?: Profile;
+  assignments?: ProjectAssignment[];
+}
+
+export interface ProjectAssignment {
+  id: string;
+  project_id: string;
+  user_id: string;
+  role: 'project_manager' | 'staff' | 'viewer';
+  created_at: string;
+  user?: Profile;
+}
+
+export interface ProjectMaterialEntry {
+  id: string;
+  project_id: string;
+  change_order_id: string | null;
+  registered_by: string | null;
+  material_date: string;
+  name: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  purchase_price: number;
+  markup_percent: number;
+  sale_price: number;
+  vat_rate: number;
+  supplier: string;
+  receipt_url: string;
+  included_in_quote: boolean;
+  invoice_separately: boolean;
+  status: 'registered' | 'approved' | 'invoiced';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectChangeOrder {
+  id: string;
+  project_id: string;
+  change_order_number: string;
+  title: string;
+  description: string;
+  reason: string;
+  requested_by: string;
+  status: 'draft' | 'sent_to_customer' | 'approved_by_customer' | 'declined_by_customer' | 'completed' | 'invoiced' | 'written_off';
+  billing_mode: 'separate' | 'included' | 'internal_note' | 'deduction';
+  estimated_amount: number;
+  actual_amount: number;
+  schedule_impact: string;
+  customer_approved_at: string | null;
+  internal_comment: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectQuoteVersion {
+  id: string;
+  project_id: string;
+  version_number: number;
+  quote_number: string;
+  status: 'draft' | 'sent' | 'accepted' | 'declined' | 'expired' | 'replaced';
+  valid_until: string | null;
+  summary: string;
+  terms: string;
+  payment_terms: string;
+  total_amount: number;
+  vat_amount: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  lines?: ProjectQuoteLine[];
+}
+
+export interface ProjectQuoteLine {
+  id: string;
+  quote_version_id: string;
+  line_type: 'work' | 'material' | 'equipment' | 'subcontractor' | 'discount' | 'other';
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  vat_rate: number;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface ProjectActivityLog {
+  id: string;
+  project_id: string;
+  organisation_id: string;
+  user_id: string | null;
+  event_type: string;
+  description: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  user?: Profile;
+}
+
+export interface ProjectSelfCheckTemplate {
+  id: string;
+  organisation_id: string;
+  name: string;
+  category: string;
+  description: string;
+  checklist: ProjectSelfCheckTemplateItem[];
+  require_photo: boolean;
+  require_comment: boolean;
+  require_signature: boolean;
+  require_date: boolean;
+  require_responsible: boolean;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectSelfCheckTemplateItem {
+  id?: string;
+  text: string;
+  require_photo?: boolean;
+  require_comment?: boolean;
+}
+
+export interface ProjectSelfCheckItem {
+  text: string;
+  result: 'approved' | 'not_approved' | 'not_applicable';
+  comment?: string;
+  image_url?: string;
+  action_required?: boolean;
+}
+
+export interface ProjectSelfCheck {
+  id: string;
+  project_id: string;
+  template_id: string | null;
+  name: string;
+  category: string;
+  status: 'draft' | 'in_progress' | 'completed' | 'signed' | 'requires_action';
+  performed_by: string | null;
+  performed_at: string | null;
+  items: ProjectSelfCheckItem[];
+  notes: string;
+  signature_name: string;
+  signed_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectInspectionRemark {
+  title: string;
+  description: string;
+  responsible_id?: string | null;
+  deadline?: string;
+  status: 'new' | 'assigned' | 'in_progress' | 'fixed' | 'checked' | 'approved';
+}
+
+export interface ProjectInspection {
+  id: string;
+  project_id: string;
+  inspection_type: 'internal' | 'customer' | 'final';
+  inspection_date: string;
+  inspector_id: string | null;
+  customer_present: boolean;
+  project_status: string;
+  result: 'approved_without_remarks' | 'approved_with_minor_remarks' | 'not_approved' | 'requires_action';
+  remarks: ProjectInspectionRemark[];
+  photos: { url: string; comment?: string }[];
+  notes: string;
+  signature_name: string;
+  signed_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectDeviation {
+  id: string;
+  project_id: string;
+  title: string;
+  description: string;
+  deviation_date: string;
+  reported_by: string | null;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  image_url: string;
+  proposed_action: string;
+  responsible_id: string | null;
+  status: 'new' | 'assigned' | 'in_progress' | 'resolved' | 'closed';
+  related_type: string;
+  related_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectInvoiceBasis {
+  id: string;
+  project_id: string;
+  basis_number: string;
+  invoice_type: 'partial' | 'final' | 'credit' | 'internal';
+  status: 'draft' | 'ready_for_invoicing' | 'invoiced' | 'do_not_invoice';
+  title: string;
+  description: string;
+  total_amount: number;
+  vat_amount: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  lines?: ProjectInvoiceBasisLine[];
+}
+
+export interface ProjectInvoiceBasisLine {
+  id: string;
+  basis_id: string;
+  source_type: 'time' | 'material' | 'change_order' | 'equipment' | 'fixed_price' | 'manual';
+  source_id: string | null;
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  vat_rate: number;
+  billing_status: 'not_ready' | 'ready' | 'invoiced' | 'do_not_invoice' | 'included_in_quote';
+  created_at: string;
+}
+
 export type TimeCategory = 'general' | 'work_order' | 'maintenance' | 'customer_project' | 'admin' | 'travel' | 'shopping' | 'standby' | 'other';
 export type TimeStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
 export type TimeEntryType = 'work' | 'break';
@@ -234,6 +518,10 @@ export interface TimeEntry {
   status: TimeStatus;
   approved_by: string | null;
   approved_at: string | null;
+  project_billable: boolean;
+  project_billing_scope: 'included_in_quote' | 'outside_quote' | 'internal';
+  project_change_order_id: string | null;
+  internal_note: string;
   created_at: string;
   user?: Profile;
   work_order?: WorkOrder;

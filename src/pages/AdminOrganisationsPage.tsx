@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Building2, Plus, Edit2, Check, X, Globe,
   Users, Home, ChevronRight, AlertTriangle, Shield, KeyRound, Mail,
+  ClipboardCheck,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
@@ -38,6 +39,7 @@ interface OrgStats {
   member_count: number;
   property_count: number;
   apartment_count: number;
+  customer_project_count: number;
 }
 
 interface OrgFormData {
@@ -49,6 +51,8 @@ interface OrgFormData {
   max_users: string;
   max_properties: string;
   max_apartments: string;
+  customer_projects_enabled: boolean;
+  max_customer_projects: string;
   active: boolean;
 }
 
@@ -65,7 +69,13 @@ interface UserFormData {
 
 const defaultForm: OrgFormData = {
   name: '', slug: '', contact_email: '', contact_phone: '',
-  plan: 'trial', max_users: '10', max_properties: '3', max_apartments: '5', active: true,
+  plan: 'trial',
+  max_users: '10',
+  max_properties: '3',
+  max_apartments: '5',
+  customer_projects_enabled: false,
+  max_customer_projects: '3',
+  active: true,
 };
 
 const defaultUserForm: UserFormData = {
@@ -155,6 +165,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         member_count: users.filter(u => u.organisation_id === org.id).length,
         property_count: 0,
         apartment_count: 0,
+        customer_project_count: 0,
       })));
       setLoading(false);
       return;
@@ -178,16 +189,18 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       // Fetch member and apartment counts for each org
       const orgStats = await Promise.all(
         data.map(async (org) => {
-          const [membersRes, propsRes, aptsRes] = await Promise.all([
+          const [membersRes, propsRes, aptsRes, projectsRes] = await Promise.all([
             supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
             supabase.from('properties').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
             supabase.from('apartments').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
+            supabase.from('customer_projects').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
           ]);
           return {
             id: org.id,
             member_count: membersRes.count ?? 0,
             property_count: propsRes.count ?? 0,
             apartment_count: aptsRes.count ?? 0,
+            customer_project_count: projectsRes.count ?? 0,
           };
         })
       );
@@ -197,7 +210,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
   };
 
   const getStats = (orgId: string): OrgStats =>
-    stats.find(s => s.id === orgId) ?? { id: orgId, member_count: 0, property_count: 0, apartment_count: 0 };
+    stats.find(s => s.id === orgId) ?? { id: orgId, member_count: 0, property_count: 0, apartment_count: 0, customer_project_count: 0 };
 
   const handlePlanChange = (plan: string) => {
     const limits = PLAN_LIMITS[plan] ?? { users: 10, properties: 3, apartments: 5 };
@@ -229,6 +242,8 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         max_users: parseInt(form.max_users) || 10,
         max_properties: parseInt(form.max_properties) || 3,
         max_apartments: parseInt(form.max_apartments) || 5,
+        customer_projects_enabled: form.customer_projects_enabled,
+        max_customer_projects: parseInt(form.max_customer_projects) || 3,
         active: form.active,
       };
       if (localTestMode) {
@@ -251,6 +266,8 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
               plan_expires_at: null,
               logo_url: '',
               settings: {},
+              customer_projects_enabled: payload.customer_projects_enabled,
+              max_customer_projects: payload.max_customer_projects,
               created_at: new Date().toISOString(),
             };
         const nextOrgs = editingOrg
@@ -337,6 +354,8 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       max_users: String(org.max_users),
       max_properties: String(org.max_properties ?? 3),
       max_apartments: String(org.max_apartments),
+      customer_projects_enabled: Boolean(org.customer_projects_enabled),
+      max_customer_projects: String(org.max_customer_projects ?? 3),
       active: org.active,
     });
     setEditingOrg(org);
@@ -691,11 +710,16 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                             <X className="w-3 h-3" /> Inaktiv
                           </Badge>
                         )}
+                        {org.customer_projects_enabled && (
+                          <Badge className="bg-violet-100 text-violet-700">
+                            Kundprojekt
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-xs text-slate-500 font-mono mb-3">{org.slug}</p>
 
                       {/* Quota bars */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                         {/* Users quota */}
                         <div>
                           <div className="flex items-center justify-between mb-1">
@@ -734,6 +758,24 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                           {propertyAtLimit && (
                             <p className="text-xs text-red-600 mt-0.5">Fastighetskvoten är nådd</p>
                           )}
+                        </div>
+
+                        {/* Customer projects quota */}
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-slate-500 flex items-center gap-1">
+                              <ClipboardCheck className="w-3 h-3" /> Kundprojekt
+                            </span>
+                            <span className="text-xs font-medium text-slate-600">
+                              {org.customer_projects_enabled ? `${s.customer_project_count} / ${org.max_customer_projects}` : 'Av'}
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className={org.customer_projects_enabled ? 'h-full rounded-full bg-violet-400 transition-all' : 'h-full rounded-full bg-slate-200 transition-all'}
+                              style={{ width: org.customer_projects_enabled && org.max_customer_projects > 0 ? `${Math.min((s.customer_project_count / org.max_customer_projects) * 100, 100)}%` : '0%' }}
+                            />
+                          </div>
                         </div>
 
                         {/* Apartments quota */}
@@ -909,6 +951,32 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
               />
               <p className="text-xs text-slate-400 mt-0.5">Totalt i alla fastigheter</p>
             </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.customer_projects_enabled}
+                onChange={e => setForm({ ...form, customer_projects_enabled: e.target.checked })}
+                className="mt-1 w-4 h-4 rounded border-slate-300"
+              />
+              <span>
+                <span className="block text-sm font-semibold text-slate-800">Aktivera Kundprojekt</span>
+                <span className="block text-xs text-slate-500">
+                  När modulen är avstängd syns Kundprojekt inte i organisationens meny eller vyer.
+                </span>
+              </span>
+            </label>
+            {form.customer_projects_enabled && (
+              <Input
+                label="Max kundprojekt"
+                type="number"
+                min={1}
+                value={form.max_customer_projects}
+                onChange={e => setForm({ ...form, max_customer_projects: e.target.value })}
+              />
+            )}
           </div>
 
           {editingOrg && (
