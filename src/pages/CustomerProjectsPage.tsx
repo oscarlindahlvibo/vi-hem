@@ -17,6 +17,7 @@ import {
   Send,
   Timer,
   Users,
+  Edit2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -144,6 +145,7 @@ const defaultCustomerForm = {
 };
 
 type ProjectTabId = 'overview' | 'time' | 'materials' | 'change-orders' | 'quotes' | 'self-checks' | 'inspections' | 'deviations' | 'invoice' | 'documents' | 'activity';
+type ProjectListView = 'quotes' | 'active' | 'all';
 
 const PROJECT_TABS: { key: ProjectTabId; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'overview', label: 'Översikt', Icon: ClipboardList },
@@ -178,12 +180,14 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
   const [invoiceBases, setInvoiceBases] = useState<ProjectInvoiceBasis[]>([]);
   const [activity, setActivity] = useState<ProjectActivityLog[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [projectListView, setProjectListView] = useState<ProjectListView>('active');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [tab, setTab] = useState<ProjectTabId>('overview');
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showTimeModal, setShowTimeModal] = useState(false);
   const [showMaterialModal, setShowMaterialModal] = useState(false);
+  const [editingMaterial, setEditingMaterial] = useState<ProjectMaterialEntry | null>(null);
   const [showChangeModal, setShowChangeModal] = useState(false);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
   const [showDocumentModal, setShowDocumentModal] = useState(false);
@@ -341,14 +345,24 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
   const filteredProjects = projects.filter(project => {
     const customer = customers.find(c => c.id === project.customer_id);
     const q = searchQuery.toLowerCase();
-    return (
+    const matchesSearch = (
       (project.title || project.name || '').toLowerCase().includes(q) ||
       (customer?.name || project.customer_name || '').toLowerCase().includes(q) ||
       (project.project_address || '').toLowerCase().includes(q) ||
       (project.internal_reference || '').toLowerCase().includes(q) ||
       (project.external_reference || '').toLowerCase().includes(q)
     );
+    const quoteStatuses: CustomerProjectStatus[] = ['draft', 'quote_created', 'quote_sent'];
+    const closedStatuses: CustomerProjectStatus[] = ['completed', 'archived', 'cancelled'];
+    const matchesView = projectListView === 'quotes'
+      ? quoteStatuses.includes(project.status)
+      : projectListView === 'active'
+        ? !quoteStatuses.includes(project.status) && !closedStatuses.includes(project.status)
+        : true;
+    return matchesSearch && matchesView;
   });
+  const quoteProjectCount = projects.filter(project => ['draft', 'quote_created', 'quote_sent'].includes(project.status)).length;
+  const activeProjectCount = projects.filter(project => !['draft', 'quote_created', 'quote_sent', 'completed', 'archived', 'cancelled'].includes(project.status)).length;
 
   async function fetchAll() {
     if (!user?.organisation_id) return;
@@ -436,6 +450,52 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     setCustomerForm(defaultCustomerForm);
     setError('');
     setShowCustomerModal(true);
+  }
+
+  function resetMaterialForm() {
+    setMaterialForm({
+      name: '',
+      description: '',
+      quantity: '1',
+      unit: 'st',
+      purchase_price: '0',
+      markup_percent: '0',
+      sale_price: '0',
+      supplier: '',
+      invoice_separately: true,
+      included_in_quote: false,
+    });
+  }
+
+  function openNewMaterial() {
+    setEditingMaterial(null);
+    resetMaterialForm();
+    setError('');
+    setShowMaterialModal(true);
+  }
+
+  function openEditMaterial(material: ProjectMaterialEntry) {
+    setEditingMaterial(material);
+    setMaterialForm({
+      name: material.name || '',
+      description: material.description || '',
+      quantity: String(material.quantity ?? 1),
+      unit: material.unit || 'st',
+      purchase_price: String(material.purchase_price ?? 0),
+      markup_percent: String(material.markup_percent ?? 0),
+      sale_price: String(material.sale_price ?? 0),
+      supplier: material.supplier || '',
+      invoice_separately: material.invoice_separately,
+      included_in_quote: material.included_in_quote,
+    });
+    setError('');
+    setShowMaterialModal(true);
+  }
+
+  function calculatedMaterialSalePrice(form = materialForm) {
+    const purchasePrice = Number(form.purchase_price) || 0;
+    const markup = Number(form.markup_percent) || 0;
+    return Math.round(purchasePrice * (1 + markup / 100) * 100) / 100;
   }
 
   async function handleSaveCustomer() {
@@ -568,10 +628,8 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       if (!materialForm.name.trim()) throw new Error('Ange material.');
       const purchasePrice = Number(materialForm.purchase_price) || 0;
       const markup = Number(materialForm.markup_percent) || 0;
-      const salePrice = Number(materialForm.sale_price) || purchasePrice * (1 + markup / 100);
-      const { error: insertError } = await supabase.from('project_material_entries').insert({
-        project_id: selectedProject.id,
-        registered_by: user?.id,
+      const salePrice = calculatedMaterialSalePrice();
+      const payload = {
         name: materialForm.name,
         description: materialForm.description,
         quantity: Number(materialForm.quantity) || 1,
@@ -582,10 +640,19 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         supplier: materialForm.supplier,
         included_in_quote: materialForm.included_in_quote,
         invoice_separately: materialForm.invoice_separately,
-      });
+      };
+      const { error: insertError } = editingMaterial
+        ? await supabase.from('project_material_entries').update(payload).eq('id', editingMaterial.id)
+        : await supabase.from('project_material_entries').insert({
+            project_id: selectedProject.id,
+            registered_by: user?.id,
+            ...payload,
+          });
       if (insertError) throw insertError;
       await refreshFinancials(selectedProject.id);
-      await logActivity(selectedProject.id, 'material_added', `Material lades till: ${materialForm.name}.`);
+      await logActivity(selectedProject.id, editingMaterial ? 'material_updated' : 'material_added', editingMaterial ? `Material uppdaterades: ${materialForm.name}.` : `Material lades till: ${materialForm.name}.`);
+      setEditingMaterial(null);
+      resetMaterialForm();
       setShowMaterialModal(false);
       await fetchAll();
     } catch (err: any) {
@@ -962,6 +1029,25 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[320px_minmax(0,1fr)]">
         <div className="space-y-4">
           <SearchInput placeholder="Sök projekt, kund, adress..." value={searchQuery} onChange={setSearchQuery} />
+          <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1">
+            {[
+              { key: 'quotes' as ProjectListView, label: 'Offerter', count: quoteProjectCount },
+              { key: 'active' as ProjectListView, label: 'Pågående', count: activeProjectCount },
+              { key: 'all' as ProjectListView, label: 'Alla', count: projects.length },
+            ].map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setProjectListView(item.key)}
+                className={`rounded-md px-2 py-2 text-xs font-semibold transition-colors ${
+                  projectListView === item.key ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {item.label}
+                <span className="ml-1 text-slate-400">{item.count}</span>
+              </button>
+            ))}
+          </div>
           {filteredProjects.length === 0 ? (
             <Card>
               <EmptyState
@@ -1113,11 +1199,21 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                 {tab === 'materials' && (
                   <SectionList
                     title="Material"
-                    action={<Button size="sm" onClick={() => setShowMaterialModal(true)}><Plus className="w-4 h-4" /> Lägg till material</Button>}
+                    action={<Button size="sm" onClick={openNewMaterial}><Plus className="w-4 h-4" /> Lägg till material</Button>}
                     empty="Inget material registrerat."
                   >
                     {projectMaterials.map(item => (
-                      <ListRow key={item.id} title={item.name} meta={`${item.quantity} ${item.unit} · ${item.supplier || 'Ingen leverantör'} · ${item.status}`} value={money(Number(item.sale_price || 0) * Number(item.quantity || 0))} />
+                      <ListRow
+                        key={item.id}
+                        title={item.name}
+                        meta={`${item.quantity} ${item.unit} · ${item.supplier || 'Ingen leverantör'} · inköp ${money(Number(item.purchase_price || 0))} · påslag ${Number(item.markup_percent || 0).toLocaleString('sv-SE')}% · ${item.status}`}
+                        value={money(Number(item.sale_price || 0) * Number(item.quantity || 0))}
+                        action={
+                          <Button size="sm" variant="ghost" onClick={() => openEditMaterial(item)} className="gap-1">
+                            <Edit2 className="w-3.5 h-3.5" /> Redigera
+                          </Button>
+                        }
+                      />
                     ))}
                   </SectionList>
                 )}
@@ -1231,7 +1327,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       <CustomerModal open={showCustomerModal} onClose={() => setShowCustomerModal(false)} form={customerForm} setForm={setCustomerForm} onSave={handleSaveCustomer} saving={saving} error={error} />
       <ProjectModal open={showProjectModal} onClose={() => setShowProjectModal(false)} form={projectForm} setForm={setProjectForm} customers={customers} staff={staff} onSave={handleSaveProject} saving={saving} error={error} />
       <TimeModal open={showTimeModal} onClose={() => setShowTimeModal(false)} form={timeForm} setForm={setTimeForm} staff={staff} isAdmin={isAdmin} onSave={handleSaveTime} saving={saving} error={error} />
-      <MaterialModal open={showMaterialModal} onClose={() => setShowMaterialModal(false)} form={materialForm} setForm={setMaterialForm} onSave={handleSaveMaterial} saving={saving} error={error} />
+      <MaterialModal open={showMaterialModal} onClose={() => { setShowMaterialModal(false); setEditingMaterial(null); resetMaterialForm(); }} form={materialForm} setForm={setMaterialForm} onSave={handleSaveMaterial} saving={saving} error={error} editing={Boolean(editingMaterial)} />
       <ChangeOrderModal open={showChangeModal} onClose={() => setShowChangeModal(false)} form={changeForm} setForm={setChangeForm} onSave={handleSaveChangeOrder} saving={saving} error={error} />
       <QuoteModal open={showQuoteModal} onClose={() => setShowQuoteModal(false)} form={quoteForm} setForm={setQuoteForm} onSave={handleSaveQuote} saving={saving} error={error} />
       <DocumentModal open={showDocumentModal} onClose={() => setShowDocumentModal(false)} form={documentForm} setForm={setDocumentForm} onSave={handleSaveDocument} saving={saving} error={error} />
@@ -1283,14 +1379,17 @@ function SectionList({ title, action, empty, children }: { title: string; action
   );
 }
 
-function ListRow({ title, meta, value }: { title: string; meta: string; value: string }) {
+function ListRow({ title, meta, value, action }: { title: string; meta: string; value: string; action?: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         <p className="break-words text-sm font-semibold text-slate-900">{title}</p>
         <p className="mt-1 break-words text-xs text-slate-500">{meta}</p>
       </div>
-      {value && <p className="break-words text-sm font-semibold text-slate-700">{value}</p>}
+      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        {value && <p className="break-words text-sm font-semibold text-slate-700">{value}</p>}
+        {action}
+      </div>
     </div>
   );
 }
@@ -1406,18 +1505,41 @@ function TimeModal({ open, onClose, form, setForm, staff, isAdmin, onSave, savin
   );
 }
 
-function MaterialModal({ open, onClose, form, setForm, onSave, saving, error }: any) {
+function MaterialModal({ open, onClose, form, setForm, onSave, saving, error, editing }: any) {
+  const purchasePrice = Number(form.purchase_price) || 0;
+  const markup = Number(form.markup_percent) || 0;
+  const quantity = Number(form.quantity) || 1;
+  const calculatedSalePrice = Math.round(purchasePrice * (1 + markup / 100) * 100) / 100;
+  const totalPurchase = purchasePrice * quantity;
+  const totalSale = calculatedSalePrice * quantity;
+  const setPurchase = (value: string) => setForm({ ...form, purchase_price: value, sale_price: String(Math.round((Number(value) || 0) * (1 + markup / 100) * 100) / 100) });
+  const setMarkup = (value: string) => setForm({ ...form, markup_percent: value, sale_price: String(Math.round(purchasePrice * (1 + (Number(value) || 0) / 100) * 100) / 100) });
+
   return (
-    <Modal open={open} onClose={onClose} title="Lägg till material" size="lg">
+    <Modal open={open} onClose={onClose} title={editing ? 'Redigera material' : 'Lägg till material'} size="lg">
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input label="Material" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <Input label="Leverantör" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
           <Input label="Antal" type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
           <Input label="Enhet" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} />
-          <Input label="Inköpspris" type="number" value={form.purchase_price} onChange={(e) => setForm({ ...form, purchase_price: e.target.value })} />
-          <Input label="Påslag %" type="number" value={form.markup_percent} onChange={(e) => setForm({ ...form, markup_percent: e.target.value })} />
-          <Input label="Försäljningspris" type="number" value={form.sale_price} onChange={(e) => setForm({ ...form, sale_price: e.target.value })} />
+          <Input label="Inköpspris/st" type="number" value={form.purchase_price} onChange={(e) => setPurchase(e.target.value)} />
+          <Input label="Påslag %" type="number" value={form.markup_percent} onChange={(e) => setMarkup(e.target.value)} />
+          <Input label="Fakturerbart pris/st" type="number" value={String(calculatedSalePrice)} onChange={(e) => setForm({ ...form, sale_price: e.target.value })} disabled />
+        </div>
+        <div className="grid grid-cols-1 gap-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm sm:grid-cols-3">
+          <div>
+            <p className="text-xs text-blue-700">Inköpsvärde</p>
+            <p className="font-bold text-blue-950">{money(totalPurchase)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-blue-700">Fakturerbart</p>
+            <p className="font-bold text-blue-950">{money(totalSale)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-blue-700">Påslag</p>
+            <p className="font-bold text-blue-950">{markup.toLocaleString('sv-SE')}%</p>
+          </div>
         </div>
         <Textarea label="Beskrivning" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1425,7 +1547,7 @@ function MaterialModal({ open, onClose, form, setForm, onSave, saving, error }: 
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.invoice_separately} onChange={(e) => setForm({ ...form, invoice_separately: e.target.checked })} /> Faktureras separat</label>
         </div>
         {error && <ErrorBox message={error} />}
-        <ModalActions onClose={onClose} onSave={onSave} saving={saving} saveLabel="Spara material" />
+        <ModalActions onClose={onClose} onSave={onSave} saving={saving} saveLabel={editing ? 'Spara ändringar' : 'Spara material'} />
       </div>
     </Modal>
   );
