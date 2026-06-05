@@ -13,6 +13,7 @@ import {
   EmptyState,
   LoadingPage,
   StatCard,
+  SearchInput,
 } from '../components/ui';
 import {
   formatDate,
@@ -21,7 +22,7 @@ import {
   TIME_CATEGORY_LABELS,
   getTimeStatusColor,
 } from '../lib/utils';
-import type { TimeEntry, TimeCategory, WorkOrder, Profile, CustomerProject } from '../types';
+import type { TimeEntry, TimeCategory, WorkOrder, Profile, CustomerProject, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus } from '../types';
 import {
   Play,
   Square,
@@ -42,9 +43,12 @@ import {
   Repeat2,
   Briefcase,
   MessageSquare,
+  Trash2,
+  UserCheck,
+  ClipboardList,
 } from 'lucide-react';
 
-type TimeStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
+type TimeStatus = 'draft' | 'submitted' | 'change_requested' | 'approved' | 'rejected';
 type TimeEntryKind = 'work' | 'break';
 
 interface DailyWorkSummary {
@@ -77,8 +81,23 @@ function localDateKey(value: string | Date) {
 const STATUS_LABEL: Record<TimeStatus, string> = {
   draft: 'Utkast',
   submitted: 'Inskickad',
+  change_requested: 'Ändring inväntar godkännande',
   approved: 'Godkänd',
   rejected: 'Avvisad',
+};
+
+const ABSENCE_TYPE_LABEL: Record<StaffAbsenceType, string> = {
+  sick: 'Sjuk',
+  vab: 'VAB',
+  vacation: 'Semester',
+  leave: 'Ledighet',
+};
+
+const ABSENCE_STATUS_LABEL: Record<StaffAbsenceStatus, string> = {
+  submitted: 'Inväntar godkännande',
+  approved: 'Godkänd',
+  rejected: 'Avvisad',
+  cancelled: 'Avbruten',
 };
 
 // ─── Main page ────────────────────────────────────────────────────────────────
@@ -140,6 +159,7 @@ function StaffTimeView({ user }: { user: Profile }) {
   const [workOrders, setWorkOrders] = useState<WorkOrderSummary[]>([]);
   const [customerProjects, setCustomerProjects] = useState<CustomerProjectSummary[]>([]);
   const [dailySummaries, setDailySummaries] = useState<Record<string, DailyWorkSummary>>({});
+  const [absenceRequests, setAbsenceRequests] = useState<StaffAbsenceRequest[]>([]);
 
   // Month navigation for calendar tab
   const now = new Date();
@@ -159,6 +179,7 @@ function StaffTimeView({ user }: { user: Profile }) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showEndDayModal, setShowEndDayModal] = useState(false);
   const [showDayCommentModal, setShowDayCommentModal] = useState(false);
+  const [showAbsenceModal, setShowAbsenceModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
   const [selectedDayEntries, setSelectedDayEntries] = useState<TimeEntry[] | null>(null);
   const [selectedDay, setSelectedDay] = useState('');
@@ -227,6 +248,15 @@ function StaffTimeView({ user }: { user: Profile }) {
         .not('status', 'in', '(archived,completed,cancelled)')
         .order('updated_at', { ascending: false });
       setCustomerProjects(projectsData || []);
+
+      const { data: absencesData } = await supabase
+        .from('staff_absence_requests')
+        .select('*')
+        .eq('user_id', user.id)
+        .gte('end_date', localDateKey(new Date(year, month, 1)))
+        .lte('start_date', localDateKey(new Date(year, month + 1, 0)))
+        .order('start_date', { ascending: false });
+      setAbsenceRequests(absencesData || []);
     } finally {
       setLoading(false);
     }
@@ -340,7 +370,8 @@ function StaffTimeView({ user }: { user: Profile }) {
 
   async function handleSaveEntry(payload: Partial<TimeEntry> & { submitNow?: boolean }, entryId?: string) {
     const isNew = !entryId;
-    const status = payload.submitNow ? 'submitted' : 'draft';
+    const previousStatus = entryId ? entries.find(e => e.id === entryId)?.status : null;
+    const status = previousStatus === 'approved' ? 'change_requested' : (payload.submitNow ? 'submitted' : 'draft');
     const data: any = {
       user_id: user.id,
       organisation_id: user.organisation_id || null,
@@ -366,6 +397,22 @@ function StaffTimeView({ user }: { user: Profile }) {
     setShowManualModal(false);
     setShowEditModal(false);
     setEditingEntry(null);
+    fetchData();
+  }
+
+  async function handleAbsenceSubmit(payload: {
+    absence_type: StaffAbsenceType;
+    start_date: string;
+    end_date: string;
+    comment: string;
+  }) {
+    await supabase.from('staff_absence_requests').insert({
+      ...payload,
+      user_id: user.id,
+      organisation_id: user.organisation_id || null,
+      status: 'submitted',
+    });
+    setShowAbsenceModal(false);
     fetchData();
   }
 
@@ -424,6 +471,9 @@ function StaffTimeView({ user }: { user: Profile }) {
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button onClick={() => setShowManualModal(true)} variant="secondary" className="gap-2 w-full sm:w-auto">
               <Plus className="w-4 h-4" /> Registrera tid
+            </Button>
+            <Button onClick={() => setShowAbsenceModal(true)} variant="secondary" className="gap-2 w-full sm:w-auto">
+              <Calendar className="w-4 h-4" /> Frånvaro
             </Button>
             {!currentEntry && (
               <Button onClick={() => { setStampMode('start'); setShowStampModal(true); }} variant="primary" className="gap-2 w-full sm:w-auto">
@@ -534,6 +584,7 @@ function StaffTimeView({ user }: { user: Profile }) {
                   onEditComment={() => { setSelectedDay(dayKey); setShowDayCommentModal(true); }}
                 />
               ))}
+              <AbsenceRequestList requests={absenceRequests} />
             </div>
           )}
         </>
@@ -584,7 +635,7 @@ function StaffTimeView({ user }: { user: Profile }) {
                 const isToday = dateStr === localDateKey(new Date());
                 const isWeekend = ((new Date(calYear, calMonth, day).getDay() + 6) % 7) >= 5;
                 const hasActive = dayEntries.some(e => !e.end_time);
-                const hasPending = dayEntries.some(e => e.status === 'submitted');
+                const hasPending = dayEntries.some(e => e.status === 'submitted' || e.status === 'change_requested');
                 const hasRejected = dayEntries.some(e => e.status === 'rejected');
 
                 return (
@@ -649,7 +700,7 @@ function StaffTimeView({ user }: { user: Profile }) {
                   setEditingEntry(entry);
                   setShowEditModal(true);
                 }}
-                showEdit={entry.status !== 'approved'}
+                showEdit
               />
             ))
           )}
@@ -719,6 +770,12 @@ function StaffTimeView({ user }: { user: Profile }) {
           title="Redigera tidpost"
         />
       )}
+
+      <AbsenceRequestModal
+        open={showAbsenceModal}
+        onClose={() => setShowAbsenceModal(false)}
+        onSubmit={handleAbsenceSubmit}
+      />
     </div>
   );
 }
@@ -786,9 +843,7 @@ function DayWorkCard({ dayKey, entries, summary, onEditEntry, onAddEntry, onEdit
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="text-sm font-bold text-slate-800">{formatMinutes(entry.total_minutes || 0)}</p>
-                    {entry.status !== 'approved' && (
-                      <button onClick={() => onEditEntry(entry)} className="text-xs text-blue-600 hover:text-blue-700 font-medium">Redigera</button>
-                    )}
+                    <button onClick={() => onEditEntry(entry)} className="text-xs text-blue-600 hover:text-blue-700 font-medium">Redigera</button>
                   </div>
                 </div>
                 );
@@ -936,7 +991,7 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
 
 interface EntryFormPayload extends Partial<TimeEntry> { submitNow?: boolean; }
 
-function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects, entry, title, defaultDate }: {
+function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects, entry, title, defaultDate, approvedEditMode = 'request' }: {
   open: boolean; onClose: () => void;
   onSubmit: (payload: EntryFormPayload) => void;
   workOrders: WorkOrderSummary[];
@@ -944,6 +999,7 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
   entry?: TimeEntry;
   title: string;
   defaultDate?: string;
+  approvedEditMode?: 'request' | 'admin';
 }) {
   const now = new Date();
   const defaultStart = defaultDate
@@ -982,6 +1038,7 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
 
   const isValid = !!startTime;
   const isRejected = entry?.status === 'rejected';
+  const isApproved = entry?.status === 'approved';
   const isDraft = !entry || entry.status === 'draft';
   const selectedProject = customerProjects.find(project => project.id === customerProjectId);
   const requiresProject = category === 'customer_project';
@@ -1058,6 +1115,15 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
           </div>
         )}
 
+        {isApproved && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            {approvedEditMode === 'admin'
+              ? 'Denna post är redan godkänd. Ändringar du sparar som admin behåller posten som godkänd.'
+              : 'Denna post är redan godkänd. Dina ändringar skickas till admin för redigeringsgodkännande.'}
+          </div>
+        )}
+
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={onClose} className="flex-1">Avbryt</Button>
           {(isDraft || isRejected) && (
@@ -1067,7 +1133,7 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
           )}
           <Button variant="primary" onClick={() => onSubmit(buildPayload(true))} disabled={!isValid || !endTime || (requiresProject && !customerProjectId)} className="flex-1 gap-2">
             <Send className="w-4 h-4" />
-            {isRejected ? 'Skicka in igen' : 'Skicka för godkännande'}
+            {isApproved && approvedEditMode === 'admin' ? 'Spara som godkänd' : isApproved ? 'Skicka ändring' : isRejected ? 'Skicka in igen' : 'Skicka för godkännande'}
           </Button>
         </div>
       </div>
@@ -1140,33 +1206,157 @@ function DayCommentModal({ open, onClose, onSubmit, defaultComment, dayKey }: {
   );
 }
 
+function absenceStatusColor(status: StaffAbsenceStatus) {
+  return {
+    submitted: 'text-amber-700 bg-amber-100',
+    approved: 'text-green-700 bg-green-100',
+    rejected: 'text-red-600 bg-red-100',
+    cancelled: 'text-slate-600 bg-slate-100',
+  }[status];
+}
+
+function AbsenceRequestList({ requests }: { requests: StaffAbsenceRequest[] }) {
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div>
+          <h3 className="text-sm font-bold text-slate-800">Frånvaro och ledighet</h3>
+          <p className="text-xs text-slate-500">Dina anmälningar och ansökningar för vald månad</p>
+        </div>
+      </div>
+      {requests.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-400">
+          Ingen frånvaro registrerad
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {requests.map(request => (
+            <div key={request.id} className="flex flex-col gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-800">{ABSENCE_TYPE_LABEL[request.absence_type]}</span>
+                  <Badge className={absenceStatusColor(request.status)}>{ABSENCE_STATUS_LABEL[request.status]}</Badge>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {formatDate(request.start_date)}{request.end_date !== request.start_date && ` - ${formatDate(request.end_date)}`}
+                </p>
+                {request.comment && <p className="text-xs text-slate-500 mt-1">{request.comment}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function AbsenceRequestModal({ open, onClose, onSubmit }: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (payload: { absence_type: StaffAbsenceType; start_date: string; end_date: string; comment: string }) => void;
+}) {
+  const today = localDateKey(new Date());
+  const [absenceType, setAbsenceType] = useState<StaffAbsenceType>('sick');
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(today);
+  const [comment, setComment] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setAbsenceType('sick');
+      setStartDate(today);
+      setEndDate(today);
+      setComment('');
+    }
+  }, [open, today]);
+
+  const valid = !!startDate && !!endDate && endDate >= startDate;
+
+  return (
+    <Modal open={open} onClose={onClose} title="Anmäl frånvaro eller ansök om ledighet">
+      <div className="space-y-4">
+        <Select
+          label="Typ"
+          value={absenceType}
+          onChange={e => setAbsenceType(e.target.value as StaffAbsenceType)}
+          options={Object.entries(ABSENCE_TYPE_LABEL).map(([value, label]) => ({ value, label }))}
+        />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Input label="Från" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+          <Input label="Till" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+        </div>
+        <Textarea
+          label="Kommentar (valfritt)"
+          value={comment}
+          onChange={e => setComment(e.target.value)}
+          rows={3}
+          placeholder="Exempel: sjuk idag, VAB, önskar ledigt..."
+        />
+        {!valid && (
+          <p className="text-sm text-red-600">Slutdatum måste vara samma dag eller efter startdatum.</p>
+        )}
+        <div className="flex gap-3 pt-2">
+          <Button variant="secondary" onClick={onClose} className="flex-1">Avbryt</Button>
+          <Button
+            variant="primary"
+            disabled={!valid}
+            onClick={() => onSubmit({ absence_type: absenceType, start_date: startDate, end_date: endDate, comment })}
+            className="flex-1 gap-2"
+          >
+            <Send className="w-4 h-4" /> Skicka
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Admin view ────────────────────────────────────────────────────────────────
 
 function AdminTimeView({ user }: { user: Profile }) {
+  const [viewTab, setViewTab] = useState<'today' | 'timesheets'>('today');
   const [monthFilter, setMonthFilter] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
+  const [todayFilter, setTodayFilter] = useState(() => localDateKey(new Date()));
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [staffMembers, setStaffMembers] = useState<Profile[]>([]);
   const [summary, setSummary] = useState<Record<string, { total: number; approved: number; pending: number; rejected: number }>>({});
+  const [todayEntries, setTodayEntries] = useState<TimeEntry[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<Profile | null>(null);
   const [staffEntries, setStaffEntries] = useState<TimeEntry[]>([]);
   const [staffModalOpen, setStaffModalOpen] = useState(false);
   const [adminTab, setAdminTab] = useState<'list' | 'calendar'>('list');
+  const [workOrders, setWorkOrders] = useState<WorkOrderSummary[]>([]);
+  const [customerProjects, setCustomerProjects] = useState<CustomerProjectSummary[]>([]);
+  const [absenceRequests, setAbsenceRequests] = useState<StaffAbsenceRequest[]>([]);
+  const [adminEditingEntry, setAdminEditingEntry] = useState<TimeEntry | null>(null);
+  const [adminEditModalOpen, setAdminEditModalOpen] = useState(false);
+  const [adminEntryModalTitle, setAdminEntryModalTitle] = useState('Redigera tidpost');
 
   // Calendar for admin staff view
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
   const [calMonth, setCalMonth] = useState(now.getMonth());
 
-  useEffect(() => { fetchStaff(); }, []);
-  useEffect(() => { if (staffMembers.length > 0) fetchSummary(); }, [monthFilter, staffMembers]);
+  useEffect(() => { fetchStaff(); fetchAdminOptions(); }, []);
+  useEffect(() => { if (staffMembers.length > 0) { fetchSummary(); fetchTodayEntries(); } }, [monthFilter, todayFilter, staffMembers]);
 
   async function fetchStaff() {
     const { data } = await supabase.from('profiles').select('*')
       .in('role', ['staff', 'admin', 'superadmin']).eq('active', true).order('name');
     setStaffMembers(data || []);
+  }
+
+  async function fetchAdminOptions() {
+    const [{ data: wos }, { data: projectsData }] = await Promise.all([
+      supabase.from('work_orders').select('id, title, status').in('status', ['new', 'assigned', 'started', 'paused']),
+      supabase.from('customer_projects').select('id, title, name, customer_name, status').not('status', 'in', '(archived,completed,cancelled)').order('updated_at', { ascending: false }),
+    ]);
+    setWorkOrders(wos || []);
+    setCustomerProjects(projectsData || []);
   }
 
   async function fetchSummary() {
@@ -1182,7 +1372,7 @@ function AdminTimeView({ user }: { user: Profile }) {
         if (s[e.user_id] && e.entry_type !== 'break') {
           s[e.user_id].total += e.total_minutes || 0;
           if (e.status === 'approved') s[e.user_id].approved += e.total_minutes || 0;
-          else if (e.status === 'submitted') s[e.user_id].pending += e.total_minutes || 0;
+          else if (e.status === 'submitted' || e.status === 'change_requested') s[e.user_id].pending += e.total_minutes || 0;
           else if (e.status === 'rejected') s[e.user_id].rejected += e.total_minutes || 0;
         }
       });
@@ -1192,9 +1382,23 @@ function AdminTimeView({ user }: { user: Profile }) {
     }
   }
 
+  async function fetchTodayEntries() {
+    const start = new Date(`${todayFilter}T00:00:00`).toISOString();
+    const end = new Date(`${todayFilter}T23:59:59`).toISOString();
+    const { data } = await supabase
+      .from('time_entries')
+      .select('*, work_order:work_order_id(id, title), customer_project:customer_project_id(id, title, name, customer_name)')
+      .gte('start_time', start)
+      .lte('start_time', end)
+      .order('start_time', { ascending: false });
+    setTodayEntries(data || []);
+  }
+
   async function openStaffModal(staff: Profile) {
     setSelectedStaff(staff);
     await loadStaffEntries(staff.id, monthFilter);
+    await loadAbsenceRequests(staff.id, monthFilter);
+    setAdminTab('list');
     setStaffModalOpen(true);
   }
 
@@ -1207,6 +1411,20 @@ function AdminTimeView({ user }: { user: Profile }) {
       .gte('start_time', start).lt('start_time', end)
       .order('start_time', { ascending: false });
     setStaffEntries(data || []);
+  }
+
+  async function loadAbsenceRequests(staffId: string, month: string) {
+    const [year, monthNumber] = month.split('-').map(Number);
+    const startDate = localDateKey(new Date(year, monthNumber - 1, 1));
+    const endDate = localDateKey(new Date(year, monthNumber, 0));
+    const { data } = await supabase
+      .from('staff_absence_requests')
+      .select('*, user:user_id(id, name, email, role)')
+      .eq('user_id', staffId)
+      .gte('end_date', startDate)
+      .lte('start_date', endDate)
+      .order('start_date', { ascending: false });
+    setAbsenceRequests(data || []);
   }
 
   async function approveEntry(id: string) {
@@ -1225,10 +1443,62 @@ function AdminTimeView({ user }: { user: Profile }) {
     if (!selectedStaff) return;
     const { start, end } = monthRange(monthFilter);
     await supabase.from('time_entries').update({ status: 'approved', approved_by: user.id, approved_at: new Date().toISOString() })
-      .eq('user_id', selectedStaff.id).eq('status', 'submitted')
+      .eq('user_id', selectedStaff.id).in('status', ['submitted', 'change_requested'])
       .gte('start_time', start).lt('start_time', end);
     loadStaffEntries(selectedStaff.id, monthFilter);
     fetchSummary();
+  }
+
+  async function handleAdminSaveEntry(payload: EntryFormPayload, entryId?: string) {
+    if (!selectedStaff) return;
+    const data: any = {
+      user_id: selectedStaff.id,
+      organisation_id: selectedStaff.organisation_id || user.organisation_id || null,
+      category: payload.category,
+      start_time: payload.start_time,
+      end_time: payload.end_time || null,
+      break_minutes: payload.break_minutes || 0,
+      total_minutes: payload.end_time
+        ? calcMinutes(payload.start_time!, payload.end_time, payload.break_minutes || 0)
+        : 0,
+      comment: payload.comment || '',
+      work_order_id: payload.work_order_id || null,
+      customer_project_id: payload.category === 'customer_project' ? payload.customer_project_id || null : null,
+      entry_type: payload.entry_type || 'work',
+      customer_name: payload.customer_name || null,
+      status: 'approved',
+      approved_by: user.id,
+      approved_at: new Date().toISOString(),
+    };
+    if (entryId) {
+      await supabase.from('time_entries').update({ ...data, user_id: undefined, organisation_id: undefined }).eq('id', entryId);
+    } else {
+      await supabase.from('time_entries').insert(data);
+    }
+    setAdminEditingEntry(null);
+    setAdminEditModalOpen(false);
+    setAdminEntryModalTitle('Redigera tidpost');
+    await loadStaffEntries(selectedStaff.id, monthFilter);
+    await fetchTodayEntries();
+    fetchSummary();
+  }
+
+  async function deleteAdminEntry(entry: TimeEntry) {
+    if (!selectedStaff) return;
+    if (!window.confirm('Ta bort denna tidrad?')) return;
+    await supabase.from('time_entries').delete().eq('id', entry.id);
+    await loadStaffEntries(selectedStaff.id, monthFilter);
+    await fetchTodayEntries();
+    fetchSummary();
+  }
+
+  async function reviewAbsenceRequest(id: string, status: 'approved' | 'rejected') {
+    if (!selectedStaff) return;
+    await supabase
+      .from('staff_absence_requests')
+      .update({ status, reviewed_by: user.id, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', id);
+    loadAbsenceRequests(selectedStaff.id, monthFilter);
   }
 
   // Calendar helpers for selected staff
@@ -1250,26 +1520,96 @@ function AdminTimeView({ user }: { user: Profile }) {
   const workDays = Object.values(calEntriesByDay).filter(d => d.some(e => e.end_time)).length;
   const modalOvertime = Math.max(modalTotalWork - workDays * 480, 0);
 
-  const pendingCount = staffEntries.filter(e => e.status === 'submitted').length;
+  const pendingCount = staffEntries.filter(e => e.status === 'submitted' || e.status === 'change_requested').length;
+  const selectedStaffAbsences = absenceRequests.filter(request => request.user_id === selectedStaff?.id);
+  const filteredStaffMembers = staffMembers.filter(staff => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return true;
+    return staff.name.toLowerCase().includes(query) || staff.email.toLowerCase().includes(query);
+  });
+  const todayEntriesByStaff = todayEntries.reduce((acc, entry) => {
+    if (!acc[entry.user_id]) acc[entry.user_id] = [];
+    acc[entry.user_id].push(entry);
+    return acc;
+  }, {} as Record<string, TimeEntry[]>);
+  const clockedInNow = staffMembers.filter(staff => (todayEntriesByStaff[staff.id] || []).some(entry => !entry.end_time));
+  const totalAttendance = staffMembers.filter(staff => (todayEntriesByStaff[staff.id] || []).length > 0);
+  const todayPendingCount = todayEntries.filter(entry => entry.status === 'submitted' || entry.status === 'change_requested').length + absenceRequests.filter(request => request.status === 'submitted').length;
 
   return (
     <div className="space-y-6 min-h-screen bg-slate-50 -m-4 lg:-m-6 p-4 lg:p-6">
-      <PageHeader
-        title="Tidrapportering — Översikt"
-        subtitle="Granska och godkänn tidsrapporter"
-      />
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="flex border-b border-slate-100">
+          <button
+            type="button"
+            onClick={() => setViewTab('today')}
+            className={`px-5 py-4 text-sm font-semibold border-b-2 transition-colors ${
+              viewTab === 'today' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Idag
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewTab('timesheets')}
+            className={`px-5 py-4 text-sm font-semibold border-b-2 transition-colors ${
+              viewTab === 'timesheets' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Timesheets
+          </button>
+        </div>
 
-      <div className="flex items-center gap-3">
-        <Input type="month" label="Månad" value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="w-44" />
+        <div className="p-4 space-y-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Sök personal..." className="sm:w-72" />
+              {viewTab === 'today' ? (
+                <Input type="date" value={todayFilter} onChange={e => setTodayFilter(e.target.value)} className="sm:w-44" />
+              ) : (
+                <Input type="month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="sm:w-44" />
+              )}
+            </div>
+            <Badge className={todayPendingCount > 0 ? 'bg-orange-100 text-orange-700 px-3 py-1.5' : 'bg-slate-100 text-slate-500 px-3 py-1.5'}>
+              {todayPendingCount} väntande
+            </Badge>
+          </div>
+
+          {viewTab === 'today' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Card className="p-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-2xl font-bold text-slate-800">{clockedInNow.length}</p>
+                    <p className="text-sm text-slate-600">Instämplade just nu</p>
+                  </div>
+                  <UserCheck className="w-5 h-5 text-slate-400" />
+                </div>
+              </Card>
+              <Card className="p-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-2xl font-bold text-slate-800">{totalAttendance.length}</p>
+                    <p className="text-sm text-slate-600">Har tid registrerad idag</p>
+                  </div>
+                  <ClipboardList className="w-5 h-5 text-slate-400" />
+                </div>
+              </Card>
+            </div>
+          )}
+        </div>
       </div>
 
       {loading ? <LoadingPage /> : (
         <Card>
           <div className="md:hidden divide-y divide-slate-100">
-            {staffMembers.length === 0 ? (
+            {filteredStaffMembers.length === 0 ? (
               <div className="px-4 py-8 text-center text-slate-400">Ingen personal</div>
-            ) : staffMembers.map(staff => {
+            ) : filteredStaffMembers.map(staff => {
               const d = summary[staff.id] || { total: 0, approved: 0, pending: 0, rejected: 0 };
+              const staffTodayEntries = todayEntriesByStaff[staff.id] || [];
+              const activeEntry = staffTodayEntries.find(entry => !entry.end_time);
+              const todayTotal = staffTodayEntries.filter(entry => entry.entry_type !== 'break').reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
               return (
                 <button
                   type="button"
@@ -1280,11 +1620,27 @@ function AdminTimeView({ user }: { user: Profile }) {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-semibold text-slate-800 break-words">{staff.name}</p>
-                      <p className="mt-1 text-sm text-slate-500">Total {formatMinutes(d.total)}</p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {viewTab === 'today'
+                          ? activeEntry ? `Instämplad som ${activeEntry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[activeEntry.category as TimeCategory]}` : 'Inte instämplad'
+                          : `Total ${formatMinutes(d.total)}`}
+                      </p>
                     </div>
                     <Button size="sm" variant="ghost" onClick={e => { e.stopPropagation(); openStaffModal(staff); }}>Granska</Button>
                   </div>
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                  {viewTab === 'today' ? (
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div className={`rounded-lg px-2 py-2 text-center ${activeEntry ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
+                        <p className="font-semibold">{activeEntry?.start_time ? new Date(activeEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</p>
+                        <p>Start</p>
+                      </div>
+                      <div className="rounded-lg bg-blue-50 px-2 py-2 text-center text-blue-700">
+                        <p className="font-semibold">{formatMinutes(todayTotal)}</p>
+                        <p>Idag</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                     <div className="rounded-lg bg-green-50 px-2 py-2 text-center text-green-700">
                       <p className="font-semibold">{formatMinutes(d.approved)}</p>
                       <p>Godkänd</p>
@@ -1297,13 +1653,70 @@ function AdminTimeView({ user }: { user: Profile }) {
                       <p className="font-semibold">{formatMinutes(d.rejected)}</p>
                       <p>Avvisad</p>
                     </div>
-                  </div>
+                    </div>
+                  )}
                 </button>
               );
             })}
           </div>
           <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-sm">
+            {viewTab === 'today' ? (
+              <table className="w-full text-sm min-w-[1120px]">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Personal</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Status</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Instämplad som</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Jobb/projekt</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Start</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Slut</th>
+                    <th className="px-4 py-3 text-right font-semibold text-slate-700">Dagstotal</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Kommentar</th>
+                    <th className="px-4 py-3" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredStaffMembers.length === 0 ? (
+                    <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-400">Ingen personal</td></tr>
+                  ) : filteredStaffMembers.map(staff => {
+                    const staffTodayEntries = todayEntriesByStaff[staff.id] || [];
+                    const activeEntry = staffTodayEntries.find(entry => !entry.end_time);
+                    const latestEntry = activeEntry || staffTodayEntries[0];
+                    const todayTotal = staffTodayEntries.filter(entry => entry.entry_type !== 'break').reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
+                    return (
+                      <tr key={staff.id} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => openStaffModal(staff)}>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold text-white ${activeEntry ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                              {staff.name.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-semibold text-slate-800 truncate">{staff.name}</p>
+                              <p className="text-xs text-slate-400 truncate">{staff.email}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge className={activeEntry ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}>
+                            {activeEntry ? 'Instämplad' : 'Ej instämplad'}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{latestEntry ? latestEntry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[latestEntry.category as TimeCategory] : '--'}</td>
+                        <td className="px-4 py-3 text-slate-600 max-w-[220px] truncate">{latestEntry ? timeEntryProjectLabel(latestEntry) || latestEntry.work_order?.title || '--' : '--'}</td>
+                        <td className="px-4 py-3 text-slate-700">{latestEntry ? new Date(latestEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
+                        <td className="px-4 py-3 text-slate-700">{latestEntry?.end_time ? new Date(latestEntry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-slate-800">{todayTotal > 0 ? formatMinutes(todayTotal) : '--'}</td>
+                        <td className="px-4 py-3 text-slate-500 max-w-[260px] truncate">{latestEntry?.comment || '--'}</td>
+                        <td className="px-4 py-3 text-right">
+                          <Button size="sm" variant="ghost" onClick={e => { e.stopPropagation(); openStaffModal(staff); }}>Timesheet</Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   <th className="px-4 py-3 text-left font-semibold text-slate-700">Personal</th>
@@ -1315,9 +1728,9 @@ function AdminTimeView({ user }: { user: Profile }) {
                 </tr>
               </thead>
               <tbody>
-                {staffMembers.length === 0 ? (
+                {filteredStaffMembers.length === 0 ? (
                   <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">Ingen personal</td></tr>
-                ) : staffMembers.map(staff => {
+                ) : filteredStaffMembers.map(staff => {
                   const d = summary[staff.id] || { total: 0, approved: 0, pending: 0, rejected: 0 };
                   return (
                     <tr key={staff.id} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => openStaffModal(staff)}>
@@ -1334,13 +1747,32 @@ function AdminTimeView({ user }: { user: Profile }) {
                 })}
               </tbody>
             </table>
+            )}
           </div>
         </Card>
       )}
 
       {/* Staff detail modal */}
-      <Modal open={staffModalOpen} onClose={() => setStaffModalOpen(false)} title={selectedStaff?.name || ''} size="xl">
+      <Modal open={staffModalOpen} onClose={() => setStaffModalOpen(false)} title={selectedStaff?.name || ''} size="xxl">
         <div className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">Timesheet</p>
+              <p className="text-xs text-slate-500">Ändra tider, byt jobb, lägg till kommentarer eller korrigera rader.</p>
+            </div>
+            <Button
+              variant="primary"
+              className="gap-2"
+              onClick={() => {
+                setAdminEditingEntry(null);
+                setAdminEntryModalTitle(`Lägg till tidrad för ${selectedStaff?.name || 'personal'}`);
+                setAdminEditModalOpen(true);
+              }}
+            >
+              <Plus className="w-4 h-4" /> Lägg till rad
+            </Button>
+          </div>
+
           {/* Summary */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="bg-slate-50 rounded-lg p-3 text-center">
@@ -1373,40 +1805,101 @@ function AdminTimeView({ user }: { user: Profile }) {
             </Button>
           )}
 
+          <Card className="p-3 bg-slate-50 border-slate-100">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div>
+                <p className="text-sm font-bold text-slate-800">Frånvaro och ledighet</p>
+                <p className="text-xs text-slate-500">Sjuk, VAB och ledighetsansökningar för vald månad</p>
+              </div>
+            </div>
+            {selectedStaffAbsences.length === 0 ? (
+              <p className="text-sm text-slate-400">Inga frånvaroärenden för perioden.</p>
+            ) : (
+              <div className="space-y-2">
+                {selectedStaffAbsences.map(request => (
+                  <div key={request.id} className="flex flex-col gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-800">{ABSENCE_TYPE_LABEL[request.absence_type]}</span>
+                        <Badge className={absenceStatusColor(request.status)}>{ABSENCE_STATUS_LABEL[request.status]}</Badge>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {formatDate(request.start_date)}{request.end_date !== request.start_date && ` - ${formatDate(request.end_date)}`}
+                      </p>
+                      {request.comment && <p className="text-xs text-slate-500 mt-1">{request.comment}</p>}
+                    </div>
+                    {request.status === 'submitted' && (
+                      <div className="flex gap-2">
+                        <button onClick={() => reviewAbsenceRequest(request.id, 'approved')} className="text-xs text-green-600 hover:text-green-700 font-medium">Godkänn</button>
+                        <span className="text-slate-300">|</span>
+                        <button onClick={() => reviewAbsenceRequest(request.id, 'rejected')} className="text-xs text-red-500 hover:text-red-600 font-medium">Avvisa</button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
           {/* List tab */}
           {adminTab === 'list' && (
-            <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+            <div className="max-h-[50vh] overflow-auto rounded-lg border border-slate-200">
               {staffEntries.length === 0 ? (
                 <EmptyState icon={<Clock className="w-10 h-10" />} title="Inga poster" description="Inga tidsrapporter för vald period." />
-              ) : staffEntries.map(entry => (
-                <Card key={entry.id} className="p-3">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between min-w-0">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <Badge className={getTimeStatusColor(entry.status)}>{STATUS_LABEL[entry.status as TimeStatus] || entry.status}</Badge>
-                        <span className="text-xs text-slate-500">{entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
-                        {timeEntryProjectLabel(entry) && <span className="text-xs text-slate-500">· Projekt: {timeEntryProjectLabel(entry)}</span>}
-                      </div>
-                      <p className="text-xs text-slate-500">
-                        {new Date(entry.start_time).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' })}
-                        {entry.end_time && ` → ${new Date(entry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}`}
-                        {entry.break_minutes > 0 && ` · ${entry.break_minutes}min rast`}
-                      </p>
-                      {entry.comment && <p className="text-xs text-slate-400 italic mt-0.5">"{entry.comment}"</p>}
-                    </div>
-                    <div className="sm:text-right sm:ml-3 flex-shrink-0">
-                      <p className="text-sm font-bold text-slate-800">{formatMinutes(entry.total_minutes || 0)}</p>
-                      {entry.status === 'submitted' && (
-                        <div className="flex gap-1 mt-1">
-                          <button onClick={() => approveEntry(entry.id)} className="text-xs text-green-600 hover:text-green-700 font-medium">Godkänn</button>
-                          <span className="text-slate-300">|</span>
-                          <button onClick={() => rejectEntry(entry.id)} className="text-xs text-red-500 hover:text-red-600 font-medium">Avvisa</button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </Card>
-              ))}
+              ) : (
+                <table className="w-full min-w-[980px] text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200">
+                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Datum</th>
+                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Typ</th>
+                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Jobb</th>
+                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Start</th>
+                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Slut</th>
+                      <th className="px-3 py-2 text-right font-semibold text-slate-600">Total</th>
+                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Kund/kommentar</th>
+                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Status</th>
+                      <th className="px-3 py-2 text-right font-semibold text-slate-600">Åtgärd</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...staffEntries].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()).map(entry => (
+                      <tr key={entry.id} className="border-b border-slate-100 hover:bg-slate-50">
+                        <td className="px-3 py-2 font-medium text-slate-800 whitespace-nowrap">{formatDate(localDateKey(entry.start_time))}</td>
+                        <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</td>
+                        <td className="px-3 py-2 text-slate-600 max-w-[180px] truncate">{timeEntryProjectLabel(entry) || entry.work_order?.title || '--'}</td>
+                        <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}</td>
+                        <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entry.end_time ? new Date(entry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
+                        <td className="px-3 py-2 text-right font-semibold text-slate-800 whitespace-nowrap">{formatMinutes(entry.total_minutes || 0)}</td>
+                        <td className="px-3 py-2 text-slate-500 max-w-[240px] truncate">{entry.comment || entry.customer_name || '--'}</td>
+                        <td className="px-3 py-2 whitespace-nowrap"><Badge className={getTimeStatusColor(entry.status)}>{STATUS_LABEL[entry.status as TimeStatus] || entry.status}</Badge></td>
+                        <td className="px-3 py-2">
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <button
+                              onClick={() => {
+                                setAdminEditingEntry(entry);
+                                setAdminEntryModalTitle(`Redigera tidpost för ${selectedStaff?.name || 'personal'}`);
+                                setAdminEditModalOpen(true);
+                              }}
+                              className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                            >
+                              Redigera
+                            </button>
+                            <button onClick={() => deleteAdminEntry(entry)} className="text-xs text-red-500 hover:text-red-600 font-medium inline-flex items-center gap-1">
+                              <Trash2 className="w-3 h-3" /> Ta bort
+                            </button>
+                            {(entry.status === 'submitted' || entry.status === 'change_requested') && (
+                              <>
+                                <button onClick={() => approveEntry(entry.id)} className="text-xs text-green-600 hover:text-green-700 font-medium">Godkänn</button>
+                                <button onClick={() => rejectEntry(entry.id)} className="text-xs text-red-500 hover:text-red-600 font-medium">Avvisa</button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
 
@@ -1433,7 +1926,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                   const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                   const dayEntries = calEntriesByDay[dateStr] || [];
                   const work = dayEntries.filter(e => e.end_time && e.entry_type !== 'break').reduce((s, e) => s + (e.total_minutes || 0), 0);
-                  const hasPending = dayEntries.some(e => e.status === 'submitted');
+                  const hasPending = dayEntries.some(e => e.status === 'submitted' || e.status === 'change_requested');
                   const isWeekend = ((new Date(calYear, calMonth, day).getDay() + 6) % 7) >= 5;
                   return (
                     <div key={day} className={`min-h-[52px] rounded p-1.5 ${isWeekend ? 'bg-slate-50' : 'bg-white border border-slate-100'}`}>
@@ -1450,6 +1943,19 @@ function AdminTimeView({ user }: { user: Profile }) {
           )}
         </div>
       </Modal>
+      {adminEditModalOpen && selectedStaff && (
+        <EntryFormModal
+          open={adminEditModalOpen}
+          onClose={() => { setAdminEditModalOpen(false); setAdminEditingEntry(null); setAdminEntryModalTitle('Redigera tidpost'); }}
+          onSubmit={(payload) => handleAdminSaveEntry(payload, adminEditingEntry?.id)}
+          workOrders={workOrders}
+          customerProjects={customerProjects}
+          entry={adminEditingEntry || undefined}
+          title={adminEntryModalTitle}
+          defaultDate={`${monthFilter}-01`}
+          approvedEditMode="admin"
+        />
+      )}
     </div>
   );
 }

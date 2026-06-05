@@ -512,8 +512,10 @@ export interface ProjectInvoiceBasisLine {
 }
 
 export type TimeCategory = 'general' | 'work_order' | 'maintenance' | 'customer_project' | 'admin' | 'travel' | 'shopping' | 'standby' | 'other';
-export type TimeStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
+export type TimeStatus = 'draft' | 'submitted' | 'change_requested' | 'approved' | 'rejected';
 export type TimeEntryType = 'work' | 'break';
+export type StaffAbsenceType = 'sick' | 'vab' | 'vacation' | 'leave';
+export type StaffAbsenceStatus = 'submitted' | 'approved' | 'rejected' | 'cancelled';
 
 export interface TimeEntry {
   id: string;
@@ -542,6 +544,22 @@ export interface TimeEntry {
   work_order?: WorkOrder;
   customer_project?: CustomerProject;
   property?: Property;
+}
+
+export interface StaffAbsenceRequest {
+  id: string;
+  organisation_id: string | null;
+  user_id: string;
+  absence_type: StaffAbsenceType;
+  start_date: string;
+  end_date: string;
+  comment: string;
+  status: StaffAbsenceStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  user?: Profile;
 }
 
 export interface LaundryRoom {

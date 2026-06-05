@@ -51,6 +51,7 @@ import {
   Paperclip,
   CheckSquare,
   X,
+  Trash2,
 } from 'lucide-react';
 import { TIME_CATEGORY_LABELS } from '../lib/utils';
 import type { TimeCategory } from '../types';
@@ -148,6 +149,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
   const [newDetailStatus, setNewDetailStatus] = useState<WOStatus>('new');
   const [updatingAssignment, setUpdatingAssignment] = useState(false);
   const [newAssignedToIds, setNewAssignedToIds] = useState<string[]>([]);
+  const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null);
 
   // Stamp-in state (inline, tied to work order detail)
   const [showStampInModal, setShowStampInModal] = useState(false);
@@ -358,6 +360,11 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
         .upload(path, file, { upsert: false });
 
       if (error) {
+        if (error.message.toLowerCase().includes('bucket not found')) {
+          throw new Error(
+            `Kunde inte ladda upp ${file.name}: storage-bucketen work-order-attachments saknas. Kör senaste Supabase-migrationerna på miljön först.`
+          );
+        }
         throw new Error(`Kunde inte ladda upp ${file.name}: ${error.message}`);
       }
 
@@ -374,6 +381,44 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
       });
     }
     return uploaded;
+  }
+
+  async function deleteWorkOrderAttachment(attachment: AttachmentItem) {
+    if (!selectedWorkOrder || !isStaff) return;
+    if (!window.confirm(`Ta bort bilagan "${attachment.name}"?`)) return;
+
+    try {
+      setDeletingAttachmentId(attachment.id);
+      const nextAttachments = (selectedWorkOrder.attachments || []).filter((item) => item.id !== attachment.id);
+
+      if (attachment.path) {
+        const { error: storageError } = await supabase.storage
+          .from('work-order-attachments')
+          .remove([attachment.path]);
+
+        if (storageError) {
+          throw new Error(`Kunde inte ta bort filen från lagringen: ${storageError.message}`);
+        }
+      }
+
+      const { error } = await supabase
+        .from('work_orders')
+        .update({ attachments: nextAttachments })
+        .eq('id', selectedWorkOrder.id);
+
+      if (error) throw error;
+
+      const updatedWorkOrder = { ...selectedWorkOrder, attachments: nextAttachments };
+      setSelectedWorkOrder(updatedWorkOrder);
+      setWorkOrders((orders) => orders.map((order) => (
+        order.id === selectedWorkOrder.id ? { ...order, attachments: nextAttachments } : order
+      )));
+    } catch (err: any) {
+      console.error('Error deleting work order attachment:', err);
+      alert(err.message || 'Kunde inte ta bort bilagan. Försök igen.');
+    } finally {
+      setDeletingAttachmentId(null);
+    }
   }
 
   async function addComment() {
@@ -1165,10 +1210,21 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
               </label>
               {createForm.files.length > 0 && (
                 <div className="space-y-1">
-                  {createForm.files.map((file) => (
+                  {createForm.files.map((file, index) => (
                     <div key={`${file.name}-${file.size}`} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
                       <Paperclip className="h-3.5 w-3.5" />
-                      <span className="truncate">{file.name}</span>
+                      <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setCreateForm({
+                          ...createForm,
+                          files: createForm.files.filter((_, fileIndex) => fileIndex !== index),
+                        })}
+                        className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-red-600"
+                        aria-label={`Ta bort ${file.name}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -1351,16 +1407,31 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
                 <p className="mb-2 text-xs font-medium uppercase text-slate-500">Bilagor</p>
                 <div className="space-y-2">
                   {selectedWorkOrder.attachments.map((attachment) => (
-                    <a
+                    <div
                       key={attachment.id}
-                      href={attachment.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-blue-700 hover:bg-blue-50"
+                      className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                     >
-                      <Paperclip className="h-4 w-4" />
-                      <span className="truncate">{attachment.name}</span>
-                    </a>
+                      <a
+                        href={attachment.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex min-w-0 flex-1 items-center gap-2 text-blue-700 hover:text-blue-800"
+                      >
+                        <Paperclip className="h-4 w-4 flex-shrink-0" />
+                        <span className="truncate">{attachment.name}</span>
+                      </a>
+                      {isStaff && (
+                        <button
+                          type="button"
+                          onClick={() => deleteWorkOrderAttachment(attachment)}
+                          disabled={deletingAttachmentId === attachment.id}
+                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          {deletingAttachmentId === attachment.id ? 'Tar bort...' : 'Ta bort'}
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>

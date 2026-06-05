@@ -187,6 +187,7 @@ export function getTimeStatusColor(status: string): string {
   return {
     draft: 'text-slate-600 bg-slate-100',
     submitted: 'text-blue-600 bg-blue-100',
+    change_requested: 'text-amber-700 bg-amber-100',
     approved: 'text-green-600 bg-green-100',
     rejected: 'text-red-600 bg-red-100',
   }[status] ?? 'text-slate-600 bg-slate-100';
