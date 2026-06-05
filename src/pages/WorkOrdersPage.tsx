@@ -114,7 +114,7 @@ const WO_STATUSES: WOStatus[] = [
 
 const ARCHIVED_WO_STATUSES: WOStatus[] = ['completed', 'cancelled'];
 
-export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
+export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: { onNavigate: (page: string) => void; initialWorkOrderId?: string }) {
   const { user, loading: authLoading } = useAuth();
   const [workOrders, setWorkOrders] = useState<WOWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
@@ -172,6 +172,17 @@ export function WorkOrdersPage({ onNavigate: _onNavigate }: { onNavigate: (page:
       }
     }
   }, [authLoading, user, isStaff]);
+
+  useEffect(() => {
+    if (!initialWorkOrderId || loading || workOrders.length === 0) return;
+    const workOrder = workOrders.find((order) => order.id === initialWorkOrderId);
+    if (workOrder) {
+      setSelectedWorkOrder(workOrder);
+      setNewDetailStatus(workOrder.status);
+      setNewAssignedToIds(workOrder.assigned_to_ids?.length ? workOrder.assigned_to_ids : workOrder.assigned_to ? [workOrder.assigned_to] : []);
+      setShowDetailModal(true);
+    }
+  }, [initialWorkOrderId, loading, workOrders]);
 
   // Fetch comments when detail modal opens
   useEffect(() => {

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, Badge, StatCard, LoadingPage } from '../components/ui';
-import { formatDate, formatDateTime, MR_STATUS_LABELS, getMRStatusColor, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS } from '../lib/utils';
+import { formatDate, formatDateTime, MR_STATUS_LABELS, getMRStatusColor, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, TIME_CATEGORY_LABELS } from '../lib/utils';
 import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus } from '../types';
 import { Wrench, ClipboardList, Clock, AlertCircle, CheckCircle, Timer, Plus, ArrowRight, CalendarX } from 'lucide-react';
 
@@ -45,6 +45,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   const [myWorkOrders, setMyWorkOrders] = useState<WorkOrder[]>([]);
   const [newWorkOrders, setNewWorkOrders] = useState<WorkOrder[]>([]);
   const [todayAbsences, setTodayAbsences] = useState<StaffAbsenceRequest[]>([]);
+  const [clockedInEntries, setClockedInEntries] = useState<TimeEntry[]>([]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -62,6 +63,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           myWODetailsResult,
           newWODetailsResult,
           todayAbsencesResult,
+          clockedInResult,
         ] = await Promise.all([
           // Count new maintenance requests (status='received')
           supabase
@@ -125,6 +127,16 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
                 .in('status', ['submitted', 'approved'])
                 .order('created_at', { ascending: false })
             : Promise.resolve({ data: [], error: null }),
+
+          user.role === 'admin'
+            ? supabase
+                .from('time_entries')
+                .select('*, user:profiles(id, name, email), work_order:work_orders(id, title), customer_project:customer_projects(id, project_name)')
+                .is('end_time', null)
+                .eq('status', 'draft')
+                .gte('start_time', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
+                .order('start_time', { ascending: true })
+            : Promise.resolve({ data: [], error: null }),
         ]);
 
         setNewMRCount(newMRResult.count || 0);
@@ -146,6 +158,10 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
 
         if (todayAbsencesResult.data) {
           setTodayAbsences(todayAbsencesResult.data as StaffAbsenceRequest[]);
+        }
+
+        if (clockedInResult.data) {
+          setClockedInEntries(clockedInResult.data as TimeEntry[]);
         }
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
@@ -193,53 +209,108 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
         />
       </div>
 
-      {/* Active Time Entry Card */}
-      {user?.role === 'admin' && todayAbsences.length > 0 && (
-        <Card className="overflow-hidden border-amber-200 bg-amber-50">
-          <div className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="rounded-xl bg-amber-100 p-2.5 text-amber-700">
-                <CalendarX className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-base font-semibold text-slate-800">Frånvaro idag</h2>
-                <p className="text-sm text-slate-600">
-                  {todayAbsences.length} person{todayAbsences.length === 1 ? '' : 'er'} är sjukanmäld, ledig eller har väntande frånvaro idag.
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => onNavigate('timetracking')}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-amber-800 shadow-sm ring-1 ring-amber-200 hover:bg-amber-100"
-            >
-              Öppna tidrapportering
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="divide-y divide-amber-100 border-t border-amber-100 bg-white/60">
-            {todayAbsences.slice(0, 5).map((absence) => (
-              <div key={absence.id} className="flex flex-col gap-2 px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+      {user?.role === 'admin' && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card className="overflow-hidden border-emerald-200 bg-emerald-50">
+            <div className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-emerald-100 p-2.5 text-emerald-700">
+                  <Timer className="h-5 w-5" />
+                </div>
                 <div>
-                  <p className="text-sm font-semibold text-slate-800">{absence.user?.name || 'Personal'}</p>
-                  <p className="text-xs text-slate-500">
-                    {formatDate(absence.start_date)}{absence.end_date !== absence.start_date ? ` - ${formatDate(absence.end_date)}` : ''}
-                    {absence.start_time && absence.end_time ? `, ${absence.start_time.slice(0, 5)}-${absence.end_time.slice(0, 5)}` : ''}
+                  <h2 className="text-base font-semibold text-slate-800">Instämplade just nu</h2>
+                  <p className="text-sm text-slate-600">
+                    {clockedInEntries.length} person{clockedInEntries.length === 1 ? '' : 'er'} är instämplad{clockedInEntries.length === 1 ? '' : 'e'}.
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Badge className={absence.absence_type === 'sick' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}>
-                    {ABSENCE_TYPE_LABEL[absence.absence_type]}
-                  </Badge>
-                  <Badge className={absenceStatusColor(absence.status)}>
-                    {ABSENCE_STATUS_LABEL[absence.status]}
-                  </Badge>
+              </div>
+              <button
+                onClick={() => onNavigate('timetracking')}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-emerald-800 shadow-sm ring-1 ring-emerald-200 hover:bg-emerald-100"
+              >
+                Se tidrapportering
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="divide-y divide-emerald-100 border-t border-emerald-100 bg-white/60">
+              {clockedInEntries.length === 0 ? (
+                <div className="px-6 py-4 text-sm text-slate-500">Ingen är instämplad just nu.</div>
+              ) : (
+                clockedInEntries.slice(0, 5).map((entry) => (
+                  <div key={entry.id} className="flex flex-col gap-2 px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{entry.user?.name || 'Personal'}</p>
+                      <p className="text-xs text-slate-500">
+                        Sedan {formatDateTime(entry.start_time)}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge className={entry.entry_type === 'break' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
+                        {entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category]}
+                      </Badge>
+                      {(entry.customer_project?.project_name || entry.work_order?.title) && (
+                        <Badge className="bg-slate-100 text-slate-700">
+                          {entry.customer_project?.project_name || entry.work_order?.title}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+
+          <Card className="overflow-hidden border-amber-200 bg-amber-50">
+            <div className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-amber-100 p-2.5 text-amber-700">
+                  <CalendarX className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-slate-800">Frånvaro idag</h2>
+                  <p className="text-sm text-slate-600">
+                    {todayAbsences.length} person{todayAbsences.length === 1 ? '' : 'er'} är sjukanmäld, ledig eller har väntande frånvaro idag.
+                  </p>
                 </div>
               </div>
-            ))}
-          </div>
-        </Card>
+              <button
+                onClick={() => onNavigate('timetracking')}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-amber-800 shadow-sm ring-1 ring-amber-200 hover:bg-amber-100"
+              >
+                Öppna tidrapportering
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="divide-y divide-amber-100 border-t border-amber-100 bg-white/60">
+              {todayAbsences.length === 0 ? (
+                <div className="px-6 py-4 text-sm text-slate-500">Ingen registrerad frånvaro idag.</div>
+              ) : (
+                todayAbsences.slice(0, 5).map((absence) => (
+                  <div key={absence.id} className="flex flex-col gap-2 px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{absence.user?.name || 'Personal'}</p>
+                      <p className="text-xs text-slate-500">
+                        {formatDate(absence.start_date)}{absence.end_date !== absence.start_date ? ` - ${formatDate(absence.end_date)}` : ''}
+                        {absence.start_time && absence.end_time ? `, ${absence.start_time.slice(0, 5)}-${absence.end_time.slice(0, 5)}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge className={absence.absence_type === 'sick' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}>
+                        {ABSENCE_TYPE_LABEL[absence.absence_type]}
+                      </Badge>
+                      <Badge className={absenceStatusColor(absence.status)}>
+                        {ABSENCE_STATUS_LABEL[absence.status]}
+                      </Badge>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+        </div>
       )}
 
+      {/* Active Time Entry Card */}
       {activeTimeEntry && (
         <Card className="p-6 border-2 border-blue-200 bg-blue-50">
           <div className="flex items-center justify-between">

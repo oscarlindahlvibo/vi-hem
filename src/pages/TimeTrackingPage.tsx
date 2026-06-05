@@ -22,7 +22,7 @@ import {
   TIME_CATEGORY_LABELS,
   getTimeStatusColor,
 } from '../lib/utils';
-import type { TimeEntry, TimeCategory, WorkOrder, Profile, CustomerProject, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus } from '../types';
+import type { TimeEntry, TimeCategory, WorkOrder, Profile, CustomerProject, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, StaffWorkSchedule } from '../types';
 import {
   Play,
   Square,
@@ -1259,15 +1259,16 @@ function AbsenceRequestList({ requests }: { requests: StaffAbsenceRequest[] }) {
   );
 }
 
-function AbsenceRequestModal({ open, onClose, onSubmit, defaultDate, title = 'Anmäl frånvaro eller ansök om ledighet', submitLabel = 'Skicka' }: {
+function AbsenceRequestModal({ open, onClose, onSubmit, defaultDate, title = 'Anmäl frånvaro eller ansök om ledighet', submitLabel = 'Skicka', absence }: {
   open: boolean;
   onClose: () => void;
   onSubmit: (payload: { absence_type: StaffAbsenceType; start_date: string; end_date: string; start_time?: string | null; end_time?: string | null; comment: string }) => void;
   defaultDate?: string;
   title?: string;
   submitLabel?: string;
+  absence?: StaffAbsenceRequest | null;
 }) {
-  const today = defaultDate || localDateKey(new Date());
+  const today = absence?.start_date || defaultDate || localDateKey(new Date());
   const [absenceType, setAbsenceType] = useState<StaffAbsenceType>('sick');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
@@ -1277,14 +1278,14 @@ function AbsenceRequestModal({ open, onClose, onSubmit, defaultDate, title = 'An
 
   useEffect(() => {
     if (open) {
-      setAbsenceType('sick');
-      setStartDate(today);
-      setEndDate(today);
-      setStartTime('');
-      setEndTime('');
-      setComment('');
+      setAbsenceType(absence?.absence_type || 'sick');
+      setStartDate(absence?.start_date || today);
+      setEndDate(absence?.end_date || today);
+      setStartTime(absence?.start_time?.slice(0, 5) || '');
+      setEndTime(absence?.end_time?.slice(0, 5) || '');
+      setComment(absence?.comment || '');
     }
-  }, [open, today]);
+  }, [open, today, absence]);
 
   const hasPartialTime = Boolean(startTime || endTime);
   const valid = !!startDate && !!endDate && endDate >= startDate && (!hasPartialTime || (!!startTime && !!endTime && (endDate > startDate || endTime > startTime)));
@@ -1369,6 +1370,8 @@ function AdminTimeView({ user }: { user: Profile }) {
   const [adminEntryDefaultDate, setAdminEntryDefaultDate] = useState('');
   const [adminAbsenceModalOpen, setAdminAbsenceModalOpen] = useState(false);
   const [adminAbsenceDefaultDate, setAdminAbsenceDefaultDate] = useState('');
+  const [adminEditingAbsence, setAdminEditingAbsence] = useState<StaffAbsenceRequest | null>(null);
+  const [staffSchedules, setStaffSchedules] = useState<StaffWorkSchedule[]>([]);
 
   // Calendar for admin staff view
   const now = new Date();
@@ -1432,6 +1435,7 @@ function AdminTimeView({ user }: { user: Profile }) {
     setSelectedStaff(staff);
     await loadStaffEntries(staff.id, monthFilter);
     await loadAbsenceRequests(staff.id, monthFilter);
+    await loadStaffSchedules(staff.id);
     setAdminTab('list');
     setStaffModalOpen(true);
   }
@@ -1459,6 +1463,22 @@ function AdminTimeView({ user }: { user: Profile }) {
       .lte('start_date', endDate)
       .order('start_date', { ascending: false });
     setAbsenceRequests(data || []);
+  }
+
+  async function loadStaffSchedules(staffId: string) {
+    const { data, error } = await supabase
+      .from('staff_work_schedules')
+      .select('*')
+      .eq('user_id', staffId)
+      .eq('active', true);
+    if (error) {
+      setStaffSchedules([]);
+      if (error.code !== 'PGRST205' && !String(error.message || '').includes('schema cache')) {
+        console.error('Error loading staff schedules:', error);
+      }
+      return;
+    }
+    setStaffSchedules((data || []) as StaffWorkSchedule[]);
   }
 
   async function approveEntry(id: string) {
@@ -1545,16 +1565,32 @@ function AdminTimeView({ user }: { user: Profile }) {
     comment: string;
   }) {
     if (!selectedStaff) return;
-    await supabase.from('staff_absence_requests').insert({
+    const data = {
       ...payload,
-      user_id: selectedStaff.id,
-      organisation_id: selectedStaff.organisation_id || user.organisation_id || null,
-      status: 'approved',
-      reviewed_by: user.id,
-      reviewed_at: new Date().toISOString(),
-    });
+      status: adminEditingAbsence?.status === 'submitted' ? 'submitted' : 'approved',
+      reviewed_by: adminEditingAbsence?.status === 'submitted' ? adminEditingAbsence.reviewed_by : user.id,
+      reviewed_at: adminEditingAbsence?.status === 'submitted' ? adminEditingAbsence.reviewed_at : new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    if (adminEditingAbsence) {
+      await supabase.from('staff_absence_requests').update(data).eq('id', adminEditingAbsence.id);
+    } else {
+      await supabase.from('staff_absence_requests').insert({
+        ...data,
+        user_id: selectedStaff.id,
+        organisation_id: selectedStaff.organisation_id || user.organisation_id || null,
+      });
+    }
     setAdminAbsenceModalOpen(false);
     setAdminAbsenceDefaultDate('');
+    setAdminEditingAbsence(null);
+    await loadAbsenceRequests(selectedStaff.id, monthFilter);
+  }
+
+  async function deleteAdminAbsence(request: StaffAbsenceRequest) {
+    if (!selectedStaff) return;
+    if (!window.confirm('Ta bort denna frånvaropost?')) return;
+    await supabase.from('staff_absence_requests').delete().eq('id', request.id);
     await loadAbsenceRequests(selectedStaff.id, monthFilter);
   }
 
@@ -1579,6 +1615,41 @@ function AdminTimeView({ user }: { user: Profile }) {
 
   const pendingCount = staffEntries.filter(e => e.status === 'submitted' || e.status === 'change_requested').length;
   const selectedStaffAbsences = absenceRequests.filter(request => request.user_id === selectedStaff?.id);
+  const [adminListYear, adminListMonthNumber] = monthFilter.split('-').map(Number);
+  const adminListMonthLabel = new Date(adminListYear, adminListMonthNumber - 1, 1)
+    .toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' });
+  const adminMonthDayKeys = Array.from(
+    { length: new Date(adminListYear, adminListMonthNumber, 0).getDate() },
+    (_, i) => localDateKey(new Date(adminListYear, adminListMonthNumber - 1, i + 1))
+  );
+  const minutesFromTime = (time: string) => {
+    const [hours, minutes] = time.slice(0, 5).split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+  const scheduledMinutesForDay = (dayKey: string) => {
+    const weekday = ((new Date(`${dayKey}T12:00:00`).getDay() + 6) % 7) + 1;
+    const schedule = staffSchedules.find((item) => item.weekday === weekday && item.active);
+    if (!schedule) return 8 * 60;
+    const workMinutes = Math.max(minutesFromTime(schedule.work_end) - minutesFromTime(schedule.work_start), 0);
+    return Math.max(workMinutes - (schedule.lunch_minutes || 0), 0);
+  };
+  const absenceMinutesForDay = (request: StaffAbsenceRequest, dayKey: string) => {
+    if (request.start_time && request.end_time) {
+      return Math.max(minutesFromTime(request.end_time) - minutesFromTime(request.start_time), 0);
+    }
+    return scheduledMinutesForDay(dayKey);
+  };
+  const absenceTotals = selectedStaffAbsences.reduce((acc, request) => {
+    if (request.status === 'rejected' || request.status === 'cancelled') return acc;
+    adminMonthDayKeys.forEach(dayKey => {
+      if (dayKey >= request.start_date && dayKey <= request.end_date) {
+        const minutes = absenceMinutesForDay(request, dayKey);
+        acc.total += minutes;
+        acc[request.absence_type] += minutes;
+      }
+    });
+    return acc;
+  }, { total: 0, sick: 0, vab: 0, vacation: 0, leave: 0, unpaid_leave: 0 } as Record<StaffAbsenceType | 'total', number>);
   const filteredStaffMembers = staffMembers.filter(staff => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return true;
@@ -1589,13 +1660,6 @@ function AdminTimeView({ user }: { user: Profile }) {
     acc[entry.user_id].push(entry);
     return acc;
   }, {} as Record<string, TimeEntry[]>);
-  const [adminListYear, adminListMonthNumber] = monthFilter.split('-').map(Number);
-  const adminListMonthLabel = new Date(adminListYear, adminListMonthNumber - 1, 1)
-    .toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' });
-  const adminMonthDayKeys = Array.from(
-    { length: new Date(adminListYear, adminListMonthNumber, 0).getDate() },
-    (_, i) => localDateKey(new Date(adminListYear, adminListMonthNumber - 1, i + 1))
-  );
   const adminEntriesByDay = staffEntries.reduce((acc, entry) => {
     const day = localDateKey(entry.start_time);
     if (!acc[day]) acc[day] = [];
@@ -1902,7 +1966,7 @@ function AdminTimeView({ user }: { user: Profile }) {
           </div>
 
           {/* Summary */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
             <div className="bg-slate-50 rounded-lg p-3 text-center">
               <p className="text-lg font-bold text-slate-800">{formatMinutes(modalTotalWork)}</p>
               <p className="text-xs text-slate-500">Arbetstid</p>
@@ -1914,6 +1978,20 @@ function AdminTimeView({ user }: { user: Profile }) {
             <div className={`rounded-lg p-3 text-center ${modalOvertime > 0 ? 'bg-orange-50' : 'bg-slate-50'}`}>
               <p className={`text-lg font-bold ${modalOvertime > 0 ? 'text-orange-700' : 'text-slate-800'}`}>{formatMinutes(modalOvertime)}</p>
               <p className="text-xs text-slate-500">Övertid</p>
+            </div>
+            <div className={`rounded-lg p-3 text-center ${absenceTotals.sick > 0 ? 'bg-red-50' : 'bg-slate-50'}`}>
+              <p className={`text-lg font-bold ${absenceTotals.sick > 0 ? 'text-red-700' : 'text-slate-800'}`}>{formatMinutes(absenceTotals.sick)}</p>
+              <p className="text-xs text-slate-500">Sjuk</p>
+            </div>
+            <div className={`rounded-lg p-3 text-center ${absenceTotals.vab > 0 ? 'bg-blue-50' : 'bg-slate-50'}`}>
+              <p className={`text-lg font-bold ${absenceTotals.vab > 0 ? 'text-blue-700' : 'text-slate-800'}`}>{formatMinutes(absenceTotals.vab)}</p>
+              <p className="text-xs text-slate-500">VAB</p>
+            </div>
+            <div className={`rounded-lg p-3 text-center ${absenceTotals.total - absenceTotals.sick - absenceTotals.vab > 0 ? 'bg-purple-50' : 'bg-slate-50'}`}>
+              <p className={`text-lg font-bold ${absenceTotals.total - absenceTotals.sick - absenceTotals.vab > 0 ? 'text-purple-700' : 'text-slate-800'}`}>
+                {formatMinutes(absenceTotals.total - absenceTotals.sick - absenceTotals.vab)}
+              </p>
+              <p className="text-xs text-slate-500">Övrig frånvaro</p>
             </div>
           </div>
 
@@ -1954,13 +2032,29 @@ function AdminTimeView({ user }: { user: Profile }) {
                       <p className="text-xs text-slate-500 mt-0.5">{absenceDateTimeLabel(request)}</p>
                       {request.comment && <p className="text-xs text-slate-500 mt-1">{request.comment}</p>}
                     </div>
-                    {request.status === 'submitted' && (
-                      <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => {
+                          setAdminEditingAbsence(request);
+                          setAdminAbsenceDefaultDate(request.start_date);
+                          setAdminAbsenceModalOpen(true);
+                        }}
+                        className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                      >
+                        Redigera
+                      </button>
+                      <button onClick={() => deleteAdminAbsence(request)} className="text-xs text-red-500 hover:text-red-600 font-medium">
+                        Ta bort
+                      </button>
+                      {request.status === 'submitted' && (
+                        <>
+                          <span className="text-slate-300">|</span>
                         <button onClick={() => reviewAbsenceRequest(request.id, 'approved')} className="text-xs text-green-600 hover:text-green-700 font-medium">Godkänn</button>
                         <span className="text-slate-300">|</span>
                         <button onClick={() => reviewAbsenceRequest(request.id, 'rejected')} className="text-xs text-red-500 hover:text-red-600 font-medium">Avvisa</button>
-                      </div>
-                    )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2033,6 +2127,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                                 <button
                                   type="button"
                                   onClick={() => {
+                                    setAdminEditingAbsence(null);
                                     setAdminAbsenceDefaultDate(dayKey);
                                     setAdminAbsenceModalOpen(true);
                                   }}
@@ -2074,6 +2169,41 @@ function AdminTimeView({ user }: { user: Profile }) {
                                   <>
                                     <button onClick={() => approveEntry(entry.id)} className="text-xs text-green-600 hover:text-green-700 font-medium">Godkänn</button>
                                     <button onClick={() => rejectEntry(entry.id)} className="text-xs text-red-500 hover:text-red-600 font-medium">Avvisa</button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {dayAbsences.map(request => (
+                          <tr key={`${request.id}-${dayKey}`} className="border-b border-slate-100 bg-blue-50/40 hover:bg-blue-50">
+                            <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{new Date(`${dayKey}T12:00:00`).toLocaleDateString('sv-SE', { weekday: 'short' })}</td>
+                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{ABSENCE_TYPE_LABEL[request.absence_type]}</td>
+                            <td className="px-3 py-2 text-slate-500">Frånvaro/ledig</td>
+                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{request.start_time ? request.start_time.slice(0, 5) : 'Heldag'}</td>
+                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{request.end_time ? request.end_time.slice(0, 5) : 'Heldag'}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-slate-800 whitespace-nowrap">{formatMinutes(absenceMinutesForDay(request, dayKey))}</td>
+                            <td className="px-3 py-2 text-slate-500 max-w-[240px] truncate">{request.comment || '--'}</td>
+                            <td className="px-3 py-2 whitespace-nowrap"><Badge className={absenceStatusColor(request.status)}>{ABSENCE_STATUS_LABEL[request.status]}</Badge></td>
+                            <td className="px-3 py-2">
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <button
+                                  onClick={() => {
+                                    setAdminEditingAbsence(request);
+                                    setAdminAbsenceDefaultDate(request.start_date);
+                                    setAdminAbsenceModalOpen(true);
+                                  }}
+                                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                                >
+                                  Redigera
+                                </button>
+                                <button onClick={() => deleteAdminAbsence(request)} className="text-xs text-red-500 hover:text-red-600 font-medium inline-flex items-center gap-1">
+                                  <Trash2 className="w-3 h-3" /> Ta bort
+                                </button>
+                                {request.status === 'submitted' && (
+                                  <>
+                                    <button onClick={() => reviewAbsenceRequest(request.id, 'approved')} className="text-xs text-green-600 hover:text-green-700 font-medium">Godkänn</button>
+                                    <button onClick={() => reviewAbsenceRequest(request.id, 'rejected')} className="text-xs text-red-500 hover:text-red-600 font-medium">Avvisa</button>
                                   </>
                                 )}
                               </div>
@@ -2144,11 +2274,12 @@ function AdminTimeView({ user }: { user: Profile }) {
       {selectedStaff && (
         <AbsenceRequestModal
           open={adminAbsenceModalOpen}
-          onClose={() => { setAdminAbsenceModalOpen(false); setAdminAbsenceDefaultDate(''); }}
+          onClose={() => { setAdminAbsenceModalOpen(false); setAdminAbsenceDefaultDate(''); setAdminEditingAbsence(null); }}
           onSubmit={handleAdminAbsenceSubmit}
           defaultDate={adminAbsenceDefaultDate || `${monthFilter}-01`}
-          title={`Lägg in frånvaro för ${selectedStaff.name}`}
-          submitLabel="Lägg in som godkänd"
+          absence={adminEditingAbsence}
+          title={adminEditingAbsence ? `Redigera frånvaro för ${selectedStaff.name}` : `Lägg in frånvaro för ${selectedStaff.name}`}
+          submitLabel={adminEditingAbsence ? 'Spara frånvaro' : 'Lägg in som godkänd'}
         />
       )}
     </div>
