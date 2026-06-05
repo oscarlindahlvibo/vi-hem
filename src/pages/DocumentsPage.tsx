@@ -15,7 +15,7 @@ import {
 } from '../components/ui';
 import { formatDate, DOCUMENT_TYPE_LABELS } from '../lib/utils';
 import { Document, Profile, Property } from '../types';
-import { FileText, Download, Upload, Search } from 'lucide-react';
+import { FileText, Download, Upload, Search, Trash2 } from 'lucide-react';
 
 interface DocumentsPageProps { onNavigate: (page: string) => void; }
 export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
@@ -29,6 +29,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [filterType, setFilterType] = useState('all');
   const [searchTitle, setSearchTitle] = useState('');
+  const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
 
   const [newTitle, setNewTitle] = useState('');
   const [newType, setNewType] = useState('contract');
@@ -39,6 +40,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
   const [newFileUrl, setNewFileUrl] = useState('');
 
   const isStaff = user?.role === 'staff' || user?.role === 'admin' || user?.role === 'superadmin';
+  const canDeleteDocuments = user?.role === 'admin' || user?.role === 'superadmin';
 
   useEffect(() => {
     fetchDocuments();
@@ -138,6 +140,25 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
       fetchDocuments();
     } catch (error) {
       console.error('Error creating document:', error);
+    }
+  };
+
+  const deleteDocument = async (doc: Document) => {
+    if (!canDeleteDocuments) return;
+    if (!window.confirm(`Ta bort dokumentet "${doc.title}"?`)) return;
+
+    try {
+      setDeletingDocumentId(doc.id);
+      const { error } = await supabase.from('documents').delete().eq('id', doc.id);
+      if (error) throw error;
+
+      setAllDocuments((current) => current.filter((item) => item.id !== doc.id));
+      setDocuments((current) => current.filter((item) => item.id !== doc.id));
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      window.alert('Kunde inte ta bort dokumentet. Kontrollera behörighet och försök igen.');
+    } finally {
+      setDeletingDocumentId(null);
     }
   };
 
@@ -249,19 +270,33 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
 
                   <p className="text-xs text-slate-400 mb-4">{formatDate(doc.created_at)}</p>
 
-                  {doc.file_url ? (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      className="w-full gap-2"
-                      onClick={() => window.open(doc.file_url, '_blank')}
-                    >
-                      <Download size={14} />
-                      Ladda ner
-                    </Button>
-                  ) : (
-                    <p className="text-xs text-center text-slate-400 py-1">Ingen fil bifogad</p>
-                  )}
+                  <div className="flex flex-col gap-2">
+                    {doc.file_url ? (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        className="w-full gap-2"
+                        onClick={() => window.open(doc.file_url, '_blank')}
+                      >
+                        <Download size={14} />
+                        Ladda ner
+                      </Button>
+                    ) : (
+                      <p className="text-xs text-center text-slate-400 py-1">Ingen fil bifogad</p>
+                    )}
+                    {canDeleteDocuments && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full gap-2 text-red-600 hover:bg-red-50"
+                        onClick={() => deleteDocument(doc)}
+                        disabled={deletingDocumentId === doc.id}
+                      >
+                        <Trash2 size={14} />
+                        {deletingDocumentId === doc.id ? 'Tar bort...' : 'Ta bort'}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </Card>
             ))}
@@ -301,19 +336,33 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
                       )}
                       <td className="px-4 py-3 text-sm text-slate-500">{formatDate(doc.created_at)}</td>
                       <td className="px-4 py-3">
-                        {doc.file_url ? (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => window.open(doc.file_url, '_blank')}
-                            className="gap-1"
-                          >
-                            <Download size={14} />
-                            Ladda ner
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-slate-400">Ingen fil</span>
-                        )}
+                        <div className="flex flex-wrap gap-2">
+                          {doc.file_url ? (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => window.open(doc.file_url, '_blank')}
+                              className="gap-1"
+                            >
+                              <Download size={14} />
+                              Ladda ner
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-slate-400 self-center">Ingen fil</span>
+                          )}
+                          {canDeleteDocuments && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => deleteDocument(doc)}
+                              disabled={deletingDocumentId === doc.id}
+                              className="gap-1 text-red-600 hover:bg-red-50"
+                            >
+                              <Trash2 size={14} />
+                              {deletingDocumentId === doc.id ? 'Tar bort...' : 'Ta bort'}
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

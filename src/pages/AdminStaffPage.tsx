@@ -32,13 +32,14 @@ type ScheduleFormRow = {
   work_start: string;
   work_end: string;
   lunch_start: string;
-  lunch_minutes: number;
+  lunch_minutes: string;
 };
 
 type NotificationSettings = {
   work_order_assigned: boolean;
   work_order_unassigned: boolean;
   maintenance_created_staff: boolean;
+  staff_absence_submitted: boolean;
   chat_message: boolean;
   shift_start_reminder: boolean;
   lunch_start_reminder: boolean;
@@ -51,6 +52,7 @@ const defaultNotificationSettings: NotificationSettings = {
   work_order_assigned: true,
   work_order_unassigned: true,
   maintenance_created_staff: true,
+  staff_absence_submitted: true,
   chat_message: true,
   shift_start_reminder: true,
   lunch_start_reminder: true,
@@ -65,12 +67,17 @@ const NOTIFICATION_SETTING_LABELS: { key: BooleanNotificationSettingKey; label: 
   { key: 'work_order_assigned', label: 'Arbetsorder tilldelad', description: 'Notifiera när en arbetsorder tilldelas användaren.' },
   { key: 'work_order_unassigned', label: 'Otilldelad arbetsorder', description: 'Notifiera personal när en arbetsorder läggs upp utan ansvarig.' },
   { key: 'maintenance_created_staff', label: 'Ny felanmälan', description: 'Notifiera all personal när en felanmälan kommer in.' },
+  { key: 'staff_absence_submitted', label: 'Frånvaro från personal', description: 'Notifiera admin när personal sjukanmäler sig eller ansöker om ledighet.' },
   { key: 'chat_message', label: 'Chattmeddelanden', description: 'Notifiera deltagare när nya chattmeddelanden skickas.' },
   { key: 'shift_start_reminder', label: 'Pass börjar', description: 'Påminn vid schemalagd starttid.' },
   { key: 'lunch_start_reminder', label: 'Lunch börjar', description: 'Påminn vid schemalagd lunchstart.' },
   { key: 'lunch_return_reminder', label: 'Lunch slutar', description: 'Påminn efter organisationens eller personalens lunchlängd.' },
   { key: 'shift_end_reminder', label: 'Pass slutar', description: 'Påminn om att stämpla ut vid schemalagt slut.' },
 ];
+
+function isMissingSchemaError(error: any) {
+  return error?.code === 'PGRST205' || String(error?.message || '').includes('schema cache');
+}
 
 const ROLE_LABELS: Record<string, string> = {
   staff: 'Personal',
@@ -115,11 +122,15 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
 
   async function fetchNotificationSettings() {
     if (!user?.organisation_id) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('organisation_notification_settings')
       .select('settings')
       .eq('organisation_id', user.organisation_id)
       .maybeSingle();
+    if (error) {
+      if (!isMissingSchemaError(error)) console.error('Error fetching notification settings:', error);
+      return;
+    }
     setNotificationSettings({ ...defaultNotificationSettings, ...(data?.settings || {}) });
   }
 
@@ -223,17 +234,26 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       active: weekday <= 5,
       work_start: '08:00',
       work_end: '17:00',
-      lunch_start: '12:00',
-      lunch_minutes: 45,
+      lunch_start: weekday === 5 ? '' : '12:00',
+      lunch_minutes: weekday === 5 ? '' : '45',
     }));
   }
 
   async function fetchStaffSchedule(staffId: string) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('staff_work_schedules')
       .select('*')
       .eq('user_id', staffId)
       .order('weekday');
+    if (error) {
+      setScheduleRows(defaultScheduleRows());
+      if (isMissingSchemaError(error)) {
+        setSaveError('Arbetsschema-tabellen saknas i databasen. Kör senaste Supabase-migrationerna på miljön först.');
+        return;
+      }
+      console.error('Error fetching staff schedule:', error);
+      return;
+    }
     const existing = (data || []) as StaffWorkSchedule[];
     const rows = defaultScheduleRows().map((row) => {
       const match = existing.find((schedule) => schedule.weekday === row.weekday);
@@ -244,7 +264,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
         work_start: match.work_start?.slice(0, 5) || row.work_start,
         work_end: match.work_end?.slice(0, 5) || row.work_end,
         lunch_start: match.lunch_start?.slice(0, 5) || '',
-        lunch_minutes: match.lunch_minutes ?? row.lunch_minutes,
+        lunch_minutes: match.lunch_minutes ? String(match.lunch_minutes) : '',
       };
     });
     setScheduleRows(rows);
@@ -252,6 +272,14 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
 
   async function saveStaffSchedule(staffId: string) {
     if (!user?.organisation_id) return;
+    const scheduleError = scheduleRows.find((row) => {
+      if (!row.active) return false;
+      if (!row.work_start || !row.work_end) return true;
+      return row.work_end <= row.work_start;
+    });
+    if (scheduleError) {
+      throw new Error('Kontrollera arbetsschemat. Aktiva dagar behöver start och slut, och sluttiden måste vara efter starttiden.');
+    }
     const rows = scheduleRows.map((row) => ({
       organisation_id: user.organisation_id,
       user_id: staffId,
@@ -259,14 +287,19 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       active: row.active,
       work_start: row.work_start || '08:00',
       work_end: row.work_end || '17:00',
-      lunch_start: row.lunch_start || null,
-      lunch_minutes: row.lunch_minutes || 0,
+      lunch_start: row.active && row.lunch_start ? row.lunch_start : null,
+      lunch_minutes: row.active && row.lunch_start && row.lunch_minutes ? Math.max(0, parseInt(row.lunch_minutes, 10) || 0) : 0,
       updated_at: new Date().toISOString(),
     }));
     const { error } = await supabase
       .from('staff_work_schedules')
       .upsert(rows, { onConflict: 'user_id,weekday' });
-    if (error) throw error;
+    if (error) {
+      if (isMissingSchemaError(error)) {
+        throw new Error('Arbetsschema-tabellen saknas i databasen. Kör senaste Supabase-migrationerna på miljön först.');
+      }
+      throw error;
+    }
   }
 
   function updateScheduleRow(weekday: number, patch: Partial<ScheduleFormRow>) {
@@ -563,14 +596,15 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                       min={0}
                       max={240}
                       value={row.lunch_minutes}
-                      onChange={(event) => updateScheduleRow(row.weekday, { lunch_minutes: Math.max(0, parseInt(event.target.value, 10) || 0) })}
-                      disabled={!row.active}
+                      placeholder="Ingen"
+                      onChange={(event) => updateScheduleRow(row.weekday, { lunch_minutes: event.target.value })}
+                      disabled={!row.active || !row.lunch_start}
                     />
                   </div>
                 ))}
               </div>
               <p className="text-xs text-slate-500">
-                Kolumnerna är: dag, status, start, slut, lunchstart och lunchlängd i minuter.
+                Kolumnerna är: dag, status, start, slut, lunchstart och lunchlängd i minuter. Lämna lunchstart och längd tomma för dagar utan rast, till exempel kortare fredagar.
               </p>
             </div>
           )}

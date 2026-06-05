@@ -13,6 +13,7 @@ import {
   Clock,
   Newspaper,
   FileText,
+  CalendarX,
   X,
 } from 'lucide-react';
 
@@ -117,6 +118,8 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
         return <Newspaper className="w-5 h-5 text-purple-600" />;
       case 'document':
         return <FileText className="w-5 h-5 text-green-600" />;
+      case 'absence':
+        return <CalendarX className="w-5 h-5 text-amber-600" />;
       default:
         return <Bell className="w-5 h-5 text-gray-600" />;
     }
@@ -135,6 +138,8 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
         return 'bg-purple-50 border-l-4 border-purple-600';
       case 'document':
         return 'bg-green-50 border-l-4 border-green-600';
+      case 'absence':
+        return 'bg-amber-50 border-l-4 border-amber-600';
       default:
         return 'bg-gray-50 border-l-4 border-gray-600';
     }

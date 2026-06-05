@@ -3,11 +3,35 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, Badge, StatCard, LoadingPage } from '../components/ui';
 import { formatDate, formatDateTime, MR_STATUS_LABELS, getMRStatusColor, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS } from '../lib/utils';
-import type { MaintenanceRequest, WorkOrder, TimeEntry } from '../types';
-import { Wrench, ClipboardList, Clock, AlertCircle, CheckCircle, Timer, Plus, ArrowRight } from 'lucide-react';
+import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus } from '../types';
+import { Wrench, ClipboardList, Clock, AlertCircle, CheckCircle, Timer, Plus, ArrowRight, CalendarX } from 'lucide-react';
 
 interface StaffDashboardProps {
   onNavigate: (page: string) => void;
+}
+
+const ABSENCE_TYPE_LABEL: Record<StaffAbsenceType, string> = {
+  sick: 'Sjuk',
+  vab: 'VAB',
+  vacation: 'Semester',
+  leave: 'Ledig',
+  unpaid_leave: 'Tjänstledig',
+};
+
+const ABSENCE_STATUS_LABEL: Record<StaffAbsenceStatus, string> = {
+  submitted: 'Inväntar godkännande',
+  approved: 'Godkänd',
+  rejected: 'Avvisad',
+  cancelled: 'Avbruten',
+};
+
+function absenceStatusColor(status: StaffAbsenceStatus) {
+  return {
+    submitted: 'text-amber-700 bg-amber-100',
+    approved: 'text-green-700 bg-green-100',
+    rejected: 'text-red-600 bg-red-100',
+    cancelled: 'text-slate-600 bg-slate-100',
+  }[status];
 }
 
 export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
@@ -20,6 +44,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   const [activeTimeEntry, setActiveTimeEntry] = useState<TimeEntry | null>(null);
   const [myWorkOrders, setMyWorkOrders] = useState<WorkOrder[]>([]);
   const [newWorkOrders, setNewWorkOrders] = useState<WorkOrder[]>([]);
+  const [todayAbsences, setTodayAbsences] = useState<StaffAbsenceRequest[]>([]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -36,6 +61,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           activeTimeResult,
           myWODetailsResult,
           newWODetailsResult,
+          todayAbsencesResult,
         ] = await Promise.all([
           // Count new maintenance requests (status='received')
           supabase
@@ -89,6 +115,16 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
             .eq('status', 'new')
             .order('created_at', { ascending: false })
             .limit(5),
+
+          user.role === 'admin'
+            ? supabase
+                .from('staff_absence_requests')
+                .select('*, user:profiles(id, name, email)')
+                .lte('start_date', new Date().toISOString().slice(0, 10))
+                .gte('end_date', new Date().toISOString().slice(0, 10))
+                .in('status', ['submitted', 'approved'])
+                .order('created_at', { ascending: false })
+            : Promise.resolve({ data: [], error: null }),
         ]);
 
         setNewMRCount(newMRResult.count || 0);
@@ -106,6 +142,10 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
 
         if (newWODetailsResult.data) {
           setNewWorkOrders(newWODetailsResult.data);
+        }
+
+        if (todayAbsencesResult.data) {
+          setTodayAbsences(todayAbsencesResult.data as StaffAbsenceRequest[]);
         }
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
@@ -154,6 +194,52 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
       </div>
 
       {/* Active Time Entry Card */}
+      {user?.role === 'admin' && todayAbsences.length > 0 && (
+        <Card className="overflow-hidden border-amber-200 bg-amber-50">
+          <div className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-amber-100 p-2.5 text-amber-700">
+                <CalendarX className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-slate-800">Frånvaro idag</h2>
+                <p className="text-sm text-slate-600">
+                  {todayAbsences.length} person{todayAbsences.length === 1 ? '' : 'er'} är sjukanmäld, ledig eller har väntande frånvaro idag.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => onNavigate('timetracking')}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-amber-800 shadow-sm ring-1 ring-amber-200 hover:bg-amber-100"
+            >
+              Öppna tidrapportering
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="divide-y divide-amber-100 border-t border-amber-100 bg-white/60">
+            {todayAbsences.slice(0, 5).map((absence) => (
+              <div key={absence.id} className="flex flex-col gap-2 px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{absence.user?.name || 'Personal'}</p>
+                  <p className="text-xs text-slate-500">
+                    {formatDate(absence.start_date)}{absence.end_date !== absence.start_date ? ` - ${formatDate(absence.end_date)}` : ''}
+                    {absence.start_time && absence.end_time ? `, ${absence.start_time.slice(0, 5)}-${absence.end_time.slice(0, 5)}` : ''}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge className={absence.absence_type === 'sick' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}>
+                    {ABSENCE_TYPE_LABEL[absence.absence_type]}
+                  </Badge>
+                  <Badge className={absenceStatusColor(absence.status)}>
+                    {ABSENCE_STATUS_LABEL[absence.status]}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {activeTimeEntry && (
         <Card className="p-6 border-2 border-blue-200 bg-blue-50">
           <div className="flex items-center justify-between">

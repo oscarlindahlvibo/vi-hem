@@ -43,7 +43,12 @@ function AppInner() {
 
     setCurrentPage(user.role === 'superadmin' ? 'admin-organisations' : 'dashboard');
     setNotificationCount(0);
+    requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
   }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
+  }, [currentPage]);
 
   useEffect(() => {
     if (!user?.organisation_id || user.role === 'superadmin') {
@@ -98,6 +103,8 @@ function AppInner() {
       `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     const reminderSent = (key: string) => localStorage.getItem(key) === 'true';
     const markReminderSent = (key: string) => localStorage.setItem(key, 'true');
+    const isMissingSchemaError = (error: any) =>
+      error?.code === 'PGRST205' || String(error?.message || '').includes('schema cache');
     const sendReminder = async (kind: string, title: string, message: string) => {
       const key = `vihem.reminder.${user.id}.${todayKey()}.${kind}`;
       if (reminderSent(key)) return;
@@ -120,7 +127,7 @@ function AppInner() {
       const weekday = ((now.getDay() + 6) % 7) + 1;
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
-      const [{ data: settingsRow }, { data: schedule }, { data: openEntries }] = await Promise.all([
+      const [settingsResult, scheduleResult, openEntriesResult] = await Promise.all([
         supabase
           .from('organisation_notification_settings')
           .select('settings')
@@ -141,6 +148,16 @@ function AppInner() {
           .is('end_time', null)
           .gte('start_time', new Date(`${todayKey()}T00:00:00`).toISOString()),
       ]);
+
+      if (isMissingSchemaError(settingsResult.error) || isMissingSchemaError(scheduleResult.error)) return;
+      if (settingsResult.error || scheduleResult.error || openEntriesResult.error) {
+        console.error('Error checking schedule reminders:', settingsResult.error || scheduleResult.error || openEntriesResult.error);
+        return;
+      }
+
+      const settingsRow = settingsResult.data;
+      const schedule = scheduleResult.data;
+      const openEntries = openEntriesResult.data;
 
       if (!schedule) return;
 
