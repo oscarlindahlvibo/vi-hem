@@ -1250,12 +1250,15 @@ function AbsenceRequestList({ requests }: { requests: StaffAbsenceRequest[] }) {
   );
 }
 
-function AbsenceRequestModal({ open, onClose, onSubmit }: {
+function AbsenceRequestModal({ open, onClose, onSubmit, defaultDate, title = 'Anmäl frånvaro eller ansök om ledighet', submitLabel = 'Skicka' }: {
   open: boolean;
   onClose: () => void;
   onSubmit: (payload: { absence_type: StaffAbsenceType; start_date: string; end_date: string; comment: string }) => void;
+  defaultDate?: string;
+  title?: string;
+  submitLabel?: string;
 }) {
-  const today = localDateKey(new Date());
+  const today = defaultDate || localDateKey(new Date());
   const [absenceType, setAbsenceType] = useState<StaffAbsenceType>('sick');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
@@ -1273,7 +1276,7 @@ function AbsenceRequestModal({ open, onClose, onSubmit }: {
   const valid = !!startDate && !!endDate && endDate >= startDate;
 
   return (
-    <Modal open={open} onClose={onClose} title="Anmäl frånvaro eller ansök om ledighet">
+    <Modal open={open} onClose={onClose} title={title}>
       <div className="space-y-4">
         <Select
           label="Typ"
@@ -1303,7 +1306,7 @@ function AbsenceRequestModal({ open, onClose, onSubmit }: {
             onClick={() => onSubmit({ absence_type: absenceType, start_date: startDate, end_date: endDate, comment })}
             className="flex-1 gap-2"
           >
-            <Send className="w-4 h-4" /> Skicka
+            <Send className="w-4 h-4" /> {submitLabel}
           </Button>
         </div>
       </div>
@@ -1335,6 +1338,9 @@ function AdminTimeView({ user }: { user: Profile }) {
   const [adminEditingEntry, setAdminEditingEntry] = useState<TimeEntry | null>(null);
   const [adminEditModalOpen, setAdminEditModalOpen] = useState(false);
   const [adminEntryModalTitle, setAdminEntryModalTitle] = useState('Redigera tidpost');
+  const [adminEntryDefaultDate, setAdminEntryDefaultDate] = useState('');
+  const [adminAbsenceModalOpen, setAdminAbsenceModalOpen] = useState(false);
+  const [adminAbsenceDefaultDate, setAdminAbsenceDefaultDate] = useState('');
 
   // Calendar for admin staff view
   const now = new Date();
@@ -1478,6 +1484,7 @@ function AdminTimeView({ user }: { user: Profile }) {
     setAdminEditingEntry(null);
     setAdminEditModalOpen(false);
     setAdminEntryModalTitle('Redigera tidpost');
+    setAdminEntryDefaultDate('');
     await loadStaffEntries(selectedStaff.id, monthFilter);
     await fetchTodayEntries();
     fetchSummary();
@@ -1499,6 +1506,26 @@ function AdminTimeView({ user }: { user: Profile }) {
       .update({ status, reviewed_by: user.id, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('id', id);
     loadAbsenceRequests(selectedStaff.id, monthFilter);
+  }
+
+  async function handleAdminAbsenceSubmit(payload: {
+    absence_type: StaffAbsenceType;
+    start_date: string;
+    end_date: string;
+    comment: string;
+  }) {
+    if (!selectedStaff) return;
+    await supabase.from('staff_absence_requests').insert({
+      ...payload,
+      user_id: selectedStaff.id,
+      organisation_id: selectedStaff.organisation_id || user.organisation_id || null,
+      status: 'approved',
+      reviewed_by: user.id,
+      reviewed_at: new Date().toISOString(),
+    });
+    setAdminAbsenceModalOpen(false);
+    setAdminAbsenceDefaultDate('');
+    await loadAbsenceRequests(selectedStaff.id, monthFilter);
   }
 
   // Calendar helpers for selected staff
@@ -1532,9 +1559,35 @@ function AdminTimeView({ user }: { user: Profile }) {
     acc[entry.user_id].push(entry);
     return acc;
   }, {} as Record<string, TimeEntry[]>);
+  const [adminListYear, adminListMonthNumber] = monthFilter.split('-').map(Number);
+  const adminListMonthLabel = new Date(adminListYear, adminListMonthNumber - 1, 1)
+    .toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' });
+  const adminMonthDayKeys = Array.from(
+    { length: new Date(adminListYear, adminListMonthNumber, 0).getDate() },
+    (_, i) => localDateKey(new Date(adminListYear, adminListMonthNumber - 1, i + 1))
+  );
+  const adminEntriesByDay = staffEntries.reduce((acc, entry) => {
+    const day = localDateKey(entry.start_time);
+    if (!acc[day]) acc[day] = [];
+    acc[day].push(entry);
+    return acc;
+  }, {} as Record<string, TimeEntry[]>);
+  const adminAbsencesByDay = selectedStaffAbsences.reduce((acc, request) => {
+    adminMonthDayKeys.forEach(day => {
+      if (day >= request.start_date && day <= request.end_date) {
+        if (!acc[day]) acc[day] = [];
+        acc[day].push(request);
+      }
+    });
+    return acc;
+  }, {} as Record<string, StaffAbsenceRequest[]>);
   const clockedInNow = staffMembers.filter(staff => (todayEntriesByStaff[staff.id] || []).some(entry => !entry.end_time));
   const totalAttendance = staffMembers.filter(staff => (todayEntriesByStaff[staff.id] || []).length > 0);
   const todayPendingCount = todayEntries.filter(entry => entry.status === 'submitted' || entry.status === 'change_requested').length + absenceRequests.filter(request => request.status === 'submitted').length;
+  function changeMonthFilter(delta: number) {
+    const next = new Date(adminListYear, adminListMonthNumber - 1 + delta, 1);
+    setMonthFilter(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`);
+  }
 
   return (
     <div className="space-y-6 min-h-screen bg-slate-50 -m-4 lg:-m-6 p-4 lg:p-6">
@@ -1567,7 +1620,28 @@ function AdminTimeView({ user }: { user: Profile }) {
               {viewTab === 'today' ? (
                 <Input type="date" value={todayFilter} onChange={e => setTodayFilter(e.target.value)} className="sm:w-44" />
               ) : (
-                <Input type="month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="sm:w-44" />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => changeMonthFilter(-1)}
+                    className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50"
+                    aria-label="Föregående månad"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <Input type="month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="sm:w-44" />
+                  <button
+                    type="button"
+                    onClick={() => changeMonthFilter(1)}
+                    className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50"
+                    aria-label="Nästa månad"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                  <span className="hidden text-sm font-semibold capitalize text-slate-700 lg:inline">
+                    {adminListMonthLabel}
+                  </span>
+                </div>
               )}
             </div>
             <Badge className={todayPendingCount > 0 ? 'bg-orange-100 text-orange-700 px-3 py-1.5' : 'bg-slate-100 text-slate-500 px-3 py-1.5'}>
@@ -1760,17 +1834,41 @@ function AdminTimeView({ user }: { user: Profile }) {
               <p className="text-sm font-semibold text-slate-800">Timesheet</p>
               <p className="text-xs text-slate-500">Ändra tider, byt jobb, lägg till kommentarer eller korrigera rader.</p>
             </div>
-            <Button
-              variant="primary"
-              className="gap-2"
-              onClick={() => {
-                setAdminEditingEntry(null);
-                setAdminEntryModalTitle(`Lägg till tidrad för ${selectedStaff?.name || 'personal'}`);
-                setAdminEditModalOpen(true);
-              }}
-            >
-              <Plus className="w-4 h-4" /> Lägg till rad
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => changeMonthFilter(-1)}
+                  className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50"
+                  aria-label="Föregående månad"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="min-w-32 text-center text-sm font-semibold capitalize text-slate-700">
+                  {adminListMonthLabel}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => changeMonthFilter(1)}
+                  className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50"
+                  aria-label="Nästa månad"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+              <Button
+                variant="primary"
+                className="gap-2"
+                onClick={() => {
+                  setAdminEditingEntry(null);
+                  setAdminEntryDefaultDate(`${monthFilter}-01`);
+                  setAdminEntryModalTitle(`Lägg till tidrad för ${selectedStaff?.name || 'personal'}`);
+                  setAdminEditModalOpen(true);
+                }}
+              >
+                <Plus className="w-4 h-4" /> Lägg till rad
+              </Button>
+            </div>
           </div>
 
           {/* Summary */}
@@ -1844,62 +1942,121 @@ function AdminTimeView({ user }: { user: Profile }) {
           {/* List tab */}
           {adminTab === 'list' && (
             <div className="max-h-[50vh] overflow-auto rounded-lg border border-slate-200">
-              {staffEntries.length === 0 ? (
-                <EmptyState icon={<Clock className="w-10 h-10" />} title="Inga poster" description="Inga tidsrapporter för vald period." />
-              ) : (
-                <table className="w-full min-w-[980px] text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Datum</th>
-                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Typ</th>
-                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Jobb</th>
-                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Start</th>
-                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Slut</th>
-                      <th className="px-3 py-2 text-right font-semibold text-slate-600">Total</th>
-                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Kund/kommentar</th>
-                      <th className="px-3 py-2 text-left font-semibold text-slate-600">Status</th>
-                      <th className="px-3 py-2 text-right font-semibold text-slate-600">Åtgärd</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...staffEntries].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()).map(entry => (
-                      <tr key={entry.id} className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className="px-3 py-2 font-medium text-slate-800 whitespace-nowrap">{formatDate(localDateKey(entry.start_time))}</td>
-                        <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</td>
-                        <td className="px-3 py-2 text-slate-600 max-w-[180px] truncate">{timeEntryProjectLabel(entry) || entry.work_order?.title || '--'}</td>
-                        <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}</td>
-                        <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entry.end_time ? new Date(entry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
-                        <td className="px-3 py-2 text-right font-semibold text-slate-800 whitespace-nowrap">{formatMinutes(entry.total_minutes || 0)}</td>
-                        <td className="px-3 py-2 text-slate-500 max-w-[240px] truncate">{entry.comment || entry.customer_name || '--'}</td>
-                        <td className="px-3 py-2 whitespace-nowrap"><Badge className={getTimeStatusColor(entry.status)}>{STATUS_LABEL[entry.status as TimeStatus] || entry.status}</Badge></td>
-                        <td className="px-3 py-2">
-                          <div className="flex flex-wrap justify-end gap-2">
-                            <button
-                              onClick={() => {
-                                setAdminEditingEntry(entry);
-                                setAdminEntryModalTitle(`Redigera tidpost för ${selectedStaff?.name || 'personal'}`);
-                                setAdminEditModalOpen(true);
-                              }}
-                              className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                            >
-                              Redigera
-                            </button>
-                            <button onClick={() => deleteAdminEntry(entry)} className="text-xs text-red-500 hover:text-red-600 font-medium inline-flex items-center gap-1">
-                              <Trash2 className="w-3 h-3" /> Ta bort
-                            </button>
-                            {(entry.status === 'submitted' || entry.status === 'change_requested') && (
-                              <>
-                                <button onClick={() => approveEntry(entry.id)} className="text-xs text-green-600 hover:text-green-700 font-medium">Godkänn</button>
-                                <button onClick={() => rejectEntry(entry.id)} className="text-xs text-red-500 hover:text-red-600 font-medium">Avvisa</button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+              <table className="w-full min-w-[1040px] text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Datum</th>
+                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Typ</th>
+                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Jobb</th>
+                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Start</th>
+                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Slut</th>
+                    <th className="px-3 py-2 text-right font-semibold text-slate-600">Total</th>
+                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Kund/kommentar</th>
+                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Status</th>
+                    <th className="px-3 py-2 text-right font-semibold text-slate-600">Åtgärd</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminMonthDayKeys.map(dayKey => {
+                    const dayEntries = [...(adminEntriesByDay[dayKey] || [])]
+                      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+                    const dayAbsences = adminAbsencesByDay[dayKey] || [];
+                    const dayWorkMinutes = dayEntries
+                      .filter(entry => entry.entry_type !== 'break')
+                      .reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
+                    const dayBreakMinutes = dayEntries.reduce((sum, entry) => {
+                      if (entry.entry_type === 'break') return sum + (entry.total_minutes || 0);
+                      return sum + (entry.break_minutes || 0);
+                    }, 0);
+                    const isFuture = dayKey > localDateKey(new Date());
+
+                    return (
+                      <React.Fragment key={dayKey}>
+                        <tr className={`${isFuture ? 'bg-slate-50/80' : 'bg-slate-100'} border-y border-slate-200`}>
+                          <td colSpan={9} className="px-3 py-2">
+                            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-bold text-slate-800">{formatDate(dayKey)}</span>
+                                {isFuture && <Badge className="bg-blue-100 text-blue-700">Kommande</Badge>}
+                                {dayWorkMinutes > 0 && <Badge className="bg-emerald-100 text-emerald-700">{formatMinutes(dayWorkMinutes)}</Badge>}
+                                {dayBreakMinutes > 0 && <Badge className="bg-amber-100 text-amber-700">Rast {formatMinutes(dayBreakMinutes)}</Badge>}
+                                {dayAbsences.map(request => (
+                                  <Badge key={request.id} className={absenceStatusColor(request.status)}>
+                                    {ABSENCE_TYPE_LABEL[request.absence_type]}
+                                  </Badge>
+                                ))}
+                                {dayEntries.length === 0 && dayAbsences.length === 0 && (
+                                  <span className="text-xs text-slate-400">Ingen tid eller frånvaro</span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAdminEditingEntry(null);
+                                    setAdminEntryDefaultDate(dayKey);
+                                    setAdminEntryModalTitle(`Lägg till tidrad ${formatDate(dayKey)}`);
+                                    setAdminEditModalOpen(true);
+                                  }}
+                                  className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                                >
+                                  Lägg till tid
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAdminAbsenceDefaultDate(dayKey);
+                                    setAdminAbsenceModalOpen(true);
+                                  }}
+                                  className="text-xs font-medium text-slate-600 hover:text-slate-800"
+                                >
+                                  Lägg ledigt/frånvaro
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                        {dayEntries.map(entry => (
+                          <tr key={entry.id} className="border-b border-slate-100 hover:bg-slate-50">
+                            <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{new Date(entry.start_time).toLocaleDateString('sv-SE', { weekday: 'short' })}</td>
+                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</td>
+                            <td className="px-3 py-2 text-slate-600 max-w-[180px] truncate">{timeEntryProjectLabel(entry) || entry.work_order?.title || '--'}</td>
+                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}</td>
+                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entry.end_time ? new Date(entry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-slate-800 whitespace-nowrap">{formatMinutes(entry.total_minutes || 0)}</td>
+                            <td className="px-3 py-2 text-slate-500 max-w-[240px] truncate">{entry.comment || entry.customer_name || '--'}</td>
+                            <td className="px-3 py-2 whitespace-nowrap"><Badge className={getTimeStatusColor(entry.status)}>{STATUS_LABEL[entry.status as TimeStatus] || entry.status}</Badge></td>
+                            <td className="px-3 py-2">
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <button
+                                  onClick={() => {
+                                    setAdminEditingEntry(entry);
+                                    setAdminEntryDefaultDate('');
+                                    setAdminEntryModalTitle(`Redigera tidpost för ${selectedStaff?.name || 'personal'}`);
+                                    setAdminEditModalOpen(true);
+                                  }}
+                                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                                >
+                                  Redigera
+                                </button>
+                                <button onClick={() => deleteAdminEntry(entry)} className="text-xs text-red-500 hover:text-red-600 font-medium inline-flex items-center gap-1">
+                                  <Trash2 className="w-3 h-3" /> Ta bort
+                                </button>
+                                {(entry.status === 'submitted' || entry.status === 'change_requested') && (
+                                  <>
+                                    <button onClick={() => approveEntry(entry.id)} className="text-xs text-green-600 hover:text-green-700 font-medium">Godkänn</button>
+                                    <button onClick={() => rejectEntry(entry.id)} className="text-xs text-red-500 hover:text-red-600 font-medium">Avvisa</button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
 
@@ -1946,14 +2103,24 @@ function AdminTimeView({ user }: { user: Profile }) {
       {adminEditModalOpen && selectedStaff && (
         <EntryFormModal
           open={adminEditModalOpen}
-          onClose={() => { setAdminEditModalOpen(false); setAdminEditingEntry(null); setAdminEntryModalTitle('Redigera tidpost'); }}
+          onClose={() => { setAdminEditModalOpen(false); setAdminEditingEntry(null); setAdminEntryDefaultDate(''); setAdminEntryModalTitle('Redigera tidpost'); }}
           onSubmit={(payload) => handleAdminSaveEntry(payload, adminEditingEntry?.id)}
           workOrders={workOrders}
           customerProjects={customerProjects}
           entry={adminEditingEntry || undefined}
           title={adminEntryModalTitle}
-          defaultDate={`${monthFilter}-01`}
+          defaultDate={adminEntryDefaultDate || `${monthFilter}-01`}
           approvedEditMode="admin"
+        />
+      )}
+      {selectedStaff && (
+        <AbsenceRequestModal
+          open={adminAbsenceModalOpen}
+          onClose={() => { setAdminAbsenceModalOpen(false); setAdminAbsenceDefaultDate(''); }}
+          onSubmit={handleAdminAbsenceSubmit}
+          defaultDate={adminAbsenceDefaultDate || `${monthFilter}-01`}
+          title={`Lägg in frånvaro för ${selectedStaff.name}`}
+          submitLabel="Lägg in som godkänd"
         />
       )}
     </div>
