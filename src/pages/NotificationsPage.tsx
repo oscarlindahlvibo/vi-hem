@@ -108,6 +108,9 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
     switch (type) {
       case 'maintenance':
         return <Wrench className="w-5 h-5 text-orange-600" />;
+      case 'work_order':
+        return <Wrench className="w-5 h-5 text-teal-600" />;
+      case 'chat':
       case 'message':
         return <MessageCircle className="w-5 h-5 text-blue-600" />;
       case 'announcement':
@@ -123,6 +126,9 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
     switch (type) {
       case 'maintenance':
         return 'bg-orange-50 border-l-4 border-orange-600';
+      case 'work_order':
+        return 'bg-teal-50 border-l-4 border-teal-600';
+      case 'chat':
       case 'message':
         return 'bg-blue-50 border-l-4 border-blue-600';
       case 'announcement':

@@ -91,6 +91,7 @@ const ABSENCE_TYPE_LABEL: Record<StaffAbsenceType, string> = {
   vab: 'VAB',
   vacation: 'Semester',
   leave: 'Ledighet',
+  unpaid_leave: 'Tjänstledig',
 };
 
 const ABSENCE_STATUS_LABEL: Record<StaffAbsenceStatus, string> = {
@@ -99,6 +100,14 @@ const ABSENCE_STATUS_LABEL: Record<StaffAbsenceStatus, string> = {
   rejected: 'Avvisad',
   cancelled: 'Avbruten',
 };
+
+function absenceDateTimeLabel(request: Pick<StaffAbsenceRequest, 'start_date' | 'end_date' | 'start_time' | 'end_time'>) {
+  const dateLabel = `${formatDate(request.start_date)}${request.end_date !== request.start_date ? ` - ${formatDate(request.end_date)}` : ''}`;
+  if (request.start_time && request.end_time) {
+    return `${dateLabel}, ${request.start_time.slice(0, 5)}-${request.end_time.slice(0, 5)}`;
+  }
+  return dateLabel;
+}
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
@@ -404,6 +413,8 @@ function StaffTimeView({ user }: { user: Profile }) {
     absence_type: StaffAbsenceType;
     start_date: string;
     end_date: string;
+    start_time?: string | null;
+    end_time?: string | null;
     comment: string;
   }) {
     await supabase.from('staff_absence_requests').insert({
@@ -1237,9 +1248,7 @@ function AbsenceRequestList({ requests }: { requests: StaffAbsenceRequest[] }) {
                   <span className="text-sm font-semibold text-slate-800">{ABSENCE_TYPE_LABEL[request.absence_type]}</span>
                   <Badge className={absenceStatusColor(request.status)}>{ABSENCE_STATUS_LABEL[request.status]}</Badge>
                 </div>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {formatDate(request.start_date)}{request.end_date !== request.start_date && ` - ${formatDate(request.end_date)}`}
-                </p>
+                <p className="text-xs text-slate-500 mt-0.5">{absenceDateTimeLabel(request)}</p>
                 {request.comment && <p className="text-xs text-slate-500 mt-1">{request.comment}</p>}
               </div>
             </div>
@@ -1253,7 +1262,7 @@ function AbsenceRequestList({ requests }: { requests: StaffAbsenceRequest[] }) {
 function AbsenceRequestModal({ open, onClose, onSubmit, defaultDate, title = 'Anmäl frånvaro eller ansök om ledighet', submitLabel = 'Skicka' }: {
   open: boolean;
   onClose: () => void;
-  onSubmit: (payload: { absence_type: StaffAbsenceType; start_date: string; end_date: string; comment: string }) => void;
+  onSubmit: (payload: { absence_type: StaffAbsenceType; start_date: string; end_date: string; start_time?: string | null; end_time?: string | null; comment: string }) => void;
   defaultDate?: string;
   title?: string;
   submitLabel?: string;
@@ -1262,6 +1271,8 @@ function AbsenceRequestModal({ open, onClose, onSubmit, defaultDate, title = 'An
   const [absenceType, setAbsenceType] = useState<StaffAbsenceType>('sick');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [comment, setComment] = useState('');
 
   useEffect(() => {
@@ -1269,11 +1280,14 @@ function AbsenceRequestModal({ open, onClose, onSubmit, defaultDate, title = 'An
       setAbsenceType('sick');
       setStartDate(today);
       setEndDate(today);
+      setStartTime('');
+      setEndTime('');
       setComment('');
     }
   }, [open, today]);
 
-  const valid = !!startDate && !!endDate && endDate >= startDate;
+  const hasPartialTime = Boolean(startTime || endTime);
+  const valid = !!startDate && !!endDate && endDate >= startDate && (!hasPartialTime || (!!startTime && !!endTime && (endDate > startDate || endTime > startTime)));
 
   return (
     <Modal open={open} onClose={onClose} title={title}>
@@ -1288,6 +1302,13 @@ function AbsenceRequestModal({ open, onClose, onSubmit, defaultDate, title = 'An
           <Input label="Från" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
           <Input label="Till" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
         </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Input label="Från tid (valfritt)" type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+          <Input label="Till tid (valfritt)" type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
+        </div>
+        <p className="text-xs text-slate-500">
+          Lämna tiderna tomma för heldag. Fyll i tider om frånvaron bara gäller några timmar.
+        </p>
         <Textarea
           label="Kommentar (valfritt)"
           value={comment}
@@ -1296,14 +1317,21 @@ function AbsenceRequestModal({ open, onClose, onSubmit, defaultDate, title = 'An
           placeholder="Exempel: sjuk idag, VAB, önskar ledigt..."
         />
         {!valid && (
-          <p className="text-sm text-red-600">Slutdatum måste vara samma dag eller efter startdatum.</p>
+          <p className="text-sm text-red-600">Kontrollera datum och tider. Sluttid måste vara efter starttid samma dag.</p>
         )}
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={onClose} className="flex-1">Avbryt</Button>
           <Button
             variant="primary"
             disabled={!valid}
-            onClick={() => onSubmit({ absence_type: absenceType, start_date: startDate, end_date: endDate, comment })}
+            onClick={() => onSubmit({
+              absence_type: absenceType,
+              start_date: startDate,
+              end_date: endDate,
+              start_time: startTime || null,
+              end_time: endTime || null,
+              comment,
+            })}
             className="flex-1 gap-2"
           >
             <Send className="w-4 h-4" /> {submitLabel}
@@ -1512,6 +1540,8 @@ function AdminTimeView({ user }: { user: Profile }) {
     absence_type: StaffAbsenceType;
     start_date: string;
     end_date: string;
+    start_time?: string | null;
+    end_time?: string | null;
     comment: string;
   }) {
     if (!selectedStaff) return;
@@ -1921,9 +1951,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                         <span className="text-sm font-semibold text-slate-800">{ABSENCE_TYPE_LABEL[request.absence_type]}</span>
                         <Badge className={absenceStatusColor(request.status)}>{ABSENCE_STATUS_LABEL[request.status]}</Badge>
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        {formatDate(request.start_date)}{request.end_date !== request.start_date && ` - ${formatDate(request.end_date)}`}
-                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">{absenceDateTimeLabel(request)}</p>
                       {request.comment && <p className="text-xs text-slate-500 mt-1">{request.comment}</p>}
                     </div>
                     {request.status === 'submitted' && (
@@ -1982,7 +2010,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                                 {dayBreakMinutes > 0 && <Badge className="bg-amber-100 text-amber-700">Rast {formatMinutes(dayBreakMinutes)}</Badge>}
                                 {dayAbsences.map(request => (
                                   <Badge key={request.id} className={absenceStatusColor(request.status)}>
-                                    {ABSENCE_TYPE_LABEL[request.absence_type]}
+                                    {ABSENCE_TYPE_LABEL[request.absence_type]}{request.start_time && request.end_time ? ` ${request.start_time.slice(0, 5)}-${request.end_time.slice(0, 5)}` : ''}
                                   </Badge>
                                 ))}
                                 {dayEntries.length === 0 && dayAbsences.length === 0 && (
