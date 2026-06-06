@@ -109,6 +109,28 @@ function absenceDateTimeLabel(request: Pick<StaffAbsenceRequest, 'start_date' | 
   return dateLabel;
 }
 
+function absenceDbErrorMessage(error: { code?: string; message?: string } | null | undefined) {
+  const message = String(error?.message || '');
+  if (error?.code === 'PGRST205' || message.includes('schema cache') || message.includes('Could not find the table')) {
+    return 'Frånvarotabellen saknas i databasen. Kör de senaste Supabase-migrationerna på servern och ladda om appen.';
+  }
+  if (error?.code === '42501' || message.includes('row-level security')) {
+    return 'Databasen stoppar frånvaron med RLS-behörighet. Kör de senaste Supabase-migrationerna så rätt policy finns.';
+  }
+  return message || 'Kunde inte spara eller läsa frånvaro just nu.';
+}
+
+function absenceDaysInRange(request: Pick<StaffAbsenceRequest, 'start_date' | 'end_date'>) {
+  const days: string[] = [];
+  const cursor = new Date(`${request.start_date}T12:00:00`);
+  const end = new Date(`${request.end_date}T12:00:00`);
+  while (!Number.isNaN(cursor.getTime()) && cursor <= end) {
+    days.push(localDateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function TimeTrackingPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
@@ -169,6 +191,7 @@ function StaffTimeView({ user }: { user: Profile }) {
   const [customerProjects, setCustomerProjects] = useState<CustomerProjectSummary[]>([]);
   const [dailySummaries, setDailySummaries] = useState<Record<string, DailyWorkSummary>>({});
   const [absenceRequests, setAbsenceRequests] = useState<StaffAbsenceRequest[]>([]);
+  const [absenceError, setAbsenceError] = useState('');
 
   // Month navigation for calendar tab
   const now = new Date();
@@ -196,6 +219,18 @@ function StaffTimeView({ user }: { user: Profile }) {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => { fetchData(); }, [listMonth, calYear, calMonth]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`staff-absence-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'staff_absence_requests', filter: `user_id=eq.${user.id}` },
+        () => fetchData()
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user.id, listMonth, calYear, calMonth]);
 
   useEffect(() => {
     if (currentEntry && !currentEntry.end_time) {
@@ -258,13 +293,18 @@ function StaffTimeView({ user }: { user: Profile }) {
         .order('updated_at', { ascending: false });
       setCustomerProjects(projectsData || []);
 
-      const { data: absencesData } = await supabase
+      const { data: absencesData, error: absencesError } = await supabase
         .from('staff_absence_requests')
         .select('*')
         .eq('user_id', user.id)
         .gte('end_date', localDateKey(new Date(year, month, 1)))
         .lte('start_date', localDateKey(new Date(year, month + 1, 0)))
         .order('start_date', { ascending: false });
+      if (absencesError) {
+        setAbsenceError(absenceDbErrorMessage(absencesError));
+      } else {
+        setAbsenceError('');
+      }
       setAbsenceRequests(absencesData || []);
     } finally {
       setLoading(false);
@@ -417,12 +457,17 @@ function StaffTimeView({ user }: { user: Profile }) {
     end_time?: string | null;
     comment: string;
   }) {
-    await supabase.from('staff_absence_requests').insert({
+    const { error } = await supabase.from('staff_absence_requests').insert({
       ...payload,
       user_id: user.id,
       organisation_id: user.organisation_id || null,
       status: 'submitted',
     });
+    if (error) {
+      setAbsenceError(absenceDbErrorMessage(error));
+      return;
+    }
+    setAbsenceError('');
     setShowAbsenceModal(false);
     fetchData();
   }
@@ -439,6 +484,13 @@ function StaffTimeView({ user }: { user: Profile }) {
     acc[day].push(e);
     return acc;
   }, {} as Record<string, TimeEntry[]>);
+  const absencesByDay = absenceRequests.reduce((acc, request) => {
+    absenceDaysInRange(request).forEach(day => {
+      if (!acc[day]) acc[day] = [];
+      acc[day].push(request);
+    });
+    return acc;
+  }, {} as Record<string, StaffAbsenceRequest[]>);
 
   function dayTotals(dayEntries: TimeEntry[]) {
     const work = dayEntries
@@ -472,6 +524,7 @@ function StaffTimeView({ user }: { user: Profile }) {
     { length: new Date(listYear, listMonthNumber, 0).getDate() },
     (_, i) => localDateKey(new Date(listYear, listMonthNumber - 1, i + 1))
   ).reverse();
+  const selectedDayAbsences = selectedDay ? absencesByDay[selectedDay] || [] : [];
 
   return (
     <div className="space-y-6 min-h-screen bg-slate-50 -m-4 lg:-m-6 p-4 lg:p-6">
@@ -554,6 +607,12 @@ function StaffTimeView({ user }: { user: Profile }) {
         </Card>
       )}
 
+      {absenceError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {absenceError}
+        </div>
+      )}
+
       {/* Tab bar */}
       <div className="flex gap-1 bg-white border border-slate-200 rounded-xl p-1 w-full sm:w-fit">
         <button
@@ -589,6 +648,7 @@ function StaffTimeView({ user }: { user: Profile }) {
                   key={dayKey}
                   dayKey={dayKey}
                   entries={entriesByDay[dayKey] || []}
+                  absences={absencesByDay[dayKey] || []}
                   summary={dailySummaries[dayKey]}
                   onEditEntry={(entry) => { setEditingEntry(entry); setShowEditModal(true); }}
                   onAddEntry={() => { setSelectedDay(dayKey); setShowManualModal(true); }}
@@ -642,12 +702,14 @@ function StaffTimeView({ user }: { user: Profile }) {
               {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => {
                 const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                 const dayEntries = entriesByDay[dateStr] || [];
+                const dayAbsences = absencesByDay[dateStr] || [];
                 const { work, breaks } = dayTotals(dayEntries);
                 const isToday = dateStr === localDateKey(new Date());
                 const isWeekend = ((new Date(calYear, calMonth, day).getDay() + 6) % 7) >= 5;
                 const hasActive = dayEntries.some(e => !e.end_time);
                 const hasPending = dayEntries.some(e => e.status === 'submitted' || e.status === 'change_requested');
                 const hasRejected = dayEntries.some(e => e.status === 'rejected');
+                const hasAbsence = dayAbsences.length > 0;
 
                 return (
                   <button
@@ -664,8 +726,9 @@ function StaffTimeView({ user }: { user: Profile }) {
                         {day}
                       </span>
                       {hasActive && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
-                      {hasPending && !hasActive && <span className="w-2 h-2 rounded-full bg-amber-400" />}
-                      {hasRejected && <span className="w-2 h-2 rounded-full bg-red-400" />}
+                      {hasAbsence && !hasActive && <span className="w-2 h-2 rounded-full bg-blue-500" />}
+                      {hasPending && !hasActive && !hasAbsence && <span className="w-2 h-2 rounded-full bg-amber-400" />}
+                      {hasRejected && !hasAbsence && <span className="w-2 h-2 rounded-full bg-red-400" />}
                     </div>
                     {work > 0 && (
                       <div>
@@ -676,6 +739,11 @@ function StaffTimeView({ user }: { user: Profile }) {
                     {dayEntries.length > 0 && work === 0 && (
                       <p className="text-xs text-green-600 font-medium">Pågående</p>
                     )}
+                    {dayAbsences.length > 0 && (
+                      <p className="mt-1 truncate text-xs font-medium text-blue-700">
+                        {dayAbsences.map(request => ABSENCE_TYPE_LABEL[request.absence_type]).join(', ')}
+                      </p>
+                    )}
                   </button>
                 );
               })}
@@ -684,6 +752,7 @@ function StaffTimeView({ user }: { user: Profile }) {
             {/* Legend */}
             <div className="flex flex-wrap gap-4 mt-4 pt-3 border-t border-slate-100">
               <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Aktiv</div>
+              <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="w-2 h-2 rounded-full bg-blue-500" /> Frånvaro</div>
               <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="w-2 h-2 rounded-full bg-amber-400" /> Inväntar godkännande</div>
               <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="w-2 h-2 rounded-full bg-red-400" /> Avvisad</div>
             </div>
@@ -699,7 +768,21 @@ function StaffTimeView({ user }: { user: Profile }) {
         size="lg"
       >
         <div className="space-y-3">
-          {selectedDayEntries?.length === 0 ? (
+          {selectedDayAbsences.length > 0 && (
+            <div className="space-y-2">
+              {selectedDayAbsences.map(request => (
+                <div key={request.id} className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-800">{ABSENCE_TYPE_LABEL[request.absence_type]}</span>
+                    <Badge className={absenceStatusColor(request.status)}>{ABSENCE_STATUS_LABEL[request.status]}</Badge>
+                  </div>
+                  <p className="mt-0.5 text-xs text-slate-500">{absenceDateTimeLabel(request)}</p>
+                  {request.comment && <p className="mt-1 text-xs text-slate-600">{request.comment}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+          {selectedDayEntries?.length === 0 && selectedDayAbsences.length === 0 ? (
             <EmptyState icon={<Clock className="w-10 h-10" />} title="Inga poster" description="Inga tidsposter för denna dag." />
           ) : (
             selectedDayEntries?.map(entry => (
@@ -793,9 +876,10 @@ function StaffTimeView({ user }: { user: Profile }) {
 
 // ─── Month list day card ──────────────────────────────────────────────────────
 
-function DayWorkCard({ dayKey, entries, summary, onEditEntry, onAddEntry, onEditComment }: {
+function DayWorkCard({ dayKey, entries, absences, summary, onEditEntry, onAddEntry, onEditComment }: {
   dayKey: string;
   entries: TimeEntry[];
+  absences: StaffAbsenceRequest[];
   summary?: DailyWorkSummary;
   onEditEntry: (entry: TimeEntry) => void;
   onAddEntry: () => void;
@@ -823,11 +907,31 @@ function DayWorkCard({ dayKey, entries, summary, onEditEntry, onAddEntry, onEdit
             {workMinutes > 0 && <Badge className="bg-emerald-100 text-emerald-700">{formatMinutes(workMinutes)}</Badge>}
             {breakMinutes > 0 && <Badge className="bg-amber-100 text-amber-700">Rast {formatMinutes(breakMinutes)}</Badge>}
             {entries.some(entry => !entry.end_time) && <Badge className="bg-blue-100 text-blue-700">Pågående</Badge>}
+            {absences.map(request => (
+              <Badge key={request.id} className={absenceStatusColor(request.status)}>
+                {ABSENCE_TYPE_LABEL[request.absence_type]}
+              </Badge>
+            ))}
           </div>
         </div>
 
         <div className="flex-1 min-w-0 space-y-3">
-          {sortedEntries.length === 0 ? (
+          {absences.length > 0 && (
+            <div className="space-y-2">
+              {absences.map(request => (
+                <div key={request.id} className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-800">{ABSENCE_TYPE_LABEL[request.absence_type]}</span>
+                    <Badge className={absenceStatusColor(request.status)}>{ABSENCE_STATUS_LABEL[request.status]}</Badge>
+                  </div>
+                  <p className="mt-0.5 text-xs text-slate-500">{absenceDateTimeLabel(request)}</p>
+                  {request.comment && <p className="mt-1 text-xs text-slate-600">{request.comment}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {sortedEntries.length === 0 && absences.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-400">
               Ingen registrerad tid
             </div>
@@ -1357,6 +1461,7 @@ function AdminTimeView({ user }: { user: Profile }) {
   const [staffMembers, setStaffMembers] = useState<Profile[]>([]);
   const [summary, setSummary] = useState<Record<string, { total: number; approved: number; pending: number; rejected: number }>>({});
   const [todayEntries, setTodayEntries] = useState<TimeEntry[]>([]);
+  const [todayAbsenceRequests, setTodayAbsenceRequests] = useState<StaffAbsenceRequest[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<Profile | null>(null);
   const [staffEntries, setStaffEntries] = useState<TimeEntry[]>([]);
   const [staffModalOpen, setStaffModalOpen] = useState(false);
@@ -1372,6 +1477,7 @@ function AdminTimeView({ user }: { user: Profile }) {
   const [adminAbsenceDefaultDate, setAdminAbsenceDefaultDate] = useState('');
   const [adminEditingAbsence, setAdminEditingAbsence] = useState<StaffAbsenceRequest | null>(null);
   const [staffSchedules, setStaffSchedules] = useState<StaffWorkSchedule[]>([]);
+  const [adminAbsenceError, setAdminAbsenceError] = useState('');
 
   // Calendar for admin staff view
   const now = new Date();
@@ -1380,6 +1486,20 @@ function AdminTimeView({ user }: { user: Profile }) {
 
   useEffect(() => { fetchStaff(); fetchAdminOptions(); }, []);
   useEffect(() => { if (staffMembers.length > 0) { fetchSummary(); fetchTodayEntries(); } }, [monthFilter, todayFilter, staffMembers]);
+  useEffect(() => {
+    const channel = supabase
+      .channel(`admin-absence-${user.organisation_id || user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'staff_absence_requests' },
+        () => {
+          if (selectedStaff) loadAbsenceRequests(selectedStaff.id, monthFilter);
+          fetchTodayEntries();
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user.organisation_id, user.id, selectedStaff?.id, monthFilter, todayFilter]);
 
   async function fetchStaff() {
     const { data } = await supabase.from('profiles').select('*')
@@ -1422,13 +1542,30 @@ function AdminTimeView({ user }: { user: Profile }) {
   async function fetchTodayEntries() {
     const start = new Date(`${todayFilter}T00:00:00`).toISOString();
     const end = new Date(`${todayFilter}T23:59:59`).toISOString();
-    const { data } = await supabase
-      .from('time_entries')
-      .select('*, work_order:work_order_id(id, title), customer_project:customer_project_id(id, title, name, customer_name)')
-      .gte('start_time', start)
-      .lte('start_time', end)
-      .order('start_time', { ascending: false });
+    const [entriesResult, absencesResult] = await Promise.all([
+      supabase
+        .from('time_entries')
+        .select('*, work_order:work_order_id(id, title), customer_project:customer_project_id(id, title, name, customer_name)')
+        .gte('start_time', start)
+        .lte('start_time', end)
+        .order('start_time', { ascending: false }),
+      supabase
+        .from('staff_absence_requests')
+        .select('*, user:user_id(id, name, email, role)')
+        .lte('start_date', todayFilter)
+        .gte('end_date', todayFilter)
+        .in('status', ['submitted', 'approved'])
+        .order('created_at', { ascending: false }),
+    ]);
+    const { data } = entriesResult;
     setTodayEntries(data || []);
+    if (absencesResult.error) {
+      setAdminAbsenceError(absenceDbErrorMessage(absencesResult.error));
+      setTodayAbsenceRequests([]);
+    } else {
+      setAdminAbsenceError('');
+      setTodayAbsenceRequests(absencesResult.data || []);
+    }
   }
 
   async function openStaffModal(staff: Profile) {
@@ -1455,13 +1592,19 @@ function AdminTimeView({ user }: { user: Profile }) {
     const [year, monthNumber] = month.split('-').map(Number);
     const startDate = localDateKey(new Date(year, monthNumber - 1, 1));
     const endDate = localDateKey(new Date(year, monthNumber, 0));
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('staff_absence_requests')
       .select('*, user:user_id(id, name, email, role)')
       .eq('user_id', staffId)
       .gte('end_date', startDate)
       .lte('start_date', endDate)
       .order('start_date', { ascending: false });
+    if (error) {
+      setAdminAbsenceError(absenceDbErrorMessage(error));
+      setAbsenceRequests([]);
+      return;
+    }
+    setAdminAbsenceError('');
     setAbsenceRequests(data || []);
   }
 
@@ -1549,10 +1692,15 @@ function AdminTimeView({ user }: { user: Profile }) {
 
   async function reviewAbsenceRequest(id: string, status: 'approved' | 'rejected') {
     if (!selectedStaff) return;
-    await supabase
+    const { error } = await supabase
       .from('staff_absence_requests')
       .update({ status, reviewed_by: user.id, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('id', id);
+    if (error) {
+      setAdminAbsenceError(absenceDbErrorMessage(error));
+      return;
+    }
+    setAdminAbsenceError('');
     loadAbsenceRequests(selectedStaff.id, monthFilter);
   }
 
@@ -1572,15 +1720,18 @@ function AdminTimeView({ user }: { user: Profile }) {
       reviewed_at: adminEditingAbsence?.status === 'submitted' ? adminEditingAbsence.reviewed_at : new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
-    if (adminEditingAbsence) {
-      await supabase.from('staff_absence_requests').update(data).eq('id', adminEditingAbsence.id);
-    } else {
-      await supabase.from('staff_absence_requests').insert({
-        ...data,
-        user_id: selectedStaff.id,
-        organisation_id: selectedStaff.organisation_id || user.organisation_id || null,
-      });
+    const result = adminEditingAbsence
+      ? await supabase.from('staff_absence_requests').update(data).eq('id', adminEditingAbsence.id)
+      : await supabase.from('staff_absence_requests').insert({
+          ...data,
+          user_id: selectedStaff.id,
+          organisation_id: selectedStaff.organisation_id || user.organisation_id || null,
+        });
+    if (result.error) {
+      setAdminAbsenceError(absenceDbErrorMessage(result.error));
+      return;
     }
+    setAdminAbsenceError('');
     setAdminAbsenceModalOpen(false);
     setAdminAbsenceDefaultDate('');
     setAdminEditingAbsence(null);
@@ -1590,7 +1741,12 @@ function AdminTimeView({ user }: { user: Profile }) {
   async function deleteAdminAbsence(request: StaffAbsenceRequest) {
     if (!selectedStaff) return;
     if (!window.confirm('Ta bort denna frånvaropost?')) return;
-    await supabase.from('staff_absence_requests').delete().eq('id', request.id);
+    const { error } = await supabase.from('staff_absence_requests').delete().eq('id', request.id);
+    if (error) {
+      setAdminAbsenceError(absenceDbErrorMessage(error));
+      return;
+    }
+    setAdminAbsenceError('');
     await loadAbsenceRequests(selectedStaff.id, monthFilter);
   }
 
@@ -1603,6 +1759,13 @@ function AdminTimeView({ user }: { user: Profile }) {
     acc[day].push(e);
     return acc;
   }, {} as Record<string, TimeEntry[]>);
+  const calAbsencesByDay = absenceRequests.reduce((acc, request) => {
+    absenceDaysInRange(request).forEach(day => {
+      if (!acc[day]) acc[day] = [];
+      acc[day].push(request);
+    });
+    return acc;
+  }, {} as Record<string, StaffAbsenceRequest[]>);
   const calMonthName = new Date(calYear, calMonth, 1).toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' });
 
   const modalTotalWork = staffEntries.filter(e => e.end_time && e.entry_type !== 'break').reduce((s, e) => s + (e.total_minutes || 0), 0);
@@ -1660,6 +1823,11 @@ function AdminTimeView({ user }: { user: Profile }) {
     acc[entry.user_id].push(entry);
     return acc;
   }, {} as Record<string, TimeEntry[]>);
+  const todayAbsencesByStaff = todayAbsenceRequests.reduce((acc, request) => {
+    if (!acc[request.user_id]) acc[request.user_id] = [];
+    acc[request.user_id].push(request);
+    return acc;
+  }, {} as Record<string, StaffAbsenceRequest[]>);
   const adminEntriesByDay = staffEntries.reduce((acc, entry) => {
     const day = localDateKey(entry.start_time);
     if (!acc[day]) acc[day] = [];
@@ -1677,7 +1845,8 @@ function AdminTimeView({ user }: { user: Profile }) {
   }, {} as Record<string, StaffAbsenceRequest[]>);
   const clockedInNow = staffMembers.filter(staff => (todayEntriesByStaff[staff.id] || []).some(entry => !entry.end_time));
   const totalAttendance = staffMembers.filter(staff => (todayEntriesByStaff[staff.id] || []).length > 0);
-  const todayPendingCount = todayEntries.filter(entry => entry.status === 'submitted' || entry.status === 'change_requested').length + absenceRequests.filter(request => request.status === 'submitted').length;
+  const todayAbsentStaffCount = staffMembers.filter(staff => (todayAbsencesByStaff[staff.id] || []).length > 0).length;
+  const todayPendingCount = todayEntries.filter(entry => entry.status === 'submitted' || entry.status === 'change_requested').length + todayAbsenceRequests.filter(request => request.status === 'submitted').length;
   function changeMonthFilter(delta: number) {
     const next = new Date(adminListYear, adminListMonthNumber - 1 + delta, 1);
     setMonthFilter(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`);
@@ -1743,8 +1912,14 @@ function AdminTimeView({ user }: { user: Profile }) {
             </Badge>
           </div>
 
+          {adminAbsenceError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {adminAbsenceError}
+            </div>
+          )}
+
           {viewTab === 'today' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Card className="p-5">
                 <div className="flex items-center justify-between gap-4">
                   <div>
@@ -1763,6 +1938,15 @@ function AdminTimeView({ user }: { user: Profile }) {
                   <ClipboardList className="w-5 h-5 text-slate-400" />
                 </div>
               </Card>
+              <Card className="p-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-2xl font-bold text-slate-800">{todayAbsentStaffCount}</p>
+                    <p className="text-sm text-slate-600">Frånvarande idag</p>
+                  </div>
+                  <Calendar className="w-5 h-5 text-slate-400" />
+                </div>
+              </Card>
             </div>
           )}
         </div>
@@ -1776,7 +1960,9 @@ function AdminTimeView({ user }: { user: Profile }) {
             ) : filteredStaffMembers.map(staff => {
               const d = summary[staff.id] || { total: 0, approved: 0, pending: 0, rejected: 0 };
               const staffTodayEntries = todayEntriesByStaff[staff.id] || [];
+              const staffTodayAbsences = todayAbsencesByStaff[staff.id] || [];
               const activeEntry = staffTodayEntries.find(entry => !entry.end_time);
+              const activeAbsence = staffTodayAbsences[0];
               const todayTotal = staffTodayEntries.filter(entry => entry.entry_type !== 'break').reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
               return (
                 <button
@@ -1790,7 +1976,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                       <p className="font-semibold text-slate-800 break-words">{staff.name}</p>
                       <p className="mt-1 text-sm text-slate-500">
                         {viewTab === 'today'
-                          ? activeEntry ? `Instämplad som ${activeEntry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[activeEntry.category as TimeCategory]}` : 'Inte instämplad'
+                          ? activeAbsence ? `${ABSENCE_TYPE_LABEL[activeAbsence.absence_type]} ${ABSENCE_STATUS_LABEL[activeAbsence.status].toLowerCase()}` : activeEntry ? `Instämplad som ${activeEntry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[activeEntry.category as TimeCategory]}` : 'Inte instämplad'
                           : `Total ${formatMinutes(d.total)}`}
                       </p>
                     </div>
@@ -1798,9 +1984,9 @@ function AdminTimeView({ user }: { user: Profile }) {
                   </div>
                   {viewTab === 'today' ? (
                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                      <div className={`rounded-lg px-2 py-2 text-center ${activeEntry ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
-                        <p className="font-semibold">{activeEntry?.start_time ? new Date(activeEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</p>
-                        <p>Start</p>
+                      <div className={`rounded-lg px-2 py-2 text-center ${activeAbsence ? 'bg-blue-50 text-blue-700' : activeEntry ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
+                        <p className="font-semibold">{activeAbsence ? ABSENCE_TYPE_LABEL[activeAbsence.absence_type] : activeEntry?.start_time ? new Date(activeEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</p>
+                        <p>{activeAbsence ? 'Frånvaro' : 'Start'}</p>
                       </div>
                       <div className="rounded-lg bg-blue-50 px-2 py-2 text-center text-blue-700">
                         <p className="font-semibold">{formatMinutes(todayTotal)}</p>
@@ -1848,7 +2034,9 @@ function AdminTimeView({ user }: { user: Profile }) {
                     <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-400">Ingen personal</td></tr>
                   ) : filteredStaffMembers.map(staff => {
                     const staffTodayEntries = todayEntriesByStaff[staff.id] || [];
+                    const staffTodayAbsences = todayAbsencesByStaff[staff.id] || [];
                     const activeEntry = staffTodayEntries.find(entry => !entry.end_time);
+                    const activeAbsence = staffTodayAbsences[0];
                     const latestEntry = activeEntry || staffTodayEntries[0];
                     const todayTotal = staffTodayEntries.filter(entry => entry.entry_type !== 'break').reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
                     return (
@@ -1865,14 +2053,19 @@ function AdminTimeView({ user }: { user: Profile }) {
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <Badge className={activeEntry ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}>
-                            {activeEntry ? 'Instämplad' : 'Ej instämplad'}
+                          <Badge className={activeEntry ? 'bg-emerald-100 text-emerald-700' : activeAbsence ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}>
+                            {activeEntry ? 'Instämplad' : activeAbsence ? 'Frånvaro' : 'Ej instämplad'}
                           </Badge>
+                          {activeAbsence && (
+                            <Badge className={absenceStatusColor(activeAbsence.status)}>
+                              {ABSENCE_TYPE_LABEL[activeAbsence.absence_type]}
+                            </Badge>
+                          )}
                         </td>
-                        <td className="px-4 py-3 text-slate-700">{latestEntry ? latestEntry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[latestEntry.category as TimeCategory] : '--'}</td>
+                        <td className="px-4 py-3 text-slate-700">{activeAbsence ? ABSENCE_TYPE_LABEL[activeAbsence.absence_type] : latestEntry ? latestEntry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[latestEntry.category as TimeCategory] : '--'}</td>
                         <td className="px-4 py-3 text-slate-600 max-w-[220px] truncate">{latestEntry ? timeEntryProjectLabel(latestEntry) || latestEntry.work_order?.title || '--' : '--'}</td>
-                        <td className="px-4 py-3 text-slate-700">{latestEntry ? new Date(latestEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
-                        <td className="px-4 py-3 text-slate-700">{latestEntry?.end_time ? new Date(latestEntry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
+                        <td className="px-4 py-3 text-slate-700">{activeAbsence ? activeAbsence.start_time?.slice(0, 5) || 'Heldag' : latestEntry ? new Date(latestEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
+                        <td className="px-4 py-3 text-slate-700">{activeAbsence ? activeAbsence.end_time?.slice(0, 5) || 'Heldag' : latestEntry?.end_time ? new Date(latestEntry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
                         <td className="px-4 py-3 text-right font-semibold text-slate-800">{todayTotal > 0 ? formatMinutes(todayTotal) : '--'}</td>
                         <td className="px-4 py-3 text-slate-500 max-w-[260px] truncate">{latestEntry?.comment || '--'}</td>
                         <td className="px-4 py-3 text-right">
@@ -2240,6 +2433,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                 {Array.from({ length: daysInCalMonth }, (_, i) => i + 1).map(day => {
                   const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                   const dayEntries = calEntriesByDay[dateStr] || [];
+                  const dayAbsences = calAbsencesByDay[dateStr] || [];
                   const work = dayEntries.filter(e => e.end_time && e.entry_type !== 'break').reduce((s, e) => s + (e.total_minutes || 0), 0);
                   const hasPending = dayEntries.some(e => e.status === 'submitted' || e.status === 'change_requested');
                   const isWeekend = ((new Date(calYear, calMonth, day).getDay() + 6) % 7) >= 5;
@@ -2247,9 +2441,14 @@ function AdminTimeView({ user }: { user: Profile }) {
                     <div key={day} className={`min-h-[52px] rounded p-1.5 ${isWeekend ? 'bg-slate-50' : 'bg-white border border-slate-100'}`}>
                       <div className="flex items-center justify-between">
                         <span className={`text-xs ${isWeekend ? 'text-slate-400' : 'text-slate-700'} font-medium`}>{day}</span>
-                        {hasPending && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
+                        {dayAbsences.length > 0 ? <span className="w-1.5 h-1.5 rounded-full bg-blue-500" /> : hasPending && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
                       </div>
                       {work > 0 && <p className="text-xs font-bold text-slate-700 mt-0.5">{formatMinutes(work)}</p>}
+                      {dayAbsences.length > 0 && (
+                        <p className="mt-0.5 truncate text-xs font-semibold text-blue-700">
+                          {dayAbsences.map(request => ABSENCE_TYPE_LABEL[request.absence_type]).join(', ')}
+                        </p>
+                      )}
                     </div>
                   );
                 })}

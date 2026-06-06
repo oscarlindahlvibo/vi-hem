@@ -25,6 +25,10 @@ const ABSENCE_STATUS_LABEL: Record<StaffAbsenceStatus, string> = {
   cancelled: 'Avbruten',
 };
 
+function customerProjectLabel(project: any) {
+  return project?.title || project?.name || project?.customer_name || '';
+}
+
 function absenceStatusColor(status: StaffAbsenceStatus) {
   return {
     submitted: 'text-amber-700 bg-amber-100',
@@ -131,7 +135,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           user.role === 'admin'
             ? supabase
                 .from('time_entries')
-                .select('*, user:profiles(id, name, email), work_order:work_orders(id, title), customer_project:customer_projects(id, project_name)')
+                .select('*, user:profiles(id, name, email), work_order:work_orders(id, title), customer_project:customer_projects(id, title, name, customer_name)')
                 .is('end_time', null)
                 .eq('status', 'draft')
                 .gte('start_time', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
@@ -171,7 +175,15 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
     };
 
     fetchDashboardData();
-  }, [user?.id]);
+
+    const channel = supabase
+      .channel(`staff-dashboard-${user.organisation_id || user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'staff_absence_requests' }, () => fetchDashboardData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_entries' }, () => fetchDashboardData())
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id, user?.organisation_id]);
 
   if (loading) {
     return <LoadingPage />;
@@ -248,9 +260,9 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
                       <Badge className={entry.entry_type === 'break' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
                         {entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category]}
                       </Badge>
-                      {(entry.customer_project?.project_name || entry.work_order?.title) && (
+                      {(customerProjectLabel(entry.customer_project) || entry.work_order?.title) && (
                         <Badge className="bg-slate-100 text-slate-700">
-                          {entry.customer_project?.project_name || entry.work_order?.title}
+                          {customerProjectLabel(entry.customer_project) || entry.work_order?.title}
                         </Badge>
                       )}
                     </div>
