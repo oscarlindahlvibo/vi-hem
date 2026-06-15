@@ -27,12 +27,14 @@ import { ApartmentPage } from './pages/ApartmentPage';
 import { InspectionsPage } from './pages/InspectionsPage';
 import { AdminOrganisationsPage } from './pages/AdminOrganisationsPage';
 import { CustomerProjectsPage } from './pages/CustomerProjectsPage';
+import { ShortStayPage } from './pages/ShortStayPage';
 
 function AppInner() {
   const { user, loading, passwordRecovery } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [notificationCount, setNotificationCount] = useState(0);
   const [customerProjectsEnabled, setCustomerProjectsEnabled] = useState(false);
+  const [shortStayEnabled, setShortStayEnabled] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -53,15 +55,19 @@ function AppInner() {
   useEffect(() => {
     if (!user?.organisation_id || user.role === 'superadmin') {
       setCustomerProjectsEnabled(false);
+      setShortStayEnabled(false);
       return;
     }
 
     supabase
       .from('organisations')
-      .select('customer_projects_enabled')
+      .select('customer_projects_enabled, short_stay_enabled')
       .eq('id', user.organisation_id)
       .maybeSingle()
-      .then(({ data }) => setCustomerProjectsEnabled(Boolean(data?.customer_projects_enabled)));
+      .then(({ data }) => {
+        setCustomerProjectsEnabled(Boolean(data?.customer_projects_enabled));
+        setShortStayEnabled(Boolean(data?.short_stay_enabled));
+      });
   }, [user?.organisation_id, user?.role]);
 
   useEffect(() => {
@@ -281,6 +287,10 @@ function AppInner() {
         if (!isStaff || !customerProjectsEnabled) return renderDashboard();
         return <CustomerProjectsPage onNavigate={navigate} />;
 
+      case 'short-stay':
+        if (!isStaff || !shortStayEnabled) return renderDashboard();
+        return <ShortStayPage onNavigate={navigate} />;
+
       case 'termination':
         if (!isTenant) return renderDashboard();
         return <TerminationPage onNavigate={navigate} />;
@@ -321,6 +331,7 @@ function AppInner() {
       onNavigate={navigate}
       notificationCount={notificationCount}
       customerProjectsEnabled={customerProjectsEnabled}
+      shortStayEnabled={shortStayEnabled}
     >
       {renderPage()}
     </Layout>

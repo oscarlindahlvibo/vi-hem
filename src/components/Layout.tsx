@@ -7,7 +7,8 @@ import { Button, Input, Modal } from './ui';
 import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
-  ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase
+  ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase,
+  BedDouble,
 } from 'lucide-react';
 
 interface NavItem {
@@ -16,7 +17,7 @@ interface NavItem {
   page: string;
   roles: Role[];
   badge?: number;
-  module?: 'customer-projects';
+  module?: 'customer-projects' | 'short-stay';
 }
 
 interface LayoutProps {
@@ -25,9 +26,10 @@ interface LayoutProps {
   onNavigate: (page: string) => void;
   notificationCount?: number;
   customerProjectsEnabled?: boolean;
+  shortStayEnabled?: boolean;
 }
 
-export function Layout({ children, currentPage, onNavigate, notificationCount = 0, customerProjectsEnabled = false }: LayoutProps) {
+export function Layout({ children, currentPage, onNavigate, notificationCount = 0, customerProjectsEnabled = false, shortStayEnabled = false }: LayoutProps) {
   const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
@@ -52,6 +54,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     { label: 'Tidrapportering', icon: <Clock className="w-5 h-5" />, page: 'timetracking', roles: ['staff', 'admin'] },
     { label: 'Inköpslista', icon: <ShoppingCart className="w-5 h-5" />, page: 'purchases', roles: ['staff', 'admin'] },
     { label: 'Kundprojekt', icon: <Briefcase className="w-5 h-5" />, page: 'customer-projects', roles: ['staff', 'admin'], module: 'customer-projects' },
+    { label: 'Korttidsuthyrning', icon: <BedDouble className="w-5 h-5" />, page: 'short-stay', roles: ['staff', 'admin'], module: 'short-stay' },
     { label: 'Besiktningar & Avtal', icon: <ClipboardCheck className="w-5 h-5" />, page: 'inspections', roles: ['staff', 'admin'] },
     // ── Admin ──────────────────────────────────────────────────────────────
     { label: 'Fastigheter', icon: <Building2 className="w-5 h-5" />, page: 'admin-properties', roles: ['admin'] },
@@ -66,6 +69,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
   const visibleItems = navItems.filter(item => {
     if (!user || !item.roles.includes(user.role)) return false;
     if (item.module === 'customer-projects') return customerProjectsEnabled;
+    if (item.module === 'short-stay') return shortStayEnabled;
     return true;
   });
 

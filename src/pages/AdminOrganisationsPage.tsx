@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Building2, Plus, Edit2, Check, X, Globe,
   Users, Home, ChevronRight, AlertTriangle, Shield, KeyRound, Mail,
-  ClipboardCheck,
+  ClipboardCheck, BedDouble,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
@@ -40,6 +40,7 @@ interface OrgStats {
   property_count: number;
   apartment_count: number;
   customer_project_count: number;
+  short_stay_unit_count: number;
 }
 
 interface OrgFormData {
@@ -53,6 +54,8 @@ interface OrgFormData {
   max_apartments: string;
   customer_projects_enabled: boolean;
   max_customer_projects: string;
+  short_stay_enabled: boolean;
+  max_short_stay_units: string;
   active: boolean;
 }
 
@@ -75,6 +78,8 @@ const defaultForm: OrgFormData = {
   max_apartments: '5',
   customer_projects_enabled: false,
   max_customer_projects: '3',
+  short_stay_enabled: false,
+  max_short_stay_units: '3',
   active: true,
 };
 
@@ -166,6 +171,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         property_count: 0,
         apartment_count: 0,
         customer_project_count: 0,
+        short_stay_unit_count: 0,
       })));
       setLoading(false);
       return;
@@ -189,11 +195,12 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       // Fetch member and apartment counts for each org
       const orgStats = await Promise.all(
         data.map(async (org) => {
-          const [membersRes, propsRes, aptsRes, projectsRes] = await Promise.all([
+          const [membersRes, propsRes, aptsRes, projectsRes, shortStayRes] = await Promise.all([
             supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
             supabase.from('properties').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
             supabase.from('apartments').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
             supabase.from('customer_projects').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
+            supabase.from('short_stay_units').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
           ]);
           return {
             id: org.id,
@@ -201,6 +208,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             property_count: propsRes.count ?? 0,
             apartment_count: aptsRes.count ?? 0,
             customer_project_count: projectsRes.count ?? 0,
+            short_stay_unit_count: shortStayRes.count ?? 0,
           };
         })
       );
@@ -210,7 +218,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
   };
 
   const getStats = (orgId: string): OrgStats =>
-    stats.find(s => s.id === orgId) ?? { id: orgId, member_count: 0, property_count: 0, apartment_count: 0, customer_project_count: 0 };
+    stats.find(s => s.id === orgId) ?? { id: orgId, member_count: 0, property_count: 0, apartment_count: 0, customer_project_count: 0, short_stay_unit_count: 0 };
 
   const handlePlanChange = (plan: string) => {
     const limits = PLAN_LIMITS[plan] ?? { users: 10, properties: 3, apartments: 5 };
@@ -244,6 +252,8 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         max_apartments: parseInt(form.max_apartments) || 5,
         customer_projects_enabled: form.customer_projects_enabled,
         max_customer_projects: parseInt(form.max_customer_projects) || 3,
+        short_stay_enabled: form.short_stay_enabled,
+        max_short_stay_units: parseInt(form.max_short_stay_units) || 3,
         active: form.active,
       };
       if (localTestMode) {
@@ -268,6 +278,8 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
               settings: {},
               customer_projects_enabled: payload.customer_projects_enabled,
               max_customer_projects: payload.max_customer_projects,
+              short_stay_enabled: payload.short_stay_enabled,
+              max_short_stay_units: payload.max_short_stay_units,
               created_at: new Date().toISOString(),
             };
         const nextOrgs = editingOrg
@@ -356,6 +368,8 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       max_apartments: String(org.max_apartments),
       customer_projects_enabled: Boolean(org.customer_projects_enabled),
       max_customer_projects: String(org.max_customer_projects ?? 3),
+      short_stay_enabled: Boolean(org.short_stay_enabled),
+      max_short_stay_units: String(org.max_short_stay_units ?? 3),
       active: org.active,
     });
     setEditingOrg(org);
@@ -715,11 +729,16 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                             Kundprojekt
                           </Badge>
                         )}
+                        {org.short_stay_enabled && (
+                          <Badge className="bg-cyan-100 text-cyan-700">
+                            Korttidsuthyrning
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-xs text-slate-500 font-mono mb-3">{org.slug}</p>
 
                       {/* Quota bars */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                         {/* Users quota */}
                         <div>
                           <div className="flex items-center justify-between mb-1">
@@ -774,6 +793,24 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                             <div
                               className={org.customer_projects_enabled ? 'h-full rounded-full bg-violet-400 transition-all' : 'h-full rounded-full bg-slate-200 transition-all'}
                               style={{ width: org.customer_projects_enabled && org.max_customer_projects > 0 ? `${Math.min((s.customer_project_count / org.max_customer_projects) * 100, 100)}%` : '0%' }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Short stay quota */}
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-slate-500 flex items-center gap-1">
+                              <BedDouble className="w-3 h-3" /> Korttid
+                            </span>
+                            <span className="text-xs font-medium text-slate-600">
+                              {org.short_stay_enabled ? `${s.short_stay_unit_count} / ${org.max_short_stay_units}` : 'Av'}
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className={org.short_stay_enabled ? 'h-full rounded-full bg-cyan-400 transition-all' : 'h-full rounded-full bg-slate-200 transition-all'}
+                              style={{ width: org.short_stay_enabled && org.max_short_stay_units > 0 ? `${Math.min((s.short_stay_unit_count / org.max_short_stay_units) * 100, 100)}%` : '0%' }}
                             />
                           </div>
                         </div>
@@ -981,6 +1018,32 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                 min={1}
                 value={form.max_customer_projects}
                 onChange={e => setForm({ ...form, max_customer_projects: e.target.value })}
+              />
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.short_stay_enabled}
+                onChange={e => setForm({ ...form, short_stay_enabled: e.target.checked })}
+                className="mt-1 w-4 h-4 rounded border-slate-300"
+              />
+              <span>
+                <span className="block text-sm font-semibold text-slate-800">Aktivera Korttidsuthyrning</span>
+                <span className="block text-xs text-slate-500">
+                  Visar modulen för personal/admin och låter organisationen hantera Airbnb, Booking och andra kalenderflöden.
+                </span>
+              </span>
+            </label>
+            {form.short_stay_enabled && (
+              <Input
+                label="Max korttidsenheter"
+                type="number"
+                min={1}
+                value={form.max_short_stay_units}
+                onChange={e => setForm({ ...form, max_short_stay_units: e.target.value })}
               />
             )}
           </div>

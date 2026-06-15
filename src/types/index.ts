@@ -11,6 +11,8 @@ export interface Organisation {
   max_apartments: number;
   customer_projects_enabled: boolean;
   max_customer_projects: number;
+  short_stay_enabled: boolean;
+  max_short_stay_units: number;
   contact_email: string;
   contact_phone: string;
   logo_url: string;
@@ -509,6 +511,63 @@ export interface ProjectInvoiceBasisLine {
   vat_rate: number;
   billing_status: 'not_ready' | 'ready' | 'invoiced' | 'do_not_invoice' | 'included_in_quote';
   created_at: string;
+}
+
+export type ShortStayBookingType = 'booking' | 'block';
+export type ShortStayPaymentStatus = 'unpaid' | 'partial' | 'paid';
+export type ShortStayCleaningStatus = 'not_needed' | 'dirty' | 'in_progress' | 'clean';
+
+export interface ShortStayUnit {
+  id: string;
+  organisation_id: string;
+  property_id: string | null;
+  apartment_id: string | null;
+  name: string;
+  description: string;
+  is_active: boolean;
+  ical_url_1: string;
+  channel_name_1: string;
+  ical_url_2: string;
+  channel_name_2: string;
+  ical_url_3: string;
+  channel_name_3: string;
+  ical_token: string;
+  last_synced_at: string | null;
+  sync_error_1: string | null;
+  sync_error_2: string | null;
+  sync_error_3: string | null;
+  sort_order: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  property?: Property;
+  apartment?: Apartment;
+}
+
+export interface ShortStayBooking {
+  id: string;
+  organisation_id: string;
+  unit_id: string;
+  external_uid: string | null;
+  channel_number: number | null;
+  channel_name: string;
+  title: string;
+  description: string;
+  start_date: string;
+  end_date: string;
+  is_manual: boolean;
+  booking_type: ShortStayBookingType;
+  guest_name: string;
+  guest_email: string;
+  guest_phone: string;
+  guest_count: number;
+  payment_status: ShortStayPaymentStatus;
+  cleaning_status: ShortStayCleaningStatus;
+  notes: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  unit?: ShortStayUnit;
 }
 
 export type TimeCategory = 'general' | 'work_order' | 'maintenance' | 'customer_project' | 'admin' | 'travel' | 'shopping' | 'standby' | 'other';
