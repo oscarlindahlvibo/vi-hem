@@ -76,10 +76,10 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
     try {
       setLoading(true);
       const [propsRes, aptsRes, tenanciesRes, profilesRes] = await Promise.all([
-        supabase.from('properties').select('*').order('name'),
-        supabase.from('apartments').select('*').order('apartment_number'),
-        supabase.from('tenancies').select('*'),
-        supabase.from('profiles').select('id, name, email'),
+        supabase.from('vihem_properties').select('*').order('name'),
+        supabase.from('vihem_apartments').select('*').order('apartment_number'),
+        supabase.from('vihem_tenancies').select('*'),
+        supabase.from('vihem_profiles').select('id, name, email'),
       ]);
       if (propsRes.data) setProperties(propsRes.data);
       if (aptsRes.data) setApartments(aptsRes.data);
@@ -89,7 +89,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
       // Fetch org quota limits
       if (user?.organisation_id) {
         const { data: org } = await supabase
-          .from('organisations')
+          .from('vihem_organisations')
           .select('max_properties, max_apartments')
           .eq('id', user.organisation_id)
           .maybeSingle();
@@ -134,7 +134,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
       email: lines[2] || '',
     };
     if (editingProperty) {
-      await supabase.from('properties').update({
+      await supabase.from('vihem_properties').update({
         name: propertyFormData.name, address: propertyFormData.address,
         city: propertyFormData.city, zip: propertyFormData.zip,
         description: propertyFormData.description,
@@ -142,7 +142,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
         contact_info: contactInfo,
       }).eq('id', editingProperty.id);
     } else {
-      await supabase.from('properties').insert({
+      await supabase.from('vihem_properties').insert({
         name: propertyFormData.name, address: propertyFormData.address,
         city: propertyFormData.city, zip: propertyFormData.zip,
         description: propertyFormData.description,
@@ -161,7 +161,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
   const handleSaveApartment = async () => {
     if (!selectedProperty) return;
 
-    // Enforce apartment quota for new apartments
+    // Enforce apartment quota for new vihem_apartments
     if (!editingApartment && orgLimits) {
       if (apartments.length >= orgLimits.max_apartments) {
         alert(`Licensgränsen för lägenheter är nådd (${orgLimits.max_apartments} st). Uppgradera licensen för att lägga till fler.`);
@@ -197,9 +197,9 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
       technical_notes: apartmentFormData.technical_notes,
     };
     if (editingApartment) {
-      await supabase.from('apartments').update(payload).eq('id', editingApartment.id);
+      await supabase.from('vihem_apartments').update(payload).eq('id', editingApartment.id);
     } else {
-      await supabase.from('apartments').insert({
+      await supabase.from('vihem_apartments').insert({
         ...payload,
         property_id: selectedProperty.id,
         organisation_id: user?.organisation_id,

@@ -322,16 +322,16 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
     try {
       const [inspRes, contractRes, tenancyRes] = await Promise.all([
         supabase
-          .from('apartment_inspections')
-          .select(`*, inspector:profiles!apartment_inspections_inspector_id_fkey(name), tenancy:tenancies!apartment_inspections_tenancy_id_fkey(id, start_date, tenant:profiles!tenancies_tenant_id_fkey(id, name, email), apartment:apartments!tenancies_apartment_id_fkey(apartment_number), property:properties!tenancies_property_id_fkey(name, address))`)
+          .from('vihem_apartment_inspections')
+          .select(`*, inspector:vihem_profiles!apartment_inspections_inspector_id_fkey(name), tenancy:vihem_tenancies!apartment_inspections_tenancy_id_fkey(id, start_date, tenant:vihem_profiles!tenancies_tenant_id_fkey(id, name, email), apartment:vihem_apartments!tenancies_apartment_id_fkey(apartment_number), property:vihem_properties!tenancies_property_id_fkey(name, address))`)
           .order('inspection_date', { ascending: false }),
         supabase
-          .from('contract_signatures')
-          .select(`*, creator:profiles!contract_signatures_created_by_fkey(name), tenant:profiles!contract_signatures_tenant_id_fkey(id, name, email), tenancy:tenancies!contract_signatures_tenancy_id_fkey(id, apartment:apartments!tenancies_apartment_id_fkey(apartment_number), property:properties!tenancies_property_id_fkey(name, address))`)
+          .from('vihem_contract_signatures')
+          .select(`*, creator:vihem_profiles!contract_signatures_created_by_fkey(name), tenant:vihem_profiles!contract_signatures_tenant_id_fkey(id, name, email), tenancy:vihem_tenancies!contract_signatures_tenancy_id_fkey(id, apartment:vihem_apartments!tenancies_apartment_id_fkey(apartment_number), property:vihem_properties!tenancies_property_id_fkey(name, address))`)
           .order('created_at', { ascending: false }),
         supabase
-          .from('tenancies')
-          .select(`id, apartment_id, property_id, start_date, monthly_rent, tenant:profiles!tenancies_tenant_id_fkey(id, name, email), apartment:apartments!tenancies_apartment_id_fkey(apartment_number, size), property:properties!tenancies_property_id_fkey(name, address, city)`)
+          .from('vihem_tenancies')
+          .select(`id, apartment_id, property_id, start_date, monthly_rent, tenant:vihem_profiles!tenancies_tenant_id_fkey(id, name, email), apartment:vihem_apartments!tenancies_apartment_id_fkey(apartment_number, size), property:vihem_properties!tenancies_property_id_fkey(name, address, city)`)
           .eq('status', 'active'),
       ]);
       setInspections(inspRes.data || []);
@@ -353,9 +353,9 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
     try {
       const ext = file.name.split('.').pop();
       const path = `inspections/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error } = await supabase.storage.from('inspection-photos').upload(path, file, { upsert: false });
+      const { error } = await supabase.storage.from('vihem-inspection-photos').upload(path, file, { upsert: false });
       if (error) throw error;
-      const { data: urlData } = supabase.storage.from('inspection-photos').getPublicUrl(path);
+      const { data: urlData } = supabase.storage.from('vihem-inspection-photos').getPublicUrl(path);
       const url = urlData.publicUrl;
 
       if (roomIndex !== undefined) {
@@ -442,12 +442,12 @@ Foton bifogade i systemet: ${photoCount}
     });
 
     if (inspection.document_id) {
-      const { error } = await supabase.from('documents').update(documentPayload).eq('id', inspection.document_id);
+      const { error } = await supabase.from('vihem_documents').update(documentPayload).eq('id', inspection.document_id);
       if (error) throw error;
       return inspection.document_id;
     }
 
-    const { data, error } = await supabase.from('documents').insert(documentPayload).select('id').single();
+    const { data, error } = await supabase.from('vihem_documents').insert(documentPayload).select('id').single();
     if (error) throw error;
     return data.id;
   };
@@ -475,18 +475,18 @@ Foton bifogade i systemet: ${photoCount}
       };
       let savedInspection = selectedInspection ? { ...selectedInspection, ...payload } : null;
       if (selectedInspection) {
-        const { data, error } = await supabase.from('apartment_inspections').update(payload).eq('id', selectedInspection.id).select('*').single();
+        const { data, error } = await supabase.from('vihem_apartment_inspections').update(payload).eq('id', selectedInspection.id).select('*').single();
         if (error) throw error;
         savedInspection = data;
       } else {
-        const { data, error } = await supabase.from('apartment_inspections').insert(payload).select('*').single();
+        const { data, error } = await supabase.from('vihem_apartment_inspections').insert(payload).select('*').single();
         if (error) throw error;
         savedInspection = data;
       }
 
       if (status === 'completed' && savedInspection) {
         const documentId = await createOrUpdateInspectionDocument(savedInspection, tenancy);
-        await supabase.from('apartment_inspections').update({ document_id: documentId }).eq('id', savedInspection.id);
+        await supabase.from('vihem_apartment_inspections').update({ document_id: documentId }).eq('id', savedInspection.id);
       }
       setShowInspectionModal(false);
       resetInspectionForm();
@@ -565,7 +565,7 @@ Foton bifogade i systemet: ${photoCount}
       };
 
       if (selectedContract) {
-        await supabase.from('contract_signatures').update({
+        await supabase.from('vihem_contract_signatures').update({
           contract_content: generatedText,
           contract_type: contractType,
           contract_data: contractData,
@@ -573,7 +573,7 @@ Foton bifogade i systemet: ${photoCount}
           status: statusOverride || selectedContract.status,
         }).eq('id', selectedContract.id);
       } else {
-        await supabase.from('contract_signatures').insert(payload);
+        await supabase.from('vihem_contract_signatures').insert(payload);
       }
       setShowContractModal(false);
       resetContractForm();
@@ -607,9 +607,9 @@ Foton bifogade i systemet: ${photoCount}
   };
 
   const sendContractForSigning = async (contract: any) => {
-    await supabase.from('contract_signatures').update({ status: 'pending_tenant' }).eq('id', contract.id);
+    await supabase.from('vihem_contract_signatures').update({ status: 'pending_tenant' }).eq('id', contract.id);
     if (contract.tenant?.id) {
-      await supabase.from('notifications').insert({
+      await supabase.from('vihem_notifications').insert({
         user_id: contract.tenant.id,
         title: 'Nytt hyresavtal att signera',
         message: 'Ett hyresavtal har skickats till dig för signering. Gå till Min lägenhet för att granska och signera avtalet.',

@@ -67,11 +67,11 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
     try {
       setLoading(true);
       const [reqRes, tenanciesRes, profilesRes, aptsRes, propsRes] = await Promise.all([
-        supabase.from('termination_requests').select('*').order('created_at', { ascending: false }),
-        supabase.from('tenancies').select('*'),
-        supabase.from('profiles').select('*'),
-        supabase.from('apartments').select('*'),
-        supabase.from('properties').select('*'),
+        supabase.from('vihem_termination_requests').select('*').order('created_at', { ascending: false }),
+        supabase.from('vihem_tenancies').select('*'),
+        supabase.from('vihem_profiles').select('*'),
+        supabase.from('vihem_apartments').select('*'),
+        supabase.from('vihem_properties').select('*'),
       ]);
       if (reqRes.data) setTerminationRequests(reqRes.data);
       if (tenanciesRes.data) setTenancies(tenanciesRes.data);
@@ -147,7 +147,7 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
       setCreateError('');
 
       const { error: insertError } = await supabase
-        .from('termination_requests')
+        .from('vihem_termination_requests')
         .insert({
           organisation_id: user.organisation_id,
           tenant_id: tenancy.tenant_id,
@@ -165,7 +165,7 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
 
       if (createForm.update_tenancy) {
         const { error: tenancyError } = await supabase
-          .from('tenancies')
+          .from('vihem_tenancies')
           .update({
             status: 'terminated',
             end_date: createForm.requested_move_out_date,
@@ -190,7 +190,7 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
     if (!selectedRequest) return;
     try {
       await supabase
-        .from('termination_requests')
+        .from('vihem_termination_requests')
         .update({ internal_notes: internalNotes })
         .eq('id', selectedRequest.id);
       setSelectedRequest({ ...selectedRequest, internal_notes: internalNotes });
@@ -204,7 +204,7 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
     if (!selectedRequest) return;
     try {
       await supabase
-        .from('termination_requests')
+        .from('vihem_termination_requests')
         .update({ status: newStatus })
         .eq('id', selectedRequest.id);
       setSelectedRequest({ ...selectedRequest, status: newStatus as TerminationRequest['status'] });

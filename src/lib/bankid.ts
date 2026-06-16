@@ -9,11 +9,11 @@
  * Integration path when BankID is activated:
  *  1. Deploy a "bankid-auth" Edge Function that wraps the BankID RP API.
  *  2. Replace the stub implementations below with calls to that function.
- *  3. Store the BankID personal number in profiles.bankid_personal_number and
- *     set profiles.auth_method = 'bankid' | 'both'.
+ *  3. Store the BankID personal number in vihem_profiles.bankid_personal_number and
+ *     set vihem_profiles.auth_method = 'bankid' | 'both'.
  *  4. For contract signing, call signContractWithBankID() — it returns the
  *     BankID signature token that is stored in
- *     contract_signatures.tenant_bankid_signature.
+ *     vihem_contract_signatures.tenant_bankid_signature.
  *
  * BankID RP API documentation: https://www.bankid.com/en/utvecklare/guider/teknisk-integrationsguide
  * Test environment base URL:    https://appapi2.test.bankid.com/rp/v6.0

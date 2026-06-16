@@ -14,7 +14,9 @@ Deno.serve(async (req: Request) => {
 
   try {
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return json({ error: "Unauthorized" }, 401);
+    if (!authHeader) {
+      return json({ error: "Unauthorized" }, 401);
+    }
 
     const userClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -23,10 +25,12 @@ Deno.serve(async (req: Request) => {
     );
 
     const { data: { user: caller }, error: callerError } = await userClient.auth.getUser();
-    if (callerError || !caller) return json({ error: "Unauthorized" }, 401);
+    if (callerError || !caller) {
+      return json({ error: "Unauthorized" }, 401);
+    }
 
     const { data: callerProfile, error: callerProfileError } = await userClient
-      .from("profiles")
+      .from("vihem_profiles")
       .select("role, organisation_id")
       .eq("id", caller.id)
       .maybeSingle();
@@ -35,8 +39,10 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Forbidden" }, 403);
     }
 
-    const { user_id, redirect_to } = await req.json() as { user_id?: string; redirect_to?: string };
-    if (!user_id) return json({ error: "user_id is required" }, 400);
+    const { user_id } = await req.json() as { user_id?: string };
+    if (!user_id) {
+      return json({ error: "user_id is required" }, 400);
+    }
 
     const adminClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -44,12 +50,14 @@ Deno.serve(async (req: Request) => {
     );
 
     const { data: targetProfile, error: targetProfileError } = await adminClient
-      .from("profiles")
+      .from("vihem_profiles")
       .select("id, email, role, organisation_id")
       .eq("id", user_id)
       .maybeSingle();
 
-    if (targetProfileError || !targetProfile) return json({ error: "User not found" }, 404);
+    if (targetProfileError || !targetProfile) {
+      return json({ error: "User not found" }, 404);
+    }
 
     if (
       callerProfile.role !== "superadmin" &&
@@ -62,18 +70,20 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Forbidden: admins cannot reset superadmins" }, 403);
     }
 
-    const { error } = await adminClient.auth.resetPasswordForEmail(targetProfile.email, {
-      redirectTo: redirect_to || `${req.headers.get("origin") ?? ""}/reset-password`,
+    const tempPassword = generatePassword();
+    const { error: updateError } = await adminClient.auth.admin.updateUserById(user_id, {
+      password: tempPassword,
     });
 
-    if (error) {
-      const message = error.message.toLowerCase().includes("sending")
-        ? "Kunde inte skicka återställningsmejl. Kontrollera SMTP/Postfix-konfigurationen på servern."
-        : error.message;
-      return json({ error: message }, 400);
+    if (updateError) {
+      return json({ error: updateError.message }, 400);
     }
 
-    return json({ success: true, email: targetProfile.email });
+    return json({
+      success: true,
+      email: targetProfile.email,
+      temp_password: tempPassword,
+    });
   } catch (err) {
     console.error(err);
     return json({ error: "Internt serverfel" }, 500);
@@ -85,4 +95,11 @@ function json(body: Record<string, unknown>, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+function generatePassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#";
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, (b) => chars[b % chars.length]).join("");
 }

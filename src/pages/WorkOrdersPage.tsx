@@ -197,14 +197,14 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from('work_orders')
+        .from('vihem_work_orders')
         .select(
           `*,
-          property:properties(name,address),
-          apartment:apartments(apartment_number),
-          tenant:profiles!work_orders_tenant_id_fkey(name),
-          assigned:profiles!work_orders_assigned_to_fkey(name),
-          creator:profiles!work_orders_created_by_fkey(name)`
+          property:vihem_properties(name,address),
+          apartment:vihem_apartments(apartment_number),
+          tenant:vihem_profiles!work_orders_tenant_id_fkey(name),
+          assigned:vihem_profiles!work_orders_assigned_to_fkey(name),
+          creator:vihem_profiles!work_orders_created_by_fkey(name)`
         )
         .order('created_at', { ascending: false });
 
@@ -220,7 +220,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   async function fetchProperties() {
     try {
       const { data, error } = await supabase
-        .from('properties')
+        .from('vihem_properties')
         .select('*')
         .eq('active', true)
         .order('name');
@@ -228,14 +228,14 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       if (error) throw error;
       setProperties(data || []);
     } catch (err) {
-      console.error('Error fetching properties:', err);
+      console.error('Error fetching vihem_properties:', err);
     }
   }
 
   async function fetchStaffMembers() {
     try {
       const { data, error } = await supabase
-        .from('profiles')
+        .from('vihem_profiles')
         .select('*')
         .in('role', ['staff', 'admin'])
         .eq('active', true)
@@ -251,21 +251,21 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   async function fetchApartments() {
     try {
       const { data, error } = await supabase
-        .from('apartments')
+        .from('vihem_apartments')
         .select('*')
         .order('apartment_number');
 
       if (error) throw error;
       setApartments(data || []);
     } catch (err) {
-      console.error('Error fetching apartments:', err);
+      console.error('Error fetching vihem_apartments:', err);
     }
   }
 
   async function fetchTenants() {
     try {
       const { data, error } = await supabase
-        .from('profiles')
+        .from('vihem_profiles')
         .select('*')
         .eq('role', 'tenant')
         .eq('active', true)
@@ -283,8 +283,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     try {
       setLoadingComments(true);
       const { data, error } = await supabase
-        .from('work_order_comments')
-        .select('*, user:profiles(name)')
+        .from('vihem_work_order_comments')
+        .select('*, user:vihem_profiles(name)')
         .eq('work_order_id', selectedWorkOrder.id)
         .order('created_at', { ascending: true });
 
@@ -301,7 +301,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     if (!selectedWorkOrder) return;
     try {
       const { data, error } = await supabase
-        .from('time_entries')
+        .from('vihem_time_entries')
         .select('total_minutes')
         .eq('work_order_id', selectedWorkOrder.id);
 
@@ -326,7 +326,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         .filter(Boolean)
         .map((text) => ({ id: crypto.randomUUID(), text, done: false }));
       const assignedIds = createForm.assigned_to_ids;
-      const { error } = await supabase.from('work_orders').insert([
+      const { error } = await supabase.from('vihem_work_orders').insert([
         {
           id: workOrderId,
           title: createForm.title,
@@ -367,19 +367,19 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
       const path = `work-orders/${workOrderId}/${crypto.randomUUID()}-${safeName}`;
       const { error } = await supabase.storage
-        .from('work-order-attachments')
+        .from('vihem-work-order-attachments')
         .upload(path, file, { upsert: false });
 
       if (error) {
         if (error.message.toLowerCase().includes('bucket not found')) {
           throw new Error(
-            `Kunde inte ladda upp ${file.name}: storage-bucketen work-order-attachments saknas. Kör senaste Supabase-migrationerna på miljön först.`
+            `Kunde inte ladda upp ${file.name}: storage-bucketen vihem-work-order-attachments saknas. Kör senaste Supabase-migrationerna på miljön först.`
           );
         }
         throw new Error(`Kunde inte ladda upp ${file.name}: ${error.message}`);
       }
 
-      const { data } = supabase.storage.from('work-order-attachments').getPublicUrl(path);
+      const { data } = supabase.storage.from('vihem-work-order-attachments').getPublicUrl(path);
       uploaded.push({
         id: crypto.randomUUID(),
         name: file.name,
@@ -404,7 +404,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
 
       if (attachment.path) {
         const { error: storageError } = await supabase.storage
-          .from('work-order-attachments')
+          .from('vihem-work-order-attachments')
           .remove([attachment.path]);
 
         if (storageError) {
@@ -413,7 +413,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       }
 
       const { error } = await supabase
-        .from('work_orders')
+        .from('vihem_work_orders')
         .update({ attachments: nextAttachments })
         .eq('id', selectedWorkOrder.id);
 
@@ -437,7 +437,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
 
     try {
       setPostingComment(true);
-      const { error } = await supabase.from('work_order_comments').insert([
+      const { error } = await supabase.from('vihem_work_order_comments').insert([
         {
           work_order_id: selectedWorkOrder.id,
           user_id: user.id,
@@ -463,7 +463,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     try {
       setUpdatingStatus(true);
       const { error } = await supabase
-        .from('work_orders')
+        .from('vihem_work_orders')
         .update({ status: newDetailStatus })
         .eq('id', selectedWorkOrder.id);
 
@@ -484,7 +484,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       setUpdatingAssignment(true);
       const assignedIds = newAssignedToIds;
       const { error } = await supabase
-        .from('work_orders')
+        .from('vihem_work_orders')
         .update({ assigned_to: assignedIds[0] || null, assigned_to_ids: assignedIds })
         .eq('id', selectedWorkOrder.id);
 
@@ -503,7 +503,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const { data } = await supabase
-      .from('time_entries')
+      .from('vihem_time_entries')
       .select('id, work_order_id')
       .eq('user_id', user.id)
       .eq('status', 'draft')
@@ -518,7 +518,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     if (!user || !selectedWorkOrder) return;
     try {
       setStampingIn(true);
-      const { error } = await supabase.from('time_entries').insert({
+      const { error } = await supabase.from('vihem_time_entries').insert({
         user_id: user.id,
         organisation_id: user.organisation_id || null,
         work_order_id: selectedWorkOrder.id,
@@ -543,13 +543,13 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   }
 
   async function handleStampOut() {
-    if (!activeTimeEntry) return;
+    if (!user || !activeTimeEntry) return;
     try {
       setStampingIn(true);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const { data: openEntries } = await supabase
-        .from('time_entries')
+        .from('vihem_time_entries')
         .select('id, start_time, break_minutes, entry_type')
         .eq('user_id', user.id)
         .eq('status', 'draft')
@@ -563,7 +563,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
           0
         );
         await supabase
-          .from('time_entries')
+          .from('vihem_time_entries')
           .update({ end_time: endTime, total_minutes: totalMinutes, status: 'submitted' })
           .eq('id', entry.id);
       }));

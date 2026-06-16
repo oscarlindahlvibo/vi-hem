@@ -35,7 +35,7 @@ interface UpdateUserResult {
   email: string;
 }
 
-async function callUserFunction<T>(functionName: string, body: Record<string, unknown>): Promise<T> {
+async function callUserFunction<T>(functionName: string, body: unknown): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
 
   const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${functionName}`, {
@@ -56,20 +56,20 @@ async function callUserFunction<T>(functionName: string, body: Record<string, un
 }
 
 export function createUserAccount(input: CreateUserInput) {
-  return callUserFunction<CreateUserResult>('create-user', input);
+  return callUserFunction<CreateUserResult>('vihem-create-user', input);
 }
 
 export function resetUserPassword(userId: string) {
-  return callUserFunction<ResetPasswordResult>('admin-reset-password', { user_id: userId });
+  return callUserFunction<ResetPasswordResult>('vihem-admin-reset-password', { user_id: userId });
 }
 
 export function sendUserPasswordResetEmail(userId: string) {
-  return callUserFunction<SendPasswordResetResult>('admin-send-password-reset', {
+  return callUserFunction<SendPasswordResetResult>('vihem-admin-send-password-reset', {
     user_id: userId,
     redirect_to: `${window.location.origin}/reset-password`,
   });
 }
 
 export function updateUserAccount(input: UpdateUserInput) {
-  return callUserFunction<UpdateUserResult>('admin-update-user', input);
+  return callUserFunction<UpdateUserResult>('vihem-admin-update-user', input);
 }

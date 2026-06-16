@@ -60,7 +60,7 @@ function AppInner() {
     }
 
     supabase
-      .from('organisations')
+      .from('vihem_organisations')
       .select('customer_projects_enabled, short_stay_enabled')
       .eq('id', user.organisation_id)
       .maybeSingle()
@@ -73,18 +73,18 @@ function AppInner() {
   useEffect(() => {
     if (!user) return;
     supabase
-      .from('notifications')
+      .from('vihem_notifications')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', user.id)
       .is('read_at', null)
       .then(({ count }) => setNotificationCount(count ?? 0));
 
     const channel = supabase
-      .channel('notifications')
+      .channel('vihem_notifications')
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
-        table: 'notifications',
+        table: 'vihem_notifications',
         filter: `user_id=eq.${user.id}`,
       }, () => {
         setNotificationCount(c => c + 1);
@@ -96,6 +96,7 @@ function AppInner() {
 
   useEffect(() => {
     if (!user || !['staff', 'admin'].includes(user.role) || !user.organisation_id) return;
+    const reminderUser = user;
 
     const todayKey = () => {
       const now = new Date();
@@ -112,11 +113,11 @@ function AppInner() {
     const isMissingSchemaError = (error: any) =>
       error?.code === 'PGRST205' || String(error?.message || '').includes('schema cache');
     const sendReminder = async (kind: string, title: string, message: string) => {
-      const key = `vihem.reminder.${user.id}.${todayKey()}.${kind}`;
+      const key = `vihem.reminder.${reminderUser.id}.${todayKey()}.${kind}`;
       if (reminderSent(key)) return;
-      const { error } = await supabase.from('notifications').insert({
-        user_id: user.id,
-        organisation_id: user.organisation_id,
+      const { error } = await supabase.from('vihem_notifications').insert({
+        user_id: reminderUser.id,
+        organisation_id: reminderUser.organisation_id,
         title,
         message,
         type: 'time_entry',
@@ -135,21 +136,21 @@ function AppInner() {
 
       const [settingsResult, scheduleResult, openEntriesResult] = await Promise.all([
         supabase
-          .from('organisation_notification_settings')
+          .from('vihem_organisation_notification_settings')
           .select('settings')
-          .eq('organisation_id', user.organisation_id)
+          .eq('organisation_id', reminderUser.organisation_id)
           .maybeSingle(),
         supabase
-          .from('staff_work_schedules')
+          .from('vihem_staff_work_schedules')
           .select('*')
-          .eq('user_id', user.id)
+          .eq('user_id', reminderUser.id)
           .eq('weekday', weekday)
           .eq('active', true)
           .maybeSingle(),
         supabase
-          .from('time_entries')
+          .from('vihem_time_entries')
           .select('id, entry_type, start_time, end_time, status')
-          .eq('user_id', user.id)
+          .eq('user_id', reminderUser.id)
           .eq('status', 'draft')
           .is('end_time', null)
           .gte('start_time', new Date(`${todayKey()}T00:00:00`).toISOString()),

@@ -178,12 +178,12 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
     }
 
     const { data } = await supabase
-      .from('organisations')
+      .from('vihem_organisations')
       .select('*')
       .order('name');
 
     const { data: superadminData } = await supabase
-      .from('profiles')
+      .from('vihem_profiles')
       .select('*')
       .eq('role', 'superadmin')
       .order('name');
@@ -196,11 +196,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       const orgStats = await Promise.all(
         data.map(async (org) => {
           const [membersRes, propsRes, aptsRes, projectsRes, shortStayRes] = await Promise.all([
-            supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
-            supabase.from('properties').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
-            supabase.from('apartments').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
-            supabase.from('customer_projects').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
-            supabase.from('short_stay_units').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
+            supabase.from('vihem_profiles').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
+            supabase.from('vihem_properties').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
+            supabase.from('vihem_apartments').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
+            supabase.from('vihem_customer_projects').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
+            supabase.from('vihem_short_stay_units').select('id', { count: 'exact', head: true }).eq('organisation_id', org.id),
           ]);
           return {
             id: org.id,
@@ -320,11 +320,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       }
 
       if (editingOrg) {
-        const { error } = await supabase.from('organisations').update(payload).eq('id', editingOrg.id);
+        const { error } = await supabase.from('vihem_organisations').update(payload).eq('id', editingOrg.id);
         if (error) throw error;
       } else {
         const { data: createdOrg, error } = await supabase
-          .from('organisations')
+          .from('vihem_organisations')
           .insert(payload)
           .select('*')
           .single();
@@ -350,7 +350,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       fetchOrgs();
     } catch (err: any) {
       if (createdOrgIdForRollback) {
-        await supabase.from('organisations').delete().eq('id', createdOrgIdForRollback);
+        await supabase.from('vihem_organisations').delete().eq('id', createdOrgIdForRollback);
       }
       setSaveError(err.message || 'Ett fel inträffade');
     } finally {

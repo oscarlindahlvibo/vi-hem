@@ -26,7 +26,7 @@ Deno.serve(async (req: Request) => {
     if (callerError || !caller) return json({ error: "Unauthorized" }, 401);
 
     const { data: callerProfile, error: callerProfileError } = await userClient
-      .from("profiles")
+      .from("vihem_profiles")
       .select("role, organisation_id")
       .eq("id", caller.id)
       .maybeSingle();
@@ -51,7 +51,7 @@ Deno.serve(async (req: Request) => {
     );
 
     const { data: targetProfile, error: targetProfileError } = await adminClient
-      .from("profiles")
+      .from("vihem_profiles")
       .select("id, role, organisation_id")
       .eq("id", user_id)
       .maybeSingle();
@@ -81,7 +81,7 @@ Deno.serve(async (req: Request) => {
     if (authError) return json({ error: authError.message }, 400);
 
     const { error: profileError } = await adminClient
-      .from("profiles")
+      .from("vihem_profiles")
       .update({
         name: name.trim(),
         email: normalizedEmail,

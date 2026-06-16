@@ -123,7 +123,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   async function fetchNotificationSettings() {
     if (!user?.organisation_id) return;
     const { data, error } = await supabase
-      .from('organisation_notification_settings')
+      .from('vihem_organisation_notification_settings')
       .select('settings')
       .eq('organisation_id', user.organisation_id)
       .maybeSingle();
@@ -139,7 +139,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     setSavingNotificationSettings(true);
     try {
       const { error } = await supabase
-        .from('organisation_notification_settings')
+        .from('vihem_organisation_notification_settings')
         .upsert({
           organisation_id: user.organisation_id,
           settings: notificationSettings,
@@ -161,7 +161,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from('profiles')
+        .from('vihem_profiles')
         .select('*')
         .in('role', ['staff', 'admin', 'superadmin'])
         .order('name');
@@ -187,7 +187,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       if (editingStaff) {
         // Update existing profile — no auth changes needed
         const { error } = await supabase
-          .from('profiles')
+          .from('vihem_profiles')
           .update({
             name: staffFormData.name,
             phone: staffFormData.phone,
@@ -241,7 +241,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
 
   async function fetchStaffSchedule(staffId: string) {
     const { data, error } = await supabase
-      .from('staff_work_schedules')
+      .from('vihem_staff_work_schedules')
       .select('*')
       .eq('user_id', staffId)
       .order('weekday');
@@ -292,7 +292,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       updated_at: new Date().toISOString(),
     }));
     const { error } = await supabase
-      .from('staff_work_schedules')
+      .from('vihem_staff_work_schedules')
       .upsert(rows, { onConflict: 'user_id,weekday' });
     if (error) {
       if (isMissingSchemaError(error)) {

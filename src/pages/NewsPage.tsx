@@ -47,12 +47,12 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
     try {
       setLoading(true);
       let query = supabase
-        .from('news')
+        .from('vihem_news')
         .select('*')
         .order('published_at', { ascending: false });
 
       if (!canManageNews) {
-        // Tenants see only published news
+        // Tenants see only published vihem_news
         query = query.eq('status', 'published');
       } else if (statusFilter !== 'all') {
         // Staff can filter by status
@@ -64,7 +64,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
       if (error) throw error;
       setNews(data || []);
     } catch (error) {
-      console.error('Error fetching news:', error);
+      console.error('Error fetching vihem_news:', error);
     } finally {
       setLoading(false);
     }
@@ -72,13 +72,13 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
 
   const fetchProperties = async () => {
     const { data, error } = await supabase
-      .from('properties')
+      .from('vihem_properties')
       .select('*')
       .eq('active', true)
       .order('name', { ascending: true });
 
     if (error) {
-      console.error('Error fetching properties:', error);
+      console.error('Error fetching vihem_properties:', error);
       return;
     }
 
@@ -117,7 +117,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
         created_at: new Date().toISOString(),
       };
 
-      const { error } = await supabase.from('news').insert(newsData);
+      const { error } = await supabase.from('vihem_news').insert(newsData);
 
       if (error) throw error;
 
@@ -125,7 +125,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
       setShowCreateModal(false);
       fetchNews();
     } catch (error) {
-      console.error('Error creating news:', error);
+      console.error('Error creating vihem_news:', error);
     }
   };
 
@@ -138,7 +138,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
 
     try {
       const { error } = await supabase
-        .from('news')
+        .from('vihem_news')
         .update({
           title: newTitle,
           content: newContent,
@@ -156,7 +156,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
       setShowCreateModal(false);
       fetchNews();
     } catch (error) {
-      console.error('Error updating news:', error);
+      console.error('Error updating vihem_news:', error);
     }
   };
 
@@ -165,12 +165,12 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
       return;
 
     try {
-      const { error } = await supabase.from('news').delete().eq('id', id);
+      const { error } = await supabase.from('vihem_news').delete().eq('id', id);
 
       if (error) throw error;
       fetchNews();
     } catch (error) {
-      console.error('Error deleting news:', error);
+      console.error('Error deleting vihem_news:', error);
     }
   };
 

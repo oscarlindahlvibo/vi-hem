@@ -55,8 +55,8 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
     const fetchDashboardData = async () => {
       try {
         const { data: tenancyData, error: tenancyError } = await supabase
-          .from('tenancies')
-          .select('*, apartment:apartments(apartment_number), property:properties(address, name)')
+          .from('vihem_tenancies')
+          .select('*, apartment:vihem_apartments(apartment_number), property:vihem_properties(address, name)')
           .eq('tenant_id', user.id)
           .eq('status', 'active')
           .order('start_date', { ascending: false })
@@ -67,26 +67,26 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
 
         const [mrRes, laundryRes, newsRes, contractRes] = await Promise.all([
           supabase
-            .from('maintenance_requests')
+            .from('vihem_maintenance_requests')
             .select('*')
             .eq('tenant_id', user.id)
             .order('created_at', { ascending: false })
             .limit(3),
           supabase
-            .from('laundry_bookings')
-            .select('*, slot:laundry_slots(date, start_time, end_time)')
+            .from('vihem_laundry_bookings')
+            .select('*, slot:vihem_laundry_slots(date, start_time, end_time)')
             .eq('tenant_id', user.id)
             .eq('status', 'active')
             .order('created_at', { ascending: false }),
           supabase
-            .from('news')
+            .from('vihem_news')
             .select('*')
             .eq('status', 'published')
             .order('published_at', { ascending: false })
             .limit(3),
           tenancyData
             ? supabase
-                .from('contract_signatures')
+                .from('vihem_contract_signatures')
                 .select('id, created_at')
                 .eq('tenancy_id', tenancyData.id)
                 .eq('status', 'pending_tenant')

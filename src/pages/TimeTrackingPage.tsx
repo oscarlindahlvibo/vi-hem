@@ -225,7 +225,7 @@ function StaffTimeView({ user }: { user: Profile }) {
       .channel(`staff-absence-${user.id}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'staff_absence_requests', filter: `user_id=eq.${user.id}` },
+        { event: '*', schema: 'public', table: 'vihem_staff_absence_requests', filter: `user_id=eq.${user.id}` },
         () => fetchData()
       )
       .subscribe();
@@ -248,7 +248,7 @@ function StaffTimeView({ user }: { user: Profile }) {
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
       const { data: current } = await supabase
-        .from('time_entries')
+        .from('vihem_time_entries')
         .select('*, customer_project:customer_project_id(id, title, name, customer_name)')
         .eq('user_id', user.id).eq('status', 'draft')
         .gte('start_time', todayStart.toISOString()).is('end_time', null)
@@ -263,7 +263,7 @@ function StaffTimeView({ user }: { user: Profile }) {
       const endDate = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
 
       const { data: entriesData } = await supabase
-        .from('time_entries')
+        .from('vihem_time_entries')
         .select('*, work_order:work_order_id(id, title), customer_project:customer_project_id(id, title, name, customer_name)')
         .eq('user_id', user.id)
         .gte('start_time', startDate).lte('start_time', endDate)
@@ -271,7 +271,7 @@ function StaffTimeView({ user }: { user: Profile }) {
       setEntries(entriesData || []);
 
       const { data: summariesData } = await supabase
-        .from('daily_work_summaries')
+        .from('vihem_daily_work_summaries')
         .select('*')
         .eq('user_id', user.id)
         .gte('work_date', localDateKey(new Date(year, month, 1)))
@@ -282,19 +282,19 @@ function StaffTimeView({ user }: { user: Profile }) {
       }, {} as Record<string, DailyWorkSummary>));
 
       const { data: wos } = await supabase
-        .from('work_orders').select('id, title, status')
+        .from('vihem_work_orders').select('id, title, status')
         .in('status', ['new', 'assigned', 'started', 'paused']);
       setWorkOrders(wos || []);
 
       const { data: projectsData } = await supabase
-        .from('customer_projects')
+        .from('vihem_customer_projects')
         .select('id, title, name, customer_name, status')
         .not('status', 'in', '(archived,completed,cancelled)')
         .order('updated_at', { ascending: false });
       setCustomerProjects(projectsData || []);
 
       const { data: absencesData, error: absencesError } = await supabase
-        .from('staff_absence_requests')
+        .from('vihem_staff_absence_requests')
         .select('*')
         .eq('user_id', user.id)
         .gte('end_date', localDateKey(new Date(year, month, 1)))
@@ -316,7 +316,7 @@ function StaffTimeView({ user }: { user: Profile }) {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const { data: openEntries, error } = await supabase
-      .from('time_entries')
+      .from('vihem_time_entries')
       .select('*')
       .eq('user_id', user.id)
       .eq('status', 'draft')
@@ -329,7 +329,7 @@ function StaffTimeView({ user }: { user: Profile }) {
     await Promise.all((openEntries || []).map(async entry => {
       const breakMinutes = entry.entry_type === 'break' ? 0 : entry.break_minutes;
       const total = calcMinutes(entry.start_time, end, breakMinutes);
-      const { error: updateError } = await supabase.from('time_entries').update({
+      const { error: updateError } = await supabase.from('vihem_time_entries').update({
         end_time: end,
         total_minutes: total,
         status: 'submitted',
@@ -339,7 +339,7 @@ function StaffTimeView({ user }: { user: Profile }) {
   }
 
   async function saveDayComment(workDate: string, comment: string) {
-    await supabase.from('daily_work_summaries').upsert({
+    await supabase.from('vihem_daily_work_summaries').upsert({
       user_id: user.id,
       work_date: workDate,
       comment,
@@ -353,7 +353,7 @@ function StaffTimeView({ user }: { user: Profile }) {
 
   async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string) {
     const project = getCustomerProject(customerProjectId);
-    await supabase.from('time_entries').insert({
+    await supabase.from('vihem_time_entries').insert({
       user_id: user.id, work_order_id: workOrderId || null, category,
       organisation_id: user.organisation_id || null,
       entry_type: 'work',
@@ -370,7 +370,7 @@ function StaffTimeView({ user }: { user: Profile }) {
     if (!currentEntry) return;
     const project = getCustomerProject(customerProjectId);
     await finishOpenEntries();
-    await supabase.from('time_entries').insert({
+    await supabase.from('vihem_time_entries').insert({
       user_id: user.id,
       organisation_id: user.organisation_id || null,
       work_order_id: workOrderId || null,
@@ -392,7 +392,7 @@ function StaffTimeView({ user }: { user: Profile }) {
   async function handleStartBreak() {
     if (!currentEntry) return;
     await finishOpenEntries();
-    await supabase.from('time_entries').insert({
+    await supabase.from('vihem_time_entries').insert({
       user_id: user.id,
       organisation_id: user.organisation_id || null,
       category: 'general',
@@ -439,9 +439,9 @@ function StaffTimeView({ user }: { user: Profile }) {
       status,
     };
     if (isNew) {
-      await supabase.from('time_entries').insert(data);
+      await supabase.from('vihem_time_entries').insert(data);
     } else {
-      await supabase.from('time_entries').update({ ...data, user_id: undefined }).eq('id', entryId!);
+      await supabase.from('vihem_time_entries').update({ ...data, user_id: undefined }).eq('id', entryId!);
     }
     setShowManualModal(false);
     setShowEditModal(false);
@@ -457,7 +457,7 @@ function StaffTimeView({ user }: { user: Profile }) {
     end_time?: string | null;
     comment: string;
   }) {
-    const { error } = await supabase.from('staff_absence_requests').insert({
+    const { error } = await supabase.from('vihem_staff_absence_requests').insert({
       ...payload,
       user_id: user.id,
       organisation_id: user.organisation_id || null,
@@ -1491,7 +1491,7 @@ function AdminTimeView({ user }: { user: Profile }) {
       .channel(`admin-absence-${user.organisation_id || user.id}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'staff_absence_requests' },
+        { event: '*', schema: 'public', table: 'vihem_staff_absence_requests' },
         () => {
           if (selectedStaff) loadAbsenceRequests(selectedStaff.id, monthFilter);
           fetchTodayEntries();
@@ -1502,15 +1502,15 @@ function AdminTimeView({ user }: { user: Profile }) {
   }, [user.organisation_id, user.id, selectedStaff?.id, monthFilter, todayFilter]);
 
   async function fetchStaff() {
-    const { data } = await supabase.from('profiles').select('*')
+    const { data } = await supabase.from('vihem_profiles').select('*')
       .in('role', ['staff', 'admin', 'superadmin']).eq('active', true).order('name');
     setStaffMembers(data || []);
   }
 
   async function fetchAdminOptions() {
     const [{ data: wos }, { data: projectsData }] = await Promise.all([
-      supabase.from('work_orders').select('id, title, status').in('status', ['new', 'assigned', 'started', 'paused']),
-      supabase.from('customer_projects').select('id, title, name, customer_name, status').not('status', 'in', '(archived,completed,cancelled)').order('updated_at', { ascending: false }),
+      supabase.from('vihem_work_orders').select('id, title, status').in('status', ['new', 'assigned', 'started', 'paused']),
+      supabase.from('vihem_customer_projects').select('id, title, name, customer_name, status').not('status', 'in', '(archived,completed,cancelled)').order('updated_at', { ascending: false }),
     ]);
     setWorkOrders(wos || []);
     setCustomerProjects(projectsData || []);
@@ -1520,7 +1520,7 @@ function AdminTimeView({ user }: { user: Profile }) {
     setLoading(true);
     try {
       const { start, end } = monthRange(monthFilter);
-      const { data } = await supabase.from('time_entries').select('user_id, total_minutes, status, entry_type')
+      const { data } = await supabase.from('vihem_time_entries').select('user_id, total_minutes, status, entry_type')
         .gte('start_time', start).lt('start_time', end);
 
       const s: Record<string, { total: number; approved: number; pending: number; rejected: number }> = {};
@@ -1544,13 +1544,13 @@ function AdminTimeView({ user }: { user: Profile }) {
     const end = new Date(`${todayFilter}T23:59:59`).toISOString();
     const [entriesResult, absencesResult] = await Promise.all([
       supabase
-        .from('time_entries')
+        .from('vihem_time_entries')
         .select('*, work_order:work_order_id(id, title), customer_project:customer_project_id(id, title, name, customer_name)')
         .gte('start_time', start)
         .lte('start_time', end)
         .order('start_time', { ascending: false }),
       supabase
-        .from('staff_absence_requests')
+        .from('vihem_staff_absence_requests')
         .select('*, user:user_id(id, name, email, role)')
         .lte('start_date', todayFilter)
         .gte('end_date', todayFilter)
@@ -1580,7 +1580,7 @@ function AdminTimeView({ user }: { user: Profile }) {
   async function loadStaffEntries(staffId: string, month: string) {
     const { start, end } = monthRange(month);
     const { data } = await supabase
-      .from('time_entries')
+      .from('vihem_time_entries')
       .select('*, work_order:work_order_id(id, title), customer_project:customer_project_id(id, title, name, customer_name)')
       .eq('user_id', staffId)
       .gte('start_time', start).lt('start_time', end)
@@ -1593,7 +1593,7 @@ function AdminTimeView({ user }: { user: Profile }) {
     const startDate = localDateKey(new Date(year, monthNumber - 1, 1));
     const endDate = localDateKey(new Date(year, monthNumber, 0));
     const { data, error } = await supabase
-      .from('staff_absence_requests')
+      .from('vihem_staff_absence_requests')
       .select('*, user:user_id(id, name, email, role)')
       .eq('user_id', staffId)
       .gte('end_date', startDate)
@@ -1610,7 +1610,7 @@ function AdminTimeView({ user }: { user: Profile }) {
 
   async function loadStaffSchedules(staffId: string) {
     const { data, error } = await supabase
-      .from('staff_work_schedules')
+      .from('vihem_staff_work_schedules')
       .select('*')
       .eq('user_id', staffId)
       .eq('active', true);
@@ -1625,13 +1625,13 @@ function AdminTimeView({ user }: { user: Profile }) {
   }
 
   async function approveEntry(id: string) {
-    await supabase.from('time_entries').update({ status: 'approved', approved_by: user.id, approved_at: new Date().toISOString() }).eq('id', id);
+    await supabase.from('vihem_time_entries').update({ status: 'approved', approved_by: user.id, approved_at: new Date().toISOString() }).eq('id', id);
     loadStaffEntries(selectedStaff!.id, monthFilter);
     fetchSummary();
   }
 
   async function rejectEntry(id: string) {
-    await supabase.from('time_entries').update({ status: 'rejected' }).eq('id', id);
+    await supabase.from('vihem_time_entries').update({ status: 'rejected' }).eq('id', id);
     loadStaffEntries(selectedStaff!.id, monthFilter);
     fetchSummary();
   }
@@ -1639,7 +1639,7 @@ function AdminTimeView({ user }: { user: Profile }) {
   async function approveAll() {
     if (!selectedStaff) return;
     const { start, end } = monthRange(monthFilter);
-    await supabase.from('time_entries').update({ status: 'approved', approved_by: user.id, approved_at: new Date().toISOString() })
+    await supabase.from('vihem_time_entries').update({ status: 'approved', approved_by: user.id, approved_at: new Date().toISOString() })
       .eq('user_id', selectedStaff.id).in('status', ['submitted', 'change_requested'])
       .gte('start_time', start).lt('start_time', end);
     loadStaffEntries(selectedStaff.id, monthFilter);
@@ -1668,9 +1668,9 @@ function AdminTimeView({ user }: { user: Profile }) {
       approved_at: new Date().toISOString(),
     };
     if (entryId) {
-      await supabase.from('time_entries').update({ ...data, user_id: undefined, organisation_id: undefined }).eq('id', entryId);
+      await supabase.from('vihem_time_entries').update({ ...data, user_id: undefined, organisation_id: undefined }).eq('id', entryId);
     } else {
-      await supabase.from('time_entries').insert(data);
+      await supabase.from('vihem_time_entries').insert(data);
     }
     setAdminEditingEntry(null);
     setAdminEditModalOpen(false);
@@ -1684,7 +1684,7 @@ function AdminTimeView({ user }: { user: Profile }) {
   async function deleteAdminEntry(entry: TimeEntry) {
     if (!selectedStaff) return;
     if (!window.confirm('Ta bort denna tidrad?')) return;
-    await supabase.from('time_entries').delete().eq('id', entry.id);
+    await supabase.from('vihem_time_entries').delete().eq('id', entry.id);
     await loadStaffEntries(selectedStaff.id, monthFilter);
     await fetchTodayEntries();
     fetchSummary();
@@ -1693,7 +1693,7 @@ function AdminTimeView({ user }: { user: Profile }) {
   async function reviewAbsenceRequest(id: string, status: 'approved' | 'rejected') {
     if (!selectedStaff) return;
     const { error } = await supabase
-      .from('staff_absence_requests')
+      .from('vihem_staff_absence_requests')
       .update({ status, reviewed_by: user.id, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('id', id);
     if (error) {
@@ -1721,8 +1721,8 @@ function AdminTimeView({ user }: { user: Profile }) {
       updated_at: new Date().toISOString(),
     };
     const result = adminEditingAbsence
-      ? await supabase.from('staff_absence_requests').update(data).eq('id', adminEditingAbsence.id)
-      : await supabase.from('staff_absence_requests').insert({
+      ? await supabase.from('vihem_staff_absence_requests').update(data).eq('id', adminEditingAbsence.id)
+      : await supabase.from('vihem_staff_absence_requests').insert({
           ...data,
           user_id: selectedStaff.id,
           organisation_id: selectedStaff.organisation_id || user.organisation_id || null,
@@ -1741,7 +1741,7 @@ function AdminTimeView({ user }: { user: Profile }) {
   async function deleteAdminAbsence(request: StaffAbsenceRequest) {
     if (!selectedStaff) return;
     if (!window.confirm('Ta bort denna frånvaropost?')) return;
-    const { error } = await supabase.from('staff_absence_requests').delete().eq('id', request.id);
+    const { error } = await supabase.from('vihem_staff_absence_requests').delete().eq('id', request.id);
     if (error) {
       setAdminAbsenceError(absenceDbErrorMessage(error));
       return;

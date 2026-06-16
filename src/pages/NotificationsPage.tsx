@@ -27,13 +27,13 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
     fetchNotifications();
     // Set up real-time subscription
     const channel = supabase
-      .channel('notifications')
+      .channel('vihem_notifications')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'notifications',
+          table: 'vihem_notifications',
           filter: `user_id=eq.${user?.id}`,
         },
         () => {
@@ -51,7 +51,7 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from('notifications')
+        .from('vihem_notifications')
         .select('*')
         .eq('user_id', user?.id)
         .order('created_at', { ascending: false });
@@ -59,7 +59,7 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
       if (error) throw error;
       setNotifications(data || []);
     } catch (error) {
-      console.error('Error fetching notifications:', error);
+      console.error('Error fetching vihem_notifications:', error);
     } finally {
       setLoading(false);
     }
@@ -68,7 +68,7 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
   const markAsRead = async (notificationId: string) => {
     try {
       await supabase
-        .from('notifications')
+        .from('vihem_notifications')
         .update({ read_at: new Date().toISOString() })
         .eq('id', notificationId);
 
@@ -81,21 +81,21 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
   const markAllAsRead = async () => {
     try {
       await supabase
-        .from('notifications')
+        .from('vihem_notifications')
         .update({ read_at: new Date().toISOString() })
         .eq('user_id', user?.id)
         .is('read_at', null);
 
       fetchNotifications();
     } catch (error) {
-      console.error('Error marking all notifications as read:', error);
+      console.error('Error marking all vihem_notifications as read:', error);
     }
   };
 
   const deleteNotification = async (notificationId: string) => {
     try {
       await supabase
-        .from('notifications')
+        .from('vihem_notifications')
         .delete()
         .eq('id', notificationId);
 

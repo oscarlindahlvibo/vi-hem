@@ -39,7 +39,7 @@ Deno.serve(async (req: Request) => {
 
     // Fetch caller profile to verify role
     const { data: callerProfile, error: profileError } = await userClient
-      .from("profiles")
+      .from("vihem_profiles")
       .select("role, organisation_id")
       .eq("id", caller.id)
       .maybeSingle();
@@ -113,12 +113,12 @@ Deno.serve(async (req: Request) => {
     if (role !== "superadmin") {
       const [{ data: org, error: orgError }, { count: userCount, error: countError }] = await Promise.all([
         adminClient
-          .from("organisations")
+          .from("vihem_organisations")
           .select("max_users")
           .eq("id", targetOrgId)
           .maybeSingle(),
         adminClient
-          .from("profiles")
+          .from("vihem_profiles")
           .select("id", { count: "exact", head: true })
           .eq("organisation_id", targetOrgId),
       ]);
@@ -163,7 +163,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // Create the profile row (trigger may also create one — use upsert)
-    await adminClient.from("profiles").upsert({
+    await adminClient.from("vihem_profiles").upsert({
       id: newAuthUser.user!.id,
       name,
       email,

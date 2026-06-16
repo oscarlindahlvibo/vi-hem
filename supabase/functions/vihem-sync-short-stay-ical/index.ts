@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
     if (!auth.user) throw new Error('Inte inloggad.');
 
     const { data: profile, error: profileError } = await serviceClient
-      .from('profiles')
+      .from('vihem_profiles')
       .select('id, role, organisation_id')
       .eq('id', auth.user.id)
       .single();
@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
     const unitId = body.unit_id as string | undefined;
 
     let query = serviceClient
-      .from('short_stay_units')
+      .from('vihem_short_stay_units')
       .select('*')
       .eq('organisation_id', profile.organisation_id)
       .eq('is_active', true);
@@ -144,13 +144,13 @@ Deno.serve(async (req) => {
 
           if (rows.length > 0) {
             const { error: upsertError } = await serviceClient
-              .from('short_stay_bookings')
+              .from('vihem_short_stay_bookings')
               .upsert(rows, { onConflict: 'unit_id,external_uid' });
             if (upsertError) throw upsertError;
           }
 
           await serviceClient
-            .from('short_stay_units')
+            .from('vihem_short_stay_units')
             .update({
               last_synced_at: new Date().toISOString(),
               [errorField]: null,
@@ -161,7 +161,7 @@ Deno.serve(async (req) => {
           results.push({ unit_id: unit.id, channel_number: channelNumber, imported: rows.length });
         } catch (error: any) {
           await serviceClient
-            .from('short_stay_units')
+            .from('vihem_short_stay_units')
             .update({
               [errorField]: error.message || 'Kunde inte synka kalendern.',
               updated_at: new Date().toISOString(),

@@ -93,11 +93,11 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from('purchase_items')
+        .from('vihem_purchase_items')
         .select(`
           *,
-          creator:profiles!created_by(id, name, email, phone, role),
-          purchaser:profiles!purchased_by(id, name, email, phone, role)
+          creator:vihem_profiles!created_by(id, name, email, phone, role),
+          purchaser:vihem_profiles!purchased_by(id, name, email, phone, role)
         `)
         .order('store_name', { ascending: true })
         .order('created_at', { ascending: false });
@@ -169,13 +169,13 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
 
       if (editingItem) {
         const { error } = await supabase
-          .from('purchase_items')
+          .from('vihem_purchase_items')
           .update(payload)
           .eq('id', editingItem.id);
         if (error) throw error;
       } else {
         const { error } = await supabase
-          .from('purchase_items')
+          .from('vihem_purchase_items')
           .insert({ ...payload, created_by: user.id });
         if (error) throw error;
       }
@@ -198,7 +198,7 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
       : { status, purchased_by: null, purchased_at: null };
 
     const { error } = await supabase
-      .from('purchase_items')
+      .from('vihem_purchase_items')
       .update(payload)
       .eq('id', item.id);
 
@@ -212,7 +212,7 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
 
   async function deleteItem(item: PurchaseItem) {
     if (!window.confirm(`Ta bort "${item.item_name}" från inköpslistan?`)) return;
-    const { error } = await supabase.from('purchase_items').delete().eq('id', item.id);
+    const { error } = await supabase.from('vihem_purchase_items').delete().eq('id', item.id);
     if (error) {
       alert('Kunde inte ta bort inköpsraden. Endast admin kan ta bort.');
       return;

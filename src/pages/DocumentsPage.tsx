@@ -67,8 +67,8 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
     try {
       setLoading(true);
       let query = supabase
-        .from('documents')
-        .select('*, tenant:profiles!documents_tenant_id_fkey(id, name, email), property:properties(id, name)');
+        .from('vihem_documents')
+        .select('*, tenant:vihem_profiles!documents_tenant_id_fkey(id, name, email), property:vihem_properties(id, name)');
 
       if (!isStaff) {
         query = query.eq('tenant_id', user?.id);
@@ -79,7 +79,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
       setAllDocuments(data || []);
       setDocuments(data || []);
     } catch (error) {
-      console.error('Error fetching documents:', error);
+      console.error('Error fetching vihem_documents:', error);
     } finally {
       setLoading(false);
     }
@@ -88,20 +88,20 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
   const fetchProperties = async () => {
     try {
       const { data, error } = await supabase
-        .from('properties')
+        .from('vihem_properties')
         .select('*')
         .order('name');
       if (error) throw error;
       setProperties(data || []);
     } catch (error) {
-      console.error('Error fetching properties:', error);
+      console.error('Error fetching vihem_properties:', error);
     }
   };
 
   const fetchTenants = async () => {
     try {
       const { data, error } = await supabase
-        .from('profiles')
+        .from('vihem_profiles')
         .select('*')
         .eq('role', 'tenant')
         .order('name');
@@ -115,7 +115,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
   const createDocument = async () => {
     if (!newTitle.trim()) return;
     try {
-      const { error } = await supabase.from('documents').insert({
+      const { error } = await supabase.from('vihem_documents').insert({
         organisation_id: user?.organisation_id || null,
         title: newTitle,
         document_type: newType,
@@ -149,7 +149,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
 
     try {
       setDeletingDocumentId(doc.id);
-      const { error } = await supabase.from('documents').delete().eq('id', doc.id);
+      const { error } = await supabase.from('vihem_documents').delete().eq('id', doc.id);
       if (error) throw error;
 
       setAllDocuments((current) => current.filter((item) => item.id !== doc.id));

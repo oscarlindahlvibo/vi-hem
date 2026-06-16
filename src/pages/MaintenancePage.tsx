@@ -151,7 +151,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
   async function fetchRequests() {
     try {
       setLoading(true);
-      let query = supabase.from('maintenance_requests').select(
+      let query = supabase.from('vihem_maintenance_requests').select(
         `
         id,
         organisation_id,
@@ -172,10 +172,10 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
         internal_notes,
         created_at,
         updated_at,
-        tenant:profiles!tenant_id(id, name, email, phone, role),
-        property:properties(id, name, address),
-        apartment:apartments(id, apartment_number),
-        assigned:profiles!assigned_to(id, name, email, phone, role)
+        tenant:vihem_profiles!tenant_id(id, name, email, phone, role),
+        property:vihem_properties(id, name, address),
+        apartment:vihem_apartments(id, apartment_number),
+        assigned:vihem_profiles!assigned_to(id, name, email, phone, role)
       `
       );
 
@@ -199,7 +199,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
   async function fetchStaffMembers() {
     try {
       const { data, error } = await supabase
-        .from('profiles')
+        .from('vihem_profiles')
         .select('id, name, email, phone, role')
         .in('role', ['staff', 'admin'])
         .eq('active', true);
@@ -215,7 +215,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
     try {
       setLoadingComments(true);
       const { data, error } = await supabase
-        .from('maintenance_request_comments')
+        .from('vihem_maintenance_request_comments')
         .select(
           `
         id,
@@ -224,7 +224,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
         comment,
         internal,
         created_at,
-        user:profiles(id, name, email, phone, role)
+        user:vihem_profiles(id, name, email, phone, role)
       `
         )
         .eq('request_id', requestId)
@@ -252,7 +252,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
     try {
       setSubmittingRequest(true);
       const { data: tenancy, error: tenancyError } = await supabase
-        .from('tenancies')
+        .from('vihem_tenancies')
         .select('organisation_id, property_id, apartment_id')
         .eq('tenant_id', user.id)
         .eq('status', 'active')
@@ -263,7 +263,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
       if (tenancyError) throw tenancyError;
 
       const { data, error } = await supabase
-        .from('maintenance_requests')
+        .from('vihem_maintenance_requests')
         .insert([
           {
             organisation_id: tenancy?.organisation_id || user.organisation_id || null,
@@ -316,7 +316,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
     try {
       setPostingComment(true);
       const { error } = await supabase
-        .from('maintenance_request_comments')
+        .from('vihem_maintenance_request_comments')
         .insert([
           {
             request_id: selectedRequest.id,
@@ -344,7 +344,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
     try {
       setUpdatingStatus(true);
       const { error } = await supabase
-        .from('maintenance_requests')
+        .from('vihem_maintenance_requests')
         .update({ status: newStatus })
         .eq('id', selectedRequest.id);
 
@@ -367,7 +367,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
     try {
       setUpdatingAssignment(true);
       const { error } = await supabase
-        .from('maintenance_requests')
+        .from('vihem_maintenance_requests')
         .update({ assigned_to: assignedToIds[0] || null, assigned_to_ids: assignedToIds })
         .eq('id', selectedRequest.id);
 
@@ -394,7 +394,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
     try {
       setSavingNotes(true);
       const { error } = await supabase
-        .from('maintenance_requests')
+        .from('vihem_maintenance_requests')
         .update({ internal_notes: internalNotes })
         .eq('id', selectedRequest.id);
 
@@ -415,7 +415,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const { data } = await supabase
-      .from('time_entries')
+      .from('vihem_time_entries')
       .select('id, maintenance_request_id')
       .eq('user_id', user.id)
       .eq('status', 'draft')
@@ -430,7 +430,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
     if (!user || !selectedRequest) return;
     try {
       setStampingIn(true);
-      const { error } = await supabase.from('time_entries').insert({
+      const { error } = await supabase.from('vihem_time_entries').insert({
         user_id: user.id,
         organisation_id: user.organisation_id || null,
         maintenance_request_id: selectedRequest.id,
@@ -455,13 +455,13 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
   }
 
   async function handleStampOut() {
-    if (!activeEntry) return;
+    if (!user || !activeEntry) return;
     try {
       setStampingIn(true);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const { data: openEntries } = await supabase
-        .from('time_entries')
+        .from('vihem_time_entries')
         .select('id, start_time, break_minutes, entry_type')
         .eq('user_id', user.id)
         .eq('status', 'draft')
@@ -475,7 +475,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
           0
         );
         await supabase
-          .from('time_entries')
+          .from('vihem_time_entries')
           .update({ end_time: endTime, total_minutes: totalMinutes, status: 'submitted' })
           .eq('id', entry.id);
       }));
@@ -494,7 +494,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
       setCreatingWO(true);
       setCreateWOError('');
       const assignedIds = woForm.assigned_to_ids;
-      const { error } = await supabase.from('work_orders').insert({
+      const { error } = await supabase.from('vihem_work_orders').insert({
         title: woForm.title,
         description: woForm.description,
         category: woForm.category,

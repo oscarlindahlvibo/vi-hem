@@ -369,9 +369,9 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     setLoading(true);
     try {
       const [projectRes, customerRes, staffRes] = await Promise.all([
-        supabase.from('customer_projects').select('*').eq('organisation_id', user.organisation_id).order('updated_at', { ascending: false }),
-        supabase.from('project_customers').select('*').eq('organisation_id', user.organisation_id).order('name'),
-        supabase.from('profiles').select('*').eq('organisation_id', user.organisation_id).in('role', ['admin', 'staff']).eq('active', true).order('name'),
+        supabase.from('vihem_customer_projects').select('*').eq('organisation_id', user.organisation_id).order('updated_at', { ascending: false }),
+        supabase.from('vihem_project_customers').select('*').eq('organisation_id', user.organisation_id).order('name'),
+        supabase.from('vihem_profiles').select('*').eq('organisation_id', user.organisation_id).in('role', ['admin', 'staff']).eq('active', true).order('name'),
       ]);
 
       const projectData = (projectRes.data || []) as CustomerProject[];
@@ -396,17 +396,17 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       }
 
       const [assignmentRes, timeRes, materialRes, changeRes, quoteRes, templateRes, selfCheckRes, inspectionRes, deviationRes, invoiceRes, activityRes] = await Promise.all([
-        supabase.from('project_assignments').select('*').in('project_id', projectIds),
-        supabase.from('time_entries').select('*').in('customer_project_id', projectIds).order('start_time', { ascending: false }),
-        supabase.from('project_material_entries').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
-        supabase.from('project_change_orders').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
-        supabase.from('project_quote_versions').select('*, lines:project_quote_lines(*)').in('project_id', projectIds).order('created_at', { ascending: false }),
-        supabase.from('project_self_check_templates').select('*').eq('organisation_id', user.organisation_id).eq('active', true).order('name'),
-        supabase.from('project_self_checks').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
-        supabase.from('project_inspections').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
-        supabase.from('project_deviations').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
-        supabase.from('project_invoice_basis').select('*, lines:project_invoice_basis_lines(*)').in('project_id', projectIds).order('created_at', { ascending: false }),
-        supabase.from('project_activity_log').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
+        supabase.from('vihem_project_assignments').select('*').in('project_id', projectIds),
+        supabase.from('vihem_time_entries').select('*').in('customer_project_id', projectIds).order('start_time', { ascending: false }),
+        supabase.from('vihem_project_material_entries').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
+        supabase.from('vihem_project_change_orders').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
+        supabase.from('vihem_project_quote_versions').select('*, lines:vihem_project_quote_lines(*)').in('project_id', projectIds).order('created_at', { ascending: false }),
+        supabase.from('vihem_project_self_check_templates').select('*').eq('organisation_id', user.organisation_id).eq('active', true).order('name'),
+        supabase.from('vihem_project_self_checks').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
+        supabase.from('vihem_project_inspections').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
+        supabase.from('vihem_project_deviations').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
+        supabase.from('vihem_project_invoice_basis').select('*, lines:vihem_project_invoice_basis_lines(*)').in('project_id', projectIds).order('created_at', { ascending: false }),
+        supabase.from('vihem_project_activity_log').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
       ]);
 
       setAssignments((assignmentRes.data || []) as ProjectAssignment[]);
@@ -427,7 +427,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
 
   async function logActivity(projectId: string, eventType: string, description: string) {
     if (!user?.organisation_id) return;
-    await supabase.from('project_activity_log').insert({
+    await supabase.from('vihem_project_activity_log').insert({
       project_id: projectId,
       organisation_id: user.organisation_id,
       user_id: user.id,
@@ -504,7 +504,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     setSaving(true);
     try {
       if (!customerForm.name.trim()) throw new Error('Ange kundnamn.');
-      const { error: insertError } = await supabase.from('project_customers').insert({
+      const { error: insertError } = await supabase.from('vihem_project_customers').insert({
         ...customerForm,
         organisation_id: user.organisation_id,
         created_by: user.id,
@@ -527,7 +527,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       if (!projectForm.title.trim()) throw new Error('Ange projektnamn.');
       if (!projectForm.customer_id) throw new Error('Välj kund.');
       const customer = customers.find(c => c.id === projectForm.customer_id);
-      const { data, error: insertError } = await supabase.from('customer_projects').insert({
+      const { data, error: insertError } = await supabase.from('vihem_customer_projects').insert({
         organisation_id: user.organisation_id,
         customer_id: projectForm.customer_id,
         customer_name: customer?.name || '',
@@ -556,7 +556,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       ].filter(Boolean)));
 
       if (selectedUsers.length > 0) {
-        await supabase.from('project_assignments').insert(selectedUsers.map(userId => ({
+        await supabase.from('vihem_project_assignments').insert(selectedUsers.map(userId => ({
           project_id: data.id,
           user_id: userId,
           role: userId === projectForm.project_manager_id ? 'project_manager' : 'staff',
@@ -576,7 +576,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
 
   async function updateProjectStatus(status: CustomerProjectStatus) {
     if (!selectedProject) return;
-    await supabase.from('customer_projects').update({ status }).eq('id', selectedProject.id);
+    await supabase.from('vihem_customer_projects').update({ status }).eq('id', selectedProject.id);
     await logActivity(selectedProject.id, 'status_changed', `Status ändrades till ${STATUS_LABELS[status]}.`);
     await fetchAll();
   }
@@ -590,7 +590,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       const end = new Date(`${timeForm.work_date}T${timeForm.end_time}`);
       const totalMinutes = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000) - (Number(timeForm.break_minutes) || 0));
       if (totalMinutes <= 0) throw new Error('Kontrollera start- och sluttid.');
-      const { error: insertError } = await supabase.from('time_entries').insert({
+      const { error: insertError } = await supabase.from('vihem_time_entries').insert({
         organisation_id: user.organisation_id,
         user_id: timeForm.user_id || user.id,
         customer_project_id: selectedProject.id,
@@ -642,8 +642,8 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         invoice_separately: materialForm.invoice_separately,
       };
       const { error: insertError } = editingMaterial
-        ? await supabase.from('project_material_entries').update(payload).eq('id', editingMaterial.id)
-        : await supabase.from('project_material_entries').insert({
+        ? await supabase.from('vihem_project_material_entries').update(payload).eq('id', editingMaterial.id)
+        : await supabase.from('vihem_project_material_entries').insert({
             project_id: selectedProject.id,
             registered_by: user?.id,
             ...payload,
@@ -669,7 +669,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     try {
       if (!changeForm.title.trim()) throw new Error('Ange rubrik.');
       const number = `ÄTA-${String(projectChangeOrders.length + 1).padStart(3, '0')}`;
-      const { error: insertError } = await supabase.from('project_change_orders').insert({
+      const { error: insertError } = await supabase.from('vihem_project_change_orders').insert({
         project_id: selectedProject.id,
         change_order_number: number,
         title: changeForm.title,
@@ -705,7 +705,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       const total = lines.reduce((sum, line) => sum + (Number(line.quantity) || 0) * (Number(line.unit_price) || 0), 0);
       const vat = lines.reduce((sum, line) => sum + ((Number(line.quantity) || 0) * (Number(line.unit_price) || 0) * ((Number(line.vat_rate) || 0) / 100)), 0);
       const version = projectQuotes.length + 1;
-      const { data, error: quoteError } = await supabase.from('project_quote_versions').insert({
+      const { data, error: quoteError } = await supabase.from('vihem_project_quote_versions').insert({
         project_id: selectedProject.id,
         version_number: version,
         quote_number: `OFF-${new Date().getFullYear()}-${String(version).padStart(3, '0')}`,
@@ -719,7 +719,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         created_by: user?.id,
       }).select('*').single();
       if (quoteError) throw quoteError;
-      await supabase.from('project_quote_lines').insert(lines.map((line, index) => ({
+      await supabase.from('vihem_project_quote_lines').insert(lines.map((line, index) => ({
         quote_version_id: data.id,
         line_type: line.line_type,
         description: line.description,
@@ -729,7 +729,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         vat_rate: Number(line.vat_rate) || 0,
         sort_order: index,
       })));
-      await supabase.from('customer_projects').update({ quoted_amount: total, status: 'quote_created' }).eq('id', selectedProject.id);
+      await supabase.from('vihem_customer_projects').update({ quoted_amount: total, status: 'quote_created' }).eq('id', selectedProject.id);
       await logActivity(selectedProject.id, 'quote_created', `Offert ${data.quote_number} skapades (${money(total)}).`);
       setShowQuoteModal(false);
       await fetchAll();
@@ -746,7 +746,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     setError('');
     try {
       if (!documentForm.title.trim() || !documentForm.file_url.trim()) throw new Error('Ange titel och länk.');
-      const { error: insertError } = await supabase.from('project_documents').insert({
+      const { error: insertError } = await supabase.from('vihem_project_documents').insert({
         project_id: selectedProject.id,
         uploaded_by: user?.id,
         ...documentForm,
@@ -773,7 +773,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         .filter(Boolean)
         .map((text, index) => ({ id: `punkt-${index + 1}`, text }));
       if (checklist.length === 0) throw new Error('Lägg till minst en kontrollpunkt.');
-      const { error: insertError } = await supabase.from('project_self_check_templates').insert({
+      const { error: insertError } = await supabase.from('vihem_project_self_check_templates').insert({
         organisation_id: user.organisation_id,
         name: selfCheckTemplateForm.name,
         category: selfCheckTemplateForm.category,
@@ -813,7 +813,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       if (items.length === 0) throw new Error('Lägg till minst en kontrollpunkt.');
       const requiresAction = items.some(item => item.result === 'not_approved' || item.action_required);
       const status = selfCheckForm.signature_name ? (requiresAction ? 'requires_action' : 'signed') : (requiresAction ? 'requires_action' : 'completed');
-      const { error: insertError } = await supabase.from('project_self_checks').insert({
+      const { error: insertError } = await supabase.from('vihem_project_self_checks').insert({
         project_id: selectedProject.id,
         template_id: template?.id || null,
         name,
@@ -852,7 +852,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
           deadline: item.deadline || null,
           status: item.status,
         }));
-      const { error: insertError } = await supabase.from('project_inspections').insert({
+      const { error: insertError } = await supabase.from('vihem_project_inspections').insert({
         project_id: selectedProject.id,
         inspection_type: inspectionForm.inspection_type,
         inspection_date: inspectionForm.inspection_date,
@@ -868,9 +868,9 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       });
       if (insertError) throw insertError;
       if (inspectionForm.result === 'approved_without_remarks') {
-        await supabase.from('customer_projects').update({ status: 'approved' }).eq('id', selectedProject.id);
+        await supabase.from('vihem_customer_projects').update({ status: 'approved' }).eq('id', selectedProject.id);
       } else if (remarks.length > 0) {
-        await supabase.from('customer_projects').update({ status: 'inspected_with_remarks' }).eq('id', selectedProject.id);
+        await supabase.from('vihem_customer_projects').update({ status: 'inspected_with_remarks' }).eq('id', selectedProject.id);
       }
       await logActivity(selectedProject.id, 'inspection_created', 'Projektbesiktning sparades.');
       setShowInspectionModal(false);
@@ -888,7 +888,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     setError('');
     try {
       if (!deviationForm.title.trim()) throw new Error('Ange rubrik.');
-      const { error: insertError } = await supabase.from('project_deviations').insert({
+      const { error: insertError } = await supabase.from('vihem_project_deviations').insert({
         project_id: selectedProject.id,
         title: deviationForm.title,
         description: deviationForm.description,
@@ -973,7 +973,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       const total = lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
       const vat = lines.reduce((sum, line) => sum + line.quantity * line.unit_price * (line.vat_rate / 100), 0);
       const basisNumber = `FU-${new Date().getFullYear()}-${String(projectInvoiceBases.length + 1).padStart(3, '0')}`;
-      const { data, error: basisError } = await supabase.from('project_invoice_basis').insert({
+      const { data, error: basisError } = await supabase.from('vihem_project_invoice_basis').insert({
         project_id: selectedProject.id,
         basis_number: basisNumber,
         invoice_type: invoiceForm.invoice_type,
@@ -985,7 +985,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         created_by: user?.id,
       }).select('*').single();
       if (basisError) throw basisError;
-      await supabase.from('project_invoice_basis_lines').insert(lines.map(line => ({ ...line, basis_id: data.id })));
+      await supabase.from('vihem_project_invoice_basis_lines').insert(lines.map(line => ({ ...line, basis_id: data.id })));
       await logActivity(selectedProject.id, 'invoice_basis_created', `Faktureringsunderlag ${basisNumber} skapades (${money(total)}).`);
       setShowInvoiceModal(false);
       await fetchAll();

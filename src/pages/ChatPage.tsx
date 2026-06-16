@@ -77,7 +77,7 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
     try {
       setLoading(true);
       let query = supabase
-        .from('chat_threads')
+        .from('vihem_chat_threads')
         .select(`
           id,
           organisation_id,
@@ -90,8 +90,8 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
           maintenance_request_id,
           last_message_at,
           created_at,
-          tenant:profiles!chat_threads_tenant_id_fkey(id, name, email, role),
-          participants:chat_participants(id, user_id, user:profiles!chat_participants_user_id_fkey(id, name, email, role))
+          tenant:vihem_profiles!chat_threads_tenant_id_fkey(id, name, email, role),
+          participants:vihem_chat_participants(id, user_id, user:vihem_profiles!chat_participants_user_id_fkey(id, name, email, role))
         `)
         .order('last_message_at', { ascending: false });
 
@@ -106,7 +106,7 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
       const { data, error } = await query;
       if (error) throw error;
 
-      setThreads((data || []) as ChatThreadWithRelations[]);
+      setThreads((data || []) as unknown as ChatThreadWithRelations[]);
     } catch (error) {
       console.error('Error fetching threads:', error);
     } finally {
@@ -118,7 +118,7 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
     if (!user?.organisation_id) return;
 
     const { data, error } = await supabase
-      .from('profiles')
+      .from('vihem_profiles')
       .select('*')
       .eq('organisation_id', user.organisation_id)
       .eq('active', true)
@@ -137,13 +137,13 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
     try {
       setMessagesLoading(true);
       const { data, error } = await supabase
-        .from('chat_messages')
-        .select('id, thread_id, sender_id, message, created_at, read_at, sender:profiles!chat_messages_sender_id_fkey(id, name)')
+        .from('vihem_chat_messages')
+        .select('id, thread_id, sender_id, message, created_at, read_at, sender:vihem_profiles!chat_messages_sender_id_fkey(id, name)')
         .eq('thread_id', threadId)
         .order('created_at', { ascending: true });
 
       if (error) throw error;
-      setMessages((data || []) as ChatMessage[]);
+      setMessages((data || []) as unknown as ChatMessage[]);
     } catch (error) {
       console.error('Error fetching messages:', error);
     } finally {
@@ -154,7 +154,7 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
   const markThreadAsRead = async (threadId: string) => {
     try {
       await supabase
-        .from('chat_messages')
+        .from('vihem_chat_messages')
         .update({ read_at: new Date().toISOString() })
         .eq('thread_id', threadId)
         .neq('sender_id', user?.id)
@@ -265,7 +265,7 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
         : 'tenant_support';
 
       const { data: threadData, error: threadError } = await supabase
-        .from('chat_threads')
+        .from('vihem_chat_threads')
         .insert({
           tenant_id: isStaff ? tenantRecipient?.id || null : user.id,
           assigned_to: isStaff && staffRecipients.length === 1 ? staffRecipients[0].id : null,
@@ -285,12 +285,12 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
       if (isStaff) selectedUserIds.forEach((id) => participantIds.add(id));
 
       const { error: participantError } = await supabase
-        .from('chat_participants')
+        .from('vihem_chat_participants')
         .insert([...participantIds].map((userId) => ({ thread_id: threadData.id, user_id: userId })));
 
       if (participantError) throw participantError;
 
-      const { error: messageError } = await supabase.from('chat_messages').insert({
+      const { error: messageError } = await supabase.from('vihem_chat_messages').insert({
         thread_id: threadData.id,
         sender_id: user.id,
         message: newMessage.trim(),
@@ -312,7 +312,7 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
     if (!messageText.trim() || !selectedThread || !user) return;
 
     try {
-      const { error: messageError } = await supabase.from('chat_messages').insert({
+      const { error: messageError } = await supabase.from('vihem_chat_messages').insert({
         thread_id: selectedThread.id,
         sender_id: user.id,
         message: messageText.trim(),
@@ -320,7 +320,7 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
       if (messageError) throw messageError;
 
       await supabase
-        .from('chat_threads')
+        .from('vihem_chat_threads')
         .update({ last_message_at: new Date().toISOString() })
         .eq('id', selectedThread.id);
 
@@ -334,7 +334,7 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
 
   const closeThread = async (threadId: string) => {
     try {
-      await supabase.from('chat_threads').update({ status: 'closed' }).eq('id', threadId);
+      await supabase.from('vihem_chat_threads').update({ status: 'closed' }).eq('id', threadId);
       setSelectedThread(null);
       fetchThreads();
     } catch (error) {

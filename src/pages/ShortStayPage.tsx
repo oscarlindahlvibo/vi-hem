@@ -126,7 +126,7 @@ function rangeOverlaps(aStart: string, aEnd: string, bStart: string, bEnd: strin
 function getExportUrl(token: string) {
   const base = import.meta.env.VITE_SUPABASE_URL;
   if (!base || !token) return '';
-  return `${base}/functions/v1/export-short-stay-ical?token=${token}`;
+  return `${base}/functions/v1/vihem-export-short-stay-ical?token=${token}`;
 }
 
 export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
@@ -203,25 +203,25 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
 
     const [unitsRes, bookingsRes, propertiesRes, apartmentsRes] = await Promise.all([
       supabase
-        .from('short_stay_units')
-        .select('*, property:properties(*), apartment:apartments(*)')
+        .from('vihem_short_stay_units')
+        .select('*, property:vihem_properties(*), apartment:vihem_apartments(*)')
         .eq('organisation_id', organisationId)
         .order('sort_order')
         .order('name'),
       supabase
-        .from('short_stay_bookings')
-        .select('*, unit:short_stay_units(*)')
+        .from('vihem_short_stay_bookings')
+        .select('*, unit:vihem_short_stay_units(*)')
         .eq('organisation_id', organisationId)
         .gte('end_date', toDateKey(addDays(new Date(), -30)))
         .order('start_date'),
       supabase
-        .from('properties')
+        .from('vihem_properties')
         .select('*')
         .eq('organisation_id', organisationId)
         .order('name'),
       supabase
-        .from('apartments')
-        .select('*, property:properties(*)')
+        .from('vihem_apartments')
+        .select('*, property:vihem_properties(*)')
         .eq('organisation_id', organisationId)
         .order('apartment_number'),
     ]);
@@ -323,8 +323,8 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     };
 
     const result = editingUnit
-      ? await supabase.from('short_stay_units').update(payload).eq('id', editingUnit.id)
-      : await supabase.from('short_stay_units').insert(payload);
+      ? await supabase.from('vihem_short_stay_units').update(payload).eq('id', editingUnit.id)
+      : await supabase.from('vihem_short_stay_units').insert(payload);
 
     setSaving(false);
     if (result.error) {
@@ -382,8 +382,8 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     };
 
     const result = editingBooking
-      ? await supabase.from('short_stay_bookings').update(payload).eq('id', editingBooking.id)
-      : await supabase.from('short_stay_bookings').insert(payload);
+      ? await supabase.from('vihem_short_stay_bookings').update(payload).eq('id', editingBooking.id)
+      : await supabase.from('vihem_short_stay_bookings').insert(payload);
 
     setSaving(false);
     if (result.error) {
@@ -399,7 +399,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     if (!editingBooking) return;
     setSaving(true);
     const { error: deleteError } = await supabase
-      .from('short_stay_bookings')
+      .from('vihem_short_stay_bookings')
       .delete()
       .eq('id', editingBooking.id);
     setSaving(false);
@@ -413,7 +413,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
 
   async function syncUnit(unitId?: string) {
     setSyncingUnitId(unitId || 'all');
-    const { error: syncError } = await supabase.functions.invoke('sync-short-stay-ical', {
+    const { error: syncError } = await supabase.functions.invoke('vihem-sync-short-stay-ical', {
       body: unitId ? { unit_id: unitId } : {},
     });
     setSyncingUnitId(null);

@@ -135,14 +135,14 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
     const fetchRooms = async () => {
       try {
         let query = supabase
-          .from('laundry_rooms')
+          .from('vihem_laundry_rooms')
           .select('*')
           .eq('active', true)
           .order('name');
 
         if (!canViewAllLaundryRooms) {
           const { data: tenancies, error: tenancyErr } = await supabase
-            .from('tenancies')
+            .from('vihem_tenancies')
             .select('property_id')
             .eq('tenant_id', user.id)
             .eq('status', 'active');
@@ -184,13 +184,13 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
 
     const fetchProperties = async () => {
       const { data, error: err } = await supabase
-        .from('properties')
+        .from('vihem_properties')
         .select('*')
         .eq('active', true)
         .order('name');
 
       if (err) {
-        console.error('Error fetching properties:', err);
+        console.error('Error fetching vihem_properties:', err);
         return;
       }
 
@@ -216,7 +216,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
 
         // Fetch slots for the week
         const { data: slotsData, error: slotsErr } = await supabase
-          .from('laundry_slots')
+          .from('vihem_laundry_slots')
           .select('*')
           .eq('laundry_room_id', selectedRoomId)
           .gte('date', weekStartStr)
@@ -230,7 +230,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
         if (slotsData && slotsData.length > 0) {
           const slotIds = slotsData.map((s) => s.id);
           const { data: bookingsData, error: bookingsErr } = await supabase
-            .from('laundry_bookings')
+            .from('vihem_laundry_bookings')
             .select('*')
             .in('laundry_slot_id', slotIds)
             .eq('status', 'active');
@@ -262,7 +262,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
 
         // Fetch user's active bookings
         const { data: myBookingsData, error: myBookingsErr } = await supabase
-          .from('laundry_bookings')
+          .from('vihem_laundry_bookings')
           .select(
             '*, slot:laundry_slot_id(date, start_time, end_time, laundry_room:laundry_room_id(id, name))'
           )
@@ -312,7 +312,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
       const room = rooms.find((r) => r.id === selectedRoomId);
       const maxBookings = room?.max_bookings_per_tenant || 3;
       const { count: activeCount, error: countErr } = await supabase
-        .from('laundry_bookings')
+        .from('vihem_laundry_bookings')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', user.id)
         .eq('status', 'active');
@@ -328,7 +328,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
 
       // Check if slot is still available
       const { data: existingBooking } = await supabase
-        .from('laundry_bookings')
+        .from('vihem_laundry_bookings')
         .select('id')
         .eq('laundry_slot_id', confirmModal.slot.id)
         .eq('status', 'active')
@@ -341,7 +341,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
 
       // Insert booking
       const { data: bookingData, error: bookingErr } = await supabase
-        .from('laundry_bookings')
+        .from('vihem_laundry_bookings')
         .insert({
           laundry_slot_id: confirmModal.slot.id,
           tenant_id: user.id,
@@ -394,7 +394,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
       setCancellingBookingId(bookingId);
 
       const { error: err } = await supabase
-        .from('laundry_bookings')
+        .from('vihem_laundry_bookings')
         .update({ status: 'cancelled' })
         .eq('id', bookingId)
         .eq('tenant_id', user.id);
@@ -454,7 +454,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
       setError('');
 
       const { data: roomData, error: roomErr } = await supabase
-        .from('laundry_rooms')
+        .from('vihem_laundry_rooms')
         .insert({
           property_id: createRoomForm.property_id,
           organisation_id: user.organisation_id,
@@ -482,7 +482,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
       });
 
       const { error: slotsErr } = await supabase
-        .from('laundry_slots')
+        .from('vihem_laundry_slots')
         .insert(slotRows);
 
       if (slotsErr) throw slotsErr;

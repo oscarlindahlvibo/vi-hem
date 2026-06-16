@@ -71,33 +71,33 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
         ] = await Promise.all([
           // Count new maintenance requests (status='received')
           supabase
-            .from('maintenance_requests')
+            .from('vihem_maintenance_requests')
             .select('id', { count: 'exact', head: true })
             .eq('status', 'received'),
 
           // Count urgent maintenance requests (priority='urgent' and status not in 'done','closed')
           supabase
-            .from('maintenance_requests')
+            .from('vihem_maintenance_requests')
             .select('id', { count: 'exact', head: true })
             .eq('priority', 'urgent')
             .not('status', 'in', '(done,closed)'),
 
           // Count my assigned work orders, including multi-assignee rows.
           supabase
-            .from('work_orders')
+            .from('vihem_work_orders')
             .select('id', { count: 'exact', head: true })
             .or(`assigned_to.eq.${user.id},assigned_to_ids.cs.{${user.id}}`)
             .not('status', 'in', '(completed,cancelled)'),
 
           // Count new work orders (status='new')
           supabase
-            .from('work_orders')
+            .from('vihem_work_orders')
             .select('id', { count: 'exact', head: true })
             .eq('status', 'new'),
 
           // Fetch today's active time entry (start_time today, end_time is null)
           supabase
-            .from('time_entries')
+            .from('vihem_time_entries')
             .select('*')
             .eq('user_id', user.id)
             .is('end_time', null)
@@ -107,7 +107,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
 
           // Fetch my assigned work orders (limit 5)
           supabase
-            .from('work_orders')
+            .from('vihem_work_orders')
             .select('*')
             .or(`assigned_to.eq.${user.id},assigned_to_ids.cs.{${user.id}}`)
             .not('status', 'in', '(completed,cancelled)')
@@ -116,7 +116,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
 
           // Fetch new work orders (limit 5)
           supabase
-            .from('work_orders')
+            .from('vihem_work_orders')
             .select('*')
             .eq('status', 'new')
             .order('created_at', { ascending: false })
@@ -124,8 +124,8 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
 
           user.role === 'admin'
             ? supabase
-                .from('staff_absence_requests')
-                .select('*, user:profiles(id, name, email)')
+                .from('vihem_staff_absence_requests')
+                .select('*, user:vihem_profiles(id, name, email)')
                 .lte('start_date', new Date().toISOString().slice(0, 10))
                 .gte('end_date', new Date().toISOString().slice(0, 10))
                 .in('status', ['submitted', 'approved'])
@@ -134,8 +134,8 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
 
           user.role === 'admin'
             ? supabase
-                .from('time_entries')
-                .select('*, user:profiles(id, name, email), work_order:work_orders(id, title), customer_project:customer_projects(id, title, name, customer_name)')
+                .from('vihem_time_entries')
+                .select('*, user:vihem_profiles(id, name, email), work_order:vihem_work_orders(id, title), customer_project:vihem_customer_projects(id, title, name, customer_name)')
                 .is('end_time', null)
                 .eq('status', 'draft')
                 .gte('start_time', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
@@ -178,8 +178,8 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
 
     const channel = supabase
       .channel(`staff-dashboard-${user.organisation_id || user.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'staff_absence_requests' }, () => fetchDashboardData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_entries' }, () => fetchDashboardData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_staff_absence_requests' }, () => fetchDashboardData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_time_entries' }, () => fetchDashboardData())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };

@@ -772,15 +772,6 @@ export interface Notification {
   created_at: string;
 }
 
-export interface CustomerProject {
-  id: string;
-  name: string;
-  customer_name: string;
-  description: string;
-  status: 'active' | 'completed' | 'paused' | 'cancelled';
-  created_at: string;
-}
-
 export interface PurchaseItem {
   id: string;
   organisation_id: string | null;

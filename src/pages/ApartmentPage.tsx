@@ -66,7 +66,7 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
       setLoading(true);
 
       const { data: tenancyData } = await supabase
-        .from('tenancies')
+        .from('vihem_tenancies')
         .select('*')
         .eq('tenant_id', user.id)
         .eq('status', 'active')
@@ -76,12 +76,12 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
         setTenancy(tenancyData);
 
         const [aptRes, inspRes, contractRes] = await Promise.all([
-          supabase.from('apartments').select('*').eq('id', tenancyData.apartment_id).maybeSingle(),
-          supabase.from('apartment_inspections')
-            .select('*, inspector:profiles!apartment_inspections_inspector_id_fkey(name)')
+          supabase.from('vihem_apartments').select('*').eq('id', tenancyData.apartment_id).maybeSingle(),
+          supabase.from('vihem_apartment_inspections')
+            .select('*, inspector:vihem_profiles!apartment_inspections_inspector_id_fkey(name)')
             .eq('tenancy_id', tenancyData.id)
             .order('inspection_date', { ascending: false }),
-          supabase.from('contract_signatures')
+          supabase.from('vihem_contract_signatures')
             .select('*')
             .eq('tenancy_id', tenancyData.id)
             .order('created_at', { ascending: false }),
@@ -89,7 +89,7 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
 
         if (aptRes.data) {
           setApartment(aptRes.data);
-          const propRes = await supabase.from('properties').select('*').eq('id', aptRes.data.property_id).maybeSingle();
+          const propRes = await supabase.from('vihem_properties').select('*').eq('id', aptRes.data.property_id).maybeSingle();
           if (propRes.data) setProperty(propRes.data);
         }
         setInspections(inspRes.data || []);
@@ -135,12 +135,12 @@ Signeringsmetod: Namnunderskrift`,
           apartmentId: apartment.id,
           createdBy: user?.id,
         });
-        const { data: documentData, error: documentError } = await supabase.from('documents').insert(documentPayload).select('id').single();
+        const { data: documentData, error: documentError } = await supabase.from('vihem_documents').insert(documentPayload).select('id').single();
         if (documentError) throw documentError;
         generatedDocumentId = documentData.id;
       }
 
-      const { error: contractError } = await supabase.from('contract_signatures').update({
+      const { error: contractError } = await supabase.from('vihem_contract_signatures').update({
         tenant_signature: signature,
         tenant_signed_at: signedAt,
         tenant_signature_method: 'name',

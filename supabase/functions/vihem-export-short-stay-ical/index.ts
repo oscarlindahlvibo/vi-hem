@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
     if (!token) throw new Error('Saknar kalender-token.');
 
     const { data: unit, error: unitError } = await supabase
-      .from('short_stay_units')
+      .from('vihem_short_stay_units')
       .select('id, name, ical_token')
       .eq('ical_token', token)
       .eq('is_active', true)
@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
     if (unitError || !unit) throw new Error('Kalendern hittades inte.');
 
     const { data: bookings, error: bookingError } = await supabase
-      .from('short_stay_bookings')
+      .from('vihem_short_stay_bookings')
       .select('*')
       .eq('unit_id', unit.id)
       .gte('end_date', new Date().toISOString().slice(0, 10))

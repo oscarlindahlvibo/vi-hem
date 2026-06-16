@@ -95,8 +95,8 @@ export function TerminationPage({ onNavigate: _onNavigate }: TerminationPageProp
   const fetchTerminationRequests = async () => {
     try {
       const { data, error } = await supabase
-        .from('termination_requests')
-        .select('*, tenancy:tenancies(*, apartment:apartments(*, property:properties(*)))')
+        .from('vihem_termination_requests')
+        .select('*, tenancy:vihem_tenancies(*, apartment:vihem_apartments(*, property:vihem_properties(*)))')
         .eq('tenant_id', user?.id)
         .order('created_at', { ascending: false });
 
@@ -110,8 +110,8 @@ export function TerminationPage({ onNavigate: _onNavigate }: TerminationPageProp
   const fetchActiveTenancy = async () => {
     try {
       const { data, error } = await supabase
-        .from('tenancies')
-        .select('*, apartment:apartments(*, property:properties(*))')
+        .from('vihem_tenancies')
+        .select('*, apartment:vihem_apartments(*, property:vihem_properties(*))')
         .eq('tenant_id', user?.id)
         .eq('status', 'active')
         .single();
@@ -131,7 +131,7 @@ export function TerminationPage({ onNavigate: _onNavigate }: TerminationPageProp
     try {
       setSubmitting(true);
 
-      const { error } = await supabase.from('termination_requests').insert([
+      const { error } = await supabase.from('vihem_termination_requests').insert([
         {
           organisation_id: user?.organisation_id,
           tenant_id: user?.id,

@@ -1,0 +1,15 @@
+# Migrations that must not run against a shared production Supabase instance.
+#
+# The VI-HEM app can share auth.users with other apps, but demo seeds create
+# fixed test users and known passwords. Some older migrations only create
+# unprefixed shared resources that have been replaced by vihem-* resources.
+# Keep these files for local development only and make the deployment script skip
+# them in production.
+
+supabase/migrations/20260601055800_seed_demo_data.sql
+supabase/migrations/20260601061948_cleanup_broken_demo_data.sql
+supabase/migrations/20260601062217_reseed_demo_data_with_real_uuids.sql
+supabase/migrations/20260601093938_create_inspection_photos_storage_bucket.sql
+supabase/migrations/20260601113956_seed_superadmin_user.sql
+supabase/migrations/20260601114333_remove_broken_superadmin_auth_user.sql
+supabase/migrations/20260601114356_fix_superadmin_profile_id.sql

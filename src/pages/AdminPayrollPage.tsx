@@ -49,13 +49,13 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
 
       const [entriesRes, profilesRes] = await Promise.all([
         supabase
-          .from('time_entries')
+          .from('vihem_time_entries')
           .select('*')
           .gte('start_time', `${startOfMonth}T00:00:00`)
           .lte('start_time', `${endOfMonth}T23:59:59`)
           .order('start_time', { ascending: false }),
         supabase
-          .from('profiles')
+          .from('vihem_profiles')
           .select('*')
           .in('role', ['staff', 'admin'])
           .order('name'),
@@ -92,7 +92,7 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
     try {
       const entries = getEntriesForUser(userId).filter((e) => e.status !== 'approved');
       for (const entry of entries) {
-        await supabase.from('time_entries').update({ status: 'approved' }).eq('id', entry.id);
+        await supabase.from('vihem_time_entries').update({ status: 'approved' }).eq('id', entry.id);
       }
       fetchData();
     } catch (error) {
@@ -102,7 +102,7 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
 
   const handleApproveEntry = async (entryId: string) => {
     try {
-      await supabase.from('time_entries').update({ status: 'approved' }).eq('id', entryId);
+      await supabase.from('vihem_time_entries').update({ status: 'approved' }).eq('id', entryId);
       fetchData();
     } catch (error) {
       console.error('Error approving entry:', error);
@@ -111,7 +111,7 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
 
   const handleRejectEntry = async (entryId: string) => {
     try {
-      await supabase.from('time_entries').update({ status: 'rejected' }).eq('id', entryId);
+      await supabase.from('vihem_time_entries').update({ status: 'rejected' }).eq('id', entryId);
       fetchData();
     } catch (error) {
       console.error('Error rejecting entry:', error);

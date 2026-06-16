@@ -81,7 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function fetchProfile(userId: string) {
     const { data } = await supabase
-      .from('profiles')
+      .from('vihem_profiles')
       .select('*')
       .eq('id', userId)
       .maybeSingle();
@@ -179,7 +179,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function linkBankID(personalNumber: string, linkedAt: string): Promise<{ error: string | null }> {
     if (!user) return { error: 'Inte inloggad.' };
     const { error } = await supabase
-      .from('profiles')
+      .from('vihem_profiles')
       .update({
         bankid_personal_number: personalNumber,
         bankid_linked_at: linkedAt,

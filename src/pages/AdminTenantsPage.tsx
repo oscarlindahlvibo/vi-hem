@@ -60,10 +60,10 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
     try {
       setLoading(true);
       const [tenantsRes, tenanciesRes, aptsRes, propsRes] = await Promise.all([
-        supabase.from('profiles').select('*').eq('role', 'tenant').order('name'),
-        supabase.from('tenancies').select('*'),
-        supabase.from('apartments').select('*'),
-        supabase.from('properties').select('*'),
+        supabase.from('vihem_profiles').select('*').eq('role', 'tenant').order('name'),
+        supabase.from('vihem_tenancies').select('*'),
+        supabase.from('vihem_apartments').select('*'),
+        supabase.from('vihem_properties').select('*'),
       ]);
       if (tenantsRes.data) setTenants(tenantsRes.data);
       if (tenanciesRes.data) setTenancies(tenanciesRes.data);
@@ -113,7 +113,7 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
     try {
       if (editingTenant) {
         const { error } = await supabase
-          .from('profiles')
+          .from('vihem_profiles')
           .update({ name: tenantFormData.name, phone: tenantFormData.phone, active: tenantFormData.active })
           .eq('id', editingTenant.id);
         if (error) throw error;
@@ -128,7 +128,7 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
 
         // Create tenancy if apartment selected
         if (newAccount.user_id && tenantFormData.apartment_id && tenantFormData.start_date) {
-          const { error: tenancyError } = await supabase.from('tenancies').insert({
+          const { error: tenancyError } = await supabase.from('vihem_tenancies').insert({
             tenant_id: newAccount.user_id,
             apartment_id: tenantFormData.apartment_id,
             property_id: tenantFormData.property_id || null,
@@ -141,7 +141,7 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
 
           // Mark apartment as rented
           const { error: apartmentError } = await supabase
-            .from('apartments')
+            .from('vihem_apartments')
             .update({ status: 'rented' })
             .eq('id', tenantFormData.apartment_id);
           if (apartmentError) throw apartmentError;
@@ -165,7 +165,7 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
     try {
       if (!selectedTenant) return;
       const apt = getApartmentInfo(linkTenancyFormData.apartment_id);
-      await supabase.from('tenancies').insert({
+      await supabase.from('vihem_tenancies').insert({
         tenant_id: selectedTenant.id,
         apartment_id: linkTenancyFormData.apartment_id,
         property_id: apt?.property_id || null,
