@@ -624,3 +624,5 @@ AFTER INSERT
 ON public.vihem_staff_absence_requests
 FOR EACH ROW
 EXECUTE FUNCTION public.notify_staff_absence_submitted();
+
+NOTIFY pgrst, 'reload schema';

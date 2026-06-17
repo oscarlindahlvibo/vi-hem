@@ -63,6 +63,14 @@ const localSuperadminProfile: Profile = {
   updated_at: new Date(0).toISOString(),
 };
 
+function profileFetchErrorMessage(error: any) {
+  if (error?.code === 'PGRST205' || String(error?.message || '').includes('schema cache')) {
+    return 'Inloggningen lyckades, men VI-HEM:s profiltabeller saknas i Supabase REST-cache. Kör senaste migrationerna och starta om/reloada Supabase REST/PostgREST.';
+  }
+
+  return error?.message || 'Kunde inte hämta användarprofilen.';
+}
+
 interface LocalTestUser extends Profile {
   password: string;
 }
@@ -80,11 +88,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   async function fetchProfile(userId: string) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('vihem_profiles')
       .select('*')
       .eq('id', userId)
       .maybeSingle();
+    if (error) throw error;
     return data as Profile | null;
   }
 
@@ -108,10 +117,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        fetchProfile(session.user.id).then(profile => {
-          setUser(profile);
-          setLoading(false);
-        });
+        fetchProfile(session.user.id)
+          .then(profile => {
+            setUser(profile);
+            setLoading(false);
+          })
+          .catch(error => {
+            console.error('Error fetching profile:', error);
+            setUser(null);
+            setLoading(false);
+          });
       } else {
         setLoading(false);
       }
@@ -123,8 +138,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
       } else if (event === 'SIGNED_IN' && session?.user) {
         (async () => {
-          const profile = await fetchProfile(session.user.id);
-          setUser(profile);
+          try {
+            const profile = await fetchProfile(session.user.id);
+            setUser(profile);
+          } catch (error) {
+            console.error('Error fetching profile after sign in:', error);
+            setUser(null);
+          }
         })();
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
@@ -163,6 +183,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: error.message };
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) return { error: 'Inloggningen lyckades inte.' };
+
+    try {
+      const profile = await fetchProfile(authUser.id);
+      if (!profile) {
+        await supabase.auth.signOut();
+        setUser(null);
+        return { error: 'Kontot finns i Supabase Auth men saknar VI-HEM-profil. Kontrollera att profilraden finns i vihem_profiles.' };
+      }
+      setUser(profile);
+    } catch (profileError) {
+      await supabase.auth.signOut();
+      setUser(null);
+      return { error: profileFetchErrorMessage(profileError) };
+    }
     return { error: null };
   }
 

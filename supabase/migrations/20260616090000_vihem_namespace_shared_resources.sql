@@ -181,3 +181,5 @@ SET search_path = public
 AS $$
   SELECT public.vihem_get_my_role() IN ('staff', 'admin', 'superadmin');
 $$;
+
+NOTIFY pgrst, 'reload schema';
