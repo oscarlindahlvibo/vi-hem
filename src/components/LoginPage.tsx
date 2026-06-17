@@ -21,7 +21,7 @@ export function LoginPage() {
     setError('');
     setLoading(true);
     const { error } = await signIn(email, password);
-    if (error) setError('Felaktigt e-post eller lösenord. Försök igen.');
+    if (error) setError(error);
     setLoading(false);
   }
 
