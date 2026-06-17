@@ -142,12 +142,6 @@ DROP POLICY IF EXISTS "Staff can update work order attachments" ON storage.objec
 DROP POLICY IF EXISTS "Public can view work order attachments" ON storage.objects;
 DROP POLICY IF EXISTS "Staff can delete work order attachments" ON storage.objects;
 
-DELETE FROM storage.objects
-WHERE bucket_id IN ('inspection-photos', 'work-order-attachments');
-
-DELETE FROM storage.buckets
-WHERE id IN ('inspection-photos', 'work-order-attachments');
-
 CREATE OR REPLACE FUNCTION public.vihem_get_my_role()
 RETURNS text
 LANGUAGE sql
