@@ -47,11 +47,11 @@ vihem-inspection-photos
 vihem-work-order-attachments
 ```
 
-The migration `20260616090000_vihem_namespace_shared_resources.sql` creates the
-buckets and policies, and removes old unprefixed VI-HEM storage policies if
-they exist. Supabase does not allow direct SQL deletion from storage tables, so
-old unused buckets can be removed manually through the Storage API or Studio if
-needed.
+The production-safe migration
+`20260618080000_vihem_namespace_shared_resources_safe.sql` creates the buckets
+and policies. Skip `20260616090000_vihem_namespace_shared_resources.sql` in
+shared production because an earlier copy of that migration attempted direct SQL
+deletes from Supabase storage tables, which Supabase blocks.
 
 ## Auth and roles
 
