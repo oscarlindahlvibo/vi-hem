@@ -133,14 +133,10 @@ CREATE POLICY "VIHEM staff can delete work order attachments"
     )
   );
 
-DROP POLICY IF EXISTS "Staff can upload inspection photos" ON storage.objects;
-DROP POLICY IF EXISTS "Staff can update inspection photos" ON storage.objects;
-DROP POLICY IF EXISTS "Public can view inspection photos" ON storage.objects;
-DROP POLICY IF EXISTS "Staff can delete inspection photos" ON storage.objects;
-DROP POLICY IF EXISTS "Staff can upload work order attachments" ON storage.objects;
-DROP POLICY IF EXISTS "Staff can update work order attachments" ON storage.objects;
-DROP POLICY IF EXISTS "Public can view work order attachments" ON storage.objects;
-DROP POLICY IF EXISTS "Staff can delete work order attachments" ON storage.objects;
+-- Do not drop legacy storage.objects policies here.
+-- Supabase Storage protects direct deletes in this environment, so the legacy
+-- cleanup step can fail the whole migration even though the new VIHEM policies
+-- above are the only ones that need to be created.
 
 CREATE OR REPLACE FUNCTION public.vihem_get_my_role()
 RETURNS text
