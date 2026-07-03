@@ -189,7 +189,7 @@ export interface MeetingTemplate {
   updated_at: string;
 }
 
-export type MeetingStatus = 'draft' | 'planned' | 'in_progress' | 'completed' | 'cancelled';
+export type MeetingStatus = 'draft' | 'planned' | 'in_progress' | 'completed' | 'locked' | 'cancelled';
 
 export interface Meeting {
   id: string;
@@ -259,6 +259,7 @@ export interface MeetingActionItem {
   description: string;
   responsible_user_id: string | null;
   due_date: string | null;
+  priority: 'low' | 'normal' | 'high' | 'urgent';
   status: 'open' | 'in_progress' | 'done' | 'cancelled';
   linked_entity_type: string;
   linked_entity_id: string | null;

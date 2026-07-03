@@ -8,7 +8,7 @@ import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
   ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase,
-  BedDouble, CalendarDays,
+  BedDouble, CalendarDays, MessageSquareText,
 } from 'lucide-react';
 
 interface NavItem {
@@ -53,6 +53,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     { label: 'Tidrapportering', icon: <Clock className="w-5 h-5" />, page: 'timetracking', roles: ['staff', 'admin'] },
     { label: 'Inköpslista', icon: <ShoppingCart className="w-5 h-5" />, page: 'purchases', roles: ['staff', 'admin'] },
     { label: 'Årsplanering', icon: <CalendarDays className="w-5 h-5" />, page: 'year-planning', roles: ['staff', 'admin'], module: 'year_planning' },
+    { label: 'Möten & Uppföljning', icon: <MessageSquareText className="w-5 h-5" />, page: 'meetings', roles: ['staff', 'admin'], module: 'meetings' },
     { label: 'Kundprojekt', icon: <Briefcase className="w-5 h-5" />, page: 'customer-projects', roles: ['staff', 'admin'], module: 'customer_projects' },
     { label: 'Korttidsuthyrning', icon: <BedDouble className="w-5 h-5" />, page: 'short-stay', roles: ['staff', 'admin'], module: 'short_stay' },
     { label: 'Besiktningar & Avtal', icon: <ClipboardCheck className="w-5 h-5" />, page: 'inspections', roles: ['staff', 'admin'] },

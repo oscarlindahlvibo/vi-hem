@@ -29,6 +29,7 @@ import { AdminOrganisationsPage } from './pages/AdminOrganisationsPage';
 import { CustomerProjectsPage } from './pages/CustomerProjectsPage';
 import { ShortStayPage } from './pages/ShortStayPage';
 import { YearPlanningPage } from './pages/YearPlanningPage';
+import { MeetingsPage } from './pages/MeetingsPage';
 import type { ModuleKey } from './types';
 
 type ModuleState = Partial<Record<ModuleKey, boolean>>;
@@ -37,6 +38,7 @@ const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
   'customer_projects',
   'short_stay',
   'year_planning',
+  'meetings',
 ];
 
 const DEFAULT_MODULE_STATE: ModuleState = {
@@ -385,6 +387,10 @@ function AppInner() {
       case 'year-planning':
         if (!isStaff || !enabledModules.year_planning) return renderDashboard();
         return <YearPlanningPage onNavigate={navigate} />;
+
+      case 'meetings':
+        if (!isStaff || !enabledModules.meetings) return renderDashboard();
+        return <MeetingsPage onNavigate={navigate} />;
 
       case 'customer-projects':
         if (!isStaff || !enabledModules.customer_projects) return renderDashboard();
