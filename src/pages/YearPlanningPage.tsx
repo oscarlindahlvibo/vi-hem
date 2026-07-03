@@ -190,6 +190,14 @@ function angleForDate(date: Date, year: number) {
   return ((dayOfYear(date) - 1) / daysInYear(year)) * 360;
 }
 
+function monthAngleRange(year: number, monthIndex: number) {
+  const startAngle = angleForDate(new Date(year, monthIndex, 1), year);
+  const endAngle = monthIndex === 11
+    ? 360
+    : angleForDate(new Date(year, monthIndex + 1, 1), year);
+  return { startAngle, endAngle };
+}
+
 function rotationForText(angle: number) {
   const normalized = ((angle % 360) + 360) % 360;
   return normalized > 90 && normalized < 270 ? angle + 180 : angle;
@@ -870,10 +878,7 @@ function YearWheelSvg({ items, selectedYear, visibleTypes, onEdit }: {
         <rect width={size} height={size} fill="#f8fafc" />
 
         {Array.from({ length: 12 }, (_, monthIndex) => {
-          const startDate = new Date(selectedYear, monthIndex, 1);
-          const endDate = new Date(selectedYear, monthIndex + 1, 1);
-          const startAngle = angleForDate(startDate, selectedYear);
-          const endAngle = angleForDate(endDate, selectedYear);
+          const { startAngle, endAngle } = monthAngleRange(selectedYear, monthIndex);
           const midAngle = (startAngle + endAngle) / 2;
           const labelPoint = polarToCartesian(cx, cy, 442, midAngle);
           return (
@@ -947,7 +952,7 @@ function YearWheelSvg({ items, selectedYear, visibleTypes, onEdit }: {
               <circle cx={cx} cy={cy} r={ring.outer} fill="none" stroke="#ffffff" strokeWidth={2} />
               <circle cx={cx} cy={cy} r={ring.inner} fill="none" stroke="#ffffff" strokeWidth={2} />
               {Array.from({ length: 12 }, (_, monthIndex) => {
-                const angle = angleForDate(new Date(selectedYear, monthIndex, 1), selectedYear);
+                const { startAngle: angle } = monthAngleRange(selectedYear, monthIndex);
                 const inner = polarToCartesian(cx, cy, ring.inner, angle);
                 const outer = polarToCartesian(cx, cy, ring.outer, angle);
                 return <line key={`${type}-${monthIndex}`} x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} stroke="#ffffff" strokeWidth={1.5} opacity={0.8} />;
