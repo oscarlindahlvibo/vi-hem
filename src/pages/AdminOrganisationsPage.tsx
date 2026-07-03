@@ -153,6 +153,7 @@ interface AdminOrganisationsPageProps { onNavigate: (page: string) => void; }
 
 export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganisationsPageProps) {
   const [orgs, setOrgs] = useState<Organisation[]>([]);
+  const [orgModules, setOrgModules] = useState<Record<string, Partial<Record<ModuleKey, boolean>>>>({});
   const [superadmins, setSuperadmins] = useState<Profile[]>([]);
   const [stats, setStats] = useState<OrgStats[]>([]);
   const [loading, setLoading] = useState(true);
@@ -191,6 +192,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       const localOrgs = readLocalOrgs();
       const users = readLocalUsers();
       setOrgs(localOrgs);
+      setOrgModules({});
       setLocalUsers(users);
       setSuperadmins(users.filter(user => user.role === 'superadmin'));
       setStats(localOrgs.map(org => ({
@@ -220,6 +222,23 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
 
     if (data) {
       setOrgs(data);
+
+      const { data: moduleRows } = await supabase
+        .from('vihem_organisation_modules')
+        .select('organisation_id, module_key, enabled')
+        .in('module_key', ['customer_projects', 'short_stay', 'year_planning']);
+
+      const nextOrgModules = (moduleRows || []).reduce((acc, row: any) => {
+        const organisationId = row.organisation_id as string;
+        const moduleKey = row.module_key as ModuleKey;
+        acc[organisationId] = {
+          ...(acc[organisationId] || {}),
+          [moduleKey]: Boolean(row.enabled),
+        };
+        return acc;
+      }, {} as Record<string, Partial<Record<ModuleKey, boolean>>>);
+      setOrgModules(nextOrgModules);
+
       // Fetch member and apartment counts for each org
       const orgStats = await Promise.all(
         data.map(async (org) => {
@@ -424,6 +443,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
   };
 
   const openEdit = async (org: Organisation) => {
+    const moduleState = orgModules[org.id] || {};
     setForm({
       name: org.name, slug: org.slug,
       contact_email: org.contact_email, contact_phone: org.contact_phone,
@@ -435,7 +455,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       max_customer_projects: String(org.max_customer_projects ?? 3),
       short_stay_enabled: Boolean(org.short_stay_enabled),
       max_short_stay_units: String(org.max_short_stay_units ?? 3),
-      year_planning_enabled: false,
+      year_planning_enabled: Boolean(moduleState.year_planning),
       active: org.active,
     });
     setEditingOrg(org);
@@ -770,6 +790,10 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
           <div className="space-y-3">
             {filtered.map((org) => {
               const s = getStats(org.id);
+              const moduleState = orgModules[org.id] || {};
+              const customerProjectsActive = moduleState.customer_projects ?? org.customer_projects_enabled;
+              const shortStayActive = moduleState.short_stay ?? org.short_stay_enabled;
+              const yearPlanningActive = Boolean(moduleState.year_planning);
               const userPct = org.max_users > 0 ? (s.member_count / org.max_users) * 100 : 0;
               const propertyPct = org.max_properties > 0 ? (s.property_count / org.max_properties) * 100 : 0;
               const aptPct = org.max_apartments > 0 ? (s.apartment_count / org.max_apartments) * 100 : 0;
@@ -801,14 +825,19 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                             <X className="w-3 h-3" /> Inaktiv
                           </Badge>
                         )}
-                        {org.customer_projects_enabled && (
+                        {customerProjectsActive && (
                           <Badge className="bg-violet-100 text-violet-700">
                             Kundprojekt
                           </Badge>
                         )}
-                        {org.short_stay_enabled && (
+                        {shortStayActive && (
                           <Badge className="bg-cyan-100 text-cyan-700">
                             Korttidsuthyrning
+                          </Badge>
+                        )}
+                        {yearPlanningActive && (
+                          <Badge className="bg-blue-100 text-blue-700">
+                            Årsplanering
                           </Badge>
                         )}
                       </div>

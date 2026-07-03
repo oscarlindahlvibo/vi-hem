@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Layout } from './components/Layout';
 import { LoginPage } from './components/LoginPage';
@@ -33,6 +33,12 @@ import type { ModuleKey } from './types';
 
 type ModuleState = Partial<Record<ModuleKey, boolean>>;
 
+const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
+  'customer_projects',
+  'short_stay',
+  'year_planning',
+];
+
 const DEFAULT_MODULE_STATE: ModuleState = {
   properties: true,
   documents: true,
@@ -52,6 +58,64 @@ function AppInner() {
   const [notificationCount, setNotificationCount] = useState(0);
   const [enabledModules, setEnabledModules] = useState<ModuleState>(DEFAULT_MODULE_STATE);
 
+  const loadOrganisationModules = useCallback(async () => {
+    if (!user?.organisation_id || user.role === 'superadmin') {
+      setEnabledModules(DEFAULT_MODULE_STATE);
+      return;
+    }
+
+    const organisationId = user.organisation_id;
+    const nextModules: ModuleState = { ...DEFAULT_MODULE_STATE };
+    const loadedModuleKeys = new Set<ModuleKey>();
+
+    const moduleResult = await supabase
+      .from('vihem_organisation_modules')
+      .select('module_key, enabled')
+      .eq('organisation_id', organisationId);
+
+    if (!moduleResult.error && moduleResult.data?.length) {
+      moduleResult.data.forEach((row: any) => {
+        const moduleKey = row.module_key as ModuleKey;
+        loadedModuleKeys.add(moduleKey);
+        nextModules[moduleKey] = Boolean(row.enabled);
+      });
+    }
+
+    if (moduleResult.error || !moduleResult.data?.length || OPTIONAL_MODULE_KEYS.some(key => !loadedModuleKeys.has(key))) {
+      const organisationResult = await supabase
+        .from('vihem_organisations')
+        .select('customer_projects_enabled, short_stay_enabled')
+        .eq('id', organisationId)
+        .maybeSingle();
+
+      if (!organisationResult.error) {
+        if (!loadedModuleKeys.has('customer_projects')) {
+          nextModules.customer_projects = Boolean(organisationResult.data?.customer_projects_enabled);
+        }
+        if (!loadedModuleKeys.has('short_stay')) {
+          nextModules.short_stay = Boolean(organisationResult.data?.short_stay_enabled);
+        }
+      }
+
+      await Promise.all(
+        OPTIONAL_MODULE_KEYS
+          .filter(key => !loadedModuleKeys.has(key))
+          .map(async (moduleKey) => {
+            const { data, error } = await supabase.rpc('vihem_module_enabled', { module_key: moduleKey });
+            if (!error && typeof data === 'boolean') {
+              nextModules[moduleKey] = data;
+            }
+          })
+      );
+    }
+
+    if (moduleResult.error) {
+      console.warn('Could not load organisation modules, using legacy module fields where available:', moduleResult.error);
+    }
+
+    setEnabledModules(nextModules);
+  }, [user?.organisation_id, user?.role]);
+
   useEffect(() => {
     if (!user) {
       setCurrentPage('dashboard');
@@ -70,45 +134,39 @@ function AppInner() {
   }, [currentPage]);
 
   useEffect(() => {
-    if (!user?.organisation_id || user.role === 'superadmin') {
-      setEnabledModules(DEFAULT_MODULE_STATE);
-      return;
-    }
+    loadOrganisationModules();
+  }, [loadOrganisationModules]);
 
-    const organisationId = user.organisation_id;
+  useEffect(() => {
+    if (!user?.organisation_id || user.role === 'superadmin') return;
 
-    async function loadModules() {
-      const nextModules: ModuleState = { ...DEFAULT_MODULE_STATE };
-
-      const moduleResult = await supabase
-        .from('vihem_organisation_modules')
-        .select('module_key, enabled')
-        .eq('organisation_id', organisationId);
-
-      if (!moduleResult.error && moduleResult.data?.length) {
-        moduleResult.data.forEach((row: any) => {
-          nextModules[row.module_key as ModuleKey] = Boolean(row.enabled);
-        });
-        setEnabledModules(nextModules);
-        return;
+    const reloadOnFocus = () => {
+      if (!document.hidden) {
+        loadOrganisationModules();
       }
+    };
 
-      const organisationResult = await supabase
-        .from('vihem_organisations')
-        .select('customer_projects_enabled, short_stay_enabled')
-        .eq('id', organisationId)
-        .maybeSingle();
+    window.addEventListener('focus', reloadOnFocus);
+    document.addEventListener('visibilitychange', reloadOnFocus);
 
-      if (!organisationResult.error) {
-        nextModules.customer_projects = Boolean(organisationResult.data?.customer_projects_enabled);
-        nextModules.short_stay = Boolean(organisationResult.data?.short_stay_enabled);
-      }
+    const channel = supabase
+      .channel(`vihem_organisation_modules_${user.organisation_id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'vihem_organisation_modules',
+        filter: `organisation_id=eq.${user.organisation_id}`,
+      }, () => {
+        loadOrganisationModules();
+      })
+      .subscribe();
 
-      setEnabledModules(nextModules);
-    }
-
-    loadModules();
-  }, [user?.organisation_id, user?.role]);
+    return () => {
+      window.removeEventListener('focus', reloadOnFocus);
+      document.removeEventListener('visibilitychange', reloadOnFocus);
+      supabase.removeChannel(channel);
+    };
+  }, [loadOrganisationModules, user?.organisation_id, user?.role]);
 
   useEffect(() => {
     if (!user) return;
