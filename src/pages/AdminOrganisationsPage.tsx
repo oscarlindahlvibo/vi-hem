@@ -3,6 +3,7 @@ import {
   Building2, Plus, Edit2, Check, X, Globe,
   Users, Home, ChevronRight, AlertTriangle, Shield, KeyRound, Mail,
   ClipboardCheck, BedDouble,
+  CalendarDays,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
@@ -10,7 +11,7 @@ import {
   EmptyState, LoadingPage, SearchInput,
 } from '../components/ui';
 import { formatDate } from '../lib/utils';
-import type { Organisation, Profile, Role } from '../types';
+import type { ModuleKey, Organisation, Profile, Role } from '../types';
 import { createUserAccount, sendUserPasswordResetEmail, updateUserAccount } from '../lib/userAdmin';
 
 const PLAN_LABELS: Record<string, string> = {
@@ -56,6 +57,7 @@ interface OrgFormData {
   max_customer_projects: string;
   short_stay_enabled: boolean;
   max_short_stay_units: string;
+  year_planning_enabled: boolean;
   active: boolean;
 }
 
@@ -80,6 +82,7 @@ const defaultForm: OrgFormData = {
   max_customer_projects: '3',
   short_stay_enabled: false,
   max_short_stay_units: '3',
+  year_planning_enabled: false,
   active: true,
 };
 
@@ -107,6 +110,31 @@ function readLocalOrgs(): Organisation[] {
 
 function writeLocalOrgs(orgs: Organisation[]) {
   localStorage.setItem(localOrgsKey, JSON.stringify(orgs));
+}
+
+function isMissingSchemaError(error: any) {
+  return error?.code === 'PGRST205' || String(error?.message || '').includes('schema cache');
+}
+
+async function syncOrganisationModules(
+  organisationId: string,
+  modules: Array<{ module_key: ModuleKey; enabled: boolean; limits: Record<string, unknown> }>
+) {
+  const { error } = await supabase
+    .from('vihem_organisation_modules')
+    .upsert(
+      modules.map(module => ({
+        organisation_id: organisationId,
+        module_key: module.module_key,
+        enabled: module.enabled,
+        limits: module.limits,
+      })),
+      { onConflict: 'organisation_id,module_key' }
+    );
+
+  if (error && !isMissingSchemaError(error)) {
+    throw error;
+  }
 }
 
 function readLocalUsers(): LocalTestUser[] {
@@ -322,6 +350,23 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       if (editingOrg) {
         const { error } = await supabase.from('vihem_organisations').update(payload).eq('id', editingOrg.id);
         if (error) throw error;
+        await syncOrganisationModules(editingOrg.id, [
+          {
+            module_key: 'customer_projects',
+            enabled: payload.customer_projects_enabled,
+            limits: { max_projects: payload.max_customer_projects },
+          },
+          {
+            module_key: 'short_stay',
+            enabled: payload.short_stay_enabled,
+            limits: { max_units: payload.max_short_stay_units },
+          },
+          {
+            module_key: 'year_planning',
+            enabled: form.year_planning_enabled,
+            limits: {},
+          },
+        ]);
       } else {
         const { data: createdOrg, error } = await supabase
           .from('vihem_organisations')
@@ -330,6 +375,26 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
           .single();
         if (error) throw error;
         createdOrgIdForRollback = createdOrg?.id ?? null;
+
+        if (createdOrg) {
+          await syncOrganisationModules(createdOrg.id, [
+            {
+              module_key: 'customer_projects',
+              enabled: payload.customer_projects_enabled,
+              limits: { max_projects: payload.max_customer_projects },
+            },
+            {
+              module_key: 'short_stay',
+              enabled: payload.short_stay_enabled,
+              limits: { max_units: payload.max_short_stay_units },
+            },
+            {
+              module_key: 'year_planning',
+              enabled: form.year_planning_enabled,
+              limits: {},
+            },
+          ]);
+        }
 
         if (initialAdminForm.create && createdOrg) {
           const result = await createUserAccount({
@@ -358,7 +423,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
     }
   };
 
-  const openEdit = (org: Organisation) => {
+  const openEdit = async (org: Organisation) => {
     setForm({
       name: org.name, slug: org.slug,
       contact_email: org.contact_email, contact_phone: org.contact_phone,
@@ -370,12 +435,24 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       max_customer_projects: String(org.max_customer_projects ?? 3),
       short_stay_enabled: Boolean(org.short_stay_enabled),
       max_short_stay_units: String(org.max_short_stay_units ?? 3),
+      year_planning_enabled: false,
       active: org.active,
     });
     setEditingOrg(org);
     setInitialAdminForm(defaultInitialAdminForm);
     setSaveError('');
     setShowModal(true);
+
+    const { data, error } = await supabase
+      .from('vihem_organisation_modules')
+      .select('enabled')
+      .eq('organisation_id', org.id)
+      .eq('module_key', 'year_planning')
+      .maybeSingle();
+
+    if (!error) {
+      setForm(current => ({ ...current, year_planning_enabled: Boolean(data?.enabled) }));
+    }
   };
 
   const openCreate = () => {
@@ -1046,6 +1123,25 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                 onChange={e => setForm({ ...form, max_short_stay_units: e.target.value })}
               />
             )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.year_planning_enabled}
+                onChange={e => setForm({ ...form, year_planning_enabled: e.target.checked })}
+                className="mt-1 w-4 h-4 rounded border-slate-300"
+              />
+              <span>
+                <span className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <CalendarDays className="w-4 h-4 text-blue-600" /> Aktivera Årsplanering
+                </span>
+                <span className="block text-xs text-slate-500">
+                  Visar årsplaneringen för personal/admin och låter organisationen planera arbeten, möten, besiktningar och deadlines över året.
+                </span>
+              </span>
+            </label>
           </div>
 
           {editingOrg && (

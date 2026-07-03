@@ -1,5 +1,25 @@
 export type Role = 'tenant' | 'staff' | 'admin' | 'superadmin';
 
+export type ModuleKey =
+  | 'properties'
+  | 'documents'
+  | 'maintenance'
+  | 'work_orders'
+  | 'time_tracking'
+  | 'laundry'
+  | 'chat'
+  | 'news'
+  | 'purchasing'
+  | 'customer_projects'
+  | 'short_stay'
+  | 'staff_ledger'
+  | 'year_planning'
+  | 'meetings'
+  | 'inspections'
+  | 'inventory'
+  | 'crm'
+  | 'ai';
+
 export interface Organisation {
   id: string;
   name: string;
@@ -35,6 +55,213 @@ export interface Profile {
   /** Swedish 12-digit personal number, set when BankID is linked */
   bankid_personal_number: string | null;
   bankid_linked_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ModuleDefinition {
+  module_key: ModuleKey;
+  name: string;
+  description: string;
+  category: string;
+  default_enabled: boolean;
+  default_limits: Record<string, unknown>;
+  default_settings: Record<string, unknown>;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrganisationModule {
+  organisation_id: string;
+  module_key: ModuleKey;
+  enabled: boolean;
+  limits: Record<string, unknown>;
+  settings: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  module?: ModuleDefinition;
+}
+
+export type PersonType = 'tenant' | 'staff' | 'customer' | 'supplier' | 'contact' | 'guest' | 'contractor' | 'other';
+
+export interface Person {
+  id: string;
+  organisation_id: string;
+  display_name: string;
+  email: string;
+  phone: string;
+  person_type: PersonType;
+  metadata: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  creator?: Profile | null;
+}
+
+export type MembershipStatus = 'invited' | 'active' | 'paused' | 'ended';
+
+export interface Membership {
+  id: string;
+  organisation_id: string;
+  person_id: string | null;
+  profile_id: string | null;
+  role_key: string;
+  permissions: Record<string, unknown>;
+  status: MembershipStatus;
+  invited_at: string | null;
+  joined_at: string | null;
+  created_at: string;
+  updated_at: string;
+  person?: Person | null;
+  profile?: Profile | null;
+}
+
+export interface AuditEvent {
+  id: string;
+  organisation_id: string | null;
+  actor_id: string | null;
+  event_type: string;
+  entity_type: string;
+  entity_id: string | null;
+  summary: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  actor?: Profile | null;
+}
+
+export type FileVisibility = 'private' | 'org' | 'tenant' | 'public';
+
+export interface FileRecord {
+  id: string;
+  organisation_id: string;
+  bucket_id: string;
+  storage_path: string;
+  file_name: string;
+  content_type: string;
+  size_bytes: number;
+  owner_type: string;
+  owner_id: string | null;
+  visibility: FileVisibility;
+  uploaded_by: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  deleted_at: string | null;
+  uploader?: Profile | null;
+}
+
+export type PlanningItemType = 'custom' | 'work_order' | 'inspection' | 'meeting' | 'absence' | 'maintenance' | 'project' | 'inventory';
+export type PlanningItemStatus = 'planned' | 'in_progress' | 'done' | 'cancelled';
+
+export interface PlanningItem {
+  id: string;
+  organisation_id: string;
+  title: string;
+  description: string;
+  start_at: string;
+  end_at: string | null;
+  item_type: PlanningItemType;
+  entity_type: string;
+  entity_id: string | null;
+  responsible_user_id: string | null;
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  status: PlanningItemStatus;
+  recurrence_rule: string;
+  metadata: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  responsible?: Profile | null;
+  creator?: Profile | null;
+}
+
+export interface MeetingTemplate {
+  id: string;
+  organisation_id: string;
+  name: string;
+  description: string;
+  agenda: Array<Record<string, unknown>>;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type MeetingStatus = 'draft' | 'planned' | 'in_progress' | 'completed' | 'cancelled';
+
+export interface Meeting {
+  id: string;
+  organisation_id: string;
+  template_id: string | null;
+  title: string;
+  description: string;
+  meeting_type: string;
+  status: MeetingStatus;
+  starts_at: string | null;
+  ends_at: string | null;
+  entity_type: string;
+  entity_id: string | null;
+  location: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  template?: MeetingTemplate | null;
+  agenda_items?: MeetingAgendaItem[];
+  notes?: MeetingNote[];
+  decisions?: MeetingDecision[];
+  action_items?: MeetingActionItem[];
+}
+
+export interface MeetingAgendaItem {
+  id: string;
+  organisation_id: string;
+  meeting_id: string;
+  title: string;
+  notes: string;
+  sort_order: number;
+  responsible_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MeetingNote {
+  id: string;
+  organisation_id: string;
+  meeting_id: string;
+  author_id: string | null;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  author?: Profile | null;
+}
+
+export interface MeetingDecision {
+  id: string;
+  organisation_id: string;
+  meeting_id: string;
+  title: string;
+  description: string;
+  decided_at: string;
+  responsible_user_id: string | null;
+  due_date: string | null;
+  status: 'open' | 'done' | 'cancelled';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MeetingActionItem {
+  id: string;
+  organisation_id: string;
+  meeting_id: string;
+  title: string;
+  description: string;
+  responsible_user_id: string | null;
+  due_date: string | null;
+  status: 'open' | 'in_progress' | 'done' | 'cancelled';
+  linked_entity_type: string;
+  linked_entity_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -789,4 +1016,139 @@ export interface PurchaseItem {
   updated_at: string;
   creator?: Profile | null;
   purchaser?: Profile | null;
+}
+
+export interface AiInteraction {
+  id: string;
+  organisation_id: string;
+  user_id: string | null;
+  feature_key: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  estimated_cost: number;
+  prompt_hash: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  user?: Profile | null;
+}
+
+export type AiSuggestionStatus = 'pending' | 'approved' | 'rejected' | 'applied' | 'cancelled';
+
+export interface AiSuggestion {
+  id: string;
+  organisation_id: string;
+  created_by: string | null;
+  source_type: string;
+  source_id: string | null;
+  suggestion_type: string;
+  target_type: string;
+  target_id: string | null;
+  payload: Record<string, unknown>;
+  confidence: number;
+  status: AiSuggestionStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  applied_at: string | null;
+  created_at: string;
+  updated_at: string;
+  creator?: Profile | null;
+  reviewer?: Profile | null;
+}
+
+export type InventoryItemStatus = 'active' | 'service_due' | 'out_of_service' | 'archived';
+
+export interface InventoryItem {
+  id: string;
+  organisation_id: string;
+  property_id: string | null;
+  apartment_id: string | null;
+  name: string;
+  category: string;
+  serial_number: string;
+  purchase_date: string | null;
+  warranty_until: string | null;
+  next_service_date: string | null;
+  status: InventoryItemStatus;
+  metadata: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  property?: Property | null;
+  apartment?: Apartment | null;
+}
+
+export interface InventoryServiceEvent {
+  id: string;
+  organisation_id: string;
+  inventory_item_id: string;
+  service_date: string;
+  title: string;
+  description: string;
+  performed_by: string;
+  cost: number;
+  next_service_date: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  item?: InventoryItem | null;
+}
+
+export type CrmAccountType = 'customer' | 'supplier' | 'partner' | 'prospect' | 'other';
+export type CrmAccountStatus = 'active' | 'inactive' | 'archived';
+
+export interface CrmAccount {
+  id: string;
+  organisation_id: string;
+  name: string;
+  account_type: CrmAccountType;
+  organisation_number: string;
+  email: string;
+  phone: string;
+  address: Record<string, unknown>;
+  notes: string;
+  status: CrmAccountStatus;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface CrmContact {
+  id: string;
+  organisation_id: string;
+  account_id: string | null;
+  person_id: string | null;
+  name: string;
+  role_title: string;
+  email: string;
+  phone: string;
+  notes: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  account?: CrmAccount | null;
+  person?: Person | null;
+}
+
+export interface CrmActivity {
+  id: string;
+  organisation_id: string;
+  account_id: string | null;
+  contact_id: string | null;
+  activity_type: 'note' | 'call' | 'email' | 'meeting' | 'task' | 'offer' | 'agreement';
+  title: string;
+  description: string;
+  due_at: string | null;
+  completed_at: string | null;
+  assigned_to: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  account?: CrmAccount | null;
+  contact?: CrmContact | null;
+  assignee?: Profile | null;
+  creator?: Profile | null;
 }

@@ -28,18 +28,35 @@ import { InspectionsPage } from './pages/InspectionsPage';
 import { AdminOrganisationsPage } from './pages/AdminOrganisationsPage';
 import { CustomerProjectsPage } from './pages/CustomerProjectsPage';
 import { ShortStayPage } from './pages/ShortStayPage';
+import { YearPlanningPage } from './pages/YearPlanningPage';
+import type { ModuleKey } from './types';
+
+type ModuleState = Partial<Record<ModuleKey, boolean>>;
+
+const DEFAULT_MODULE_STATE: ModuleState = {
+  properties: true,
+  documents: true,
+  maintenance: true,
+  work_orders: true,
+  time_tracking: true,
+  laundry: true,
+  chat: true,
+  news: true,
+  purchasing: true,
+  inspections: true,
+};
 
 function AppInner() {
   const { user, loading, passwordRecovery } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [notificationCount, setNotificationCount] = useState(0);
-  const [customerProjectsEnabled, setCustomerProjectsEnabled] = useState(false);
-  const [shortStayEnabled, setShortStayEnabled] = useState(false);
+  const [enabledModules, setEnabledModules] = useState<ModuleState>(DEFAULT_MODULE_STATE);
 
   useEffect(() => {
     if (!user) {
       setCurrentPage('dashboard');
       setNotificationCount(0);
+      setEnabledModules(DEFAULT_MODULE_STATE);
       return;
     }
 
@@ -54,20 +71,43 @@ function AppInner() {
 
   useEffect(() => {
     if (!user?.organisation_id || user.role === 'superadmin') {
-      setCustomerProjectsEnabled(false);
-      setShortStayEnabled(false);
+      setEnabledModules(DEFAULT_MODULE_STATE);
       return;
     }
 
-    supabase
-      .from('vihem_organisations')
-      .select('customer_projects_enabled, short_stay_enabled')
-      .eq('id', user.organisation_id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setCustomerProjectsEnabled(Boolean(data?.customer_projects_enabled));
-        setShortStayEnabled(Boolean(data?.short_stay_enabled));
-      });
+    const organisationId = user.organisation_id;
+
+    async function loadModules() {
+      const nextModules: ModuleState = { ...DEFAULT_MODULE_STATE };
+
+      const moduleResult = await supabase
+        .from('vihem_organisation_modules')
+        .select('module_key, enabled')
+        .eq('organisation_id', organisationId);
+
+      if (!moduleResult.error && moduleResult.data?.length) {
+        moduleResult.data.forEach((row: any) => {
+          nextModules[row.module_key as ModuleKey] = Boolean(row.enabled);
+        });
+        setEnabledModules(nextModules);
+        return;
+      }
+
+      const organisationResult = await supabase
+        .from('vihem_organisations')
+        .select('customer_projects_enabled, short_stay_enabled')
+        .eq('id', organisationId)
+        .maybeSingle();
+
+      if (!organisationResult.error) {
+        nextModules.customer_projects = Boolean(organisationResult.data?.customer_projects_enabled);
+        nextModules.short_stay = Boolean(organisationResult.data?.short_stay_enabled);
+      }
+
+      setEnabledModules(nextModules);
+    }
+
+    loadModules();
   }, [user?.organisation_id, user?.role]);
 
   useEffect(() => {
@@ -284,12 +324,16 @@ function AppInner() {
         if (!isStaff) return renderDashboard();
         return <PurchaseListPage onNavigate={navigate} />;
 
+      case 'year-planning':
+        if (!isStaff || !enabledModules.year_planning) return renderDashboard();
+        return <YearPlanningPage onNavigate={navigate} />;
+
       case 'customer-projects':
-        if (!isStaff || !customerProjectsEnabled) return renderDashboard();
+        if (!isStaff || !enabledModules.customer_projects) return renderDashboard();
         return <CustomerProjectsPage onNavigate={navigate} />;
 
       case 'short-stay':
-        if (!isStaff || !shortStayEnabled) return renderDashboard();
+        if (!isStaff || !enabledModules.short_stay) return renderDashboard();
         return <ShortStayPage onNavigate={navigate} />;
 
       case 'termination':
@@ -331,8 +375,7 @@ function AppInner() {
       currentPage={currentPage}
       onNavigate={navigate}
       notificationCount={notificationCount}
-      customerProjectsEnabled={customerProjectsEnabled}
-      shortStayEnabled={shortStayEnabled}
+      enabledModules={enabledModules}
     >
       {renderPage()}
     </Layout>
