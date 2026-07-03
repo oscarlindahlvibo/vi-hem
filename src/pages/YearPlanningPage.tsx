@@ -218,7 +218,7 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
   const [form, setForm] = useState<PlanningForm>(defaultForm);
   const [saveError, setSaveError] = useState('');
   const [selectedYear, setSelectedYear] = useState(currentYear);
-  const [selectedMonth, setSelectedMonth] = useState<number | 'all'>(today.getFullYear() === currentYear ? today.getMonth() : 'all');
+  const [selectedMonth, setSelectedMonth] = useState<number | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<PlanningItemStatus | 'active' | 'all'>('active');
   const [viewMode, setViewMode] = useState<PlanningViewMode>('wheel');
   const [visibleTypes, setVisibleTypes] = useState<PlanningItemType[]>(wheelTypes);
@@ -340,10 +340,21 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
         if (error) throw error;
       }
 
+      const savedDate = new Date(startAt);
+      const savedYear = savedDate.getFullYear();
       setShowModal(false);
       setEditingItem(null);
       setForm(defaultForm());
-      await fetchData();
+      setSelectedMonth(viewMode === 'wheel' ? 'all' : savedDate.getMonth());
+      setVisibleTypes(current => current.includes(payload.item_type) ? current : [...current, payload.item_type]);
+      if (statusFilter === 'active' && ['done', 'cancelled'].includes(payload.status)) {
+        setStatusFilter('all');
+      }
+      if (savedYear !== selectedYear) {
+        setSelectedYear(savedYear);
+      } else {
+        await fetchData();
+      }
     } catch (error: any) {
       setSaveError(error.message || 'Kunde inte spara planeringspunkten.');
     } finally {

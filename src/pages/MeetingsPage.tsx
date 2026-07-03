@@ -251,6 +251,11 @@ function splitEntity(value: string) {
   return { type: type || '', id: id || '' };
 }
 
+function isSchemaCacheMiss(error: any) {
+  const message = String(error?.message || '');
+  return error?.code === 'PGRST204' || error?.code === 'PGRST205' || message.includes('schema cache');
+}
+
 export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
   const { user } = useAuth();
   const [tab, setTab] = useState<MeetingTab>('dashboard');
@@ -406,29 +411,44 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
     setSaving(true);
     try {
       const previousMeeting = meetings.find(meeting => meeting.meeting_type === meetingForm.meeting_type && ['completed', 'locked'].includes(meeting.status)) || null;
-      const { data: meeting, error } = await supabase
+      const baseMeetingPayload = {
+        organisation_id: user.organisation_id,
+        title: meetingForm.title.trim(),
+        description: meetingForm.description.trim(),
+        meeting_type: meetingForm.meeting_type,
+        template_id: meetingForm.template_id || null,
+        starts_at: new Date(meetingForm.starts_at).toISOString(),
+        status: 'draft',
+        created_by: user.id,
+      };
+      const fullMeetingPayload = {
+        ...baseMeetingPayload,
+        participant_ids: meetingForm.participant_ids,
+        previous_meeting_id: previousMeeting?.id || null,
+      };
+
+      let meetingResult = await supabase
         .from('vihem_meetings')
-        .insert({
-          organisation_id: user.organisation_id,
-          title: meetingForm.title.trim(),
-          description: meetingForm.description.trim(),
-          meeting_type: meetingForm.meeting_type,
-          template_id: meetingForm.template_id || null,
-          starts_at: new Date(meetingForm.starts_at).toISOString(),
-          status: 'draft',
-          participant_ids: meetingForm.participant_ids,
-          previous_meeting_id: previousMeeting?.id || null,
-          created_by: user.id,
-        })
+        .insert(fullMeetingPayload)
         .select('*')
         .single();
-      if (error) throw error;
+
+      if (meetingResult.error && isSchemaCacheMiss(meetingResult.error)) {
+        meetingResult = await supabase
+          .from('vihem_meetings')
+          .insert(baseMeetingPayload)
+          .select('*')
+          .single();
+      }
+
+      if (meetingResult.error) throw meetingResult.error;
+      const meeting = meetingResult.data;
 
       const agendaRows: AgendaDraft[] = meetingForm.generate_agenda
         ? buildAutoAgenda(previousMeeting)
         : agendaFromTemplate(templates.find(row => row.id === meetingForm.template_id)).map(title => ({ title, notes: '', item_type: 'template' }));
       if (agendaRows.length > 0) {
-        const { error: agendaError } = await supabase.from('vihem_meeting_agenda_items').insert(agendaRows.map((row, index) => ({
+        const fullAgendaPayload = agendaRows.map((row, index) => ({
           organisation_id: user.organisation_id,
           meeting_id: meeting.id,
           title: row.title,
@@ -439,8 +459,19 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
           linked_entity_type: row.linked_entity_type || '',
           linked_entity_id: row.linked_entity_id || null,
           sort_order: index + 1,
-        })));
-        if (agendaError) throw agendaError;
+        }));
+        const baseAgendaPayload = agendaRows.map((row, index) => ({
+          organisation_id: user.organisation_id,
+          meeting_id: meeting.id,
+          title: row.title,
+          notes: row.notes,
+          sort_order: index + 1,
+        }));
+        let agendaResult = await supabase.from('vihem_meeting_agenda_items').insert(fullAgendaPayload);
+        if (agendaResult.error && isSchemaCacheMiss(agendaResult.error)) {
+          agendaResult = await supabase.from('vihem_meeting_agenda_items').insert(baseAgendaPayload);
+        }
+        if (agendaResult.error) throw agendaResult.error;
       }
 
       setShowMeetingModal(false);

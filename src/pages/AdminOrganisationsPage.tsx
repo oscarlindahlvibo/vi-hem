@@ -479,7 +479,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
 
     const { data, error } = await supabase
       .from('vihem_organisation_modules')
-      .select('enabled')
+      .select('module_key, enabled')
       .eq('organisation_id', org.id)
       .in('module_key', ['year_planning', 'meetings']);
 
