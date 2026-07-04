@@ -16,7 +16,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../components/ui';
 import { formatDate } from '../lib/utils';
-import type { PlanningItem, PlanningItemStatus, PlanningItemType, Profile } from '../types';
+import type { PlanningCategory, PlanningItem, PlanningItemStatus, PlanningItemType, Profile } from '../types';
 
 type PlanningForm = {
   title: string;
@@ -32,6 +32,18 @@ type PlanningForm = {
 };
 
 type PlanningViewMode = 'wheel' | 'list';
+
+type CategoryForm = {
+  id: string;
+  category_key: string;
+  label: string;
+  fill_color: string;
+  stroke_color: string;
+  text_color: string;
+  sort_order: string;
+  active: boolean;
+  system_key: boolean;
+};
 
 const today = new Date();
 const currentYear = today.getFullYear();
@@ -51,19 +63,6 @@ const defaultForm = (): PlanningForm => {
     responsible_user_id: '',
   };
 };
-
-const typeOptions: { value: PlanningItemType; label: string }[] = [
-  { value: 'custom', label: 'Egen punkt' },
-  { value: 'work_order', label: 'Arbetsorder' },
-  { value: 'inspection', label: 'Besiktning' },
-  { value: 'meeting', label: 'Möte' },
-  { value: 'absence', label: 'Frånvaro' },
-  { value: 'maintenance', label: 'Underhåll' },
-  { value: 'project', label: 'Projekt' },
-  { value: 'inventory', label: 'Inventarie' },
-];
-
-const typeLabels: Record<PlanningItemType, string> = Object.fromEntries(typeOptions.map(option => [option.value, option.label])) as Record<PlanningItemType, string>;
 
 const priorityOptions = [
   { value: 'low', label: 'Låg' },
@@ -107,18 +106,28 @@ const statusClasses: Record<PlanningItemStatus, string> = {
   cancelled: 'bg-slate-200 text-slate-500',
 };
 
-const wheelTypeStyles: Record<PlanningItemType, { label: string; fill: string; stroke: string; text: string }> = {
-  custom: { label: 'Övrigt', fill: '#f1f5f9', stroke: '#94a3b8', text: '#475569' },
-  work_order: { label: 'Arbetsorder', fill: '#dbeafe', stroke: '#60a5fa', text: '#1d4ed8' },
-  inspection: { label: 'Besiktning', fill: '#dcfce7', stroke: '#4ade80', text: '#15803d' },
-  meeting: { label: 'Möten', fill: '#ede9fe', stroke: '#8b5cf6', text: '#6d28d9' },
-  absence: { label: 'Frånvaro', fill: '#fee2e2', stroke: '#f87171', text: '#b91c1c' },
-  maintenance: { label: 'Underhåll', fill: '#fef3c7', stroke: '#f59e0b', text: '#b45309' },
-  project: { label: 'Projekt', fill: '#ccfbf1', stroke: '#14b8a6', text: '#0f766e' },
-  inventory: { label: 'Inventarier', fill: '#e0f2fe', stroke: '#38bdf8', text: '#0369a1' },
-};
+const defaultCategoryRows: PlanningCategory[] = [
+  { id: 'default-maintenance', organisation_id: '', category_key: 'maintenance', label: 'Underhåll', fill_color: '#fef3c7', stroke_color: '#f59e0b', text_color: '#b45309', sort_order: 10, active: true, system_key: true, created_by: null, created_at: '', updated_at: '' },
+  { id: 'default-inspection', organisation_id: '', category_key: 'inspection', label: 'Besiktning', fill_color: '#dcfce7', stroke_color: '#4ade80', text_color: '#15803d', sort_order: 20, active: true, system_key: true, created_by: null, created_at: '', updated_at: '' },
+  { id: 'default-work-order', organisation_id: '', category_key: 'work_order', label: 'Arbetsorder', fill_color: '#dbeafe', stroke_color: '#60a5fa', text_color: '#1d4ed8', sort_order: 30, active: true, system_key: true, created_by: null, created_at: '', updated_at: '' },
+  { id: 'default-meeting', organisation_id: '', category_key: 'meeting', label: 'Möten', fill_color: '#ede9fe', stroke_color: '#8b5cf6', text_color: '#6d28d9', sort_order: 40, active: true, system_key: true, created_by: null, created_at: '', updated_at: '' },
+  { id: 'default-project', organisation_id: '', category_key: 'project', label: 'Projekt', fill_color: '#ccfbf1', stroke_color: '#14b8a6', text_color: '#0f766e', sort_order: 50, active: true, system_key: true, created_by: null, created_at: '', updated_at: '' },
+  { id: 'default-inventory', organisation_id: '', category_key: 'inventory', label: 'Inventarier', fill_color: '#e0f2fe', stroke_color: '#38bdf8', text_color: '#0369a1', sort_order: 60, active: true, system_key: true, created_by: null, created_at: '', updated_at: '' },
+  { id: 'default-absence', organisation_id: '', category_key: 'absence', label: 'Frånvaro', fill_color: '#fee2e2', stroke_color: '#f87171', text_color: '#b91c1c', sort_order: 70, active: true, system_key: true, created_by: null, created_at: '', updated_at: '' },
+  { id: 'default-custom', organisation_id: '', category_key: 'custom', label: 'Övrigt', fill_color: '#f1f5f9', stroke_color: '#94a3b8', text_color: '#475569', sort_order: 80, active: true, system_key: true, created_by: null, created_at: '', updated_at: '' },
+];
 
-const wheelTypes: PlanningItemType[] = ['maintenance', 'inspection', 'work_order', 'meeting', 'project', 'inventory', 'absence', 'custom'];
+const defaultCategoryForm: CategoryForm = {
+  id: '',
+  category_key: '',
+  label: '',
+  fill_color: '#f1f5f9',
+  stroke_color: '#64748b',
+  text_color: '#334155',
+  sort_order: '90',
+  active: true,
+  system_key: false,
+};
 
 function localDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -207,21 +216,52 @@ function truncateLabel(label: string, maxLength: number) {
   return label.length > maxLength ? `${label.slice(0, Math.max(1, maxLength - 1))}…` : label;
 }
 
+function categoryKeyFromLabel(label: string) {
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/[åä]/g, 'a')
+    .replace(/ö/g, 'o')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 48) || 'egen_kategori';
+}
+
+function categoryStyle(category?: PlanningCategory) {
+  return {
+    label: category?.label || 'Övrigt',
+    fill: category?.fill_color || '#f1f5f9',
+    stroke: category?.stroke_color || '#94a3b8',
+    text: category?.text_color || '#475569',
+  };
+}
+
+function isMissingCategorySchema(error: any) {
+  return error?.code === 'PGRST205' || String(error?.message || '').includes('schema cache');
+}
+
 export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
   const { user } = useAuth();
   const [items, setItems] = useState<PlanningItem[]>([]);
   const [staff, setStaff] = useState<Profile[]>([]);
+  const [categories, setCategories] = useState<PlanningCategory[]>(defaultCategoryRows);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingCategory, setSavingCategory] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [editingItem, setEditingItem] = useState<PlanningItem | null>(null);
+  const [editingCategory, setEditingCategory] = useState<PlanningCategory | null>(null);
   const [form, setForm] = useState<PlanningForm>(defaultForm);
+  const [categoryForm, setCategoryForm] = useState<CategoryForm>(defaultCategoryForm);
   const [saveError, setSaveError] = useState('');
+  const [categoryError, setCategoryError] = useState('');
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedMonth, setSelectedMonth] = useState<number | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<PlanningItemStatus | 'active' | 'all'>('active');
   const [viewMode, setViewMode] = useState<PlanningViewMode>('wheel');
-  const [visibleTypes, setVisibleTypes] = useState<PlanningItemType[]>(wheelTypes);
+  const [visibleTypes, setVisibleTypes] = useState<PlanningItemType[]>(defaultCategoryRows.map(category => category.category_key));
+  const canManageCategories = user?.role === 'admin' || user?.role === 'superadmin';
 
   useEffect(() => {
     fetchData();
@@ -233,7 +273,7 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
     try {
       const start = new Date(selectedYear, 0, 1).toISOString();
       const end = new Date(selectedYear, 11, 31, 23, 59, 59).toISOString();
-      const [itemsResult, staffResult] = await Promise.all([
+      const [itemsResult, staffResult, categoriesResult] = await Promise.all([
         supabase
           .from('vihem_planning_items')
           .select('*, responsible:vihem_profiles!responsible_user_id(id, name, email, role), creator:vihem_profiles!created_by(id, name, email, role)')
@@ -249,12 +289,28 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
           .in('role', ['staff', 'admin'])
           .eq('active', true)
           .order('name', { ascending: true }),
+        supabase
+          .from('vihem_planning_categories')
+          .select('*')
+          .eq('organisation_id', user.organisation_id)
+          .order('sort_order', { ascending: true }),
       ]);
 
       if (itemsResult.error) throw itemsResult.error;
       if (staffResult.error) throw staffResult.error;
+      if (categoriesResult.error && !isMissingCategorySchema(categoriesResult.error)) throw categoriesResult.error;
       setItems((itemsResult.data || []) as unknown as PlanningItem[]);
       setStaff((staffResult.data || []) as Profile[]);
+      const nextCategories = categoriesResult.error
+        ? defaultCategoryRows
+        : ((categoriesResult.data?.length ? categoriesResult.data : defaultCategoryRows) as PlanningCategory[]);
+      setCategories(nextCategories);
+      setVisibleTypes(current => {
+        if (current.length === 0) return current;
+        const validKeys = new Set(nextCategories.filter(category => category.active).map(category => category.category_key));
+        const nextVisible = current.filter(type => validKeys.has(type));
+        return nextVisible.length > 0 ? nextVisible : nextCategories.filter(category => category.active).map(category => category.category_key);
+      });
     } catch (error) {
       console.error('Error fetching year planning:', error);
     } finally {
@@ -391,6 +447,32 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
     setItems(current => current.filter(row => row.id !== item.id));
   }
 
+  const activeCategories = useMemo(() => {
+    return categories
+      .filter(category => category.active)
+      .sort((a, b) => a.sort_order - b.sort_order || a.label.localeCompare(b.label));
+  }, [categories]);
+
+  const categoryByKey = useMemo(() => {
+    return categories.reduce((acc, category) => {
+      acc[category.category_key] = category;
+      return acc;
+    }, {} as Record<string, PlanningCategory>);
+  }, [categories]);
+
+  const typeOptions = useMemo(() => {
+    return activeCategories.map(category => ({ value: category.category_key, label: category.label }));
+  }, [activeCategories]);
+
+  const typeLabels = useMemo(() => {
+    return categories.reduce((acc, category) => {
+      acc[category.category_key] = category.label;
+      return acc;
+    }, {} as Record<string, string>);
+  }, [categories]);
+
+  const wheelTypes = useMemo(() => activeCategories.map(category => category.category_key), [activeCategories]);
+
   const filteredItems = useMemo(() => {
     return items.filter(item => {
       if (selectedMonth !== 'all' && !isInMonth(item.start_at, selectedYear, selectedMonth)) return false;
@@ -440,7 +522,7 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
       acc[type] = items.filter(item => item.item_type === type).length;
       return acc;
     }, {} as Record<PlanningItemType, number>);
-  }, [items]);
+  }, [items, wheelTypes]);
 
   const toggleType = (type: PlanningItemType) => {
     setVisibleTypes(current => current.includes(type)
@@ -448,6 +530,94 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
       : [...current, type]
     );
   };
+
+  function openCategoryModal(category?: PlanningCategory) {
+    setEditingCategory(category || null);
+    setCategoryForm(category ? {
+      id: category.id,
+      category_key: category.category_key,
+      label: category.label,
+      fill_color: category.fill_color,
+      stroke_color: category.stroke_color,
+      text_color: category.text_color,
+      sort_order: String(category.sort_order),
+      active: category.active,
+      system_key: category.system_key,
+    } : {
+      ...defaultCategoryForm,
+      sort_order: String((categories.reduce((max, category) => Math.max(max, category.sort_order), 0) || 80) + 10),
+    });
+    setCategoryError('');
+    setShowCategoryModal(true);
+  }
+
+  async function handleSaveCategory() {
+    if (!user?.organisation_id) return;
+    setCategoryError('');
+    const label = categoryForm.label.trim();
+    const categoryKey = (categoryForm.category_key || categoryKeyFromLabel(label)).trim();
+
+    if (!label) {
+      setCategoryError('Ange namn på ringen.');
+      return;
+    }
+    if (!/^[a-z0-9_:-]{1,64}$/.test(categoryKey)) {
+      setCategoryError('Nyckeln får bara innehålla små bokstäver, siffror, bindestreck, kolon och understreck.');
+      return;
+    }
+    if (!editingCategory && categories.some(category => category.category_key === categoryKey)) {
+      setCategoryError('Det finns redan en ring med den nyckeln.');
+      return;
+    }
+
+    setSavingCategory(true);
+    try {
+      const payload = {
+        organisation_id: user.organisation_id,
+        category_key: categoryKey,
+        label,
+        fill_color: categoryForm.fill_color,
+        stroke_color: categoryForm.stroke_color,
+        text_color: categoryForm.text_color,
+        sort_order: parseInt(categoryForm.sort_order, 10) || 0,
+        active: categoryForm.active,
+        system_key: categoryForm.system_key,
+        created_by: user.id,
+      };
+
+      const result = editingCategory
+        ? await supabase.from('vihem_planning_categories').update(payload).eq('id', editingCategory.id)
+        : await supabase.from('vihem_planning_categories').insert(payload);
+
+      if (result.error) throw result.error;
+      setShowCategoryModal(false);
+      setEditingCategory(null);
+      await fetchData();
+    } catch (error: any) {
+      setCategoryError(isMissingCategorySchema(error)
+        ? 'Databasen saknar kategoritabellen. Kör senaste migreringarna på servern.'
+        : (error.message || 'Kunde inte spara ringen.')
+      );
+    } finally {
+      setSavingCategory(false);
+    }
+  }
+
+  async function handleDeleteCategory(category: PlanningCategory) {
+    const usedCount = items.filter(item => item.item_type === category.category_key).length;
+    if (usedCount > 0) {
+      alert(`Ringen används av ${usedCount} planeringspunkter. Inaktivera den istället eller flytta punkterna först.`);
+      return;
+    }
+    if (!window.confirm(`Ta bort ringen "${category.label}"?`)) return;
+
+    const { error } = await supabase.from('vihem_planning_categories').delete().eq('id', category.id);
+    if (error) {
+      alert(isMissingCategorySchema(error) ? 'Databasen saknar kategoritabellen.' : 'Kunde inte ta bort ringen.');
+      return;
+    }
+    await fetchData();
+  }
 
   if (loading) return <LoadingPage />;
 
@@ -577,11 +747,16 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
           selectedMonth={selectedMonth}
           visibleTypes={visibleTypes}
           typeCounts={typeCounts}
+          categories={activeCategories}
+          categoryByKey={categoryByKey}
           onToggleType={toggleType}
           onShowAllTypes={() => setVisibleTypes(wheelTypes)}
           onHideAllTypes={() => setVisibleTypes([])}
+          onEditCategory={openCategoryModal}
+          onCreateCategory={() => openCategoryModal()}
           onEdit={openEditModal}
           onCreate={openCreateModal}
+          canManageCategories={canManageCategories}
         />
       ) : filteredItems.length === 0 ? (
         <Card>
@@ -619,6 +794,7 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
                       onEdit={() => openEditModal(item)}
                       onDelete={() => deleteItem(item)}
                       onStatus={status => updateStatus(item, status)}
+                      typeLabel={typeLabels[item.item_type] || item.item_type}
                     />
                   ))}
                 </div>
@@ -694,15 +870,83 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
           </div>
         </div>
       </Modal>
+
+      <Modal
+        open={showCategoryModal}
+        onClose={() => {
+          setShowCategoryModal(false);
+          setEditingCategory(null);
+          setCategoryError('');
+        }}
+        title={editingCategory ? 'Redigera ring' : 'Ny ring'}
+        size="lg"
+      >
+        <div className="space-y-4">
+          {categoryError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {categoryError}
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input
+              label="Namn"
+              value={categoryForm.label}
+              onChange={event => setCategoryForm(current => ({
+                ...current,
+                label: event.target.value,
+                category_key: current.id ? current.category_key : categoryKeyFromLabel(event.target.value),
+              }))}
+            />
+            <Input
+              label="Nyckel"
+              value={categoryForm.category_key}
+              disabled={Boolean(editingCategory)}
+              onChange={event => setCategoryForm({ ...categoryForm, category_key: categoryKeyFromLabel(event.target.value) })}
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <Input label="Sortering" type="number" value={categoryForm.sort_order} onChange={event => setCategoryForm({ ...categoryForm, sort_order: event.target.value })} />
+            <Input label="Bakgrund" type="color" value={categoryForm.fill_color} onChange={event => setCategoryForm({ ...categoryForm, fill_color: event.target.value })} />
+            <Input label="Fältfärg" type="color" value={categoryForm.stroke_color} onChange={event => setCategoryForm({ ...categoryForm, stroke_color: event.target.value })} />
+            <Input label="Textfärg" type="color" value={categoryForm.text_color} onChange={event => setCategoryForm({ ...categoryForm, text_color: event.target.value })} />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={categoryForm.active}
+              onChange={event => setCategoryForm({ ...categoryForm, active: event.target.checked })}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            Aktiv ring
+          </label>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Förhandsvisning</p>
+            <div className="mt-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold" style={{ backgroundColor: categoryForm.fill_color, borderColor: categoryForm.stroke_color, color: categoryForm.text_color }}>
+              <span className="h-3 w-3 rounded-full" style={{ backgroundColor: categoryForm.stroke_color }} />
+              {categoryForm.label || 'Ny ring'}
+            </div>
+          </div>
+          <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
+            {editingCategory && (
+              <Button variant="ghost" onClick={() => handleDeleteCategory(editingCategory)} className="text-red-600 hover:bg-red-50">
+                <Trash2 className="w-4 h-4" /> Ta bort
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => setShowCategoryModal(false)} className="flex-1">Avbryt</Button>
+            <Button onClick={handleSaveCategory} loading={savingCategory} className="flex-1">Spara ring</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
 
-function PlanningItemRow({ item, onEdit, onDelete, onStatus }: {
+function PlanningItemRow({ item, onEdit, onDelete, onStatus, typeLabel }: {
   item: PlanningItem;
   onEdit: () => void;
   onDelete: () => void;
   onStatus: (status: PlanningItemStatus) => void;
+  typeLabel: string;
 }) {
   const responsibleName = item.responsible?.name || 'Ej tilldelad';
   const start = new Date(item.start_at);
@@ -725,7 +969,7 @@ function PlanningItemRow({ item, onEdit, onDelete, onStatus }: {
             <span className="inline-flex items-center gap-1">
               <Clock3 className="w-3.5 h-3.5" /> {timeLabel}
             </span>
-            <span>{typeLabels[item.item_type]}</span>
+            <span>{typeLabel}</span>
             <span>Ansvarig: {responsibleName}</span>
           </div>
         </div>
@@ -747,18 +991,23 @@ function PlanningItemRow({ item, onEdit, onDelete, onStatus }: {
   );
 }
 
-function YearWheelView({ items, allItems, selectedYear, selectedMonth, visibleTypes, typeCounts, onToggleType, onShowAllTypes, onHideAllTypes, onEdit, onCreate }: {
+function YearWheelView({ items, allItems, selectedYear, selectedMonth, visibleTypes, typeCounts, categories, categoryByKey, onToggleType, onShowAllTypes, onHideAllTypes, onEditCategory, onCreateCategory, onEdit, onCreate, canManageCategories }: {
   items: PlanningItem[];
   allItems: PlanningItem[];
   selectedYear: number;
   selectedMonth: number | 'all';
   visibleTypes: PlanningItemType[];
   typeCounts: Record<PlanningItemType, number>;
+  categories: PlanningCategory[];
+  categoryByKey: Record<string, PlanningCategory>;
   onToggleType: (type: PlanningItemType) => void;
   onShowAllTypes: () => void;
   onHideAllTypes: () => void;
+  onEditCategory: (category: PlanningCategory) => void;
+  onCreateCategory: () => void;
   onEdit: (item: PlanningItem) => void;
   onCreate: (monthIndex?: number) => void;
+  canManageCategories: boolean;
 }) {
   const activeStatusCount = allItems.filter(item => !['done', 'cancelled'].includes(item.status)).length;
   const doneStatusCount = allItems.filter(item => item.status === 'done').length;
@@ -780,34 +1029,46 @@ function YearWheelView({ items, allItems, selectedYear, selectedMonth, visibleTy
         <div className="mt-5">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Ringar</h3>
-            <span className="text-xs text-slate-400">{visibleTypes.length}/{wheelTypes.length}</span>
+            <span className="text-xs text-slate-400">{visibleTypes.length}/{categories.length}</span>
           </div>
           <div className="mt-3 space-y-2">
-            {wheelTypes.map(type => {
-              const style = wheelTypeStyles[type];
+            {categories.map(category => {
+              const type = category.category_key;
+              const style = categoryStyle(category);
               const active = visibleTypes.includes(type);
               return (
-                <button
+                <div
                   key={type}
-                  type="button"
-                  onClick={() => onToggleType(type)}
-                  className={`w-full flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${
                     active ? 'border-slate-200 bg-white' : 'border-slate-100 bg-slate-50 opacity-50'
                   }`}
                 >
-                  <span className="flex items-center gap-3 min-w-0">
-                    <span className="h-4 w-4 rounded-full border" style={{ backgroundColor: style.fill, borderColor: style.stroke }} />
-                    <span className="text-sm font-medium text-slate-700 truncate">{style.label}</span>
-                  </span>
+                  <button type="button" onClick={() => onToggleType(type)} className="min-w-0 flex-1 text-left">
+                    <span className="flex items-center gap-3 min-w-0">
+                      <span className="h-4 w-4 rounded-full border" style={{ backgroundColor: style.fill, borderColor: style.stroke }} />
+                      <span className="text-sm font-medium text-slate-700 truncate">{style.label}</span>
+                    </span>
+                  </button>
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">{typeCounts[type] || 0}</span>
-                </button>
+                  {canManageCategories && (
+                    <button type="button" onClick={() => onEditCategory(category)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label={`Redigera ${category.label}`}>
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>
-          <div className="mt-3 flex gap-2 text-xs">
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
             <button type="button" onClick={onShowAllTypes} className="font-semibold text-slate-700 hover:text-blue-700">Visa alla</button>
             <span className="text-slate-300">|</span>
             <button type="button" onClick={onHideAllTypes} className="font-semibold text-slate-500 hover:text-blue-700">Ingen</button>
+            {canManageCategories && (
+              <>
+                <span className="text-slate-300">|</span>
+                <button type="button" onClick={onCreateCategory} className="font-semibold text-blue-700 hover:text-blue-800">Ny ring</button>
+              </>
+            )}
           </div>
         </div>
 
@@ -837,6 +1098,7 @@ function YearWheelView({ items, allItems, selectedYear, selectedMonth, visibleTy
               items={items}
               selectedYear={selectedYear}
               visibleTypes={visibleTypes}
+              categoryByKey={categoryByKey}
               onEdit={onEdit}
             />
           </div>
@@ -846,12 +1108,19 @@ function YearWheelView({ items, allItems, selectedYear, selectedMonth, visibleTy
   );
 }
 
-function YearWheelSvg({ items, selectedYear, visibleTypes, onEdit }: {
+function YearWheelSvg({ items, selectedYear, visibleTypes, categoryByKey, onEdit }: {
   items: PlanningItem[];
   selectedYear: number;
   visibleTypes: PlanningItemType[];
+  categoryByKey: Record<string, PlanningCategory>;
   onEdit: (item: PlanningItem) => void;
 }) {
+  const [activeTooltip, setActiveTooltip] = useState<{
+    item: PlanningItem;
+    x: number;
+    y: number;
+    dateLabel: string;
+  } | null>(null);
   const size = 920;
   const cx = size / 2;
   const cy = size / 2;
@@ -880,12 +1149,22 @@ function YearWheelSvg({ items, selectedYear, visibleTypes, onEdit }: {
     if (item.status === 'cancelled') return '#94a3b8';
     if (item.priority === 'urgent') return '#ef4444';
     if (item.status === 'in_progress') return '#3b82f6';
-    return wheelTypeStyles[item.item_type].stroke;
+    return categoryStyle(categoryByKey[item.item_type]).stroke;
+  };
+
+  const showTooltip = (item: PlanningItem, x: number, y: number, dateLabel: string) => {
+    setActiveTooltip({ item, x, y, dateLabel });
   };
 
   return (
     <div className="relative">
-      <svg viewBox={`0 0 ${size} ${size}`} className="h-auto w-full" role="img" aria-label={`Årshjul ${selectedYear}`}>
+      <svg
+        viewBox={`0 0 ${size} ${size}`}
+        className="h-auto w-full"
+        role="img"
+        aria-label={`Årshjul ${selectedYear}`}
+        onClick={() => setActiveTooltip(null)}
+      >
         <rect width={size} height={size} fill="#f8fafc" />
 
         {Array.from({ length: 12 }, (_, monthIndex) => {
@@ -956,7 +1235,7 @@ function YearWheelSvg({ items, selectedYear, visibleTypes, onEdit }: {
 
         {visibleTypes.map(type => {
           const ring = typeRing(type);
-          const style = wheelTypeStyles[type];
+          const style = categoryStyle(categoryByKey[type]);
           return (
             <g key={`ring-${type}`}>
               <circle cx={cx} cy={cy} r={(ring.inner + ring.outer) / 2} fill="none" stroke={style.fill} strokeWidth={ringWidth} opacity={0.78} />
@@ -996,18 +1275,39 @@ function YearWheelSvg({ items, selectedYear, visibleTypes, onEdit }: {
           const labelRadius = (ring.inner + ring.outer) / 2;
           const labelPoint = polarToCartesian(cx, cy, labelRadius, (startAngle + endAngle) / 2);
           const labelAngle = (startAngle + endAngle) / 2;
-          const label = truncateLabel(item.title, 18);
+          const arcLength = (Math.PI / 180) * Math.max(4, endAngle - startAngle) * labelRadius;
+          const maxLabelLength = Math.max(3, Math.min(12, Math.floor(arcLength / 9)));
+          const label = truncateLabel(item.title, maxLabelLength);
+          const dateLabel = formatDate(localDateKey(itemDate));
           return (
-            <g key={item.id} className="cursor-pointer" onClick={() => onEdit(item)}>
+            <g
+              key={item.id}
+              className="cursor-pointer outline-none"
+              role="button"
+              tabIndex={0}
+              aria-label={`${item.title}, ${dateLabel}`}
+              onMouseEnter={() => showTooltip(item, labelPoint.x, labelPoint.y, dateLabel)}
+              onFocus={() => showTooltip(item, labelPoint.x, labelPoint.y, dateLabel)}
+              onClick={event => {
+                event.stopPropagation();
+                showTooltip(item, labelPoint.x, labelPoint.y, dateLabel);
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  showTooltip(item, labelPoint.x, labelPoint.y, dateLabel);
+                }
+              }}
+            >
               <path d={itemPath} fill={activityColor(item)} opacity={0.88}>
-                <title>{`${item.title} - ${formatDate(localDateKey(itemDate))}`}</title>
+                <title>{`${item.title} - ${dateLabel}`}</title>
               </path>
               <text
                 x={labelPoint.x}
                 y={labelPoint.y}
                 textAnchor="middle"
                 dominantBaseline="middle"
-                className="pointer-events-none fill-white text-[10px] font-bold"
+                className="pointer-events-none select-none fill-white text-[9px] font-bold"
                 transform={`rotate(${rotationForText(labelAngle)} ${labelPoint.x} ${labelPoint.y})`}
               >
                 {label}
@@ -1028,6 +1328,38 @@ function YearWheelSvg({ items, selectedYear, visibleTypes, onEdit }: {
           <div className="rounded-lg border border-slate-200 bg-white/95 px-4 py-3 text-center shadow-sm">
             <p className="text-sm font-semibold text-slate-700">Inga punkter i urvalet</p>
             <p className="text-xs text-slate-500">Ändra filter eller lägg till en planeringspunkt.</p>
+          </div>
+        </div>
+      )}
+
+      {activeTooltip && (
+        <div
+          className="absolute z-10 w-56 max-w-[calc(100%-1rem)] rounded-lg border border-slate-200 bg-white p-3 text-left shadow-lg"
+          style={{
+            left: `${Math.min(88, Math.max(12, (activeTooltip.x / size) * 100))}%`,
+            top: `${Math.min(88, Math.max(12, (activeTooltip.y / size) * 100))}%`,
+            transform: 'translate(-50%, -110%)',
+          }}
+          onClick={event => event.stopPropagation()}
+        >
+          <p className="break-words text-sm font-bold text-slate-900">{activeTooltip.item.title}</p>
+          <div className="mt-2 flex flex-wrap gap-1">
+            <Badge className={statusClasses[activeTooltip.item.status]}>{statusLabels[activeTooltip.item.status]}</Badge>
+            <Badge className={priorityClasses[activeTooltip.item.priority]}>{priorityLabels[activeTooltip.item.priority]}</Badge>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            {categoryStyle(categoryByKey[activeTooltip.item.item_type]).label} · {activeTooltip.dateLabel}
+          </p>
+          {activeTooltip.item.description && (
+            <p className="mt-2 line-clamp-3 break-words text-xs text-slate-600">{activeTooltip.item.description}</p>
+          )}
+          <div className="mt-3 flex gap-2">
+            <Button size="sm" onClick={() => onEdit(activeTooltip.item)}>
+              Redigera
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setActiveTooltip(null)}>
+              Stäng
+            </Button>
           </div>
         </div>
       )}

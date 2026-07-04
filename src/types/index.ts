@@ -151,8 +151,24 @@ export interface FileRecord {
   uploader?: Profile | null;
 }
 
-export type PlanningItemType = 'custom' | 'work_order' | 'inspection' | 'meeting' | 'absence' | 'maintenance' | 'project' | 'inventory';
+export type PlanningItemType = string;
 export type PlanningItemStatus = 'planned' | 'in_progress' | 'done' | 'cancelled';
+
+export interface PlanningCategory {
+  id: string;
+  organisation_id: string;
+  category_key: string;
+  label: string;
+  fill_color: string;
+  stroke_color: string;
+  text_color: string;
+  sort_order: number;
+  active: boolean;
+  system_key: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface PlanningItem {
   id: string;
