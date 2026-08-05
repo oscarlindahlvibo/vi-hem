@@ -768,7 +768,11 @@ export interface ShortStayUnit {
   apartment_id: string | null;
   name: string;
   description: string;
+  max_guests: number;
   is_active: boolean;
+  beds24_enabled: boolean;
+  beds24_property_id: string;
+  beds24_room_id: string;
   ical_url_1: string;
   channel_name_1: string;
   ical_url_2: string;
@@ -799,6 +803,8 @@ export interface ShortStayBooking {
   description: string;
   start_date: string;
   end_date: string;
+  arrival_time: string | null;
+  departure_time: string | null;
   is_manual: boolean;
   booking_type: ShortStayBookingType;
   guest_name: string;
@@ -807,6 +813,7 @@ export interface ShortStayBooking {
   guest_count: number;
   payment_status: ShortStayPaymentStatus;
   cleaning_status: ShortStayCleaningStatus;
+  cleaning_work_order_id: string | null;
   notes: string;
   created_by: string | null;
   created_at: string;

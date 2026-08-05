@@ -281,8 +281,8 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       )}
 
       {/* Main content */}
-      <main className="flex-1 pb-24 pt-16 lg:ml-[17rem] lg:pb-0 lg:pt-0">
-        <div className="w-full max-w-[1560px] p-4 lg:p-6 xl:p-8">
+      <main className="min-w-0 flex-1 overflow-x-hidden pb-24 pt-16 lg:ml-[17rem] lg:pb-0 lg:pt-0">
+        <div className="w-full min-w-0 max-w-[1560px] overflow-x-hidden p-4 lg:p-6 xl:p-8">
           {children}
         </div>
       </main>

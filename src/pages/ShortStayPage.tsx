@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   BedDouble, CalendarDays, RefreshCw, Plus, Edit2, ExternalLink,
   Sparkles, Search, ClipboardCheck, AlertTriangle, DoorOpen,
+  ChevronLeft, ChevronRight, LogIn, LogOut, Users, Wrench,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -22,9 +23,13 @@ type Tab = 'overview' | 'calendar' | 'bookings' | 'settings';
 interface UnitForm {
   name: string;
   description: string;
+  max_guests: string;
   property_id: string;
   apartment_id: string;
   is_active: boolean;
+  beds24_enabled: boolean;
+  beds24_property_id: string;
+  beds24_room_id: string;
   channel_name_1: string;
   ical_url_1: string;
   channel_name_2: string;
@@ -39,6 +44,8 @@ interface BookingForm {
   title: string;
   start_date: string;
   end_date: string;
+  arrival_time: string;
+  departure_time: string;
   guest_name: string;
   guest_email: string;
   guest_phone: string;
@@ -68,12 +75,26 @@ const formatShortDate = (value: string) =>
 const formatDateRange = (start: string, end: string) =>
   `${formatShortDate(start)} - ${formatShortDate(end)}`;
 
+const monthLabel = (date: Date) =>
+  date.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' });
+
+const getMonthDays = (date: Date) => {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1, 12);
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 12);
+  const daysInMonth = end.getDate();
+  return Array.from({ length: daysInMonth }, (_, index) => toDateKey(addDays(start, index)));
+};
+
 const defaultUnitForm: UnitForm = {
   name: '',
   description: '',
+  max_guests: '2',
   property_id: '',
   apartment_id: '',
   is_active: true,
+  beds24_enabled: false,
+  beds24_property_id: '',
+  beds24_room_id: '',
   channel_name_1: 'Booking.com',
   ical_url_1: '',
   channel_name_2: 'Expedia / Hotels.com',
@@ -88,6 +109,8 @@ const defaultBookingForm: BookingForm = {
   title: '',
   start_date: todayKey(),
   end_date: toDateKey(addDays(new Date(), 1)),
+  arrival_time: '15:00',
+  departure_time: '11:00',
   guest_name: '',
   guest_email: '',
   guest_phone: '',
@@ -148,15 +171,15 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   const [saving, setSaving] = useState(false);
   const [syncingUnitId, setSyncingUnitId] = useState<string | null>(null);
   const [formError, setFormError] = useState('');
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1, 12);
+  });
 
   const isAdmin = user?.role === 'admin';
   const organisationId = user?.organisation_id;
 
-  const days = useMemo(() => {
-    const start = new Date();
-    start.setHours(12, 0, 0, 0);
-    return Array.from({ length: 35 }, (_, index) => toDateKey(addDays(start, index)));
-  }, []);
+  const days = useMemo(() => getMonthDays(calendarMonth), [calendarMonth]);
 
   const bookingsByUnit = useMemo(() => {
     const map = new Map<string, ShortStayBooking[]>();
@@ -173,7 +196,8 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     const checkIns = bookings.filter(booking => booking.start_date === today && booking.booking_type === 'booking');
     const checkOuts = bookings.filter(booking => booking.end_date === today && booking.booking_type === 'booking');
     const cleaning = bookings.filter(booking => booking.end_date <= today && booking.cleaning_status !== 'clean');
-    return { activeUnits, current, checkIns, checkOuts, cleaning };
+    const currentGuests = current.reduce((sum, booking) => sum + (booking.guest_count || 1), 0);
+    return { activeUnits, current, currentGuests, checkIns, checkOuts, cleaning };
   }, [bookings, units]);
 
   const conflicts = useMemo(() => {
@@ -249,9 +273,13 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     setUnitForm({
       name: unit.name,
       description: unit.description || '',
+      max_guests: String(unit.max_guests || 2),
       property_id: unit.property_id || '',
       apartment_id: unit.apartment_id || '',
       is_active: unit.is_active,
+      beds24_enabled: Boolean(unit.beds24_enabled),
+      beds24_property_id: unit.beds24_property_id || '',
+      beds24_room_id: unit.beds24_room_id || '',
       channel_name_1: unit.channel_name_1 || 'Booking.com',
       ical_url_1: unit.ical_url_1 || '',
       channel_name_2: unit.channel_name_2 || 'Expedia / Hotels.com',
@@ -284,6 +312,8 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
       title: booking.title || '',
       start_date: booking.start_date,
       end_date: booking.end_date,
+      arrival_time: booking.arrival_time || '15:00',
+      departure_time: booking.departure_time || '11:00',
       guest_name: booking.guest_name || '',
       guest_email: booking.guest_email || '',
       guest_phone: booking.guest_phone || '',
@@ -309,9 +339,13 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
       organisation_id: organisationId,
       name: unitForm.name.trim(),
       description: unitForm.description.trim(),
+      max_guests: Math.max(parseInt(unitForm.max_guests) || 1, 1),
       property_id: unitForm.property_id || null,
       apartment_id: unitForm.apartment_id || null,
       is_active: unitForm.is_active,
+      beds24_enabled: unitForm.beds24_enabled,
+      beds24_property_id: unitForm.beds24_property_id.trim(),
+      beds24_room_id: unitForm.beds24_room_id.trim(),
       channel_name_1: unitForm.channel_name_1.trim() || 'Booking.com',
       ical_url_1: unitForm.ical_url_1.trim(),
       channel_name_2: unitForm.channel_name_2.trim() || 'Expedia / Hotels.com',
@@ -368,6 +402,8 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
       title: bookingForm.title.trim() || bookingTypeLabels[bookingForm.booking_type],
       start_date: bookingForm.start_date,
       end_date: bookingForm.end_date,
+      arrival_time: bookingForm.booking_type === 'booking' ? bookingForm.arrival_time || null : null,
+      departure_time: bookingForm.booking_type === 'booking' ? bookingForm.departure_time || null : null,
       is_manual: true,
       channel_name: 'VI-HEM',
       guest_name: bookingForm.booking_type === 'booking' ? bookingForm.guest_name.trim() : '',
@@ -498,6 +534,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
             <Card className="p-4">
               <p className="text-xs text-slate-500">Belagda nu</p>
               <p className="mt-1 text-2xl font-bold text-blue-700">{stats.current.length}</p>
+              <p className="mt-1 text-xs text-slate-500">{stats.currentGuests} gäster</p>
             </Card>
             <Card className="p-4">
               <p className="text-xs text-slate-500">Check-in idag</p>
@@ -544,6 +581,11 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                           </Badge>
                         </div>
                         <p className="text-sm text-slate-500">{unit?.name} · {formatDateRange(booking.start_date, booking.end_date)}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {booking.guest_count || 1} gäster
+                          {booking.arrival_time ? ` · ankomst ${booking.arrival_time.slice(0, 5)}` : ''}
+                          {booking.departure_time ? ` · avresa ${booking.departure_time.slice(0, 5)}` : ''}
+                        </p>
                       </button>
                     );
                   })
@@ -566,6 +608,9 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                           <Badge className="bg-rose-100 text-rose-700">{cleaningLabels[booking.cleaning_status]}</Badge>
                         </div>
                         <p className="text-sm text-slate-500">Efter {booking.guest_name || booking.title || 'bokning'} · ut {formatShortDate(booking.end_date)}</p>
+                        {booking.cleaning_work_order_id && (
+                          <p className="mt-1 text-xs font-medium text-blue-700">Arbetsorder skapad</p>
+                        )}
                       </button>
                     );
                   })
@@ -576,10 +621,39 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
         </div>
       ) : tab === 'calendar' ? (
         <Card className="overflow-hidden">
+          <div className="flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900 capitalize">{monthLabel(calendarMonth)}</h2>
+              <p className="text-sm text-slate-500">Ankomster, avresor, beläggning och städbehov per enhet</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1, 12))}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const now = new Date();
+                  setCalendarMonth(new Date(now.getFullYear(), now.getMonth(), 1, 12));
+                }}
+              >
+                Idag
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1, 12))}
+              >
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
           <div className="overflow-x-auto">
-            <div className="min-w-[980px]">
-              <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `210px repeat(${days.length}, minmax(38px, 1fr))` }}>
-                <div className="sticky left-0 z-10 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Enhet</div>
+            <div className="min-w-[1120px]">
+              <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `230px repeat(${days.length}, minmax(64px, 1fr))` }}>
+                <div className="sticky left-0 z-10 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Rum/lägenhet</div>
                 {days.map((day) => (
                   <div key={day} className={`px-2 py-3 text-center text-xs font-medium ${day === todayKey() ? 'bg-blue-50 text-blue-700' : 'text-slate-500'}`}>
                     <div>{new Date(`${day}T12:00:00`).toLocaleDateString('sv-SE', { weekday: 'short' })}</div>
@@ -588,34 +662,72 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                 ))}
               </div>
 
-              {units.map((unit) => (
-                <div key={unit.id} className="grid border-b border-slate-100" style={{ gridTemplateColumns: `210px repeat(${days.length}, minmax(38px, 1fr))` }}>
-                  <div className="sticky left-0 z-10 bg-white px-4 py-3">
-                    <p className="text-sm font-semibold text-slate-900">{unit.name}</p>
-                    <p className="text-xs text-slate-500">{unit.apartment?.apartment_number || unit.property?.name || 'Fristående'}</p>
-                  </div>
-                  {days.map((day) => {
-                    const booking = (bookingsByUnit.get(unit.id) || []).find(item => overlaps(item, day));
-                    return (
-                      <button
-                        key={`${unit.id}-${day}`}
-                        onClick={() => booking ? openEditBooking(booking) : openCreateBooking(unit.id, day)}
-                        className={`min-h-[58px] border-l border-slate-100 px-1 py-2 text-left hover:bg-slate-50 ${
-                          booking?.booking_type === 'block' ? 'bg-slate-100' : booking ? 'bg-blue-50' : ''
-                        }`}
-                      >
-                        {booking && (
-                          <div className={`rounded-md px-2 py-1 text-[11px] font-medium leading-tight ${
-                            booking.booking_type === 'block' ? 'bg-slate-700 text-white' : 'bg-blue-600 text-white'
-                          }`}>
-                            {booking.guest_name || booking.title || booking.channel_name}
+              {units.map((unit) => {
+                const unitBookings = bookingsByUnit.get(unit.id) || [];
+                return (
+                  <div key={unit.id} className="grid border-b border-slate-100" style={{ gridTemplateColumns: `230px repeat(${days.length}, minmax(64px, 1fr))` }}>
+                    <div className="sticky left-0 z-10 bg-white px-4 py-3">
+                      <p className="text-sm font-semibold text-slate-900">{unit.name}</p>
+                      <p className="text-xs text-slate-500">{unit.apartment?.apartment_number || unit.property?.name || 'Fristående'}</p>
+                      <p className="mt-1 inline-flex items-center gap-1 text-xs text-slate-400">
+                        <Users className="h-3 w-3" /> Max {unit.max_guests || 2}
+                      </p>
+                    </div>
+                    {days.map((day) => {
+                      const activeBooking = unitBookings.find(item => overlaps(item, day));
+                      const arrival = unitBookings.find(item => item.start_date === day && item.booking_type === 'booking');
+                      const departure = unitBookings.find(item => item.end_date === day && item.booking_type === 'booking');
+                      const block = unitBookings.find(item => item.booking_type === 'block' && (overlaps(item, day) || item.start_date === day));
+                      const booking = activeBooking || arrival || departure || block;
+                      const isTurnover = Boolean(arrival && departure && arrival.id !== departure.id);
+                      return (
+                        <button
+                          key={`${unit.id}-${day}`}
+                          onClick={() => booking ? openEditBooking(booking) : openCreateBooking(unit.id, day)}
+                          className={`min-h-[72px] border-l border-slate-100 px-1.5 py-2 text-left transition hover:bg-slate-50 ${
+                            block ? 'bg-slate-100' : activeBooking ? 'bg-blue-50' : departure ? 'bg-amber-50' : ''
+                          }`}
+                          title={booking ? `${booking.guest_name || booking.title || booking.channel_name} (${formatDateRange(booking.start_date, booking.end_date)})` : 'Skapa bokning'}
+                        >
+                          {booking && (
+                            <div className={`space-y-1 rounded-md px-2 py-1 text-[11px] font-medium leading-tight ${
+                              block ? 'bg-slate-700 text-white' : activeBooking ? 'bg-blue-600 text-white' : 'bg-amber-500 text-white'
+                            }`}>
+                              <div className="truncate">{booking.guest_name || booking.title || booking.channel_name}</div>
+                              {booking.booking_type === 'booking' && (
+                                <div className="flex items-center gap-1 opacity-90">
+                                  <Users className="h-3 w-3" />
+                                  {booking.guest_count || 1}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <div className="mt-1 flex flex-col gap-1">
+                            {arrival && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                <LogIn className="h-3 w-3" /> In
+                              </span>
+                            )}
+                            {departure && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                                <LogOut className="h-3 w-3" /> Ut
+                              </span>
+                            )}
+                            {departure?.cleaning_status && departure.cleaning_status !== 'clean' && departure.cleaning_status !== 'not_needed' && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
+                                <Wrench className="h-3 w-3" /> Städ
+                              </span>
+                            )}
+                            {isTurnover && (
+                              <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">Byte</span>
+                            )}
                           </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </Card>
@@ -649,10 +761,18 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                         <Badge className="bg-slate-100 text-slate-600">{booking.channel_name || 'Manuell'}</Badge>
                       </div>
                       <p className="mt-1 text-sm text-slate-500">{unit?.name} · {formatDateRange(booking.start_date, booking.end_date)}</p>
+                      {booking.booking_type === 'booking' && (
+                        <p className="mt-1 text-xs text-slate-500">
+                          {booking.guest_count || 1} gäster
+                          {booking.arrival_time ? ` · in ${booking.arrival_time.slice(0, 5)}` : ''}
+                          {booking.departure_time ? ` · ut ${booking.departure_time.slice(0, 5)}` : ''}
+                        </p>
+                      )}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Badge className="bg-emerald-100 text-emerald-700">{paymentLabels[booking.payment_status]}</Badge>
                       <Badge className="bg-amber-100 text-amber-700">{cleaningLabels[booking.cleaning_status]}</Badge>
+                      {booking.cleaning_work_order_id && <Badge className="bg-blue-100 text-blue-700">Städorder</Badge>}
                     </div>
                   </div>
                 </Card>
@@ -677,8 +797,15 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                       <Badge className={unit.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}>
                         {unit.is_active ? 'Aktiv' : 'Inaktiv'}
                       </Badge>
+                      <Badge className="bg-blue-100 text-blue-700">Max {unit.max_guests || 2} gäster</Badge>
+                      {unit.beds24_enabled && <Badge className="bg-violet-100 text-violet-700">Beds24</Badge>}
                     </div>
                     <p className="mt-1 text-sm text-slate-500">{unit.description || unit.apartment?.apartment_number || unit.property?.name || 'Ingen koppling till lägenhet vald'}</p>
+                    {unit.beds24_enabled && (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Beds24: property {unit.beds24_property_id || 'ej angivet'} · room {unit.beds24_room_id || 'ej angivet'}
+                      </p>
+                    )}
                     <div className="mt-3 grid gap-2 text-sm text-slate-600">
                       {[1, 2, 3].map((channel) => {
                         const name = unit[`channel_name_${channel}` as keyof ShortStayUnit] as string;
@@ -724,6 +851,13 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
         <div className="space-y-4">
           <Input label="Namn" value={unitForm.name} onChange={e => setUnitForm({ ...unitForm, name: e.target.value })} placeholder="T.ex. Lägenhet 1201" />
           <Textarea label="Beskrivning" rows={3} value={unitForm.description} onChange={e => setUnitForm({ ...unitForm, description: e.target.value })} />
+          <Input
+            label="Max antal gäster"
+            type="number"
+            min={1}
+            value={unitForm.max_guests}
+            onChange={e => setUnitForm({ ...unitForm, max_guests: e.target.value })}
+          />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Select
               label="Fastighet"
@@ -742,6 +876,34 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                   .map(apartment => ({ value: apartment.id, label: `${apartment.apartment_number} · ${apartment.property?.name || ''}` })),
               ]}
             />
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <label className="flex items-start gap-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={unitForm.beds24_enabled}
+                onChange={e => setUnitForm({ ...unitForm, beds24_enabled: e.target.checked })}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300"
+              />
+              <span>
+                <span className="block font-semibold text-slate-900">Aktivera Beds24 för den här enheten</span>
+                <span className="block text-slate-500">Används när API/webhook-kopplingen slås på separat i korttidsuthyrnings-tillägget.</span>
+              </span>
+            </label>
+            {unitForm.beds24_enabled && (
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Input
+                  label="Beds24 property-id"
+                  value={unitForm.beds24_property_id}
+                  onChange={e => setUnitForm({ ...unitForm, beds24_property_id: e.target.value })}
+                />
+                <Input
+                  label="Beds24 room-id"
+                  value={unitForm.beds24_room_id}
+                  onChange={e => setUnitForm({ ...unitForm, beds24_room_id: e.target.value })}
+                />
+              </div>
+            )}
           </div>
           {[1, 2, 3].map((channel) => (
             <div key={channel} className="rounded-lg border border-slate-200 p-3">
@@ -793,6 +955,12 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
             />
             <Input label="Startdatum" type="date" value={bookingForm.start_date} onChange={e => setBookingForm({ ...bookingForm, start_date: e.target.value })} />
             <Input label="Slutdatum" type="date" value={bookingForm.end_date} onChange={e => setBookingForm({ ...bookingForm, end_date: e.target.value })} />
+            {bookingForm.booking_type === 'booking' && (
+              <>
+                <Input label="Ankomsttid" type="time" value={bookingForm.arrival_time} onChange={e => setBookingForm({ ...bookingForm, arrival_time: e.target.value })} />
+                <Input label="Avresetid" type="time" value={bookingForm.departure_time} onChange={e => setBookingForm({ ...bookingForm, departure_time: e.target.value })} />
+              </>
+            )}
           </div>
           <Input label={bookingForm.booking_type === 'block' ? 'Rubrik' : 'Rubrik / bokningsnamn'} value={bookingForm.title} onChange={e => setBookingForm({ ...bookingForm, title: e.target.value })} />
           {bookingForm.booking_type === 'booking' && (

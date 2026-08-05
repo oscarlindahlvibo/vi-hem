@@ -243,18 +243,18 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   ];
 
   return (
-    <div className="-mx-4 -mt-4 space-y-3 bg-[#f4f5f7] sm:mx-0 sm:mt-0 sm:space-y-6 sm:bg-transparent">
-      <section className="bg-white px-5 pb-4 pt-5 shadow-sm sm:rounded-2xl sm:border sm:border-slate-200 sm:px-6">
+    <div className="min-w-0 max-w-full space-y-3 overflow-hidden sm:space-y-6">
+      <section className="rounded-2xl bg-white px-4 pb-4 pt-5 shadow-sm ring-1 ring-slate-200/70 sm:px-6">
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-500 to-violet-500 text-base font-black text-white shadow-sm">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-500 to-violet-500 text-base font-black text-white shadow-sm sm:h-12 sm:w-12">
               {user?.name?.charAt(0) || 'V'}
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-2xl font-black tracking-[-0.02em] text-slate-950">
+              <h1 className="truncate text-xl font-black text-slate-950 sm:text-2xl">
                 God kväll, {firstName}
               </h1>
-              <p className="mt-0.5 text-sm font-medium text-slate-500">
+              <p className="mt-0.5 truncate text-sm font-medium text-slate-500">
                 {user?.role === 'admin' ? 'Överblick över dagens drift' : 'Din arbetsdag i VI-HEM'}
               </p>
             </div>
@@ -273,19 +273,19 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           </button>
         </div>
 
-        <div className="mt-5 flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="mt-5 grid min-w-0 grid-cols-3 gap-3 sm:flex sm:overflow-x-auto sm:pb-1 sm:[-ms-overflow-style:none] sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden">
           {quickTiles.map((tile) => (
             <button
               key={tile.label}
               onClick={() => onNavigate(tile.page)}
-              className="relative flex min-w-[7.4rem] flex-col items-center gap-2 rounded-2xl px-3 py-3 text-center transition-transform active:scale-[0.98] sm:min-w-[8.5rem]"
+              className="relative flex min-w-0 flex-col items-center gap-2 rounded-2xl px-1 py-2 text-center transition-transform active:scale-[0.98] sm:min-w-[8.5rem] sm:px-3 sm:py-3"
             >
-              <span className={`flex h-16 w-full items-center justify-center rounded-2xl ${tile.className}`}>
+              <span className={`flex h-14 w-full items-center justify-center rounded-2xl sm:h-16 ${tile.className}`}>
                 {tile.icon}
               </span>
-              <span className="max-w-full truncate text-sm font-semibold text-slate-700">{tile.label}</span>
+              <span className="max-w-full truncate text-xs font-semibold text-slate-700 sm:text-sm">{tile.label}</span>
               {tile.count !== null && tile.count > 0 && (
-                <span className="absolute right-2 top-1 flex h-7 min-w-7 items-center justify-center rounded-full bg-rose-500 px-1.5 text-sm font-bold text-white shadow-sm">
+                <span className="absolute right-0 top-0 flex h-6 min-w-6 items-center justify-center rounded-full bg-rose-500 px-1 text-xs font-bold text-white shadow-sm sm:right-2 sm:top-1 sm:h-7 sm:min-w-7 sm:text-sm">
                   {tile.count}
                 </span>
               )}
@@ -294,22 +294,22 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
         </div>
       </section>
 
-      <section className="bg-white px-5 py-5 shadow-sm sm:rounded-2xl sm:border sm:border-slate-200 sm:px-6">
+      <section className="rounded-2xl bg-white px-4 py-5 shadow-sm ring-1 ring-slate-200/70 sm:px-6">
         <button
           onClick={() => onNavigate('timetracking')}
-          className="mb-4 flex w-full items-center justify-between text-left"
+          className="mb-4 flex w-full min-w-0 items-center justify-between gap-3 text-left"
         >
-          <h2 className="text-xl font-black tracking-[-0.02em] text-slate-950">Stämpelklocka</h2>
-          <ArrowRight className="h-5 w-5 text-slate-300" />
+          <h2 className="min-w-0 text-xl font-black text-slate-950">Stämpelklocka</h2>
+          <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
         </button>
         <button
           onClick={() => onNavigate('timetracking')}
-          className={`flex w-full items-center justify-center gap-3 rounded-full px-5 py-4 text-base font-bold text-white shadow-lg transition-transform active:scale-[0.99] ${
+          className={`flex w-full min-w-0 items-center justify-center gap-3 rounded-full px-4 py-4 text-base font-bold text-white shadow-lg transition-transform active:scale-[0.99] ${
             activeTimeEntry ? 'bg-emerald-500 shadow-emerald-500/25 hover:bg-emerald-600' : 'bg-[#2d9cff] shadow-blue-500/25 hover:bg-blue-600'
           }`}
         >
-          <Timer className="h-6 w-6" />
-          {activeTimeEntry ? 'Fortsätt pass' : 'Stämpla in'}
+          <Timer className="h-6 w-6 shrink-0" />
+          <span className="truncate">{activeTimeEntry ? 'Fortsätt pass' : 'Stämpla in'}</span>
         </button>
         {activeTimeEntry && (
           <p className="mt-3 text-center text-sm font-medium text-slate-500">
@@ -318,51 +318,51 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
         )}
       </section>
 
-      <section className="bg-white shadow-sm sm:rounded-2xl sm:border sm:border-slate-200">
+      <section className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
         <button
           onClick={() => onNavigate(user?.role === 'admin' ? 'timetracking' : 'workorders')}
-          className="flex w-full items-center justify-between px-5 py-5 text-left sm:px-6"
+          className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-5 text-left sm:px-6"
         >
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <span className="flex h-11 min-w-11 items-center justify-center rounded-full bg-orange-400 text-lg font-black text-white">
               {attentionCount}
             </span>
-            <h2 className="text-xl font-black tracking-[-0.02em] text-slate-950">Behöver din uppmärksamhet</h2>
+            <h2 className="min-w-0 text-lg font-black leading-tight text-slate-950 sm:text-xl">Behöver din uppmärksamhet</h2>
           </div>
-          <ArrowRight className="h-5 w-5 text-slate-300" />
+          <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
         </button>
-        <div className="border-t border-slate-100 px-5 py-4 sm:px-6">
+        <div className="border-t border-slate-100 px-4 py-4 sm:px-6">
           <button
             onClick={() => onNavigate(myWorkOrdersCount > 0 ? 'workorders' : 'maintenance')}
-            className="flex w-full items-center justify-between gap-4 rounded-2xl bg-white text-left"
+            className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl bg-white text-left"
           >
-            <div className="flex min-w-0 items-center gap-4">
-              <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 shadow-sm">
-                <ClipboardList className="h-8 w-8" />
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 shadow-sm sm:h-16 sm:w-16">
+                <ClipboardList className="h-7 w-7 sm:h-8 sm:w-8" />
               </span>
-              <p className="min-w-0 text-base font-semibold text-slate-950">
+              <p className="min-w-0 text-sm font-semibold leading-5 text-slate-950 sm:text-base">
                 <span className="font-black">{myWorkOrdersCount + newWorkOrdersCount}</span> uppgifter väntar på dig i <span className="font-black">Arbetsordrar</span>
               </p>
             </div>
-            <span className="shrink-0 rounded-full border border-slate-200 px-4 py-2 text-sm font-bold text-blue-500">Öppna</span>
+            <span className="hidden shrink-0 rounded-full border border-slate-200 px-4 py-2 text-sm font-bold text-blue-500 sm:inline-flex">Öppna</span>
           </button>
         </div>
       </section>
 
-      <section className="bg-white shadow-sm sm:rounded-2xl sm:border sm:border-slate-200">
+      <section className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
         <button
           onClick={() => onNavigate('news')}
-          className="flex w-full items-center justify-between px-5 py-5 text-left sm:px-6"
+          className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-5 text-left sm:px-6"
         >
-          <div>
-            <h2 className="text-xl font-black tracking-[-0.02em] text-slate-950">Nyheter</h2>
-            <p className="mt-1 text-sm font-medium text-slate-500">Information till din organisation</p>
+          <div className="min-w-0">
+            <h2 className="truncate text-xl font-black text-slate-950">Nyheter</h2>
+            <p className="mt-1 truncate text-sm font-medium text-slate-500">Information till din organisation</p>
           </div>
-          <ArrowRight className="h-5 w-5 text-slate-300" />
+          <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
         </button>
         <div className="border-t border-slate-100">
           {dashboardNews.length === 0 ? (
-            <div className="px-5 py-6 text-sm font-medium text-slate-500 sm:px-6">
+            <div className="px-4 py-6 text-sm font-medium text-slate-500 sm:px-6">
               Inga publicerade nyheter just nu.
             </div>
           ) : (
@@ -371,7 +371,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
                 <button
                   key={item.id}
                   onClick={() => onNavigate('news')}
-                  className="flex w-full items-start gap-4 px-5 py-4 text-left transition-colors hover:bg-slate-50 sm:px-6"
+                  className="flex w-full min-w-0 items-start gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 sm:gap-4 sm:px-6"
                 >
                   <span className={`mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
                     item.priority === 'urgent' ? 'bg-red-50 text-red-600' : item.priority === 'important' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
@@ -402,24 +402,24 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
       {user?.role === 'admin' && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card className="overflow-hidden border-emerald-200 bg-emerald-50">
-            <div className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-start gap-3">
-                <div className="rounded-xl bg-emerald-100 p-2.5 text-emerald-700">
+            <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="shrink-0 rounded-xl bg-emerald-100 p-2.5 text-emerald-700">
                   <Timer className="h-5 w-5" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h2 className="text-base font-semibold text-slate-800">Instämplade just nu</h2>
-                  <p className="text-sm text-slate-600">
+                  <p className="text-sm leading-5 text-slate-600">
                     {clockedInEntries.length} person{clockedInEntries.length === 1 ? '' : 'er'} är instämplad{clockedInEntries.length === 1 ? '' : 'e'}.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => onNavigate('timetracking')}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-emerald-800 shadow-sm ring-1 ring-emerald-200 hover:bg-emerald-100"
+                className="inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-emerald-800 shadow-sm ring-1 ring-emerald-200 hover:bg-emerald-100 sm:w-auto"
               >
-                Se tidrapportering
-                <ArrowRight className="h-4 w-4" />
+                <span className="truncate">Se tidrapportering</span>
+                <ArrowRight className="h-4 w-4 shrink-0" />
               </button>
             </div>
             <div className="divide-y divide-emerald-100 border-t border-emerald-100 bg-white/60">
@@ -451,24 +451,24 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           </Card>
 
           <Card className="overflow-hidden border-amber-200 bg-amber-50">
-            <div className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-start gap-3">
-                <div className="rounded-xl bg-amber-100 p-2.5 text-amber-700">
+            <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="shrink-0 rounded-xl bg-amber-100 p-2.5 text-amber-700">
                   <CalendarX className="h-5 w-5" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h2 className="text-base font-semibold text-slate-800">Frånvaro idag</h2>
-                  <p className="text-sm text-slate-600">
+                  <p className="text-sm leading-5 text-slate-600">
                     {todayAbsences.length} person{todayAbsences.length === 1 ? '' : 'er'} är sjukanmäld, ledig eller har väntande frånvaro idag.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => onNavigate('timetracking')}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-amber-800 shadow-sm ring-1 ring-amber-200 hover:bg-amber-100"
+                className="inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-amber-800 shadow-sm ring-1 ring-amber-200 hover:bg-amber-100 sm:w-auto"
               >
-                Öppna tidrapportering
-                <ArrowRight className="h-4 w-4" />
+                <span className="truncate">Öppna tidrapportering</span>
+                <ArrowRight className="h-4 w-4 shrink-0" />
               </button>
             </div>
             <div className="divide-y divide-amber-100 border-t border-amber-100 bg-white/60">
