@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { formatDateTime } from '../lib/utils';
 import {
   Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea,
 } from '../components/ui';
@@ -53,6 +54,25 @@ interface BookingForm {
   payment_status: ShortStayPaymentStatus;
   cleaning_status: ShortStayCleaningStatus;
   notes: string;
+}
+
+interface Beds24Connection {
+  enabled: boolean;
+  connected: boolean;
+  webhook_secret?: string;
+  last_sync_at?: string | null;
+  last_error?: string | null;
+  webhook_url_hint?: string;
+}
+
+interface Beds24Log {
+  id: string;
+  status: 'success' | 'warning' | 'error' | 'info';
+  event_type: string;
+  message: string;
+  imported_count: number;
+  external_id?: string | null;
+  created_at: string;
 }
 
 const todayKey = () => {
@@ -152,6 +172,12 @@ function getExportUrl(token: string) {
   return `${base}/functions/v1/vihem-export-short-stay-ical?token=${token}`;
 }
 
+function getBeds24WebhookUrl(connection: Beds24Connection | null) {
+  const base = import.meta.env.VITE_SUPABASE_URL;
+  if (!base || !connection?.webhook_secret) return '';
+  return `${base}/functions/v1/vihem-beds24-webhook?secret=${connection.webhook_secret}`;
+}
+
 export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>('overview');
@@ -175,6 +201,13 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1, 12);
   });
+  const [beds24Connection, setBeds24Connection] = useState<Beds24Connection | null>(null);
+  const [beds24Logs, setBeds24Logs] = useState<Beds24Log[]>([]);
+  const [beds24InviteCode, setBeds24InviteCode] = useState('');
+  const [beds24RefreshToken, setBeds24RefreshToken] = useState('');
+  const [savingBeds24, setSavingBeds24] = useState(false);
+  const [syncingBeds24, setSyncingBeds24] = useState(false);
+  const [beds24Message, setBeds24Message] = useState('');
 
   const isAdmin = user?.role === 'admin';
   const organisationId = user?.organisation_id;
@@ -220,6 +253,10 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     fetchData();
   }, [organisationId]);
 
+  useEffect(() => {
+    if (organisationId && isAdmin) fetchBeds24Connection();
+  }, [organisationId, isAdmin]);
+
   async function fetchData() {
     if (!organisationId) return;
     setLoading(true);
@@ -259,6 +296,73 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
       setApartments((apartmentsRes.data || []) as Apartment[]);
     }
     setLoading(false);
+  }
+
+  async function fetchBeds24Connection() {
+    setBeds24Message('');
+    const { data, error: connectionError } = await supabase.functions.invoke('vihem-beds24-connection', {
+      body: { action: 'get' },
+    });
+    if (connectionError) {
+      setBeds24Message(connectionError.message);
+      return;
+    }
+    setBeds24Connection(data?.connection || null);
+    setBeds24Logs(data?.logs || []);
+  }
+
+  async function saveBeds24Connection(enabled: boolean) {
+    setSavingBeds24(true);
+    setBeds24Message('');
+    const { data, error: saveError } = await supabase.functions.invoke('vihem-beds24-connection', {
+      body: {
+        action: 'save',
+        enabled,
+        invite_code: beds24InviteCode.trim(),
+        refresh_token: beds24RefreshToken.trim(),
+      },
+    });
+    setSavingBeds24(false);
+    if (saveError || data?.error) {
+      setBeds24Message(saveError?.message || data?.error || 'Kunde inte spara Beds24-anslutningen.');
+      return;
+    }
+    setBeds24InviteCode('');
+    setBeds24RefreshToken('');
+    setBeds24Connection(data.connection);
+    setBeds24Message(enabled ? 'Beds24-anslutningen är sparad.' : 'Beds24 är avstängt.');
+    await fetchBeds24Connection();
+  }
+
+  async function testBeds24Connection() {
+    setSavingBeds24(true);
+    setBeds24Message('');
+    const { data, error: testError } = await supabase.functions.invoke('vihem-beds24-connection', {
+      body: { action: 'test' },
+    });
+    setSavingBeds24(false);
+    if (testError || data?.error) {
+      setBeds24Message(testError?.message || data?.error || 'Kunde inte testa Beds24.');
+      return;
+    }
+    setBeds24Message(`Beds24 svarar. ${data.properties_count ?? 0} properties kunde läsas.`);
+    await fetchBeds24Connection();
+  }
+
+  async function syncBeds24Bookings() {
+    setSyncingBeds24(true);
+    setBeds24Message('');
+    const { data, error: syncError } = await supabase.functions.invoke('vihem-sync-beds24-bookings', {
+      body: {},
+    });
+    setSyncingBeds24(false);
+    if (syncError || data?.error) {
+      setBeds24Message(syncError?.message || data?.error || 'Beds24-synken misslyckades.');
+      await fetchBeds24Connection();
+      return;
+    }
+    setBeds24Message(`Importerade ${data.imported || 0} bokningar från Beds24.`);
+    await Promise.all([fetchData(), fetchBeds24Connection()]);
   }
 
   function openCreateUnit() {
@@ -782,6 +886,116 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
         </div>
       ) : (
         <div className="space-y-4">
+          <Card className="p-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg font-semibold text-slate-900">Beds24-integration</h2>
+                  <Badge className={beds24Connection?.enabled ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'}>
+                    {beds24Connection?.enabled ? 'Aktiv' : 'Avstängd'}
+                  </Badge>
+                  <Badge className={beds24Connection?.connected ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}>
+                    {beds24Connection?.connected ? 'Ansluten' : 'Saknar token'}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-sm text-slate-500">
+                  Aktivera Beds24 separat från korttidsuthyrningen. Bokningar importeras till kalendern och skapar städarbetsorder automatiskt.
+                </p>
+                {beds24Connection?.last_sync_at && (
+                  <p className="mt-2 text-xs text-slate-500">Senast synkad {formatDateTime(beds24Connection.last_sync_at)}</p>
+                )}
+                {beds24Connection?.last_error && (
+                  <p className="mt-2 text-sm text-red-700">{beds24Connection.last_error}</p>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={testBeds24Connection} loading={savingBeds24} disabled={!beds24Connection?.connected}>
+                  Testa
+                </Button>
+                <Button variant="primary" onClick={syncBeds24Bookings} loading={syncingBeds24} disabled={!beds24Connection?.enabled || !beds24Connection?.connected}>
+                  <RefreshCw className="w-4 h-4" /> Synka Beds24
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <Input
+                  label="Beds24 invite code"
+                  value={beds24InviteCode}
+                  onChange={e => setBeds24InviteCode(e.target.value)}
+                  placeholder="Klistra in invite code första gången"
+                />
+                <Input
+                  label="Refresh token"
+                  value={beds24RefreshToken}
+                  onChange={e => setBeds24RefreshToken(e.target.value)}
+                  placeholder="Alternativt befintlig refresh token"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => saveBeds24Connection(true)} loading={savingBeds24}>
+                    Spara och aktivera
+                  </Button>
+                  <Button variant="secondary" onClick={() => saveBeds24Connection(false)} loading={savingBeds24}>
+                    Stäng av
+                  </Button>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-sm font-semibold text-slate-900">Webhook till Beds24</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  Lägg in denna under Beds24 Booking Webhook när anslutningen är sparad.
+                </p>
+                {getBeds24WebhookUrl(beds24Connection) ? (
+                  <a
+                    href={getBeds24WebhookUrl(beds24Connection)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex max-w-full items-center gap-1 break-all text-sm text-blue-700 hover:underline"
+                  >
+                    {getBeds24WebhookUrl(beds24Connection)}
+                    <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
+                  </a>
+                ) : (
+                  <p className="mt-2 text-sm text-slate-500">Spara anslutningen för att skapa webhook-URL.</p>
+                )}
+                <p className="mt-3 text-xs text-slate-500">
+                  Använd API v2 webhook med persondata om ni vill få gästnamn, e-post och telefon.
+                </p>
+              </div>
+            </div>
+
+            {beds24Message && (
+              <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                {beds24Message}
+              </div>
+            )}
+
+            {beds24Logs.length > 0 && (
+              <div className="mt-4">
+                <h3 className="text-sm font-semibold text-slate-900">Senaste Beds24-loggar</h3>
+                <div className="mt-2 grid gap-2">
+                  {beds24Logs.slice(0, 6).map(log => (
+                    <div key={log.id} className="flex flex-col gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-slate-800">{log.message}</p>
+                        <p className="text-xs text-slate-500">{log.event_type} · {formatDateTime(log.created_at)}</p>
+                      </div>
+                      <Badge className={
+                        log.status === 'success' ? 'bg-emerald-100 text-emerald-700' :
+                          log.status === 'error' ? 'bg-red-100 text-red-700' :
+                            log.status === 'warning' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
+                      }>
+                        {log.status}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Card>
+
           <div className="flex justify-end">
             <Button onClick={openCreateUnit}>
               <Plus className="w-4 h-4" /> Lägg till enhet

@@ -797,6 +797,8 @@ export interface ShortStayBooking {
   organisation_id: string;
   unit_id: string;
   external_uid: string | null;
+  beds24_booking_id: string;
+  beds24_status: string;
   channel_number: number | null;
   channel_name: string;
   title: string;
@@ -815,6 +817,7 @@ export interface ShortStayBooking {
   cleaning_status: ShortStayCleaningStatus;
   cleaning_work_order_id: string | null;
   notes: string;
+  source_payload: Record<string, unknown>;
   created_by: string | null;
   created_at: string;
   updated_at: string;
