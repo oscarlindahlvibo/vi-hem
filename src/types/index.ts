@@ -924,7 +924,11 @@ export interface Document {
   file_url: string;
   file_name: string;
   file_size: number;
-  document_type: 'contract' | 'rules' | 'inspection' | 'invoice' | 'other';
+  document_type: 'contract' | 'rules' | 'inspection' | 'invoice' | 'notice' | 'certificate' | 'template' | 'other';
+  document_category: 'residential_lease' | 'premises_lease' | 'parking_agreement' | 'storage_agreement' | 'lease_addendum' | 'termination' | 'inspection_protocol' | 'house_rules' | 'rent_notice' | 'invoice' | 'template' | 'other';
+  contract_status: 'not_applicable' | 'draft' | 'pending_signature' | 'signed' | 'cancelled' | 'archived';
+  storage_bucket: string | null;
+  storage_path: string | null;
   visibility: 'public' | 'tenant' | 'staff' | 'admin';
   tenant_id: string | null;
   property_id: string | null;
@@ -944,6 +948,8 @@ export interface News {
   organisation_id: string | null;
   target_type: 'all' | 'property' | 'staircase' | 'tenant';
   target_id: string | null;
+  audience: 'tenants' | 'staff' | 'all';
+  priority: 'normal' | 'important' | 'urgent';
   published_at: string | null;
   status: 'draft' | 'published' | 'archived';
   created_by: string | null;

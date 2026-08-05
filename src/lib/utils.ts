@@ -80,14 +80,53 @@ export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   rules: 'Ordningsregler',
   inspection: 'Besiktningsprotokoll',
   invoice: 'Hyresavi',
+  notice: 'Meddelande',
+  certificate: 'Intyg',
+  template: 'Mall',
   other: 'Övrigt',
 };
 
+export const DOCUMENT_CATEGORY_LABELS: Record<string, string> = {
+  residential_lease: 'Bostadshyresavtal',
+  premises_lease: 'Lokalhyresavtal',
+  parking_agreement: 'Parkeringsavtal',
+  storage_agreement: 'Förrådsavtal',
+  lease_addendum: 'Tilläggsavtal',
+  termination: 'Uppsägning',
+  inspection_protocol: 'Besiktningsprotokoll',
+  house_rules: 'Ordningsregler',
+  rent_notice: 'Hyresavi',
+  invoice: 'Faktura',
+  template: 'Mall',
+  other: 'Övrigt',
+};
+
+export const DOCUMENT_CONTRACT_STATUS_LABELS: Record<string, string> = {
+  not_applicable: 'Ej avtal',
+  draft: 'Utkast',
+  pending_signature: 'Väntar signering',
+  signed: 'Signerat',
+  cancelled: 'Avbrutet',
+  archived: 'Arkiverat',
+};
+
 export const NEWS_TARGET_LABELS: Record<string, string> = {
-  all: 'Alla hyresgäster',
+  all: 'Hela organisationen',
   property: 'Fastighet',
   staircase: 'Trapphus',
   tenant: 'Specifik hyresgäst',
+};
+
+export const NEWS_AUDIENCE_LABELS: Record<string, string> = {
+  tenants: 'Hyresgäster',
+  staff: 'Personal',
+  all: 'Personal och hyresgäster',
+};
+
+export const NEWS_PRIORITY_LABELS: Record<string, string> = {
+  normal: 'Normal',
+  important: 'Viktig',
+  urgent: 'Akut',
 };
 
 export const TERMINATION_STATUS_LABELS: Record<string, string> = {

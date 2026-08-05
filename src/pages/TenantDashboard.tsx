@@ -236,6 +236,40 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
               icon={<WashingMachine className="h-5 w-5" />}
             />
           </div>
+
+          <section className="mt-6 lg:hidden">
+            <button
+              onClick={() => onNavigate('news')}
+              className="mb-3 flex w-full items-center justify-between text-left"
+            >
+              <div className="flex items-center gap-2">
+                <Newspaper className="h-5 w-5 text-blue-600" />
+                <h2 className="text-lg font-bold text-slate-900">Nyheter</h2>
+              </div>
+              <ArrowRight className="h-5 w-5 text-slate-300" />
+            </button>
+
+            {data.news.length === 0 ? (
+              <Card className="p-5">
+                <div className="text-center py-3">
+                  <Newspaper className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-slate-500 text-sm">Inga nyheter</p>
+                </div>
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {data.news.slice(0, 3).map((item) => (
+                  <Card key={item.id} className="p-4 hover:shadow-md transition-shadow cursor-pointer" onClick={() => onNavigate('news')}>
+                    <h3 className="font-semibold text-slate-900 text-sm line-clamp-2">{item.title}</h3>
+                    <p className="mt-1 line-clamp-2 text-sm text-slate-500">{item.content}</p>
+                    {item.published_at && (
+                      <p className="text-xs text-slate-400 mt-2">{formatDate(new Date(item.published_at))}</p>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

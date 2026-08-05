@@ -13,9 +13,9 @@ import {
   EmptyState,
   LoadingPage,
 } from '../components/ui';
-import { formatDate, DOCUMENT_TYPE_LABELS } from '../lib/utils';
+import { formatDate, DOCUMENT_CATEGORY_LABELS, DOCUMENT_CONTRACT_STATUS_LABELS, DOCUMENT_TYPE_LABELS } from '../lib/utils';
 import { Document, Profile, Property } from '../types';
-import { FileText, Download, Upload, Search, Trash2 } from 'lucide-react';
+import { FileText, Download, Upload, Search, Trash2, FolderOpen } from 'lucide-react';
 
 interface DocumentsPageProps { onNavigate: (page: string) => void; }
 export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
@@ -28,19 +28,26 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [filterType, setFilterType] = useState('all');
+  const [filterCategory, setFilterCategory] = useState('all');
   const [searchTitle, setSearchTitle] = useState('');
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
+  const [savingDocument, setSavingDocument] = useState(false);
+  const [formError, setFormError] = useState('');
 
   const [newTitle, setNewTitle] = useState('');
   const [newType, setNewType] = useState('contract');
+  const [newCategory, setNewCategory] = useState('residential_lease');
+  const [newContractStatus, setNewContractStatus] = useState('signed');
   const [newVisibility, setNewVisibility] = useState('tenant');
   const [newTenantId, setNewTenantId] = useState('');
   const [newPropertyId, setNewPropertyId] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newFileUrl, setNewFileUrl] = useState('');
+  const [newFile, setNewFile] = useState<File | null>(null);
 
   const isStaff = user?.role === 'staff' || user?.role === 'admin' || user?.role === 'superadmin';
   const canDeleteDocuments = user?.role === 'admin' || user?.role === 'superadmin';
+  const canCreateDocuments = isStaff;
 
   useEffect(() => {
     fetchDocuments();
@@ -55,13 +62,52 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
     if (filterType !== 'all') {
       filtered = filtered.filter((d) => d.document_type === filterType);
     }
+    if (filterCategory !== 'all') {
+      filtered = filtered.filter((d) => (d.document_category || fallbackCategory(d.document_type)) === filterCategory);
+    }
     if (searchTitle) {
       filtered = filtered.filter((d) =>
         d.title.toLowerCase().includes(searchTitle.toLowerCase())
       );
     }
     setDocuments(filtered);
-  }, [filterType, searchTitle, allDocuments]);
+  }, [filterType, filterCategory, searchTitle, allDocuments]);
+
+  const resetCreateForm = () => {
+    setNewTitle('');
+    setNewType('contract');
+    setNewCategory('residential_lease');
+    setNewContractStatus('signed');
+    setNewVisibility('tenant');
+    setNewTenantId('');
+    setNewPropertyId('');
+    setNewDescription('');
+    setNewFileUrl('');
+    setNewFile(null);
+    setFormError('');
+  };
+
+  const fallbackCategory = (type: string) => {
+    if (type === 'contract') return 'residential_lease';
+    if (type === 'inspection') return 'inspection_protocol';
+    if (type === 'rules') return 'house_rules';
+    if (type === 'invoice') return 'invoice';
+    return 'other';
+  };
+
+  const formatBytes = (bytes?: number | null) => {
+    if (!bytes) return '';
+    if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} kB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const safePathPart = (value: string) =>
+    value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase();
 
   const fetchDocuments = async () => {
     try {
@@ -114,32 +160,84 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
 
   const createDocument = async () => {
     if (!newTitle.trim()) return;
+    setFormError('');
+    setSavingDocument(true);
+
     try {
+      let fileUrl = newFileUrl || null;
+      let fileName = newFileUrl ? newFileUrl.split('/').pop() || newTitle : null;
+      let fileSize = 0;
+      let storageBucket: string | null = null;
+      let storagePath: string | null = null;
+
+      if (newFile) {
+        const organisationPath = user?.organisation_id || 'platform';
+        const timestamp = Date.now();
+        const path = `${organisationPath}/${user?.id || 'unknown'}/${timestamp}-${safePathPart(newFile.name)}`;
+        const { error: uploadError } = await supabase.storage
+          .from('vihem-documents')
+          .upload(path, newFile, { upsert: false });
+
+        if (uploadError) {
+          if (uploadError.message.toLowerCase().includes('bucket')) {
+            throw new Error('Storage-bucketen vihem-documents saknas. Kör senaste Supabase-migrationerna först.');
+          }
+          throw uploadError;
+        }
+
+        storageBucket = 'vihem-documents';
+        storagePath = path;
+        fileName = newFile.name;
+        fileSize = newFile.size;
+      }
+
       const { error } = await supabase.from('vihem_documents').insert({
         organisation_id: user?.organisation_id || null,
         title: newTitle,
         document_type: newType,
+        document_category: newCategory,
+        contract_status: newType === 'contract' ? newContractStatus : 'not_applicable',
         visibility: newVisibility,
         description: newDescription || null,
-        file_url: newFileUrl || null,
-        file_name: newFileUrl ? newFileUrl.split('/').pop() || newTitle : null,
-        file_size: 0,
+        file_url: fileUrl,
+        file_name: fileName,
+        file_size: fileSize,
+        storage_bucket: storageBucket,
+        storage_path: storagePath,
         tenant_id: newTenantId || null,
         property_id: newPropertyId || null,
         created_by: user?.id,
       });
       if (error) throw error;
-      setNewTitle('');
-      setNewType('contract');
-      setNewVisibility('tenant');
-      setNewTenantId('');
-      setNewPropertyId('');
-      setNewDescription('');
-      setNewFileUrl('');
+      resetCreateForm();
       setShowCreateModal(false);
       fetchDocuments();
     } catch (error) {
       console.error('Error creating document:', error);
+      setFormError(error instanceof Error ? error.message : 'Kunde inte skapa dokumentet.');
+    } finally {
+      setSavingDocument(false);
+    }
+  };
+
+  const downloadDocument = async (doc: Document) => {
+    try {
+      if (doc.storage_bucket && doc.storage_path) {
+        const { data, error } = await supabase.storage
+          .from(doc.storage_bucket)
+          .createSignedUrl(doc.storage_path, 60 * 10);
+        if (error) throw error;
+        if (data?.signedUrl) {
+          window.open(data.signedUrl, '_blank');
+          return;
+        }
+      }
+      if (doc.file_url) {
+        window.open(doc.file_url, '_blank');
+      }
+    } catch (error) {
+      console.error('Error opening document:', error);
+      window.alert('Kunde inte öppna dokumentet.');
     }
   };
 
@@ -149,6 +247,14 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
 
     try {
       setDeletingDocumentId(doc.id);
+      if (doc.storage_bucket && doc.storage_path) {
+        const { error: storageError } = await supabase.storage
+          .from(doc.storage_bucket)
+          .remove([doc.storage_path]);
+        if (storageError) {
+          console.warn('Could not delete storage object, deleting database row only:', storageError);
+        }
+      }
       const { error } = await supabase.from('vihem_documents').delete().eq('id', doc.id);
       if (error) throw error;
 
@@ -169,9 +275,44 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
       rules: 'bg-amber-100 text-amber-700',
       inspection: 'bg-orange-100 text-orange-700',
       other: 'bg-slate-100 text-slate-700',
+      notice: 'bg-purple-100 text-purple-700',
+      certificate: 'bg-teal-100 text-teal-700',
+      template: 'bg-indigo-100 text-indigo-700',
     };
     return colors[type] || colors.other;
   };
+
+  const typeOptions = [
+    { value: 'contract', label: 'Avtal' },
+    { value: 'rules', label: 'Regler' },
+    { value: 'inspection', label: 'Besiktning' },
+    { value: 'invoice', label: 'Faktura' },
+    { value: 'notice', label: 'Meddelande' },
+    { value: 'certificate', label: 'Intyg' },
+    { value: 'template', label: 'Mall' },
+    { value: 'other', label: 'Övrigt' },
+  ];
+
+  const categoryOptions = [
+    { value: 'residential_lease', label: 'Bostadshyresavtal' },
+    { value: 'premises_lease', label: 'Lokalhyresavtal' },
+    { value: 'parking_agreement', label: 'Parkeringsavtal' },
+    { value: 'storage_agreement', label: 'Förrådsavtal' },
+    { value: 'lease_addendum', label: 'Tilläggsavtal' },
+    { value: 'termination', label: 'Uppsägning' },
+    { value: 'inspection_protocol', label: 'Besiktningsprotokoll' },
+    { value: 'house_rules', label: 'Ordningsregler' },
+    { value: 'rent_notice', label: 'Hyresavi' },
+    { value: 'invoice', label: 'Faktura' },
+    { value: 'template', label: 'Mall' },
+    { value: 'other', label: 'Övrigt' },
+  ];
+
+  const categoryCounts = allDocuments.reduce<Record<string, number>>((acc, doc) => {
+    const category = doc.document_category || fallbackCategory(doc.document_type);
+    acc[category] = (acc[category] || 0) + 1;
+    return acc;
+  }, {});
 
   if (loading) return <LoadingPage />;
 
@@ -182,7 +323,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
           title="Dokument"
           subtitle="Dina dokument och kontrakt"
           action={
-            isStaff ? (
+            canCreateDocuments ? (
               <Button onClick={() => setShowCreateModal(true)} variant="primary" className="gap-2">
                 <Upload size={18} />
                 Nytt dokument
@@ -190,6 +331,32 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
             ) : undefined
           }
         />
+
+        <div className="mb-4 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button
+            onClick={() => setFilterCategory('all')}
+            className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+              filterCategory === 'all' ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/20' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            Alla ({allDocuments.length})
+          </button>
+          {categoryOptions.map((category) => {
+            const count = categoryCounts[category.value] || 0;
+            if (count === 0) return null;
+            return (
+              <button
+                key={category.value}
+                onClick={() => setFilterCategory(category.value)}
+                className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+                  filterCategory === category.value ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/20' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                {category.label} ({count})
+              </button>
+            );
+          })}
+        </div>
 
         {/* Filters */}
         <div className="mb-6 flex flex-col sm:flex-row gap-3">
@@ -214,6 +381,9 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
             <option value="rules">Regler</option>
             <option value="inspection">Besiktning</option>
             <option value="invoice">Faktura</option>
+            <option value="notice">Meddelande</option>
+            <option value="certificate">Intyg</option>
+            <option value="template">Mall</option>
             <option value="other">Övrigt</option>
           </select>
 
@@ -256,6 +426,16 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
                   </div>
 
                   <h3 className="font-semibold text-slate-900 mb-1 line-clamp-2">{doc.title}</h3>
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    <Badge className="bg-slate-100 text-slate-700">
+                      {DOCUMENT_CATEGORY_LABELS[(doc.document_category || fallbackCategory(doc.document_type)) as keyof typeof DOCUMENT_CATEGORY_LABELS] || 'Övrigt'}
+                    </Badge>
+                    {doc.document_type === 'contract' && (
+                      <Badge className={doc.contract_status === 'signed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}>
+                        {DOCUMENT_CONTRACT_STATUS_LABELS[doc.contract_status || 'not_applicable']}
+                      </Badge>
+                    )}
+                  </div>
 
                   {doc.description && (
                     <p className="text-sm text-slate-500 mb-3 line-clamp-2">{doc.description}</p>
@@ -268,15 +448,19 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
                     <p className="text-xs text-slate-500 mb-1">Fastighet: {doc.property.name}</p>
                   )}
 
-                  <p className="text-xs text-slate-400 mb-4">{formatDate(doc.created_at)}</p>
+                  <p className="text-xs text-slate-400 mb-4">
+                    {formatDate(doc.created_at)}
+                    {doc.file_name ? ` • ${doc.file_name}` : ''}
+                    {doc.file_size ? ` • ${formatBytes(doc.file_size)}` : ''}
+                  </p>
 
                   <div className="flex flex-col gap-2">
-                    {doc.file_url ? (
+                    {doc.file_url || doc.storage_path ? (
                       <Button
                         variant="primary"
                         size="sm"
                         className="w-full gap-2"
-                        onClick={() => window.open(doc.file_url, '_blank')}
+                        onClick={() => downloadDocument(doc)}
                       >
                         <Download size={14} />
                         Ladda ner
@@ -309,6 +493,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
                   <tr className="border-b border-slate-200 bg-slate-50">
                     <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Titel</th>
                     <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Typ</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Kategori</th>
                     {isStaff && (
                       <>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Hyresgäst</th>
@@ -328,6 +513,18 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
                           {DOCUMENT_TYPE_LABELS[doc.document_type as keyof typeof DOCUMENT_TYPE_LABELS] || doc.document_type}
                         </Badge>
                       </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          <Badge className="bg-slate-100 text-slate-700">
+                            {DOCUMENT_CATEGORY_LABELS[(doc.document_category || fallbackCategory(doc.document_type)) as keyof typeof DOCUMENT_CATEGORY_LABELS] || 'Övrigt'}
+                          </Badge>
+                          {doc.document_type === 'contract' && (
+                            <Badge className={doc.contract_status === 'signed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}>
+                              {DOCUMENT_CONTRACT_STATUS_LABELS[doc.contract_status || 'not_applicable']}
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
                       {isStaff && (
                         <>
                           <td className="px-4 py-3 text-sm text-slate-600">{doc.tenant?.name || '—'}</td>
@@ -337,11 +534,11 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
                       <td className="px-4 py-3 text-sm text-slate-500">{formatDate(doc.created_at)}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-2">
-                          {doc.file_url ? (
+                          {doc.file_url || doc.storage_path ? (
                             <Button
                               variant="secondary"
                               size="sm"
-                              onClick={() => window.open(doc.file_url, '_blank')}
+                              onClick={() => downloadDocument(doc)}
                               className="gap-1"
                             >
                               <Download size={14} />
@@ -373,7 +570,15 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
         )}
       </div>
 
-      <Modal open={showCreateModal} onClose={() => setShowCreateModal(false)} title="Nytt dokument" size="lg">
+      <Modal
+        open={showCreateModal}
+        onClose={() => {
+          setShowCreateModal(false);
+          resetCreateForm();
+        }}
+        title="Nytt dokument"
+        size="lg"
+      >
         <div className="space-y-4">
           <Input
             label="Titel"
@@ -382,18 +587,17 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
             onChange={(e) => setNewTitle(e.target.value)}
           />
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Select
               label="Dokumenttyp"
               value={newType}
-              onChange={(e) => setNewType(e.target.value)}
-              options={[
-                { value: 'contract', label: 'Kontrakt' },
-                { value: 'rules', label: 'Regler' },
-                { value: 'inspection', label: 'Besiktning' },
-                { value: 'invoice', label: 'Faktura' },
-                { value: 'other', label: 'Övrigt' },
-              ]}
+              onChange={(e) => {
+                const nextType = e.target.value;
+                setNewType(nextType);
+                setNewCategory(fallbackCategory(nextType));
+                setNewContractStatus(nextType === 'contract' ? 'signed' : 'not_applicable');
+              }}
+              options={typeOptions}
             />
             <Select
               label="Synlighet"
@@ -408,7 +612,30 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Select
+              label="Kategori"
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              options={categoryOptions}
+            />
+            <Select
+              label="Avtalsstatus"
+              value={newContractStatus}
+              onChange={(e) => setNewContractStatus(e.target.value)}
+              disabled={newType !== 'contract'}
+              options={[
+                { value: 'not_applicable', label: 'Ej avtal' },
+                { value: 'draft', label: 'Utkast' },
+                { value: 'pending_signature', label: 'Väntar signering' },
+                { value: 'signed', label: 'Signerat' },
+                { value: 'cancelled', label: 'Avbrutet' },
+                { value: 'archived', label: 'Arkiverat' },
+              ]}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Select
               label="Hyresgäst (valfritt)"
               value={newTenantId}
@@ -438,17 +665,63 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
           />
 
           <Input
-            label="Fil-URL"
+            label="Extern fil-URL (valfritt)"
             placeholder="https://example.com/dokument.pdf"
             value={newFileUrl}
             onChange={(e) => setNewFileUrl(e.target.value)}
+            disabled={Boolean(newFile)}
           />
 
+          <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-4">
+            <label className="flex cursor-pointer flex-col items-center justify-center gap-2 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                <FolderOpen className="h-6 w-6" />
+              </span>
+              <span className="text-sm font-semibold text-slate-800">
+                {newFile ? newFile.name : 'Ladda upp PDF, bild eller Word-fil'}
+              </span>
+              <span className="text-xs text-slate-500">
+                {newFile ? formatBytes(newFile.size) : 'Max 50 MB. Uppladdningen sparas i vihem-documents.'}
+              </span>
+              <input
+                type="file"
+                accept="application/pdf,image/jpeg,image/png,image/webp,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                className="sr-only"
+                onChange={(event) => {
+                  setNewFile(event.target.files?.[0] || null);
+                  if (event.target.files?.[0]) setNewFileUrl('');
+                }}
+              />
+            </label>
+            {newFile && (
+              <button
+                type="button"
+                onClick={() => setNewFile(null)}
+                className="mt-3 w-full rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+              >
+                Ta bort vald fil
+              </button>
+            )}
+          </div>
+
+          {formError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+              {formError}
+            </div>
+          )}
+
           <div className="flex gap-3 pt-2">
-            <Button variant="secondary" onClick={() => setShowCreateModal(false)} className="flex-1">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowCreateModal(false);
+                resetCreateForm();
+              }}
+              className="flex-1"
+            >
               Avbryt
             </Button>
-            <Button variant="primary" onClick={createDocument} className="flex-1">
+            <Button variant="primary" onClick={createDocument} className="flex-1" loading={savingDocument}>
               Skapa dokument
             </Button>
           </div>

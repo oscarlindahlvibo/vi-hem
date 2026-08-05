@@ -12,7 +12,7 @@ import {
   EmptyState,
   LoadingPage,
 } from '../components/ui';
-import { formatDate, NEWS_TARGET_LABELS } from '../lib/utils';
+import { formatDate, NEWS_AUDIENCE_LABELS, NEWS_PRIORITY_LABELS, NEWS_TARGET_LABELS } from '../lib/utils';
 import type { News, Property } from '../types';
 import { Newspaper, Plus, Edit2, Calendar } from 'lucide-react';
 
@@ -30,8 +30,10 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
   // Form state
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
+  const [newAudience, setNewAudience] = useState<'tenants' | 'staff' | 'all'>('tenants');
   const [newTarget, setNewTarget] = useState<'all' | 'property'>('all');
   const [newTargetId, setNewTargetId] = useState('');
+  const [newPriority, setNewPriority] = useState<'normal' | 'important' | 'urgent'>('normal');
   const [newStatus, setNewStatus] = useState('published');
   const [newPublishedAt, setNewPublishedAt] = useState('');
   const [newImageUrl, setNewImageUrl] = useState('');
@@ -88,8 +90,10 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
   const resetForm = () => {
     setNewTitle('');
     setNewContent('');
+    setNewAudience('tenants');
     setNewTarget('all');
     setNewTargetId('');
+    setNewPriority('normal');
     setNewStatus('published');
     setNewPublishedAt('');
     setNewImageUrl('');
@@ -107,8 +111,10 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
       const newsData = {
         title: newTitle,
         content: newContent,
+        audience: newAudience,
         target_type: newTarget,
         target_id: newTarget === 'property' ? newTargetId || null : null,
+        priority: newPriority,
         status: newStatus,
         published_at: newPublishedAt || new Date().toISOString(),
         image_url: newImageUrl || null,
@@ -142,8 +148,10 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
         .update({
           title: newTitle,
           content: newContent,
+          audience: newAudience,
           target_type: newTarget,
           target_id: newTarget === 'property' ? newTargetId || null : null,
+          priority: newPriority,
           status: newStatus,
           published_at: newPublishedAt || new Date().toISOString(),
           image_url: newImageUrl || null,
@@ -178,8 +186,10 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
     setEditingNews(item);
     setNewTitle(item.title);
     setNewContent(item.content);
+    setNewAudience(item.audience || 'tenants');
     setNewTarget(item.target_type === 'property' ? 'property' : 'all');
     setNewTargetId(item.target_type === 'property' ? item.target_id || '' : '');
+    setNewPriority(item.priority || 'normal');
     setNewStatus(item.status);
     setNewPublishedAt(item.published_at || '');
     setNewImageUrl(item.image_url || '');
@@ -196,6 +206,17 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
         return 'bg-red-100 text-red-800';
       default:
         return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getPriorityColor = (priority: string): string => {
+    switch (priority) {
+      case 'urgent':
+        return 'bg-red-100 text-red-800';
+      case 'important':
+        return 'bg-amber-100 text-amber-800';
+      default:
+        return 'bg-blue-100 text-blue-800';
     }
   };
 
@@ -276,16 +297,24 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                     <div className="flex items-center gap-2">
                       <Newspaper className="w-5 h-5 text-blue-600" />
                       {canManageNews && (
-                        <Badge
-                          className={getStatusColor(item.status)}
-                          text={
-                            item.status === 'published'
-                              ? 'Publicerad'
-                              : item.status === 'draft'
-                                ? 'Utkast'
-                                : 'Arkiverad'
-                          }
-                        />
+                        <>
+                          <Badge
+                            className={getStatusColor(item.status)}
+                            text={
+                              item.status === 'published'
+                                ? 'Publicerad'
+                                : item.status === 'draft'
+                                  ? 'Utkast'
+                                  : 'Arkiverad'
+                            }
+                          />
+                          <Badge className={getPriorityColor(item.priority || 'normal')}>
+                            {NEWS_PRIORITY_LABELS[item.priority || 'normal']}
+                          </Badge>
+                          <Badge className="bg-slate-100 text-slate-700">
+                            {NEWS_AUDIENCE_LABELS[item.audience || 'tenants']}
+                          </Badge>
+                        </>
                       )}
                     </div>
 
@@ -356,6 +385,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                         <p>
                           Målgrupp:{' '}
                           <span className="font-medium">
+                            {NEWS_AUDIENCE_LABELS[item.audience || 'tenants']} ·{' '}
                             {NEWS_TARGET_LABELS[
                               item.target_type as keyof typeof NEWS_TARGET_LABELS
                             ] || item.target_type}
@@ -407,10 +437,25 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Målgrupp
+                      Mottagare
+                    </label>
+                    <Select
+                      value={newAudience}
+                      onChange={(e: any) => setNewAudience(e.target.value)}
+                      options={[
+                        { value: 'tenants', label: 'Hyresgäster' },
+                        { value: 'staff', label: 'Personal' },
+                        { value: 'all', label: 'Personal och hyresgäster' },
+                      ]}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Område
                     </label>
                     <Select
                       value={newTarget}
@@ -419,12 +464,14 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                         if (e.target.value === 'all') setNewTargetId('');
                       }}
                       options={[
-                        { value: 'all', label: 'Alla hyresgäster i organisationen' },
+                        { value: 'all', label: 'Alla i valda mottagargruppen' },
                         { value: 'property', label: 'Särskild fastighet' },
                       ]}
                     />
                   </div>
+                </div>
 
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Status
@@ -436,6 +483,20 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                         { value: 'draft', label: 'Utkast' },
                         { value: 'published', label: 'Publicerad' },
                         { value: 'archived', label: 'Arkiverad' },
+                      ]}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Prioritet
+                    </label>
+                    <Select
+                      value={newPriority}
+                      onChange={(e: any) => setNewPriority(e.target.value)}
+                      options={[
+                        { value: 'normal', label: 'Normal' },
+                        { value: 'important', label: 'Viktig' },
+                        { value: 'urgent', label: 'Akut' },
                       ]}
                     />
                   </div>

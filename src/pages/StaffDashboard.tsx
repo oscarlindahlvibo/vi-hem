@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, Badge, StatCard, LoadingPage } from '../components/ui';
-import { formatDate, formatDateTime, MR_STATUS_LABELS, getMRStatusColor, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, TIME_CATEGORY_LABELS } from '../lib/utils';
-import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus } from '../types';
-import { Wrench, ClipboardList, Clock, AlertCircle, CheckCircle, Timer, Plus, ArrowRight, CalendarX } from 'lucide-react';
+import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, TIME_CATEGORY_LABELS } from '../lib/utils';
+import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News } from '../types';
+import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, MessageCircle, Users } from 'lucide-react';
 
 interface StaffDashboardProps {
   onNavigate: (page: string) => void;
@@ -50,6 +50,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   const [newWorkOrders, setNewWorkOrders] = useState<WorkOrder[]>([]);
   const [todayAbsences, setTodayAbsences] = useState<StaffAbsenceRequest[]>([]);
   const [clockedInEntries, setClockedInEntries] = useState<TimeEntry[]>([]);
+  const [dashboardNews, setDashboardNews] = useState<News[]>([]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -68,6 +69,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           newWODetailsResult,
           todayAbsencesResult,
           clockedInResult,
+          newsResult,
         ] = await Promise.all([
           // Count new maintenance requests (status='received')
           supabase
@@ -141,6 +143,13 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
                 .gte('start_time', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
                 .order('start_time', { ascending: true })
             : Promise.resolve({ data: [], error: null }),
+
+          supabase
+            .from('vihem_news')
+            .select('*')
+            .eq('status', 'published')
+            .order('published_at', { ascending: false })
+            .limit(4),
         ]);
 
         setNewMRCount(newMRResult.count || 0);
@@ -167,6 +176,10 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
         if (clockedInResult.data) {
           setClockedInEntries(clockedInResult.data as TimeEntry[]);
         }
+
+        if (newsResult.data) {
+          setDashboardNews((newsResult.data as News[]).filter(item => ['staff', 'all'].includes(item.audience || 'staff')));
+        }
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
@@ -189,36 +202,201 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
     return <LoadingPage />;
   }
 
+  const firstName = user?.name?.split(' ')[0] || 'där';
+  const attentionCount = newMRCount + urgentMRCount + myWorkOrdersCount + newWorkOrdersCount + todayAbsences.length;
+  const quickTiles = [
+    {
+      label: 'Nyheter',
+      count: null,
+      icon: <Newspaper className="h-6 w-6" />,
+      className: 'bg-blue-50 text-blue-600',
+      page: 'news',
+    },
+    {
+      label: 'Arbetsordrar',
+      count: myWorkOrdersCount + newWorkOrdersCount,
+      icon: <ClipboardList className="h-6 w-6" />,
+      className: 'bg-orange-50 text-orange-500',
+      page: 'workorders',
+    },
+    {
+      label: 'Stämpelklocka',
+      count: null,
+      icon: <Timer className="h-6 w-6" />,
+      className: 'bg-sky-50 text-sky-600',
+      page: 'timetracking',
+    },
+    {
+      label: 'Chatt',
+      count: null,
+      icon: <MessageCircle className="h-6 w-6" />,
+      className: 'bg-rose-50 text-rose-500',
+      page: 'chat',
+    },
+    {
+      label: 'Personal',
+      count: user?.role === 'admin' ? clockedInEntries.length : null,
+      icon: <Users className="h-6 w-6" />,
+      className: 'bg-violet-50 text-violet-500',
+      page: user?.role === 'admin' ? 'admin-staff' : 'timetracking',
+    },
+  ];
+
   return (
-    <div className="space-y-6">
-      {/* Stat Cards Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          label="Nya felanmälningar"
-          value={newMRCount}
-          icon={<AlertCircle className="w-6 h-6" />}
-          color="text-red-600 bg-red-50"
-          onClick={() => onNavigate('maintenance')}
-        />
-        <StatCard
-          label="Akuta ärenden"
-          value={urgentMRCount}
-          icon={<Wrench className="w-6 h-6" />}
-          color="text-orange-600 bg-orange-50"
-        />
-        <StatCard
-          label="Mina arbetsordrar"
-          value={myWorkOrdersCount}
-          icon={<ClipboardList className="w-6 h-6" />}
-          color="text-blue-600 bg-blue-50"
-          onClick={() => onNavigate('workorders')}
-        />
-        <StatCard
-          label="Nya arbetsordrar"
-          value={newWorkOrdersCount}
-          icon={<Plus className="w-6 h-6" />}
-          color="text-green-600 bg-green-50"
-        />
+    <div className="-mx-4 -mt-4 space-y-3 bg-[#f4f5f7] sm:mx-0 sm:mt-0 sm:space-y-6 sm:bg-transparent">
+      <section className="bg-white px-5 pb-4 pt-5 shadow-sm sm:rounded-2xl sm:border sm:border-slate-200 sm:px-6">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-500 to-violet-500 text-base font-black text-white shadow-sm">
+              {user?.name?.charAt(0) || 'V'}
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate text-2xl font-black tracking-[-0.02em] text-slate-950">
+                God kväll, {firstName}
+              </h1>
+              <p className="mt-0.5 text-sm font-medium text-slate-500">
+                {user?.role === 'admin' ? 'Överblick över dagens drift' : 'Din arbetsdag i VI-HEM'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onNavigate('notifications')}
+            className="relative rounded-2xl p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Notiser"
+          >
+            <AlertCircle className="h-6 w-6" />
+            {attentionCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-rose-500 px-1 text-xs font-bold text-white">
+                {attentionCount > 99 ? '99+' : attentionCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        <div className="mt-5 flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {quickTiles.map((tile) => (
+            <button
+              key={tile.label}
+              onClick={() => onNavigate(tile.page)}
+              className="relative flex min-w-[7.4rem] flex-col items-center gap-2 rounded-2xl px-3 py-3 text-center transition-transform active:scale-[0.98] sm:min-w-[8.5rem]"
+            >
+              <span className={`flex h-16 w-full items-center justify-center rounded-2xl ${tile.className}`}>
+                {tile.icon}
+              </span>
+              <span className="max-w-full truncate text-sm font-semibold text-slate-700">{tile.label}</span>
+              {tile.count !== null && tile.count > 0 && (
+                <span className="absolute right-2 top-1 flex h-7 min-w-7 items-center justify-center rounded-full bg-rose-500 px-1.5 text-sm font-bold text-white shadow-sm">
+                  {tile.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-white px-5 py-5 shadow-sm sm:rounded-2xl sm:border sm:border-slate-200 sm:px-6">
+        <button
+          onClick={() => onNavigate('timetracking')}
+          className="mb-4 flex w-full items-center justify-between text-left"
+        >
+          <h2 className="text-xl font-black tracking-[-0.02em] text-slate-950">Stämpelklocka</h2>
+          <ArrowRight className="h-5 w-5 text-slate-300" />
+        </button>
+        <button
+          onClick={() => onNavigate('timetracking')}
+          className={`flex w-full items-center justify-center gap-3 rounded-full px-5 py-4 text-base font-bold text-white shadow-lg transition-transform active:scale-[0.99] ${
+            activeTimeEntry ? 'bg-emerald-500 shadow-emerald-500/25 hover:bg-emerald-600' : 'bg-[#2d9cff] shadow-blue-500/25 hover:bg-blue-600'
+          }`}
+        >
+          <Timer className="h-6 w-6" />
+          {activeTimeEntry ? 'Fortsätt pass' : 'Stämpla in'}
+        </button>
+        {activeTimeEntry && (
+          <p className="mt-3 text-center text-sm font-medium text-slate-500">
+            Startad {formatDateTime(activeTimeEntry.start_time)}
+          </p>
+        )}
+      </section>
+
+      <section className="bg-white shadow-sm sm:rounded-2xl sm:border sm:border-slate-200">
+        <button
+          onClick={() => onNavigate(user?.role === 'admin' ? 'timetracking' : 'workorders')}
+          className="flex w-full items-center justify-between px-5 py-5 text-left sm:px-6"
+        >
+          <div className="flex items-center gap-3">
+            <span className="flex h-11 min-w-11 items-center justify-center rounded-full bg-orange-400 text-lg font-black text-white">
+              {attentionCount}
+            </span>
+            <h2 className="text-xl font-black tracking-[-0.02em] text-slate-950">Behöver din uppmärksamhet</h2>
+          </div>
+          <ArrowRight className="h-5 w-5 text-slate-300" />
+        </button>
+        <div className="border-t border-slate-100 px-5 py-4 sm:px-6">
+          <button
+            onClick={() => onNavigate(myWorkOrdersCount > 0 ? 'workorders' : 'maintenance')}
+            className="flex w-full items-center justify-between gap-4 rounded-2xl bg-white text-left"
+          >
+            <div className="flex min-w-0 items-center gap-4">
+              <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 shadow-sm">
+                <ClipboardList className="h-8 w-8" />
+              </span>
+              <p className="min-w-0 text-base font-semibold text-slate-950">
+                <span className="font-black">{myWorkOrdersCount + newWorkOrdersCount}</span> uppgifter väntar på dig i <span className="font-black">Arbetsordrar</span>
+              </p>
+            </div>
+            <span className="shrink-0 rounded-full border border-slate-200 px-4 py-2 text-sm font-bold text-blue-500">Öppna</span>
+          </button>
+        </div>
+      </section>
+
+      <section className="bg-white shadow-sm sm:rounded-2xl sm:border sm:border-slate-200">
+        <button
+          onClick={() => onNavigate('news')}
+          className="flex w-full items-center justify-between px-5 py-5 text-left sm:px-6"
+        >
+          <div>
+            <h2 className="text-xl font-black tracking-[-0.02em] text-slate-950">Nyheter</h2>
+            <p className="mt-1 text-sm font-medium text-slate-500">Information till din organisation</p>
+          </div>
+          <ArrowRight className="h-5 w-5 text-slate-300" />
+        </button>
+        <div className="border-t border-slate-100">
+          {dashboardNews.length === 0 ? (
+            <div className="px-5 py-6 text-sm font-medium text-slate-500 sm:px-6">
+              Inga publicerade nyheter just nu.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {dashboardNews.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => onNavigate('news')}
+                  className="flex w-full items-start gap-4 px-5 py-4 text-left transition-colors hover:bg-slate-50 sm:px-6"
+                >
+                  <span className={`mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
+                    item.priority === 'urgent' ? 'bg-red-50 text-red-600' : item.priority === 'important' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
+                  }`}>
+                    <Newspaper className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-black text-slate-950">{item.title}</span>
+                    <span className="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">{item.content}</span>
+                    {item.published_at && (
+                      <span className="mt-2 block text-xs font-semibold text-slate-400">{formatDate(item.published_at)}</span>
+                    )}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <div className="hidden grid-cols-1 gap-4 sm:grid sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Nya felanmälningar" value={newMRCount} icon={<AlertCircle className="w-6 h-6" />} color="text-red-600 bg-red-50" onClick={() => onNavigate('maintenance')} />
+        <StatCard label="Akuta ärenden" value={urgentMRCount} icon={<Wrench className="w-6 h-6" />} color="text-orange-600 bg-orange-50" />
+        <StatCard label="Mina arbetsordrar" value={myWorkOrdersCount} icon={<ClipboardList className="w-6 h-6" />} color="text-blue-600 bg-blue-50" onClick={() => onNavigate('workorders')} />
+        <StatCard label="Nya arbetsordrar" value={newWorkOrdersCount} icon={<Plus className="w-6 h-6" />} color="text-green-600 bg-green-50" />
       </div>
 
       {user?.role === 'admin' && (
@@ -320,32 +498,6 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
             </div>
           </Card>
         </div>
-      )}
-
-      {/* Active Time Entry Card */}
-      {activeTimeEntry && (
-        <Card className="p-6 border-2 border-blue-200 bg-blue-50">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-blue-600 text-white">
-                <Timer className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-slate-800">Pågående tidsstämpling</h3>
-                <p className="text-sm text-slate-600 mt-1">
-                  Startad: {formatDateTime(activeTimeEntry.start_time)}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => onNavigate('timetracking')}
-              className="inline-flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-            >
-              Stämpla ut
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </Card>
       )}
 
       {/* My Assigned Work Orders */}

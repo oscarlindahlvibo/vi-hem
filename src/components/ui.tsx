@@ -8,7 +8,7 @@ interface BadgeProps {
 
 export function Badge({ children, className = '', text }: BadgeProps) {
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${className}`}>
+    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ring-black/5 ${className}`}>
       {children ?? text}
     </span>
   );
@@ -21,18 +21,18 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export function Button({ children, variant = 'primary', size = 'md', loading, className = '', disabled, ...props }: ButtonProps) {
-  const base = 'inline-flex items-center justify-center gap-2 font-medium rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-60 disabled:cursor-not-allowed';
+  const base = 'inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-55 active:translate-y-px';
   const variants = {
-    primary: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
-    secondary: 'bg-slate-100 text-slate-700 hover:bg-slate-200 focus:ring-slate-400',
-    danger: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500',
-    ghost: 'text-slate-600 hover:bg-slate-100 focus:ring-slate-400',
-    outline: 'border border-slate-300 text-slate-700 hover:bg-slate-50 focus:ring-slate-400',
+    primary: 'bg-blue-600 text-white shadow-sm shadow-blue-600/25 hover:bg-blue-700 focus:ring-blue-500',
+    secondary: 'bg-white text-slate-800 ring-1 ring-slate-200 shadow-sm hover:bg-slate-50 hover:ring-slate-300 focus:ring-slate-400',
+    danger: 'bg-red-600 text-white shadow-sm shadow-red-600/20 hover:bg-red-700 focus:ring-red-500',
+    ghost: 'text-slate-600 hover:bg-white/80 hover:text-slate-950 focus:ring-slate-400',
+    outline: 'border border-slate-300 bg-white/70 text-slate-800 shadow-sm hover:bg-white hover:border-slate-400 focus:ring-slate-400',
   };
   const sizes = {
-    sm: 'text-xs px-3 py-1.5',
-    md: 'text-sm px-4 py-2',
-    lg: 'text-base px-6 py-3',
+    sm: 'px-3 py-1.5 text-xs',
+    md: 'px-4 py-2 text-sm',
+    lg: 'px-5 py-3 text-base',
   };
   return (
     <button
@@ -60,11 +60,11 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 export function Input({ label, error, hint, className = '', id, ...props }: InputProps) {
   const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
   return (
-    <div className="flex flex-col gap-1">
-      {label && <label htmlFor={inputId} className="text-sm font-medium text-slate-700">{label}</label>}
+    <div className="flex flex-col gap-1.5">
+      {label && <label htmlFor={inputId} className="text-sm font-semibold text-slate-700">{label}</label>}
       <input
         id={inputId}
-        className={`w-full border rounded-lg px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${error ? 'border-red-400 bg-red-50' : 'border-slate-300 bg-white'} ${className}`}
+        className={`vihem-field vihem-focus w-full rounded-lg border px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 transition-colors ${error ? 'border-red-400 bg-red-50' : ''} ${className}`}
         {...props}
       />
       {error && <p className="text-xs text-red-600">{error}</p>}
@@ -81,11 +81,11 @@ interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement
 export function Textarea({ label, error, className = '', id, ...props }: TextareaProps) {
   const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
   return (
-    <div className="flex flex-col gap-1">
-      {label && <label htmlFor={inputId} className="text-sm font-medium text-slate-700">{label}</label>}
+    <div className="flex flex-col gap-1.5">
+      {label && <label htmlFor={inputId} className="text-sm font-semibold text-slate-700">{label}</label>}
       <textarea
         id={inputId}
-        className={`w-full border rounded-lg px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none ${error ? 'border-red-400 bg-red-50' : 'border-slate-300 bg-white'} ${className}`}
+        className={`vihem-field vihem-focus w-full resize-none rounded-lg border px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 transition-colors ${error ? 'border-red-400 bg-red-50' : ''} ${className}`}
         {...props}
       />
       {error && <p className="text-xs text-red-600">{error}</p>}
@@ -102,11 +102,11 @@ interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
 export function Select({ label, error, options, className = '', id, ...props }: SelectProps) {
   const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
   return (
-    <div className="flex flex-col gap-1">
-      {label && <label htmlFor={inputId} className="text-sm font-medium text-slate-700">{label}</label>}
+    <div className="flex flex-col gap-1.5">
+      {label && <label htmlFor={inputId} className="text-sm font-semibold text-slate-700">{label}</label>}
       <select
         id={inputId}
-        className={`w-full border rounded-lg px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white ${error ? 'border-red-400' : 'border-slate-300'} ${className}`}
+        className={`vihem-field vihem-focus w-full rounded-lg border px-3 py-2.5 text-sm text-slate-900 transition-colors ${error ? 'border-red-400' : ''} ${className}`}
         {...props}
       >
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -125,7 +125,7 @@ interface CardProps {
 export function Card({ children, className = '', onClick }: CardProps) {
   return (
     <div
-      className={`bg-white rounded-xl border border-slate-200 shadow-sm ${onClick ? 'cursor-pointer hover:shadow-md hover:border-slate-300 transition-all' : ''} ${className}`}
+      className={`vihem-surface rounded-lg ${onClick ? 'cursor-pointer transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-lg' : ''} ${className}`}
       onClick={onClick}
     >
       {children}
@@ -146,11 +146,11 @@ export function Modal({ open, onClose, title, children, size = 'md' }: ModalProp
   const sizes = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', xxl: 'max-w-7xl' };
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className={`relative bg-white rounded-t-2xl sm:rounded-2xl w-full ${sizes[size]} max-h-[90vh] flex flex-col shadow-xl`}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h2 className="text-lg font-semibold text-slate-800">{title}</h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors text-slate-500">
+      <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-md" onClick={onClose} />
+      <div className={`relative flex max-h-[90vh] w-full ${sizes[size]} flex-col rounded-t-xl bg-white shadow-2xl shadow-slate-950/20 ring-1 ring-slate-900/10 sm:rounded-xl`}>
+        <div className="flex items-center justify-between border-b border-slate-200/80 px-6 py-4">
+          <h2 className="text-lg font-bold text-slate-950">{title}</h2>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900">
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -175,13 +175,13 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
   const Icon = typeof icon === 'function' ? icon : null;
   const iconNode = Icon ? <Icon className="w-12 h-12" /> : (icon as React.ReactNode);
   return (
-    <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+    <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
       {icon && (
-        <div className="mb-4 text-slate-300">
+        <div className="mb-4 rounded-xl bg-blue-50 p-3 text-blue-500 ring-1 ring-blue-100">
           {iconNode}
         </div>
       )}
-      <h3 className="text-base font-medium text-slate-600">{title}</h3>
+      <h3 className="text-base font-bold text-slate-800">{title}</h3>
       {description && <p className="mt-1 text-sm text-slate-400 max-w-sm">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
@@ -221,7 +221,7 @@ export function StatCard({ label, value, icon, color = 'text-blue-600 bg-blue-50
   return (
     <Card className={`p-4 min-w-0 ${onClick ? 'cursor-pointer hover:shadow-md transition-all' : ''}`} onClick={onClick}>
       <div className="flex items-center gap-3 min-w-0">
-        <div className={`p-2.5 rounded-xl flex-shrink-0 ${color}`}>{icon}</div>
+        <div className={`flex-shrink-0 rounded-lg p-2.5 ring-1 ring-black/5 ${color}`}>{icon}</div>
         <div className="min-w-0">
           <p className="text-xl sm:text-2xl font-bold text-slate-800 break-words leading-tight">{value}</p>
           <p className="text-xs text-slate-500 font-medium mt-1 leading-snug break-words">{label}</p>
@@ -249,7 +249,7 @@ export function SearchInput({ value, onChange, placeholder = 'Sök...', classNam
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+        className="vihem-field vihem-focus w-full rounded-lg border py-2.5 pl-9 pr-4 text-sm text-slate-900 placeholder:text-slate-400"
       />
     </div>
   );
@@ -265,21 +265,26 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, subtitle, action, backButton, icon: Icon }: PageHeaderProps) {
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-6 min-w-0">
+    <div className="mb-6 flex min-w-0 flex-col gap-4 border-b border-slate-200/70 pb-5 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex items-center gap-3 min-w-0">
         {backButton && (
-          <button onClick={backButton} className="p-2 rounded-lg hover:bg-slate-100 transition-colors text-slate-600">
+          <button onClick={backButton} className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-white hover:text-slate-950">
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="m15 18-6-6 6-6" />
             </svg>
           </button>
         )}
+        {Icon && (
+          <div className="hidden rounded-xl bg-blue-600 p-2.5 text-white shadow-sm shadow-blue-600/20 sm:block">
+            <Icon className="h-5 w-5" />
+          </div>
+        )}
         <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-xl font-bold text-slate-800 break-words">
-            {Icon && <Icon className="w-5 h-5 text-blue-600" />}
+          <h1 className="flex items-center gap-2 text-xl font-bold tracking-[-0.02em] text-slate-950 break-words sm:text-2xl">
+            {Icon && <Icon className="h-5 w-5 text-blue-600 sm:hidden" />}
             {title}
           </h1>
-          {subtitle && <p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}
+          {subtitle && <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">{subtitle}</p>}
         </div>
       </div>
       {action && <div className="w-full sm:w-auto sm:flex-shrink-0">{action}</div>}

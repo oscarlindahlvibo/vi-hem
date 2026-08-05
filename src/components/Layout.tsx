@@ -73,6 +73,24 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     return true;
   });
 
+  const bottomItems = user ? [
+    { label: 'Hem', icon: <Home className="h-5 w-5" />, action: () => navigate('dashboard'), active: currentPage === 'dashboard' },
+    {
+      label: user.role === 'tenant' ? 'Fel' : 'Jobb',
+      icon: user.role === 'tenant' ? <Wrench className="h-5 w-5" /> : <ClipboardList className="h-5 w-5" />,
+      action: () => navigate(user.role === 'tenant' ? 'maintenance' : 'workorders'),
+      active: currentPage === (user.role === 'tenant' ? 'maintenance' : 'workorders'),
+    },
+    { label: 'Chatt', icon: <MessageCircle className="h-5 w-5" />, action: () => navigate('chat'), active: currentPage === 'chat' },
+    {
+      label: user.role === 'tenant' ? 'Tvätt' : 'Tid',
+      icon: user.role === 'tenant' ? <WashingMachine className="h-5 w-5" /> : <Clock className="h-5 w-5" />,
+      action: () => navigate(user.role === 'tenant' ? 'laundry' : 'timetracking'),
+      active: currentPage === (user.role === 'tenant' ? 'laundry' : 'timetracking'),
+    },
+    { label: 'Mer', icon: <Menu className="h-5 w-5" />, action: () => setMobileMenuOpen(true), active: false },
+  ] : [];
+
   const navigate = (page: string) => {
     onNavigate(page);
     setMobileMenuOpen(false);
@@ -116,32 +134,32 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="min-h-screen flex bg-[var(--vihem-canvas)] text-slate-900">
       {/* Desktop sidebar */}
-      <aside className="hidden lg:flex flex-col w-64 bg-white border-r border-slate-200 fixed top-0 left-0 h-full z-30">
-        <div className="px-5 py-5 border-b border-slate-200">
+      <aside className="fixed left-0 top-0 z-30 hidden h-full w-[17rem] flex-col border-r border-slate-200/80 bg-white/95 shadow-[8px_0_34px_rgba(15,23,42,0.045)] backdrop-blur-xl lg:flex">
+        <div className="border-b border-slate-200/80 px-5 py-5">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl shadow-sm overflow-hidden">
+            <div className="h-10 w-10 overflow-hidden rounded-xl shadow-sm ring-1 ring-slate-200">
               <AppLogo className="w-full h-full" />
             </div>
             <div>
-              <p className="text-sm font-bold text-slate-800">VI-HEM</p>
-              <p className="text-xs text-slate-500">Fastighetsportalen</p>
+              <p className="text-sm font-black text-slate-950">VI-HEM</p>
+              <p className="text-xs font-medium text-slate-500">Fastighetsportalen</p>
             </div>
           </div>
         </div>
-        <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-0.5">
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {visibleItems.map(item => (
             <button
               key={item.page}
               onClick={() => navigate(item.page)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all group ${
+              className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all ${
                 currentPage === item.page
-                  ? 'bg-blue-50 text-blue-700'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+                  ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-100 shadow-sm shadow-blue-600/5'
+                  : 'text-slate-600 hover:bg-slate-100/90 hover:text-slate-950'
               }`}
             >
-              <span className={currentPage === item.page ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-600'}>
+              <span className={currentPage === item.page ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-700'}>
                 {item.icon}
               </span>
               {item.label}
@@ -151,14 +169,14 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
             </button>
           ))}
         </nav>
-        <div className="px-3 py-4 border-t border-slate-200">
-          <div className="flex items-center gap-3 px-3 py-2 mb-2">
-            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-bold text-sm">
+        <div className="border-t border-slate-200/80 px-3 py-4">
+          <div className="mb-2 flex items-center gap-3 rounded-xl bg-slate-50/90 px-3 py-3 ring-1 ring-slate-200">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold text-white shadow-sm shadow-blue-600/20">
               {user?.name?.charAt(0) ?? '?'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-slate-800 truncate">{user?.name}</p>
-              <p className="text-xs text-slate-500">{roleLabel}</p>
+              <p className="truncate text-sm font-bold text-slate-950">{user?.name}</p>
+              <p className="text-xs font-medium text-slate-500">{roleLabel}</p>
             </div>
             {notificationCount > 0 && (
               <button onClick={() => navigate('notifications')} className="relative">
@@ -169,12 +187,12 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
           </div>
           <button
             onClick={() => setPasswordModalOpen(true)}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950"
           >
             <KeyRound className="w-4 h-4" />
             Byt lösenord
           </button>
-          <button onClick={signOut} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors">
+          <button onClick={signOut} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950">
             <LogOut className="w-4 h-4" />
             Logga ut
           </button>
@@ -182,12 +200,12 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       </aside>
 
       {/* Mobile top bar */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-30 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
+      <div className="fixed left-0 right-0 top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-xl lg:hidden">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg shadow-sm overflow-hidden">
+          <div className="h-8 w-8 overflow-hidden rounded-xl shadow-sm ring-1 ring-slate-200">
             <AppLogo className="w-full h-full" />
           </div>
-          <span className="font-bold text-slate-800 text-sm">VI-HEM</span>
+          <span className="text-sm font-black text-slate-950">VI-HEM</span>
         </div>
         <div className="flex items-center gap-2">
           {notificationCount > 0 && (
@@ -196,7 +214,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
               <span className="absolute top-1 right-1 bg-red-500 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">{notificationCount}</span>
             </button>
           )}
-          <button onClick={() => setMobileMenuOpen(true)} className="p-2">
+          <button onClick={() => setMobileMenuOpen(true)} className="rounded-xl p-2 hover:bg-slate-100">
             <Menu className="w-5 h-5 text-slate-600" />
           </button>
         </div>
@@ -205,8 +223,8 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       {/* Mobile menu overlay */}
       {mobileMenuOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileMenuOpen(false)} />
-          <div className="relative bg-white w-72 h-full flex flex-col shadow-xl">
+          <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
+          <div className="relative flex h-full w-72 flex-col bg-white shadow-2xl shadow-slate-950/20">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg shadow-sm overflow-hidden">
@@ -214,12 +232,12 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
                 </div>
                 <span className="font-bold text-slate-800">VI-HEM</span>
               </div>
-              <button onClick={() => setMobileMenuOpen(false)} className="p-1.5 rounded-lg hover:bg-slate-100">
+              <button onClick={() => setMobileMenuOpen(false)} className="p-1.5 rounded-xl hover:bg-slate-100">
                 <X className="w-5 h-5 text-slate-600" />
               </button>
             </div>
-            <div className="flex items-center gap-3 px-5 py-4 bg-slate-50 border-b border-slate-200">
-              <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-bold">
+            <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 font-bold text-white shadow-sm shadow-blue-600/20">
                 {user?.name?.charAt(0) ?? '?'}
               </div>
               <div>
@@ -232,8 +250,8 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
                 <button
                   key={item.page}
                   onClick={() => navigate(item.page)}
-                  className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-all ${
-                    currentPage === item.page ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100'
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition-all ${
+                    currentPage === item.page ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-100 shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
                   }`}
                 >
                   <span className={currentPage === item.page ? 'text-blue-600' : 'text-slate-400'}>{item.icon}</span>
@@ -248,12 +266,12 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
                   setPasswordModalOpen(true);
                   setMobileMenuOpen(false);
                 }}
-                className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-slate-600 hover:bg-slate-100"
+                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm text-slate-600 hover:bg-slate-100"
               >
                 <KeyRound className="w-4 h-4" />
                 Byt lösenord
               </button>
-              <button onClick={signOut} className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
+              <button onClick={signOut} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm text-slate-600 hover:bg-slate-100">
                 <LogOut className="w-4 h-4" />
                 Logga ut
               </button>
@@ -263,11 +281,35 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       )}
 
       {/* Main content */}
-      <main className="flex-1 lg:ml-64 pt-16 lg:pt-0">
-        <div className="w-full max-w-[1600px] p-4 lg:p-5 xl:p-6">
+      <main className="flex-1 pb-24 pt-16 lg:ml-[17rem] lg:pb-0 lg:pt-0">
+        <div className="w-full max-w-[1560px] p-4 lg:p-6 xl:p-8">
           {children}
         </div>
       </main>
+
+      {user?.role !== 'superadmin' && (
+        <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/80 bg-white/95 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-2 shadow-[0_-12px_34px_rgba(15,23,42,0.08)] backdrop-blur-xl lg:hidden">
+          <div className="grid grid-cols-5 gap-1">
+            {bottomItems.map((item) => (
+              <button
+                key={item.label}
+                onClick={item.action}
+                className={`relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-semibold transition-colors ${
+                  item.active ? 'text-blue-600' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <span className={item.active ? 'text-blue-600' : 'text-slate-400'}>{item.icon}</span>
+                <span className="truncate">{item.label}</span>
+                {item.label === 'Chatt' && notificationCount > 0 && (
+                  <span className="absolute right-3 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
+                    {notificationCount > 9 ? '9+' : notificationCount}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </nav>
+      )}
 
       <Modal
         open={passwordModalOpen}
