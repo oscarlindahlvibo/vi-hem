@@ -11,6 +11,7 @@ import { StaffDashboard } from './pages/StaffDashboard';
 import { MaintenancePage } from './pages/MaintenancePage';
 import { WorkOrdersPage } from './pages/WorkOrdersPage';
 import { TimeTrackingPage } from './pages/TimeTrackingPage';
+import type { TimeTrackingInitialAction } from './pages/TimeTrackingPage';
 import { LaundryPage } from './pages/LaundryPage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { NewsPage } from './pages/NewsPage';
@@ -340,6 +341,12 @@ function AppInner() {
     // Superadmin sees only the organisations page
     if (isSuperadmin) {
       return <AdminOrganisationsPage onNavigate={navigate} />;
+    }
+
+    if (currentPage.startsWith('timetracking')) {
+      if (!isStaff) return renderDashboard();
+      const action = currentPage.split('/')[1] as TimeTrackingInitialAction;
+      return <TimeTrackingPage onNavigate={navigate} initialAction={action} />;
     }
 
     switch (currentPage) {

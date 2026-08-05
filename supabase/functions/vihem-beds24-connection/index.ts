@@ -80,15 +80,15 @@ Deno.serve(async (req: Request) => {
       let accessToken = existing?.access_token || "";
       let expiresAt = existing?.access_token_expires_at || null;
 
-      if (inviteCode) {
+      if (refreshTokenInput) {
+        const refreshed = await refreshBeds24Token(refreshTokenInput);
+        accessToken = refreshed.token;
+        expiresAt = new Date(Date.now() + Math.max(refreshed.expiresIn - 300, 60) * 1000).toISOString();
+      } else if (inviteCode) {
         const setup = await beds24Setup(inviteCode);
         refreshToken = setup.refreshToken;
         accessToken = setup.token;
         expiresAt = new Date(Date.now() + Math.max(setup.expiresIn - 300, 60) * 1000).toISOString();
-      } else if (refreshTokenInput) {
-        const refreshed = await refreshBeds24Token(refreshTokenInput);
-        accessToken = refreshed.token;
-        expiresAt = new Date(Date.now() + Math.max(refreshed.expiresIn - 300, 60) * 1000).toISOString();
       }
 
       if (enabled && !refreshToken) {
@@ -185,7 +185,7 @@ async function beds24Setup(inviteCode: string) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data?.refreshToken || !data?.token) {
-    throw new Error(data?.error || data?.message || "Kunde inte växla Beds24 invite code.");
+    throw new Error(readBeds24Error(data, response.status, "Kunde inte växla Beds24 invite code."));
   }
   return data as { token: string; expiresIn: number; refreshToken: string };
 }
@@ -196,7 +196,7 @@ async function refreshBeds24Token(refreshToken: string) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data?.token) {
-    throw new Error(data?.error || data?.message || "Kunde inte hämta Beds24 access token.");
+    throw new Error(readBeds24Error(data, response.status, "Kunde inte hämta Beds24 access token."));
   }
   return data as { token: string; expiresIn: number };
 }
@@ -224,4 +224,13 @@ function safeJson(text: string) {
   } catch {
     return null;
   }
+}
+
+function readBeds24Error(data: any, status: number, fallback: string) {
+  const message =
+    data?.error ||
+    data?.message ||
+    data?.detail ||
+    (Array.isArray(data?.errors) ? data.errors.map((item: any) => item?.message || item).join(", ") : "");
+  return message ? `Beds24 ${status}: ${message}` : `${fallback} (Beds24 ${status})`;
 }

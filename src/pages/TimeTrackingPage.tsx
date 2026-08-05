@@ -50,6 +50,7 @@ import {
 
 type TimeStatus = 'draft' | 'submitted' | 'change_requested' | 'approved' | 'rejected';
 type TimeEntryKind = 'work' | 'break';
+export type TimeTrackingInitialAction = 'clockout' | 'switch' | 'break' | undefined;
 
 interface DailyWorkSummary {
   id: string;
@@ -133,16 +134,16 @@ function absenceDaysInRange(request: Pick<StaffAbsenceRequest, 'start_date' | 'e
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export function TimeTrackingPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
+export function TimeTrackingPage({ onNavigate: _onNavigate, initialAction }: { onNavigate: (page: string) => void; initialAction?: TimeTrackingInitialAction }) {
   const { user, loading: authLoading } = useAuth();
   if (authLoading || !user) return <LoadingPage />;
-  if (user.role === 'admin' || user.role === 'superadmin') return <AdminCombinedTimeView user={user} />;
-  return <StaffTimeView user={user} />;
+  if (user.role === 'admin' || user.role === 'superadmin') return <AdminCombinedTimeView user={user} initialAction={initialAction} />;
+  return <StaffTimeView user={user} initialAction={initialAction} />;
 }
 
 type AdminMainTimeTab = 'own' | 'staff';
 
-function AdminCombinedTimeView({ user }: { user: Profile }) {
+function AdminCombinedTimeView({ user, initialAction }: { user: Profile; initialAction?: TimeTrackingInitialAction }) {
   const [tab, setTab] = useState<AdminMainTimeTab>('own');
 
   return (
@@ -170,7 +171,7 @@ function AdminCombinedTimeView({ user }: { user: Profile }) {
         </button>
       </div>
 
-      {tab === 'own' ? <StaffTimeView user={user} /> : <AdminTimeView user={user} />}
+      {tab === 'own' ? <StaffTimeView user={user} initialAction={initialAction} /> : <AdminTimeView user={user} />}
     </div>
   );
 }
@@ -181,7 +182,7 @@ type StaffTab = 'list' | 'calendar';
 type WorkOrderSummary = Pick<WorkOrder, 'id' | 'title' | 'status'>;
 type CustomerProjectSummary = Pick<CustomerProject, 'id' | 'title' | 'name' | 'customer_name' | 'status'>;
 
-function StaffTimeView({ user }: { user: Profile }) {
+function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?: TimeTrackingInitialAction }) {
   const [tab, setTab] = useState<StaffTab>('list');
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [currentEntry, setCurrentEntry] = useState<TimeEntry | null>(null);
@@ -217,6 +218,7 @@ function StaffTimeView({ user }: { user: Profile }) {
   const [selectedDay, setSelectedDay] = useState('');
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const initialActionHandledRef = useRef(false);
 
   useEffect(() => { fetchData(); }, [listMonth, calYear, calMonth]);
 
@@ -240,6 +242,26 @@ function StaffTimeView({ user }: { user: Profile }) {
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [currentEntry]);
+
+  useEffect(() => {
+    if (!initialAction || initialActionHandledRef.current || loading) return;
+    if (!currentEntry) return;
+    initialActionHandledRef.current = true;
+
+    if (initialAction === 'clockout') {
+      setShowEndDayModal(true);
+    } else if (initialAction === 'switch') {
+      setStampMode('switch');
+      setShowStampModal(true);
+    } else if (initialAction === 'break') {
+      if (currentEntry.entry_type !== 'break') {
+        handleStartBreak();
+      } else {
+        setStampMode('switch');
+        setShowStampModal(true);
+      }
+    }
+  }, [initialAction, currentEntry, loading]);
 
   async function fetchData() {
     setLoading(true);

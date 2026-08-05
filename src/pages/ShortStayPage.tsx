@@ -178,6 +178,20 @@ function getBeds24WebhookUrl(connection: Beds24Connection | null) {
   return `${base}/functions/v1/vihem-beds24-webhook?secret=${connection.webhook_secret}`;
 }
 
+async function edgeFunctionErrorMessage(error: any, fallback: string) {
+  const context = error?.context;
+  if (context && typeof context.json === 'function') {
+    try {
+      const body = await context.json();
+      if (body?.error) return body.error;
+      if (body?.message) return body.message;
+    } catch {
+      // Supabase can only read the response body once; fall through to generic message.
+    }
+  }
+  return error?.message || fallback;
+}
+
 export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>('overview');
@@ -304,7 +318,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
       body: { action: 'get' },
     });
     if (connectionError) {
-      setBeds24Message(connectionError.message);
+      setBeds24Message(await edgeFunctionErrorMessage(connectionError, 'Kunde inte hämta Beds24-anslutningen.'));
       return;
     }
     setBeds24Connection(data?.connection || null);
@@ -324,7 +338,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     });
     setSavingBeds24(false);
     if (saveError || data?.error) {
-      setBeds24Message(saveError?.message || data?.error || 'Kunde inte spara Beds24-anslutningen.');
+      setBeds24Message(data?.error || await edgeFunctionErrorMessage(saveError, 'Kunde inte spara Beds24-anslutningen.'));
       return;
     }
     setBeds24InviteCode('');
@@ -342,7 +356,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     });
     setSavingBeds24(false);
     if (testError || data?.error) {
-      setBeds24Message(testError?.message || data?.error || 'Kunde inte testa Beds24.');
+      setBeds24Message(data?.error || await edgeFunctionErrorMessage(testError, 'Kunde inte testa Beds24.'));
       return;
     }
     setBeds24Message(`Beds24 svarar. ${data.properties_count ?? 0} properties kunde läsas.`);
@@ -357,7 +371,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     });
     setSyncingBeds24(false);
     if (syncError || data?.error) {
-      setBeds24Message(syncError?.message || data?.error || 'Beds24-synken misslyckades.');
+      setBeds24Message(data?.error || await edgeFunctionErrorMessage(syncError, 'Beds24-synken misslyckades.'));
       await fetchBeds24Connection();
       return;
     }

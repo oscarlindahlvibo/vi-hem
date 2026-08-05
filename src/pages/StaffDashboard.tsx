@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Card, Badge, StatCard, LoadingPage } from '../components/ui';
 import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, TIME_CATEGORY_LABELS } from '../lib/utils';
 import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News } from '../types';
-import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, MessageCircle, Users } from 'lucide-react';
+import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, MessageCircle, Users, Square, Repeat2, Coffee } from 'lucide-react';
 
 interface StaffDashboardProps {
   onNavigate: (page: string) => void;
@@ -27,6 +27,11 @@ const ABSENCE_STATUS_LABEL: Record<StaffAbsenceStatus, string> = {
 
 function customerProjectLabel(project: any) {
   return project?.title || project?.name || project?.customer_name || '';
+}
+
+function timeEntryLabel(entry: TimeEntry) {
+  if (entry.entry_type === 'break') return 'Rast';
+  return TIME_CATEGORY_LABELS[entry.category] || 'Arbete';
 }
 
 function absenceStatusColor(status: StaffAbsenceStatus) {
@@ -97,13 +102,12 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
             .select('id', { count: 'exact', head: true })
             .eq('status', 'new'),
 
-          // Fetch today's active time entry (start_time today, end_time is null)
+          // Fetch active time entry, regardless of when it started.
           supabase
             .from('vihem_time_entries')
             .select('*')
             .eq('user_id', user.id)
             .is('end_time', null)
-            .gte('start_time', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
             .order('start_time', { ascending: false })
             .limit(1),
 
@@ -139,9 +143,8 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
                 .from('vihem_time_entries')
                 .select('*, user:vihem_profiles(id, name, email), work_order:vihem_work_orders(id, title), customer_project:vihem_customer_projects(id, title, name, customer_name)')
                 .is('end_time', null)
-                .eq('status', 'draft')
-                .gte('start_time', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
-                .order('start_time', { ascending: true })
+                .eq('organisation_id', user.organisation_id)
+                .order('start_time', { ascending: false })
             : Promise.resolve({ data: [], error: null }),
 
           supabase
@@ -157,9 +160,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
         setMyWorkOrdersCount(myWOResult.count || 0);
         setNewWorkOrdersCount(newWOResult.count || 0);
 
-        if (activeTimeResult.data && activeTimeResult.data.length > 0) {
-          setActiveTimeEntry(activeTimeResult.data[0]);
-        }
+        setActiveTimeEntry(activeTimeResult.data && activeTimeResult.data.length > 0 ? activeTimeResult.data[0] : null);
 
         if (myWODetailsResult.data) {
           setMyWorkOrders(myWODetailsResult.data);
@@ -174,7 +175,13 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
         }
 
         if (clockedInResult.data) {
-          setClockedInEntries(clockedInResult.data as TimeEntry[]);
+          const latestEntryByUser = new Map<string, TimeEntry>();
+          (clockedInResult.data as TimeEntry[]).forEach((entry) => {
+            if (!latestEntryByUser.has(entry.user_id)) latestEntryByUser.set(entry.user_id, entry);
+          });
+          setClockedInEntries(Array.from(latestEntryByUser.values()));
+        } else {
+          setClockedInEntries([]);
         }
 
         if (newsResult.data) {
@@ -302,19 +309,64 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           <h2 className="min-w-0 text-xl font-black text-slate-950">Stämpelklocka</h2>
           <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
         </button>
-        <button
-          onClick={() => onNavigate('timetracking')}
-          className={`flex w-full min-w-0 items-center justify-center gap-3 rounded-full px-4 py-4 text-base font-bold text-white shadow-lg transition-transform active:scale-[0.99] ${
-            activeTimeEntry ? 'bg-emerald-500 shadow-emerald-500/25 hover:bg-emerald-600' : 'bg-[#2d9cff] shadow-blue-500/25 hover:bg-blue-600'
-          }`}
-        >
-          <Timer className="h-6 w-6 shrink-0" />
-          <span className="truncate">{activeTimeEntry ? 'Fortsätt pass' : 'Stämpla in'}</span>
-        </button>
-        {activeTimeEntry && (
-          <p className="mt-3 text-center text-sm font-medium text-slate-500">
-            Startad {formatDateTime(activeTimeEntry.start_time)}
-          </p>
+        {activeTimeEntry ? (
+          <div className="space-y-3">
+            <div className={`rounded-2xl px-4 py-3 ${
+              activeTimeEntry.entry_type === 'break' ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'
+            }`}>
+              <p className="text-xs font-bold uppercase tracking-wide">
+                {activeTimeEntry.entry_type === 'break' ? 'Aktiv rast' : 'Instämplad just nu'}
+              </p>
+              <p className="mt-1 text-sm font-semibold">
+                {timeEntryLabel(activeTimeEntry)}
+                {(customerProjectLabel(activeTimeEntry.customer_project) || activeTimeEntry.work_order?.title) && (
+                  <> · {customerProjectLabel(activeTimeEntry.customer_project) || activeTimeEntry.work_order?.title}</>
+                )}
+              </p>
+              <p className="mt-1 text-xs font-medium opacity-80">Startad {formatDateTime(activeTimeEntry.start_time)}</p>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <button
+                onClick={() => onNavigate('timetracking/clockout')}
+                className="inline-flex min-w-0 items-center justify-center gap-2 rounded-full bg-rose-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-rose-500/20 transition-transform hover:bg-rose-600 active:scale-[0.99]"
+              >
+                <Square className="h-4 w-4 shrink-0" />
+                <span className="truncate">Stämpla ut</span>
+              </button>
+              <button
+                onClick={() => onNavigate('timetracking/switch')}
+                className="inline-flex min-w-0 items-center justify-center gap-2 rounded-full bg-blue-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-blue-500/20 transition-transform hover:bg-blue-600 active:scale-[0.99]"
+              >
+                <Repeat2 className="h-4 w-4 shrink-0" />
+                <span className="truncate">Byt jobb</span>
+              </button>
+              {activeTimeEntry.entry_type === 'break' ? (
+                <button
+                  onClick={() => onNavigate('timetracking/switch')}
+                  className="inline-flex min-w-0 items-center justify-center gap-2 rounded-full bg-emerald-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition-transform hover:bg-emerald-600 active:scale-[0.99]"
+                >
+                  <Timer className="h-4 w-4 shrink-0" />
+                  <span className="truncate">Börja jobba</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => onNavigate('timetracking/break')}
+                  className="inline-flex min-w-0 items-center justify-center gap-2 rounded-full bg-amber-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-amber-500/20 transition-transform hover:bg-amber-600 active:scale-[0.99]"
+                >
+                  <Coffee className="h-4 w-4 shrink-0" />
+                  <span className="truncate">Gå på rast</span>
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => onNavigate('timetracking')}
+            className="flex w-full min-w-0 items-center justify-center gap-3 rounded-full bg-[#2d9cff] px-4 py-4 text-base font-bold text-white shadow-lg shadow-blue-500/25 transition-transform hover:bg-blue-600 active:scale-[0.99]"
+          >
+            <Timer className="h-6 w-6 shrink-0" />
+            <span className="truncate">Stämpla in</span>
+          </button>
         )}
       </section>
 
@@ -436,7 +488,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Badge className={entry.entry_type === 'break' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
-                        {entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category]}
+                        {timeEntryLabel(entry)}
                       </Badge>
                       {(customerProjectLabel(entry.customer_project) || entry.work_order?.title) && (
                         <Badge className="bg-slate-100 text-slate-700">
