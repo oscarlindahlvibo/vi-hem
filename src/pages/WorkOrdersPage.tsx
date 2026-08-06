@@ -52,6 +52,8 @@ import {
   CheckSquare,
   X,
   Trash2,
+  CheckCircle2,
+  RotateCcw,
 } from 'lucide-react';
 import { TIME_CATEGORY_LABELS } from '../lib/utils';
 import type { TimeCategory } from '../types';
@@ -157,6 +159,9 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   const [postingComment, setPostingComment] = useState(false);
   const [totalTimeLogged, setTotalTimeLogged] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
+  const [selectedWorkOrderIds, setSelectedWorkOrderIds] = useState<string[]>([]);
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [bulkError, setBulkError] = useState('');
 
   // Create form state
   const [createForm, setCreateForm] = useState<CreateWorkOrderForm>(defaultCreateForm);
@@ -211,6 +216,11 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       if (isStaff) checkActiveTimeEntry();
     }
   }, [showDetailModal, selectedWorkOrder?.id]);
+
+  useEffect(() => {
+    setSelectedWorkOrderIds([]);
+    setBulkError('');
+  }, [searchQuery, filterStatus, filterPriority, filterView, sortBy, listTab, viewMode]);
 
   async function fetchWorkOrders() {
     try {
@@ -496,6 +506,45 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     }
   }
 
+  async function bulkUpdateWorkOrders(action: 'complete' | 'archive' | 'reopen') {
+    if (!isStaff || selectedWorkOrderIds.length === 0) return;
+
+    const now = new Date().toISOString();
+    const status: WOStatus = action === 'complete' ? 'completed' : action === 'archive' ? 'cancelled' : 'assigned';
+    const payload = {
+      status,
+      completed_at: action === 'complete' ? now : null,
+      updated_at: now,
+    };
+
+    try {
+      setBulkUpdating(true);
+      setBulkError('');
+      const ids = selectedWorkOrderIds;
+      const { error } = await supabase
+        .from('vihem_work_orders')
+        .update(payload)
+        .in('id', ids);
+
+      if (error) throw error;
+
+      setWorkOrders((orders) => orders.map((order) => (
+        ids.includes(order.id) ? { ...order, ...payload } : order
+      )));
+      if (selectedWorkOrder && ids.includes(selectedWorkOrder.id)) {
+        setSelectedWorkOrder({ ...selectedWorkOrder, ...payload });
+        setNewDetailStatus(status);
+      }
+      setSelectedWorkOrderIds([]);
+      await fetchWorkOrders();
+    } catch (err: any) {
+      console.error('Error bulk updating work orders:', err);
+      setBulkError(err.message || 'Kunde inte uppdatera valda arbetsordrar.');
+    } finally {
+      setBulkUpdating(false);
+    }
+  }
+
   async function updateWorkOrderAssignment() {
     if (!selectedWorkOrder) return;
 
@@ -649,6 +698,20 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   if (authLoading) return <LoadingPage />;
 
   const filtered = filteredWorkOrders();
+  const visibleWorkOrderIds = filtered.map((wo) => wo.id);
+  const selectedVisibleCount = selectedWorkOrderIds.filter((id) => visibleWorkOrderIds.includes(id)).length;
+  const allVisibleSelected = filtered.length > 0 && selectedVisibleCount === filtered.length;
+  const toggleWorkOrderSelection = (id: string) => {
+    setSelectedWorkOrderIds((current) => current.includes(id)
+      ? current.filter((selectedId) => selectedId !== id)
+      : [...current, id]);
+  };
+  const toggleAllVisibleWorkOrders = () => {
+    setSelectedWorkOrderIds((current) => {
+      if (allVisibleSelected) return current.filter((id) => !visibleWorkOrderIds.includes(id));
+      return Array.from(new Set([...current, ...visibleWorkOrderIds]));
+    });
+  };
   const propertyApartments = createForm.property_id
     ? apartments.filter((apt) => apt.property_id === createForm.property_id)
     : apartments;
@@ -937,11 +1000,82 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         />
       ) : viewMode === 'list' ? (
         <>
+          {isStaff && (
+            <Card className="p-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleAllVisibleWorkOrders}
+                      className="h-4 w-4 rounded border-slate-300 accent-blue-600"
+                    />
+                    Välj alla synliga
+                  </label>
+                  <span className="text-sm text-slate-500">
+                    {selectedWorkOrderIds.length} markerade
+                  </span>
+                  {selectedWorkOrderIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedWorkOrderIds([])}
+                      className="text-sm font-medium text-slate-500 hover:text-slate-800"
+                    >
+                      Rensa val
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:flex">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => bulkUpdateWorkOrders('complete')}
+                    loading={bulkUpdating}
+                    disabled={selectedWorkOrderIds.length === 0}
+                    className="gap-1"
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    Klarmarkera
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => bulkUpdateWorkOrders('archive')}
+                    loading={bulkUpdating}
+                    disabled={selectedWorkOrderIds.length === 0}
+                    className="gap-1"
+                  >
+                    <Archive className="h-4 w-4" />
+                    Arkivera
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => bulkUpdateWorkOrders('reopen')}
+                    loading={bulkUpdating}
+                    disabled={selectedWorkOrderIds.length === 0}
+                    className="gap-1"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Markera som ej klar
+                  </Button>
+                </div>
+              </div>
+              {bulkError && (
+                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {bulkError}
+                </div>
+              )}
+            </Card>
+          )}
           <div className="grid gap-3 md:hidden">
             {filtered.map((wo) => (
               <Card
                 key={wo.id}
-                className="p-4 cursor-pointer hover:shadow-md transition-all"
+                className={`p-4 cursor-pointer hover:shadow-md transition-all ${
+                  selectedWorkOrderIds.includes(wo.id) ? 'ring-2 ring-blue-500 ring-offset-1' : ''
+                }`}
                 onClick={() => {
                   setSelectedWorkOrder(wo);
                   setNewDetailStatus(wo.status);
@@ -950,6 +1084,16 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                 }}
               >
                 <div className="flex items-start justify-between gap-3">
+                  {isStaff && (
+                    <input
+                      type="checkbox"
+                      checked={selectedWorkOrderIds.includes(wo.id)}
+                      onChange={() => toggleWorkOrderSelection(wo.id)}
+                      onClick={(event) => event.stopPropagation()}
+                      className="mt-1 h-4 w-4 rounded border-slate-300 accent-blue-600"
+                      aria-label={`Markera ${wo.title}`}
+                    />
+                  )}
                   <div className="min-w-0 flex-1">
                     <h3 className="font-semibold text-slate-900 leading-snug break-words">{wo.title}</h3>
                     <p className="mt-1 text-sm text-slate-500 break-words">
@@ -1000,6 +1144,17 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50">
+                    {isStaff && (
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          onChange={toggleAllVisibleWorkOrders}
+                          className="h-4 w-4 rounded border-slate-300 accent-blue-600"
+                          aria-label="Markera alla synliga arbetsordrar"
+                        />
+                      </th>
+                    )}
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Titel</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Kategori</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Prioritet</th>
@@ -1014,7 +1169,9 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                   {filtered.map((wo) => (
                     <tr
                       key={wo.id}
-                      className="border-b border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
+                      className={`border-b border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer ${
+                        selectedWorkOrderIds.includes(wo.id) ? 'bg-blue-50/70' : ''
+                      }`}
                       onClick={() => {
                         setSelectedWorkOrder(wo);
                         setNewDetailStatus(wo.status);
@@ -1022,6 +1179,18 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                         setShowDetailModal(true);
                       }}
                     >
+                      {isStaff && (
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedWorkOrderIds.includes(wo.id)}
+                            onChange={() => toggleWorkOrderSelection(wo.id)}
+                            onClick={(event) => event.stopPropagation()}
+                            className="h-4 w-4 rounded border-slate-300 accent-blue-600"
+                            aria-label={`Markera ${wo.title}`}
+                          />
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-sm font-medium text-slate-900">{wo.title}</td>
                       <td className="px-4 py-3 text-sm text-slate-600">{wo.category}</td>
                       <td className="px-4 py-3 text-sm">
