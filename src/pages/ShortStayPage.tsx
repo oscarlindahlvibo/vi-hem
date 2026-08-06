@@ -166,6 +166,25 @@ function rangeOverlaps(aStart: string, aEnd: string, bStart: string, bEnd: strin
   return aStart < bEnd && bStart < aEnd;
 }
 
+function bookingBandStyle(booking: ShortStayBooking, days: string[]) {
+  const firstDay = days[0];
+  const lastDay = days[days.length - 1];
+  if (!firstDay || !lastDay) return null;
+
+  const visibleStart = booking.start_date < firstDay ? firstDay : booking.start_date;
+  const visibleEndExclusive = booking.end_date > toDateKey(addDays(new Date(`${lastDay}T12:00:00`), 1))
+    ? toDateKey(addDays(new Date(`${lastDay}T12:00:00`), 1))
+    : booking.end_date;
+  const startIndex = days.indexOf(visibleStart);
+  const endIndex = days.indexOf(toDateKey(addDays(new Date(`${visibleEndExclusive}T12:00:00`), -1)));
+  if (startIndex < 0 || endIndex < startIndex) return null;
+
+  return {
+    left: `${(startIndex / days.length) * 100}%`,
+    width: `${((endIndex - startIndex + 1) / days.length) * 100}%`,
+  };
+}
+
 function getExportUrl(token: string) {
   const base = import.meta.env.VITE_SUPABASE_URL;
   if (!base || !token) return '';
@@ -782,8 +801,12 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
 
               {units.map((unit) => {
                 const unitBookings = bookingsByUnit.get(unit.id) || [];
+                const visibleBookings = unitBookings.filter(item =>
+                  item.start_date <= toDateKey(addDays(new Date(`${days[days.length - 1]}T12:00:00`), 1)) &&
+                  item.end_date > days[0]
+                );
                 return (
-                  <div key={unit.id} className="grid border-b border-slate-100" style={{ gridTemplateColumns: `230px repeat(${days.length}, minmax(64px, 1fr))` }}>
+                  <div key={unit.id} className="grid border-b border-slate-100" style={{ gridTemplateColumns: `230px minmax(0, 1fr)` }}>
                     <div className="sticky left-0 z-10 bg-white px-4 py-3">
                       <p className="text-sm font-semibold text-slate-900">{unit.name}</p>
                       <p className="text-xs text-slate-500">{unit.apartment?.apartment_number || unit.property?.name || 'Fristående'}</p>
@@ -791,58 +814,72 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                         <Users className="h-3 w-3" /> Max {unit.max_guests || 2}
                       </p>
                     </div>
-                    {days.map((day) => {
-                      const activeBooking = unitBookings.find(item => overlaps(item, day));
-                      const arrival = unitBookings.find(item => item.start_date === day && item.booking_type === 'booking');
-                      const departure = unitBookings.find(item => item.end_date === day && item.booking_type === 'booking');
-                      const block = unitBookings.find(item => item.booking_type === 'block' && (overlaps(item, day) || item.start_date === day));
-                      const booking = activeBooking || arrival || departure || block;
-                      const isTurnover = Boolean(arrival && departure && arrival.id !== departure.id);
-                      return (
-                        <button
-                          key={`${unit.id}-${day}`}
-                          onClick={() => booking ? openEditBooking(booking) : openCreateBooking(unit.id, day)}
-                          className={`min-h-[72px] border-l border-slate-100 px-1.5 py-2 text-left transition hover:bg-slate-50 ${
-                            block ? 'bg-slate-100' : activeBooking ? 'bg-blue-50' : departure ? 'bg-amber-50' : ''
-                          }`}
-                          title={booking ? `${booking.guest_name || booking.title || booking.channel_name} (${formatDateRange(booking.start_date, booking.end_date)})` : 'Skapa bokning'}
-                        >
-                          {booking && (
-                            <div className={`space-y-1 rounded-md px-2 py-1 text-[11px] font-medium leading-tight ${
-                              block ? 'bg-slate-700 text-white' : activeBooking ? 'bg-blue-600 text-white' : 'bg-amber-500 text-white'
-                            }`}>
-                              <div className="truncate">{booking.guest_name || booking.title || booking.channel_name}</div>
-                              {booking.booking_type === 'booking' && (
-                                <div className="flex items-center gap-1 opacity-90">
-                                  <Users className="h-3 w-3" />
-                                  {booking.guest_count || 1}
-                                </div>
+                    <div className="relative grid min-h-[94px]" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(64px, 1fr))` }}>
+                      {visibleBookings.map((booking, index) => {
+                        const style = bookingBandStyle(booking, days);
+                        if (!style) return null;
+                        const isBlock = booking.booking_type === 'block';
+                        return (
+                          <button
+                            key={booking.id}
+                            type="button"
+                            onClick={() => openEditBooking(booking)}
+                            title={`${booking.guest_name || booking.title || booking.channel_name} (${formatDateRange(booking.start_date, booking.end_date)})`}
+                            className={`absolute top-2 z-10 flex h-9 min-w-0 items-center gap-2 rounded-lg px-2 text-left text-[11px] font-semibold text-white shadow-sm transition hover:brightness-95 ${
+                              isBlock ? 'bg-slate-700' : 'bg-blue-600'
+                            }`}
+                            style={{ ...style, top: `${8 + (index % 2) * 34}px` }}
+                          >
+                            <span className="min-w-0 flex-1 truncate">{booking.guest_name || booking.title || booking.channel_name}</span>
+                            {booking.booking_type === 'booking' && (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/20 px-1.5 py-0.5">
+                                <Users className="h-3 w-3" />
+                                {booking.guest_count || 1}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                      {days.map((day) => {
+                        const activeBooking = unitBookings.find(item => overlaps(item, day));
+                        const arrival = unitBookings.find(item => item.start_date === day && item.booking_type === 'booking');
+                        const departure = unitBookings.find(item => item.end_date === day && item.booking_type === 'booking');
+                        const block = unitBookings.find(item => item.booking_type === 'block' && (overlaps(item, day) || item.start_date === day));
+                        const booking = activeBooking || arrival || departure || block;
+                        const isTurnover = Boolean(arrival && departure && arrival.id !== departure.id);
+                        return (
+                          <button
+                            key={`${unit.id}-${day}`}
+                            onClick={() => booking ? openEditBooking(booking) : openCreateBooking(unit.id, day)}
+                            className={`relative min-h-[94px] border-l border-slate-100 px-1.5 pb-2 pt-12 text-left transition hover:bg-slate-50 ${
+                              block ? 'bg-slate-100' : activeBooking ? 'bg-blue-50' : departure ? 'bg-amber-50' : ''
+                            }`}
+                            title={booking ? `${booking.guest_name || booking.title || booking.channel_name} (${formatDateRange(booking.start_date, booking.end_date)})` : 'Skapa bokning'}
+                          >
+                            <div className="relative z-20 flex flex-col gap-1">
+                              {arrival && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                  <LogIn className="h-3 w-3" /> In
+                                </span>
+                              )}
+                              {departure && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                                  <LogOut className="h-3 w-3" /> Ut
+                                </span>
+                              )}
+                              {departure?.cleaning_status && departure.cleaning_status !== 'clean' && departure.cleaning_status !== 'not_needed' && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
+                                  <Wrench className="h-3 w-3" /> Städ
+                                </span>
+                              )}
+                              {isTurnover && (
+                                <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">Byte</span>
                               )}
                             </div>
-                          )}
-                          <div className="mt-1 flex flex-col gap-1">
-                            {arrival && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
-                                <LogIn className="h-3 w-3" /> In
-                              </span>
-                            )}
-                            {departure && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                                <LogOut className="h-3 w-3" /> Ut
-                              </span>
-                            )}
-                            {departure?.cleaning_status && departure.cleaning_status !== 'clean' && departure.cleaning_status !== 'not_needed' && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
-                                <Wrench className="h-3 w-3" /> Städ
-                              </span>
-                            )}
-                            {isTurnover && (
-                              <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">Byte</span>
-                            )}
-                          </div>
-                        </button>
-                      );
-                    })}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}
