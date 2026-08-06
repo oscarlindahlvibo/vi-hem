@@ -17,6 +17,7 @@ import { DocumentsPage } from './pages/DocumentsPage';
 import { NewsPage } from './pages/NewsPage';
 import { ChatPage } from './pages/ChatPage';
 import { PurchaseListPage } from './pages/PurchaseListPage';
+import { CalendarPage } from './pages/CalendarPage';
 import { TerminationPage } from './pages/TerminationPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { AdminPropertiesPage } from './pages/AdminPropertiesPage';
@@ -410,6 +411,10 @@ function AppInner() {
       case 'purchases':
         if (!isStaff) return renderDashboard();
         return <PurchaseListPage onNavigate={navigate} />;
+
+      case 'calendar':
+        if (!isStaff) return renderDashboard();
+        return <CalendarPage onNavigate={navigate} />;
 
       case 'year-planning':
         if (!isStaff || !enabledModules.year_planning) return renderDashboard();

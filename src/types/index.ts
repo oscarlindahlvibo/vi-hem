@@ -83,6 +83,31 @@ export interface OrganisationModule {
   module?: ModuleDefinition;
 }
 
+export type CalendarEventVisibility = 'organisation' | 'selected_users' | 'private';
+export type CalendarEventCategory = 'general' | 'operations' | 'staff' | 'maintenance' | 'customer_project' | 'short_stay' | 'meeting' | 'deadline' | 'private';
+
+export interface CalendarEvent {
+  id: string;
+  organisation_id: string;
+  title: string;
+  description: string;
+  location: string;
+  starts_at: string;
+  ends_at: string;
+  all_day: boolean;
+  visibility: CalendarEventVisibility;
+  participant_ids: string[];
+  category: CalendarEventCategory;
+  color: string;
+  source_type: string;
+  source_id: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  creator?: Profile | null;
+}
+
 export type PersonType = 'tenant' | 'staff' | 'customer' | 'supplier' | 'contact' | 'guest' | 'contractor' | 'other';
 
 export interface Person {
