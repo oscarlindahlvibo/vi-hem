@@ -220,7 +220,7 @@ export function ScreenDisplayPage() {
         .limit(8),
       supabase
         .from('vihem_time_entries')
-        .select('*, user:vihem_profiles(id, name, email), work_order:vihem_work_orders(id, title), customer_project:vihem_customer_projects(id, title, name, customer_name), property:vihem_properties(id, name)')
+        .select('*, user:vihem_profiles!time_entries_user_id_fkey(id, name, email), work_order:vihem_work_orders(id, title), customer_project:vihem_customer_projects(id, title, name, customer_name), property:vihem_properties(id, name)')
         .eq('organisation_id', user.organisation_id)
         .is('end_time', null)
         .order('start_time', { ascending: false }),
