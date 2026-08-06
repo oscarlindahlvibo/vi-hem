@@ -252,9 +252,7 @@ function AppInner() {
           .from('vihem_time_entries')
           .select('id, entry_type, start_time, end_time, status')
           .eq('user_id', reminderUser.id)
-          .eq('status', 'draft')
           .is('end_time', null)
-          .gte('start_time', new Date(`${todayKey()}T00:00:00`).toISOString()),
       ]);
 
       if (isMissingSchemaError(settingsResult.error) || isMissingSchemaError(scheduleResult.error)) return;

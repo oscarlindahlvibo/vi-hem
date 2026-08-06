@@ -266,14 +266,13 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
   async function fetchData() {
     setLoading(true);
     try {
-      // Always load current open draft
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
+      // Always load the latest open entry. Open rows are the source of truth,
+      // even if they started before midnight or have already been submitted.
       const { data: current } = await supabase
         .from('vihem_time_entries')
         .select('*, customer_project:customer_project_id(id, title, name, customer_name)')
-        .eq('user_id', user.id).eq('status', 'draft')
-        .gte('start_time', todayStart.toISOString()).is('end_time', null)
+        .eq('user_id', user.id)
+        .is('end_time', null)
         .order('start_time', { ascending: false })
         .limit(1);
       setCurrentEntry(current?.[0] || null);
@@ -335,14 +334,10 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
 
   async function finishOpenEntries() {
     const end = new Date().toISOString();
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
     const { data: openEntries, error } = await supabase
       .from('vihem_time_entries')
       .select('*')
       .eq('user_id', user.id)
-      .eq('status', 'draft')
-      .gte('start_time', todayStart.toISOString())
       .is('end_time', null)
       .order('start_time', { ascending: true });
 
@@ -375,6 +370,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
 
   async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string) {
     const project = getCustomerProject(customerProjectId);
+    await finishOpenEntries();
     await supabase.from('vihem_time_entries').insert({
       user_id: user.id, work_order_id: workOrderId || null, category,
       organisation_id: user.organisation_id || null,
