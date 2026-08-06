@@ -322,6 +322,12 @@ function rangeOverlaps(aStart: string, aEnd: string, bStart: string, bEnd: strin
   return aStart < bEnd && bStart < aEnd;
 }
 
+function overlapDateRange(first: ShortStayBooking, second: ShortStayBooking) {
+  const start = first.start_date > second.start_date ? first.start_date : second.start_date;
+  const end = first.end_date < second.end_date ? first.end_date : second.end_date;
+  return formatDateRange(start, end);
+}
+
 function bookingBandStyle(booking: ShortStayBooking, days: string[]) {
   const firstDay = days[0];
   const lastDay = days[days.length - 1];
@@ -398,6 +404,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   const [syncingBeds24, setSyncingBeds24] = useState(false);
   const [beds24Message, setBeds24Message] = useState('');
   const [completingCleaningId, setCompletingCleaningId] = useState<string | null>(null);
+  const [conflictsModalOpen, setConflictsModalOpen] = useState(false);
 
   const isAdmin = user?.role === 'admin';
   const organisationId = user?.organisation_id;
@@ -430,16 +437,17 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   }, [bookings, units]);
 
   const conflicts = useMemo(() => {
-    const found: ShortStayBooking[][] = [];
+    const found: Array<[ShortStayBooking, ShortStayBooking]> = [];
     units.forEach((unit) => {
       const unitBookings = (bookingsByUnit.get(unit.id) || [])
         .filter(booking => booking.booking_type === 'booking')
         .sort((a, b) => a.start_date.localeCompare(b.start_date));
       unitBookings.forEach((booking, index) => {
-        const conflict = unitBookings.slice(index + 1).find(other =>
-          rangeOverlaps(booking.start_date, booking.end_date, other.start_date, other.end_date)
-        );
-        if (conflict) found.push([booking, conflict]);
+        unitBookings.slice(index + 1).forEach((other) => {
+          if (rangeOverlaps(booking.start_date, booking.end_date, other.start_date, other.end_date)) {
+            found.push([booking, other]);
+          }
+        });
       });
     });
     return found;
@@ -627,6 +635,12 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     });
     setFormError('');
     setBookingModalOpen(true);
+  }
+
+  function openConflictInCalendar(booking: ShortStayBooking) {
+    setCalendarStartDate(new Date(`${booking.start_date}T12:00:00`));
+    setTab('calendar');
+    setConflictsModalOpen(false);
   }
 
   async function saveUnit() {
@@ -959,12 +973,22 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
 
           {conflicts.length > 0 && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 w-4 h-4 flex-shrink-0" />
-                <div>
-                  <p className="font-semibold">Möjlig dubbelbokning hittad</p>
-                  <p>{conflicts.length} datumkrock behöver kontrolleras i kalendern.</p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 w-4 h-4 flex-shrink-0" />
+                  <div>
+                    <p className="font-semibold">Möjlig dubbelbokning hittad</p>
+                    <p>{conflicts.length} potentiella krockar behöver kontrolleras i kalendern.</p>
+                  </div>
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-amber-300 bg-white text-amber-900 hover:border-amber-400"
+                  onClick={() => setConflictsModalOpen(true)}
+                >
+                  Visa krockar
+                </Button>
               </div>
             </div>
           )}
@@ -1450,6 +1474,78 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
           </div>
         </div>
       )}
+
+      <Modal open={conflictsModalOpen} onClose={() => setConflictsModalOpen(false)} title="Potentiella dubbelbokningar" size="xl">
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Kontrollera bokningarna nedan. Varje rad visar två bokningar på samma enhet där datumen överlappar.
+          </p>
+          {conflicts.length === 0 ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+              Inga datumkrockar hittades just nu.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {conflicts.map(([first, second], index) => {
+                const unit = units.find(item => item.id === first.unit_id) || units.find(item => item.id === second.unit_id);
+                return (
+                  <div key={`${first.id}-${second.id}-${index}`} className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-950">{unit?.name || 'Okänd enhet'}</p>
+                        <p className="mt-0.5 text-xs text-amber-800">
+                          Överlapp: {overlapDateRange(first, second)}
+                        </p>
+                      </div>
+                      <Button variant="secondary" size="sm" onClick={() => openConflictInCalendar(first)}>
+                        <CalendarDays className="h-4 w-4" /> Visa i kalender
+                      </Button>
+                    </div>
+
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      {[first, second].map((booking) => (
+                        <div key={booking.id} className="rounded-lg border border-white/80 bg-white p-3 shadow-sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate font-semibold text-slate-900">
+                                {booking.guest_name || booking.title || 'Bokning utan namn'}
+                              </p>
+                              <p className="mt-1 text-sm text-slate-600">{formatDateRange(booking.start_date, booking.end_date)}</p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {booking.guest_count || 1} gäster
+                                {booking.arrival_time ? ` · in ${booking.arrival_time.slice(0, 5)}` : ''}
+                                {booking.departure_time ? ` · ut ${booking.departure_time.slice(0, 5)}` : ''}
+                              </p>
+                            </div>
+                            <ShortStayChannelBadge booking={booking} />
+                          </div>
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setConflictsModalOpen(false);
+                                openEditBooking(booking);
+                              }}
+                            >
+                              Öppna bokning
+                            </Button>
+                            {(booking.external_uid || booking.beds24_booking_id) && (
+                              <Badge className="bg-slate-100 text-slate-600">
+                                ID {booking.external_uid || booking.beds24_booking_id}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </Modal>
 
       <Modal open={unitModalOpen} onClose={() => setUnitModalOpen(false)} title={editingUnit ? 'Redigera korttidsenhet' : 'Ny korttidsenhet'} size="lg">
         <div className="space-y-4">
