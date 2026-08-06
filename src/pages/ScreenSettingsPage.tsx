@@ -6,11 +6,14 @@ import { Button, Card, EmptyState, Input, LoadingPage, PageHeader, Select } from
 import {
   buildOrganisationScreenSettings,
   DEFAULT_SCREEN_KEY,
+  defaultScreenConfig,
   isMissingScreenSettingsTable,
   normalizePresentationSettings,
-  readOrganisationScreenSettings,
+  normalizeScreenConfig,
+  readOrganisationScreenConfigs,
   screenViewLabel,
   type PresentationSettings,
+  type ScreenConfig,
   type ScreenView,
 } from '../lib/screenSettings';
 
@@ -39,11 +42,14 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [screenView, setScreenView] = useState<ScreenView>('presentation');
-  const [settings, setSettings] = useState<PresentationSettings>(() => normalizePresentationSettings({}));
+  const [screens, setScreens] = useState<ScreenConfig[]>(() => [defaultScreenConfig(1)]);
+  const [selectedScreenKey, setSelectedScreenKey] = useState(DEFAULT_SCREEN_KEY);
   const [organisationSettings, setOrganisationSettings] = useState<Record<string, unknown>>({});
 
   const canManage = user?.role === 'admin' || user?.role === 'superadmin';
+  const selectedScreen = screens.find(screen => screen.screenKey === selectedScreenKey) || screens[0] || defaultScreenConfig(1);
+  const screenView = selectedScreen.screenView;
+  const settings = selectedScreen.presentationSettings;
 
   useEffect(() => {
     fetchSettings();
@@ -61,10 +67,9 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
     const [screenSettingsResult, organisationResult] = await Promise.all([
       supabase
         .from('vihem_screen_settings')
-        .select('screen_view, presentation_settings')
+        .select('screen_key, screen_view, presentation_settings')
         .eq('organisation_id', user.organisation_id)
-        .eq('screen_key', DEFAULT_SCREEN_KEY)
-        .maybeSingle(),
+        .order('screen_key'),
       supabase
         .from('vihem_organisations')
         .select('settings')
@@ -82,27 +87,61 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
       setError(screenSettingsResult.error.message);
     } else if (organisationResult.error) {
       setError(organisationResult.error.message);
-    } else if (screenSettingsResult.data) {
-      setScreenView(screenSettingsResult.data.screen_view as ScreenView);
-      setSettings(normalizePresentationSettings(screenSettingsResult.data.presentation_settings));
+    } else if (screenSettingsResult.data?.length) {
+      const nextScreens = screenSettingsResult.data.map((row: any, index: number) => normalizeScreenConfig(row, index + 1));
+      setScreens(nextScreens);
+      setSelectedScreenKey(current => nextScreens.some(screen => screen.screenKey === current) ? current : nextScreens[0].screenKey);
     } else {
-      const fallbackScreenSettings = readOrganisationScreenSettings(organisationResult.data?.settings);
-      if (fallbackScreenSettings.screenView) setScreenView(fallbackScreenSettings.screenView);
-      if (fallbackScreenSettings.presentationSettings) setSettings(fallbackScreenSettings.presentationSettings);
+      const fallbackScreens = readOrganisationScreenConfigs(organisationResult.data?.settings);
+      if (fallbackScreens.length > 0) {
+        setScreens(fallbackScreens);
+        setSelectedScreenKey(current => fallbackScreens.some(screen => screen.screenKey === current) ? current : fallbackScreens[0].screenKey);
+      }
     }
 
     setLoading(false);
   }
 
   function updateSetting<K extends keyof PresentationSettings>(key: K, value: PresentationSettings[K]) {
-    setSettings(prev => ({ ...prev, [key]: value }));
+    updateSelectedScreen({
+      presentationSettings: { ...settings, [key]: value },
+    });
   }
 
   function updateTickerItem(index: number, value: string) {
-    setSettings(prev => {
-      const nextItems = [...prev.customTickerItems];
-      nextItems[index] = value;
-      return { ...prev, customTickerItems: nextItems };
+    const nextItems = [...settings.customTickerItems];
+    nextItems[index] = value;
+    updateSetting('customTickerItems', nextItems);
+  }
+
+  function updateSelectedScreen(updates: Partial<ScreenConfig>) {
+    setScreens(prev => prev.map(screen => (
+      screen.screenKey === selectedScreen.screenKey ? { ...screen, ...updates } : screen
+    )));
+  }
+
+  function addScreen() {
+    setError('');
+    setSuccess('');
+    const nextNumber = screens.length + 1;
+    let nextScreen = defaultScreenConfig(nextNumber);
+    while (screens.some(screen => screen.screenKey === nextScreen.screenKey)) {
+      nextScreen = defaultScreenConfig(nextNumber + Math.floor(Math.random() * 1000));
+    }
+    setScreens(prev => [...prev, nextScreen]);
+    setSelectedScreenKey(nextScreen.screenKey);
+  }
+
+  function deleteSelectedScreen() {
+    if (screens.length <= 1) {
+      setError('Det måste finnas minst en skärm.');
+      return;
+    }
+
+    setScreens(prev => {
+      const nextScreens = prev.filter(screen => screen.screenKey !== selectedScreen.screenKey);
+      setSelectedScreenKey(nextScreens[0]?.screenKey || DEFAULT_SCREEN_KEY);
+      return nextScreens;
     });
   }
 
@@ -113,27 +152,34 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
     setError('');
     setSuccess('');
 
-    const cleanedSettings: PresentationSettings = {
-      ...settings,
-      customTickerText: '',
-      customTickerItems: settings.customTickerItems.map(item => item.trim()).filter(Boolean),
-    };
+    const cleanedScreens = screens.map(screen => ({
+      ...screen,
+      name: screen.name.trim() || screen.screenKey,
+      presentationSettings: {
+        ...screen.presentationSettings,
+        customTickerText: '',
+        customTickerItems: screen.presentationSettings.customTickerItems.map(item => item.trim()).filter(Boolean),
+      },
+    }));
 
     const now = new Date().toISOString();
     const saveResult = await supabase
       .from('vihem_screen_settings')
-      .upsert({
+      .upsert(cleanedScreens.map(screen => ({
         organisation_id: user.organisation_id,
-        screen_key: DEFAULT_SCREEN_KEY,
-        screen_view: screenView,
-        presentation_settings: cleanedSettings,
+        screen_key: screen.screenKey,
+        screen_view: screen.screenView,
+        presentation_settings: {
+          ...screen.presentationSettings,
+          screen_name: screen.name,
+        },
         created_by: user.id,
         updated_by: user.id,
         updated_at: now,
-      }, { onConflict: 'organisation_id,screen_key' });
+      })), { onConflict: 'organisation_id,screen_key' });
 
     if (saveResult.error && isMissingScreenSettingsTable(saveResult.error)) {
-      const nextOrganisationSettings = buildOrganisationScreenSettings(organisationSettings, screenView, cleanedSettings);
+      const nextOrganisationSettings = buildOrganisationScreenSettings(organisationSettings, cleanedScreens);
       const organisationSaveResult = await supabase
         .from('vihem_organisations')
         .update({ settings: nextOrganisationSettings })
@@ -147,7 +193,7 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
       }
 
       setOrganisationSettings(nextOrganisationSettings);
-      setSettings(cleanedSettings);
+      setScreens(cleanedScreens);
       setSuccess('Skärminställningarna är sparade i organisationens inställningar. TV-skärmen uppdaterar automatiskt inom ungefär en minut.');
       return;
     }
@@ -159,7 +205,19 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
       return;
     }
 
-    setSettings(cleanedSettings);
+    const screenKeys = cleanedScreens.map(screen => screen.screenKey);
+    const deleteResult = await supabase
+      .from('vihem_screen_settings')
+      .delete()
+      .eq('organisation_id', user.organisation_id)
+      .not('screen_key', 'in', `(${screenKeys.join(',')})`);
+
+    if (deleteResult.error) {
+      setError(deleteResult.error.message);
+      return;
+    }
+
+    setScreens(cleanedScreens);
     setSuccess('Skärminställningarna är sparade. TV-skärmen uppdaterar automatiskt inom ungefär en minut.');
   }
 
@@ -203,23 +261,65 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
       <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
         <div className="space-y-5">
           <Card className="p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="text-lg font-black text-slate-950">Skärmar</h2>
+              <Button type="button" size="sm" variant="secondary" onClick={addScreen}>
+                <Plus className="h-4 w-4" />
+                Lägg till
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {screens.map(screen => (
+                <button
+                  key={screen.screenKey}
+                  type="button"
+                  onClick={() => setSelectedScreenKey(screen.screenKey)}
+                  className={`flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left transition ${
+                    selectedScreen.screenKey === screen.screenKey
+                      ? 'border-blue-300 bg-blue-50 text-blue-800 ring-1 ring-blue-100'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-black">{screen.name}</span>
+                    <span className="mt-0.5 block text-xs font-semibold text-slate-500">{screenViewLabel(screen.screenView)}</span>
+                  </span>
+                  <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-black text-slate-500">{screen.screenKey}</span>
+                </button>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="p-5">
             <div className="mb-4 flex items-center gap-2">
               <Settings className="h-5 w-5 text-blue-600" />
-              <h2 className="text-lg font-black text-slate-950">Skärmläge</h2>
+              <h2 className="text-lg font-black text-slate-950">Vald skärm</h2>
             </div>
+            <Input
+              label="Namn"
+              value={selectedScreen.name}
+              onChange={(event) => updateSelectedScreen({ name: event.target.value })}
+              placeholder="Ex. Reception"
+            />
+            <div className="mt-4">
             <Select
               label="Vad ska TV:n visa?"
               value={screenView}
-              onChange={(event) => setScreenView(event.target.value as ScreenView)}
+              onChange={(event) => updateSelectedScreen({ screenView: event.target.value as ScreenView })}
               options={[
                 { value: 'presentation', label: screenViewLabel('presentation') },
                 { value: 'short-stay', label: screenViewLabel('short-stay') },
                 { value: 'work-orders', label: screenViewLabel('work-orders') },
               ]}
             />
+            </div>
             <p className="mt-3 text-sm leading-6 text-slate-500">
-              När TV-skärmen är inloggad hämtar den det här valet automatiskt vid uppdatering.
+              När TV:n har valts som {selectedScreen.name || selectedScreen.screenKey} hämtar den den här profilen automatiskt.
             </p>
+            <Button type="button" variant="outline" className="mt-4" onClick={deleteSelectedScreen} disabled={screens.length <= 1}>
+              <Trash2 className="h-4 w-4" />
+              Ta bort vald skärm
+            </Button>
           </Card>
 
           <Card className="p-5">

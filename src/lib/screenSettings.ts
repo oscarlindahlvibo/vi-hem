@@ -15,8 +15,16 @@ export type PresentationSettings = {
   customTickerItems: string[];
 };
 
+export type ScreenConfig = {
+  screenKey: string;
+  name: string;
+  screenView: ScreenView;
+  presentationSettings: PresentationSettings;
+};
+
 export const SCREEN_VIEW_STORAGE_KEY = 'vihem.screen.view';
 export const PRESENTATION_SETTINGS_STORAGE_KEY = 'vihem.screen.presentationSettings';
+export const SCREEN_KEY_STORAGE_KEY = 'vihem.screen.key';
 export const DEFAULT_SCREEN_KEY = 'default';
 export const ORGANISATION_SCREEN_SETTINGS_KEY = 'screen_settings';
 
@@ -55,6 +63,48 @@ export function normalizePresentationSettings(input: unknown): PresentationSetti
   };
 }
 
+export function defaultScreenConfig(index = 1): ScreenConfig {
+  return {
+    screenKey: index === 1 ? DEFAULT_SCREEN_KEY : `screen-${index}`,
+    name: `Skärm ${index}`,
+    screenView: index === 1 ? 'short-stay' : 'presentation',
+    presentationSettings: DEFAULT_PRESENTATION_SETTINGS,
+  };
+}
+
+export function normalizeScreenConfig(input: unknown, fallbackIndex = 1): ScreenConfig {
+  const stored = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+  const fallback = defaultScreenConfig(fallbackIndex);
+  const key = typeof stored.screen_key === 'string'
+    ? stored.screen_key
+    : typeof stored.screenKey === 'string'
+      ? stored.screenKey
+      : fallback.screenKey;
+  const name = typeof stored.name === 'string'
+    ? stored.name
+    : typeof stored.display_name === 'string'
+      ? stored.display_name
+      : typeof stored.displayName === 'string'
+        ? stored.displayName
+        : typeof (stored.presentation_settings as Record<string, unknown> | undefined)?.screen_name === 'string'
+          ? String((stored.presentation_settings as Record<string, unknown>).screen_name)
+          : typeof (stored.presentationSettings as Record<string, unknown> | undefined)?.screenName === 'string'
+            ? String((stored.presentationSettings as Record<string, unknown>).screenName)
+            : fallback.name;
+  const view = isScreenView(stored.screen_view)
+    ? stored.screen_view
+    : isScreenView(stored.screenView)
+      ? stored.screenView
+      : fallback.screenView;
+
+  return {
+    screenKey: key,
+    name,
+    screenView: view,
+    presentationSettings: normalizePresentationSettings(stored.presentation_settings || stored.presentationSettings),
+  };
+}
+
 export function isMissingScreenSettingsTable(error: unknown) {
   const message = String((error as { message?: string; code?: string } | null)?.message || '');
   const code = String((error as { code?: string } | null)?.code || '');
@@ -64,36 +114,76 @@ export function isMissingScreenSettingsTable(error: unknown) {
   );
 }
 
-export function readOrganisationScreenSettings(settings: unknown): {
-  screenView?: ScreenView;
-  presentationSettings?: PresentationSettings;
-} {
+export function readOrganisationScreenConfigs(settings: unknown): ScreenConfig[] {
   const root = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {};
   const raw = root[ORGANISATION_SCREEN_SETTINGS_KEY] || root.screenSettings;
   const stored = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
-  const screenView = isScreenView(stored.screen_view) ? stored.screen_view : isScreenView(stored.screenView) ? stored.screenView : undefined;
-  const presentationSettings = stored.presentation_settings || stored.presentationSettings
-    ? normalizePresentationSettings(stored.presentation_settings || stored.presentationSettings)
-    : undefined;
+  const rawScreens = stored.screens || stored.screen_configs || stored.screenConfigs;
 
-  return { screenView, presentationSettings };
+  if (Array.isArray(rawScreens)) {
+    const screens = rawScreens.map((item, index) => normalizeScreenConfig(item, index + 1));
+    if (screens.length > 0) return screens;
+  }
+
+  if (stored.screen_view || stored.screenView || stored.presentation_settings || stored.presentationSettings) {
+    return [normalizeScreenConfig({
+      screen_key: DEFAULT_SCREEN_KEY,
+      name: 'Skärm 1',
+      screen_view: stored.screen_view || stored.screenView,
+      presentation_settings: stored.presentation_settings || stored.presentationSettings,
+    }, 1)];
+  }
+
+  return [];
+}
+
+export function readOrganisationScreenSettings(settings: unknown, screenKey = DEFAULT_SCREEN_KEY): {
+  screenView?: ScreenView;
+  presentationSettings?: PresentationSettings;
+  screenName?: string;
+  screens: ScreenConfig[];
+} {
+  const screens = readOrganisationScreenConfigs(settings);
+  const selected = screens.find(screen => screen.screenKey === screenKey) || screens[0];
+
+  return {
+    screenView: selected?.screenView,
+    presentationSettings: selected?.presentationSettings,
+    screenName: selected?.name,
+    screens,
+  };
 }
 
 export function buildOrganisationScreenSettings(
   existingSettings: unknown,
-  screenView: ScreenView,
-  presentationSettings: PresentationSettings
+  screensOrView: ScreenConfig[] | ScreenView,
+  presentationSettings?: PresentationSettings
 ): Record<string, unknown> {
   const root = existingSettings && typeof existingSettings === 'object'
     ? { ...existingSettings as Record<string, unknown> }
     : {};
+  const screens = Array.isArray(screensOrView)
+    ? screensOrView
+    : [{
+      ...defaultScreenConfig(1),
+      screenView: screensOrView,
+      presentationSettings: presentationSettings || DEFAULT_PRESENTATION_SETTINGS,
+    }];
 
   root[ORGANISATION_SCREEN_SETTINGS_KEY] = {
-    screen_view: screenView,
-    presentation_settings: presentationSettings,
+    screens: screens.map(screen => ({
+      screen_key: screen.screenKey,
+      name: screen.name,
+      screen_view: screen.screenView,
+      presentation_settings: screen.presentationSettings,
+    })),
   };
 
   return root;
+}
+
+export function readStoredScreenKey() {
+  return localStorage.getItem(SCREEN_KEY_STORAGE_KEY) || DEFAULT_SCREEN_KEY;
 }
 
 export function readStoredScreenView(): ScreenView {

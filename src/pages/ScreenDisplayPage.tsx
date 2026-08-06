@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, ClipboardList, CloudSun, Monitor, Newspaper, RefreshCw, Settings, Timer, Users } from 'lucide-react';
+import { CalendarDays, ClipboardList, CloudSun, Monitor, Newspaper, RefreshCw, Timer, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
@@ -9,15 +9,20 @@ import { formatDate, formatDateTime, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, W
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import {
   DEFAULT_SCREEN_KEY,
+  defaultScreenConfig,
   isMissingScreenSettingsTable,
   normalizePresentationSettings,
   PRESENTATION_SETTINGS_STORAGE_KEY,
+  readOrganisationScreenConfigs,
   readOrganisationScreenSettings,
+  readStoredScreenKey,
   readStoredPresentationSettings,
   readStoredScreenView,
   screenViewLabel,
+  SCREEN_KEY_STORAGE_KEY,
   SCREEN_VIEW_STORAGE_KEY,
   type PresentationSettings,
+  type ScreenConfig,
   type ScreenView,
 } from '../lib/screenSettings';
 
@@ -101,6 +106,8 @@ export function ScreenDisplayPage() {
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loggingIn, setLoggingIn] = useState(false);
+  const [selectedScreenKey, setSelectedScreenKey] = useState(readStoredScreenKey);
+  const [screenConfigs, setScreenConfigs] = useState<ScreenConfig[]>(() => [defaultScreenConfig(1)]);
   const [view, setView] = useState<ScreenView>(readStoredScreenView);
   const [showViewChooser, setShowViewChooser] = useState(false);
   const [presentationSettings, setPresentationSettings] = useState<PresentationSettings>(readStoredPresentationSettings);
@@ -129,11 +136,17 @@ export function ScreenDisplayPage() {
   }, [view]);
 
   useEffect(() => {
+    localStorage.setItem(SCREEN_KEY_STORAGE_KEY, selectedScreenKey);
+  }, [selectedScreenKey]);
+
+  useEffect(() => {
     localStorage.setItem(PRESENTATION_SETTINGS_STORAGE_KEY, JSON.stringify(presentationSettings));
   }, [presentationSettings]);
 
-  const chooseScreenView = (nextView: ScreenView) => {
-    setView(nextView);
+  const chooseScreenConfig = (screen: ScreenConfig) => {
+    setSelectedScreenKey(screen.screenKey);
+    setView(screen.screenView);
+    setPresentationSettings(screen.presentationSettings);
     setShowViewChooser(false);
   };
 
@@ -152,7 +165,7 @@ export function ScreenDisplayPage() {
     fetchScreenData();
     const interval = window.setInterval(fetchScreenData, SCREEN_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, [allowed, user?.organisation_id, days]);
+  }, [allowed, user?.organisation_id, days, selectedScreenKey]);
 
   async function handleLogin(event: React.FormEvent) {
     event.preventDefault();
@@ -164,6 +177,7 @@ export function ScreenDisplayPage() {
       setLoginError(result.error);
       return;
     }
+    setShowViewChooser(true);
   }
 
   async function fetchScreenData() {
@@ -185,10 +199,9 @@ export function ScreenDisplayPage() {
         .maybeSingle(),
       supabase
         .from('vihem_screen_settings')
-        .select('screen_view, presentation_settings')
+        .select('screen_key, screen_view, presentation_settings')
         .eq('organisation_id', user.organisation_id)
-        .eq('screen_key', DEFAULT_SCREEN_KEY)
-        .maybeSingle(),
+        .order('screen_key'),
       supabase
         .from('vihem_profiles')
         .select('id, name')
@@ -258,11 +271,27 @@ export function ScreenDisplayPage() {
       );
     } else {
       setOrganisationName(organisationResult.data?.name || 'VI-HEM');
-      const fallbackScreenSettings = readOrganisationScreenSettings((organisationResult.data as any)?.settings);
-      const nextScreenView = screenSettingsResult.data?.screen_view || fallbackScreenSettings.screenView;
-      const nextPresentationSettings = screenSettingsResult.data?.presentation_settings
-        ? normalizePresentationSettings(screenSettingsResult.data.presentation_settings)
-        : fallbackScreenSettings.presentationSettings;
+      const dbScreenConfigs = Array.isArray(screenSettingsResult.data)
+        ? screenSettingsResult.data.map((row: any, index: number) => ({
+          screenKey: row.screen_key || (index === 0 ? DEFAULT_SCREEN_KEY : `screen-${index + 1}`),
+          name: (row.presentation_settings as any)?.screen_name || `Skärm ${index + 1}`,
+          screenView: row.screen_view as ScreenView,
+          presentationSettings: normalizePresentationSettings(row.presentation_settings),
+        }))
+        : [];
+      const fallbackScreenConfigs = readOrganisationScreenConfigs((organisationResult.data as any)?.settings);
+      const nextScreenConfigs = dbScreenConfigs.length > 0 ? dbScreenConfigs : fallbackScreenConfigs;
+      const selectedConfig = nextScreenConfigs.find(screen => screen.screenKey === selectedScreenKey) || nextScreenConfigs[0];
+      const fallbackScreenSettings = readOrganisationScreenSettings((organisationResult.data as any)?.settings, selectedScreenKey);
+      const nextScreenView = selectedConfig?.screenView || fallbackScreenSettings.screenView;
+      const nextPresentationSettings = selectedConfig?.presentationSettings || fallbackScreenSettings.presentationSettings;
+
+      if (nextScreenConfigs.length > 0) {
+        setScreenConfigs(nextScreenConfigs);
+        if (!nextScreenConfigs.some(screen => screen.screenKey === selectedScreenKey)) {
+          setSelectedScreenKey(nextScreenConfigs[0].screenKey);
+        }
+      }
 
       if (nextScreenView) {
         setView(nextScreenView as ScreenView);
@@ -303,49 +332,8 @@ export function ScreenDisplayPage() {
             </div>
           </div>
           <div className="space-y-4">
-            <div>
-              <p className="mb-2 text-sm font-semibold text-slate-700">Vad ska skärmen visa?</p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <button
-                  type="button"
-                  onClick={() => chooseScreenView('short-stay')}
-                  className={`rounded-2xl border px-4 py-4 text-left transition ${
-                    view === 'short-stay'
-                      ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <CalendarDays className="mb-2 h-5 w-5" />
-                  <span className="block font-black">Korttidskalender</span>
-                  <span className="mt-1 block text-xs text-slate-500">Ankomster, avresor och städ.</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => chooseScreenView('work-orders')}
-                  className={`rounded-2xl border px-4 py-4 text-left transition ${
-                    view === 'work-orders'
-                      ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <ClipboardList className="mb-2 h-5 w-5" />
-                  <span className="block font-black">Arbetsordrar</span>
-                  <span className="mt-1 block text-xs text-slate-500">Aktiva jobb efter förfallodatum.</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => chooseScreenView('presentation')}
-                  className={`rounded-2xl border px-4 py-4 text-left transition ${
-                    view === 'presentation'
-                      ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <Monitor className="mb-2 h-5 w-5" />
-                  <span className="block font-black">Presentation</span>
-                  <span className="mt-1 block text-xs text-slate-500">Klocka, nyheter och drift.</span>
-                </button>
-              </div>
+            <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
+              Efter inloggning väljer du om den här TV:n är Skärm 1, Skärm 2 osv. Admin styr sedan vad varje skärm visar.
             </div>
             <input
               type="email"
@@ -389,158 +377,35 @@ export function ScreenDisplayPage() {
   if (showViewChooser) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
-        <div className="w-full max-w-5xl rounded-3xl bg-white p-8 text-slate-950 shadow-2xl">
+        <div className="w-full max-w-4xl rounded-3xl bg-white p-8 text-slate-950 shadow-2xl">
           <div className="mb-7 flex items-center gap-3">
             <div className="h-12 w-12 overflow-hidden rounded-2xl">
               <AppLogo className="h-full w-full" />
             </div>
             <div>
-              <h1 className="text-2xl font-black">Välj skärm</h1>
-              <p className="text-sm text-slate-500">Välj vad den här VI-HEM-skärmen ska visa.</p>
+              <h1 className="text-2xl font-black">Välj TV-skärm</h1>
+              <p className="text-sm text-slate-500">Välj vilken administrerad skärm den här TV:n ska vara.</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <button
-              type="button"
-              onClick={() => chooseScreenView('short-stay')}
-              className={`rounded-3xl border px-5 py-6 text-left transition ${
-                view === 'short-stay'
-                  ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
-                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <CalendarDays className="mb-3 h-8 w-8" />
-              <span className="block text-xl font-black">Korttidskalender</span>
-              <span className="mt-2 block text-sm text-slate-500">Ankomster, avresor, bokningsläge och städstatus.</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => chooseScreenView('work-orders')}
-              className={`rounded-3xl border px-5 py-6 text-left transition ${
-                view === 'work-orders'
-                  ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
-                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <ClipboardList className="mb-3 h-8 w-8" />
-              <span className="block text-xl font-black">Arbetsordrar</span>
-              <span className="mt-2 block text-sm text-slate-500">Aktiva arbetsordrar sorterade efter förfallodatum.</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => chooseScreenView('presentation')}
-              className={`rounded-3xl border px-5 py-6 text-left transition ${
-                view === 'presentation'
-                  ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
-                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <Monitor className="mb-3 h-8 w-8" />
-              <span className="block text-xl font-black">Presentation</span>
-              <span className="mt-2 block text-sm text-slate-500">Klocka, väderbanner, nyheter och driftstatus.</span>
-            </button>
-          </div>
-
-          <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-5">
-            <div className="mb-4 flex items-center gap-2">
-              <Settings className="h-5 w-5 text-slate-500" />
-              <h2 className="text-lg font-black text-slate-900">Presentationsinställningar</h2>
-            </div>
-            <div className="grid gap-4 lg:grid-cols-[1.3fr_2fr]">
-              <label className="block">
-                <span className="mb-2 block text-sm font-bold text-slate-700">Plats för väder</span>
-                <input
-                  value={presentationSettings.weatherLocation}
-                  onChange={(event) => setPresentationSettings({ ...presentationSettings, weatherLocation: event.target.value })}
-                  placeholder="Ex. Värnamo"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base outline-none ring-blue-500 focus:ring-2"
-                />
-              </label>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {[
-                  ['showNews', 'Nyheter'],
-                  ['showWorkOrders', 'Arbetsordrar'],
-                  ['showClockedIn', 'Instämplad personal'],
-                  ['showMeetings', 'Kalenderhändelser'],
-                ].map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(presentationSettings[key as keyof PresentationSettings])}
-                      onChange={(event) => setPresentationSettings({ ...presentationSettings, [key]: event.target.checked })}
-                      className="h-4 w-4 rounded border-slate-300 accent-blue-600"
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
-              <p className="mb-3 text-sm font-black text-slate-900">Rullande banner</p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {[
-                  ['showTickerWeather', 'Väder'],
-                  ['showTickerCheckIns', 'Incheckningar'],
-                  ['showTickerCheckOuts', 'Utcheckningar'],
-                  ['showTickerClockedIn', 'Instämplade'],
-                  ['showTickerUpdated', 'Senast uppdaterad'],
-                ].map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(presentationSettings[key as keyof PresentationSettings])}
-                      onChange={(event) => setPresentationSettings({ ...presentationSettings, [key]: event.target.checked })}
-                      className="h-4 w-4 rounded border-slate-300 accent-blue-600"
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-              <div className="mt-4">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <span className="block text-sm font-bold text-slate-700">Egna rullande texter</span>
-                  <button
-                    type="button"
-                    onClick={() => setPresentationSettings({
-                      ...presentationSettings,
-                      customTickerItems: [...presentationSettings.customTickerItems, ''],
-                    })}
-                    className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700 hover:bg-blue-100"
-                  >
-                    Lägg till punkt
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {(presentationSettings.customTickerItems.length > 0 ? presentationSettings.customTickerItems : ['']).map((item, index) => (
-                    <div key={index} className="flex gap-2">
-                      <input
-                        value={item}
-                        onChange={(event) => {
-                          const nextItems = [...presentationSettings.customTickerItems];
-                          if (nextItems.length === 0) nextItems.push('');
-                          nextItems[index] = event.target.value;
-                          setPresentationSettings({ ...presentationSettings, customTickerItems: nextItems });
-                        }}
-                        placeholder="Ex. Välkommen till kvällens information..."
-                        className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-base outline-none ring-blue-500 focus:ring-2"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setPresentationSettings({
-                          ...presentationSettings,
-                          customTickerItems: presentationSettings.customTickerItems.filter((_, itemIndex) => itemIndex !== index),
-                        })}
-                        className="rounded-xl border border-slate-200 px-3 text-sm font-black text-slate-500 hover:bg-slate-50"
-                      >
-                        Ta bort
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {screenConfigs.map(screen => (
+              <button
+                key={screen.screenKey}
+                type="button"
+                onClick={() => chooseScreenConfig(screen)}
+                className={`rounded-3xl border px-5 py-6 text-left transition ${
+                  selectedScreenKey === screen.screenKey
+                    ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Monitor className="mb-3 h-8 w-8" />
+                <span className="block text-xl font-black">{screen.name}</span>
+                <span className="mt-2 block text-sm text-slate-500">{screenViewLabel(screen.screenView)}</span>
+                <span className="mt-3 inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-500">{screen.screenKey}</span>
+              </button>
+            ))}
           </div>
 
           <div className="mt-6 flex justify-end">
