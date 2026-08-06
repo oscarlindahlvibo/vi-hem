@@ -101,11 +101,31 @@ export interface CalendarEvent {
   color: string;
   source_type: string;
   source_id: string | null;
+  calendar_source_id?: string | null;
+  external_uid?: string;
   created_by: string | null;
   updated_by: string | null;
   created_at: string;
   updated_at: string;
   creator?: Profile | null;
+}
+
+export interface CalendarSource {
+  id: string;
+  organisation_id: string;
+  user_id: string;
+  name: string;
+  ical_url: string;
+  color: string;
+  category: CalendarEventCategory;
+  active: boolean;
+  last_synced_at: string | null;
+  sync_error: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  user?: Profile | null;
 }
 
 export type PersonType = 'tenant' | 'staff' | 'customer' | 'supplier' | 'contact' | 'guest' | 'contractor' | 'other';

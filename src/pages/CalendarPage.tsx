@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, Clock, MapPin, Plus, Trash2, Users } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Clock, Link2, MapPin, Plus, RefreshCw, Trash2, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../components/ui';
-import type { CalendarEvent, CalendarEventCategory, CalendarEventVisibility, Profile } from '../types';
+import type { CalendarEvent, CalendarEventCategory, CalendarEventVisibility, CalendarSource, Profile } from '../types';
 
 type CalendarFilter = 'all' | 'mine' | 'organisation';
 
@@ -20,6 +20,15 @@ interface CalendarForm {
   participant_ids: string[];
   category: CalendarEventCategory;
   color: string;
+}
+
+interface SourceForm {
+  user_id: string;
+  name: string;
+  ical_url: string;
+  category: CalendarEventCategory;
+  color: string;
+  active: boolean;
 }
 
 const categoryLabels: Record<CalendarEventCategory, string> = {
@@ -103,16 +112,30 @@ function defaultForm(date = localDateKey()): CalendarForm {
   };
 }
 
+const defaultSourceForm: SourceForm = {
+  user_id: '',
+  name: '',
+  ical_url: '',
+  category: 'staff',
+  color: categoryColors.staff,
+  active: true,
+};
+
 export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
   const { user } = useAuth();
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [sources, setSources] = useState<CalendarSource[]>([]);
   const [staff, setStaff] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
+  const [editingSource, setEditingSource] = useState<CalendarSource | null>(null);
   const [form, setForm] = useState<CalendarForm>(() => defaultForm());
+  const [sourceForm, setSourceForm] = useState<SourceForm>(defaultSourceForm);
+  const [syncingSourceId, setSyncingSourceId] = useState<string | null>(null);
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState(localDateKey());
   const [filter, setFilter] = useState<CalendarFilter>('all');
@@ -140,7 +163,7 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
     setError('');
     const start = gridStart.toISOString();
     const stop = end.toISOString();
-    const [eventsResult, staffResult] = await Promise.all([
+    const [eventsResult, staffResult, sourcesResult] = await Promise.all([
       supabase
         .from('vihem_calendar_events')
         .select('*, creator:created_by(id, name, email)')
@@ -155,6 +178,13 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
         .in('role', ['staff', 'admin'])
         .eq('active', true)
         .order('name'),
+      user.role === 'admin'
+        ? supabase
+            .from('vihem_calendar_sources')
+            .select('*, user:user_id(id, name, email)')
+            .eq('organisation_id', user.organisation_id)
+            .order('created_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
     if (eventsResult.error) {
@@ -163,6 +193,7 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
       setEvents((eventsResult.data || []) as CalendarEvent[]);
     }
     if (!staffResult.error) setStaff((staffResult.data || []) as Profile[]);
+    if (!sourcesResult.error) setSources((sourcesResult.data || []) as CalendarSource[]);
     setLoading(false);
   }
 
@@ -269,6 +300,91 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
       return;
     }
     setModalOpen(false);
+    await fetchData();
+  }
+
+  function openCreateSource() {
+    setEditingSource(null);
+    setSourceForm({ ...defaultSourceForm, user_id: staff[0]?.id || '' });
+    setError('');
+    setSourceModalOpen(true);
+  }
+
+  function openEditSource(source: CalendarSource) {
+    setEditingSource(source);
+    setSourceForm({
+      user_id: source.user_id,
+      name: source.name,
+      ical_url: source.ical_url,
+      category: source.category,
+      color: source.color,
+      active: source.active,
+    });
+    setError('');
+    setSourceModalOpen(true);
+  }
+
+  async function saveSource() {
+    if (!user?.organisation_id || !user?.id || user.role !== 'admin') return;
+    setError('');
+    if (!sourceForm.user_id) {
+      setError('Välj vilken person kalendern hör till.');
+      return;
+    }
+    if (!sourceForm.name.trim() || !sourceForm.ical_url.trim()) {
+      setError('Ange namn och iCal-länk.');
+      return;
+    }
+
+    const payload = {
+      organisation_id: user.organisation_id,
+      user_id: sourceForm.user_id,
+      name: sourceForm.name.trim(),
+      ical_url: sourceForm.ical_url.trim(),
+      category: sourceForm.category,
+      color: sourceForm.color || categoryColors[sourceForm.category],
+      active: sourceForm.active,
+      created_by: editingSource?.created_by || user.id,
+      updated_by: user.id,
+    };
+
+    setSaving(true);
+    const result = editingSource
+      ? await supabase.from('vihem_calendar_sources').update(payload).eq('id', editingSource.id)
+      : await supabase.from('vihem_calendar_sources').insert(payload);
+    setSaving(false);
+    if (result.error) {
+      setError(result.error.message);
+      return;
+    }
+    setSourceModalOpen(false);
+    await fetchData();
+  }
+
+  async function deleteSource() {
+    if (!editingSource || !window.confirm('Vill du ta bort iCal-kanalen och importerade händelser från den?')) return;
+    setSaving(true);
+    const { error: deleteError } = await supabase.from('vihem_calendar_sources').delete().eq('id', editingSource.id);
+    setSaving(false);
+    if (deleteError) {
+      setError(deleteError.message);
+      return;
+    }
+    setSourceModalOpen(false);
+    await fetchData();
+  }
+
+  async function syncSource(sourceId?: string) {
+    setSyncingSourceId(sourceId || 'all');
+    setError('');
+    const { data, error: syncError } = await supabase.functions.invoke('vihem-sync-calendar-ical', {
+      body: sourceId ? { source_id: sourceId } : {},
+    });
+    setSyncingSourceId(null);
+    if (syncError || data?.error) {
+      setError(data?.error || syncError?.message || 'Kunde inte synka iCal.');
+      return;
+    }
     await fetchData();
   }
 
@@ -382,6 +498,56 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
         </Card>
       </div>
 
+      {user?.role === 'admin' && (
+        <Card className="overflow-hidden">
+          <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-black text-slate-950">iCal-kanaler för personal</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Koppla externa kalenderflöden till en person. Importerade händelser visas i kalendern för personen och admin.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => syncSource()} loading={syncingSourceId === 'all'}>
+                <RefreshCw className="h-4 w-4" /> Synka alla
+              </Button>
+              <Button onClick={openCreateSource}>
+                <Plus className="h-4 w-4" /> Lägg till kanal
+              </Button>
+            </div>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {sources.length === 0 ? (
+              <div className="p-6 text-sm text-slate-500">Inga iCal-kanaler är upplagda ännu.</div>
+            ) : sources.map(source => (
+              <div key={source.id} className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
+                <button type="button" onClick={() => openEditSource(source)} className="min-w-0 text-left">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="h-3 w-3 rounded-full" style={{ backgroundColor: source.color }} />
+                    <p className="font-black text-slate-950">{source.name}</p>
+                    <Badge className={source.active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}>
+                      {source.active ? 'Aktiv' : 'Avstängd'}
+                    </Badge>
+                    <Badge className="bg-blue-100 text-blue-700">{source.user?.name || 'Personal'}</Badge>
+                  </div>
+                  <p className="mt-1 truncate text-sm text-slate-500">{source.ical_url}</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {source.last_synced_at ? `Senast synkad ${new Date(source.last_synced_at).toLocaleString('sv-SE')}` : 'Aldrig synkad'}
+                    {source.sync_error ? ` · Fel: ${source.sync_error}` : ''}
+                  </p>
+                </button>
+                <div className="flex shrink-0 gap-2">
+                  <Button variant="outline" size="sm" onClick={() => syncSource(source.id)} loading={syncingSourceId === source.id}>
+                    <RefreshCw className="h-4 w-4" /> Synka
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => openEditSource(source)}>Redigera</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editingEvent ? 'Redigera händelse' : 'Ny händelse'} size="lg">
         <div className="space-y-4">
           <Input label="Rubrik" value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} />
@@ -437,6 +603,49 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
             <div className="flex justify-end gap-3">
               <Button variant="secondary" onClick={() => setModalOpen(false)}>Avbryt</Button>
               <Button onClick={saveEvent} loading={saving}>{editingEvent ? 'Spara' : 'Skapa'}</Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={sourceModalOpen} onClose={() => setSourceModalOpen(false)} title={editingSource ? 'Redigera iCal-kanal' : 'Ny iCal-kanal'} size="lg">
+        <div className="space-y-4">
+          <Select
+            label="Person"
+            value={sourceForm.user_id}
+            onChange={event => setSourceForm({ ...sourceForm, user_id: event.target.value })}
+            options={staff.map(person => ({ value: person.id, label: person.name }))}
+          />
+          <Input label="Namn" value={sourceForm.name} onChange={event => setSourceForm({ ...sourceForm, name: event.target.value })} placeholder="Ex. Oscars Google Kalender" />
+          <Input label="iCal-länk" value={sourceForm.ical_url} onChange={event => setSourceForm({ ...sourceForm, ical_url: event.target.value })} placeholder="https://..." />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Select
+              label="Kategori"
+              value={sourceForm.category}
+              onChange={event => {
+                const category = event.target.value as CalendarEventCategory;
+                setSourceForm({ ...sourceForm, category, color: categoryColors[category] });
+              }}
+              options={Object.entries(categoryLabels).map(([value, label]) => ({ value, label }))}
+            />
+            <Input label="Färg" type="color" value={sourceForm.color} onChange={event => setSourceForm({ ...sourceForm, color: event.target.value })} />
+          </div>
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <input type="checkbox" checked={sourceForm.active} onChange={event => setSourceForm({ ...sourceForm, active: event.target.checked })} className="h-4 w-4 rounded border-slate-300" />
+            Aktiv kanal
+          </label>
+          <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">
+            <div className="flex gap-2">
+              <Link2 className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>Händelser importeras som personliga/tilldelade händelser för vald person. Admin kan synka alla kanaler manuellt här.</p>
+            </div>
+          </div>
+          {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+            {editingSource ? <Button variant="danger" onClick={deleteSource} loading={saving}><Trash2 className="h-4 w-4" /> Ta bort</Button> : <span />}
+            <div className="flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setSourceModalOpen(false)}>Avbryt</Button>
+              <Button onClick={saveSource} loading={saving}>{editingSource ? 'Spara' : 'Skapa'}</Button>
             </div>
           </div>
         </div>
