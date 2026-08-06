@@ -11,6 +11,7 @@ import {
   DEFAULT_SCREEN_KEY,
   defaultScreenConfig,
   isMissingScreenSettingsTable,
+  mergeScreenConfigs,
   normalizePresentationSettings,
   normalizeScreenConfig,
   PRESENTATION_SETTINGS_STORAGE_KEY,
@@ -327,7 +328,9 @@ export function ScreenDisplayPage() {
         ? screenSettingsResult.data.map((row: any, index: number) => normalizeScreenConfig(row, index + 1))
         : [];
       const fallbackScreenConfigs = readOrganisationScreenConfigs((organisationResult.data as any)?.settings);
-      const nextScreenConfigs = dbScreenConfigs.length > 0 ? dbScreenConfigs : fallbackScreenConfigs;
+      const nextScreenConfigs = fallbackScreenConfigs.length > 0
+        ? mergeScreenConfigs(fallbackScreenConfigs, dbScreenConfigs)
+        : dbScreenConfigs;
       const selectedConfig = nextScreenConfigs.find(screen => screen.screenKey === selectedScreenKey) || nextScreenConfigs[0];
       const fallbackScreenSettings = readOrganisationScreenSettings((organisationResult.data as any)?.settings, selectedScreenKey);
       const nextScreenView = selectedConfig?.screenView || fallbackScreenSettings.screenView;

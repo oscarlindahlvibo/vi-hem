@@ -9,6 +9,8 @@ import {
   DEFAULT_SCREEN_KEY,
   defaultScreenConfig,
   isMissingScreenSettingsTable,
+  isScreenSettingsTableUnsupported,
+  mergeScreenConfigs,
   normalizePresentationSettings,
   normalizeScreenConfig,
   readOrganisationScreenConfigs,
@@ -102,7 +104,9 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
     } else if (laundryRoomsResult.error) {
       setError(laundryRoomsResult.error.message);
     } else if (screenSettingsResult.data?.length) {
-      const nextScreens = screenSettingsResult.data.map((row: any, index: number) => normalizeScreenConfig(row, index + 1));
+      const dbScreens = screenSettingsResult.data.map((row: any, index: number) => normalizeScreenConfig(row, index + 1));
+      const fallbackScreens = readOrganisationScreenConfigs(organisationResult.data?.settings);
+      const nextScreens = mergeScreenConfigs(fallbackScreens, dbScreens);
       setScreens(nextScreens);
       setSelectedScreenKey(current => nextScreens.some(screen => screen.screenKey === current) ? current : nextScreens[0].screenKey);
     } else {
@@ -193,7 +197,7 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
         updated_at: now,
       })), { onConflict: 'organisation_id,screen_key' });
 
-    if (saveResult.error && isMissingScreenSettingsTable(saveResult.error)) {
+    if (saveResult.error && isScreenSettingsTableUnsupported(saveResult.error)) {
       const nextOrganisationSettings = buildOrganisationScreenSettings(organisationSettings, cleanedScreens);
       const organisationSaveResult = await supabase
         .from('vihem_organisations')

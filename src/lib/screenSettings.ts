@@ -125,6 +125,22 @@ export function isMissingScreenSettingsTable(error: unknown) {
   );
 }
 
+export function isScreenSettingsTableUnsupported(error: unknown) {
+  const message = String((error as { message?: string; code?: string } | null)?.message || '');
+  return isMissingScreenSettingsTable(error) || (
+    message.includes('vihem_screen_settings_screen_view_check') ||
+    message.includes('screen_view_check') ||
+    (message.includes('violates check constraint') && message.includes('screen'))
+  );
+}
+
+export function mergeScreenConfigs(primary: ScreenConfig[], secondary: ScreenConfig[]) {
+  const byKey = new Map<string, ScreenConfig>();
+  secondary.forEach(screen => byKey.set(screen.screenKey, screen));
+  primary.forEach(screen => byKey.set(screen.screenKey, screen));
+  return Array.from(byKey.values());
+}
+
 export function readOrganisationScreenConfigs(settings: unknown): ScreenConfig[] {
   const root = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {};
   const raw = root[ORGANISATION_SCREEN_SETTINGS_KEY] || root.screenSettings;
