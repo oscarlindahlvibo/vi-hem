@@ -33,6 +33,38 @@ function guestLabel(booking?: ShortStayBooking) {
   return booking.guest_name || booking.title || booking.channel_name || 'Bokning';
 }
 
+function screenTagClasses(color: 'emerald' | 'amber' | 'rose' | 'violet', compact: boolean) {
+  const colors = {
+    emerald: 'bg-emerald-100 text-emerald-700',
+    amber: 'bg-amber-100 text-amber-700',
+    rose: 'bg-rose-100 text-rose-700',
+    violet: 'bg-violet-100 text-violet-700',
+  };
+  return `shrink-0 rounded-full font-bold ${colors[color]} ${
+    compact ? 'min-w-[13px] px-1 py-0 text-center text-[9px] leading-[13px]' : 'px-1.5 py-0.5 text-[10px]'
+  }`;
+}
+
+function screenBookingBandStyle(booking: ShortStayBooking, days: string[]) {
+  if (days.length === 0) return null;
+  const firstDay = days[0];
+  const lastVisibleEnd = dateKey(addDays(new Date(`${days[days.length - 1]}T12:00:00`), 1));
+  if (booking.end_date <= firstDay || booking.start_date >= lastVisibleEnd) return null;
+
+  const visibleStart = booking.start_date <= firstDay ? firstDay : booking.start_date;
+  const visibleEnd = booking.end_date >= lastVisibleEnd ? lastVisibleEnd : booking.end_date;
+  const startIndex = days.findIndex(day => day >= visibleStart);
+  const endIndex = days.findIndex(day => day >= visibleEnd);
+  const normalizedStart = startIndex === -1 ? 0 : startIndex;
+  const normalizedEnd = endIndex === -1 ? days.length : endIndex;
+  const span = Math.max(normalizedEnd - normalizedStart, 1);
+
+  return {
+    left: `${(normalizedStart / days.length) * 100}%`,
+    width: `${(span / days.length) * 100}%`,
+  };
+}
+
 function readStoredScreenView(): ScreenView {
   const urlView = new URLSearchParams(window.location.search).get('view');
   if (urlView === 'work-orders' || urlView === 'short-stay') return urlView;
@@ -268,36 +300,58 @@ function ShortStayScreen({ units, bookings, days, screenHeight }: { units: Short
       <div>
         {units.map(unit => {
           const unitBookings = bookings.filter(booking => booking.unit_id === unit.id);
+          const lastVisibleEnd = dateKey(addDays(new Date(`${days[days.length - 1]}T12:00:00`), 1));
+          const visibleBookings = unitBookings.filter(booking => booking.start_date < lastVisibleEnd && booking.end_date > days[0]);
           return (
-            <div key={unit.id} className="grid border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: `220px repeat(${days.length}, minmax(58px, 1fr))`, height: rowHeight }}>
+            <div key={unit.id} className="grid border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: `220px 1fr`, height: rowHeight }}>
               <div className="min-w-0 bg-white px-3 py-2">
                 <p className={`${compact ? 'text-sm' : 'text-base'} truncate font-black`}>{unit.name}</p>
                 <p className={`${compact ? 'mt-0 text-[11px]' : 'mt-1 text-xs'} truncate text-slate-500`}>{unit.apartment?.apartment_number || unit.property?.name || unit.description}</p>
                 {!compact && <p className="mt-1 inline-flex items-center gap-1 text-xs text-slate-400"><Users className="h-3 w-3" /> Max {unit.max_guests || 2}</p>}
               </div>
-              {days.map(day => {
-                const booking = unitBookings.find(item => overlaps(item, day));
-                const arrival = unitBookings.find(item => item.start_date === day);
-                const departure = unitBookings.find(item => item.end_date === day);
-                return (
-                  <div key={`${unit.id}-${day}`} className={`overflow-hidden border-l border-slate-100 px-1 py-1 ${booking ? 'bg-blue-50' : departure ? 'bg-amber-50' : ''}`}>
-                    {booking && (
-                      <div className={`rounded-lg bg-blue-600 px-1.5 ${compact ? 'py-0.5 text-[10px]' : 'py-1 text-xs'} font-black leading-tight text-white`}>
-                        <div className="truncate">{guestLabel(booking)}</div>
-                        {!compact && <div className="mt-0.5 text-[10px] opacity-90">{booking.guest_count || 1} gäster</div>}
+              <div className="relative grid overflow-hidden" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(58px, 1fr))` }}>
+                {days.map(day => {
+                  const activeBooking = unitBookings.find(item => overlaps(item, day));
+                  const arrival = unitBookings.find(item => item.start_date === day);
+                  const departure = unitBookings.find(item => item.end_date === day);
+                  return (
+                    <div key={`${unit.id}-${day}`} className={`relative overflow-hidden border-l border-slate-100 px-1 ${activeBooking ? 'bg-blue-50' : departure ? 'bg-amber-50' : ''}`}>
+                      <div className={`absolute z-20 flex gap-0.5 ${
+                        compact
+                          ? 'bottom-0.5 left-0.5 right-0.5 flex-nowrap justify-center overflow-visible'
+                          : 'bottom-1 left-1 right-1 flex-wrap'
+                      }`}>
+                        {arrival && <span className={screenTagClasses('emerald', compact)} title="Incheckning">{compact ? 'I' : 'In'}</span>}
+                        {departure && <span className={screenTagClasses('amber', compact)} title="Utcheckning">{compact ? 'U' : 'Ut'}</span>}
+                        {departure?.cleaning_status && departure.cleaning_status !== 'clean' && departure.cleaning_status !== 'not_needed' && (
+                          <span className={screenTagClasses('rose', compact)} title="Städ">{compact ? 'S' : 'Städ'}</span>
+                        )}
+                        {arrival && departure && arrival.id !== departure.id && <span className={screenTagClasses('violet', compact)} title="Byte">{compact ? 'B' : 'Byte'}</span>}
                       </div>
-                    )}
-                    <div className={`${compact ? 'mt-1' : 'mt-1.5'} flex flex-wrap gap-0.5`}>
-                      {arrival && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">In</span>}
-                      {departure && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">Ut</span>}
-                      {departure?.cleaning_status && departure.cleaning_status !== 'clean' && departure.cleaning_status !== 'not_needed' && (
-                        <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">Städ</span>
-                      )}
-                      {arrival && departure && arrival.id !== departure.id && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">Byte</span>}
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+                {visibleBookings.map(booking => {
+                  const style = screenBookingBandStyle(booking, days);
+                  if (!style) return null;
+                  const isBlock = booking.booking_type === 'block';
+                  return (
+                    <div
+                      key={booking.id}
+                      className={`absolute z-10 flex items-center gap-1 overflow-hidden rounded-lg px-2 font-black leading-none text-white shadow-sm ${compact ? 'top-1 h-5 text-[10px]' : 'top-1.5 h-7 text-xs'} ${
+                        isBlock ? 'bg-slate-700' : 'bg-blue-600'
+                      }`}
+                      style={style}
+                      title={`${guestLabel(booking)} (${booking.start_date} - ${booking.end_date})`}
+                    >
+                      <span className="min-w-0 flex-1 truncate">{guestLabel(booking)}</span>
+                      {booking.booking_type === 'booking' && !compact && (
+                        <span className="shrink-0 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px]">{booking.guest_count || 1}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           );
         })}

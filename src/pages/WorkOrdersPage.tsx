@@ -56,8 +56,9 @@ import {
 import { TIME_CATEGORY_LABELS } from '../lib/utils';
 import type { TimeCategory } from '../types';
 
-type FilterView = 'all' | 'mine' | 'new' | 'urgent';
+type FilterView = 'all' | 'mine' | 'unassigned';
 type WorkOrderListTab = 'active' | 'archived';
+type WorkOrderSort = 'due_date' | 'created_at';
 
 type WorkOrderPerson = Pick<Profile, 'name'>;
 
@@ -122,6 +123,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   const [filterStatus, setFilterStatus] = useState<WOStatus | 'all'>('all');
   const [filterPriority, setFilterPriority] = useState<WOPriority | 'all'>('all');
   const [filterView, setFilterView] = useState<FilterView>('all');
+  const [sortBy, setSortBy] = useState<WorkOrderSort>('due_date');
   const [listTab, setListTab] = useState<WorkOrderListTab>('active');
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<WOWithRelations | null>(null);
@@ -584,17 +586,25 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       const matchesSearch = wo.title.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = filterStatus === 'all' || wo.status === filterStatus;
       const matchesPriority = filterPriority === 'all' || wo.priority === filterPriority;
+      const assignedIds = wo.assigned_to_ids?.length ? wo.assigned_to_ids : wo.assigned_to ? [wo.assigned_to] : [];
 
       let matchesView = true;
       if (filterView === 'mine') {
-        matchesView = wo.assigned_to === user?.id || wo.assigned_to_ids?.includes(user?.id || '');
-      } else if (filterView === 'new') {
-        matchesView = wo.status === 'new';
-      } else if (filterView === 'urgent') {
-        matchesView = wo.priority === 'urgent' || wo.priority === 'high';
+        matchesView = assignedIds.includes(user?.id || '');
+      } else if (filterView === 'unassigned') {
+        matchesView = assignedIds.length === 0;
       }
 
       return matchesTab && matchesSearch && matchesStatus && matchesPriority && matchesView;
+    }).sort((a, b) => {
+      if (sortBy === 'created_at') {
+        return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+      }
+
+      const aDue = a.due_date ? new Date(`${a.due_date}T12:00:00`).getTime() : Number.POSITIVE_INFINITY;
+      const bDue = b.due_date ? new Date(`${b.due_date}T12:00:00`).getTime() : Number.POSITIVE_INFINITY;
+      if (aDue !== bDue) return aDue - bDue;
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
     });
   }
 
@@ -772,12 +782,21 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
           <Select
             options={[
               { value: 'all', label: 'Alla arbetsordrar' },
-              { value: 'mine', label: 'Tilldelade till mig' },
-              { value: 'new', label: 'Nya arbetsordrar' },
-              { value: 'urgent', label: 'Akuta arbetsordrar' },
+              { value: 'mine', label: 'Mina arbetsordrar' },
+              { value: 'unassigned', label: 'Ej tilldelade arbetsordrar' },
             ]}
             value={filterView}
             onChange={(e) => setFilterView((e.target.value as any) || 'all')}
+            className="hidden md:block"
+          />
+
+          <Select
+            options={[
+              { value: 'due_date', label: 'Sortera: förfallodag' },
+              { value: 'created_at', label: 'Sortera: senast skapade' },
+            ]}
+            value={sortBy}
+            onChange={(e) => setSortBy((e.target.value as WorkOrderSort) || 'due_date')}
             className="hidden md:block"
           />
 
@@ -832,12 +851,21 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
             label="Visning"
             options={[
               { value: 'all', label: 'Alla arbetsordrar' },
-              { value: 'mine', label: 'Tilldelade till mig' },
-              { value: 'new', label: 'Nya arbetsordrar' },
-              { value: 'urgent', label: 'Akuta arbetsordrar' },
+              { value: 'mine', label: 'Mina arbetsordrar' },
+              { value: 'unassigned', label: 'Ej tilldelade arbetsordrar' },
             ]}
             value={filterView}
             onChange={(e) => setFilterView((e.target.value as any) || 'all')}
+          />
+
+          <Select
+            label="Sortering"
+            options={[
+              { value: 'due_date', label: 'Förfallodag' },
+              { value: 'created_at', label: 'Senast skapade' },
+            ]}
+            value={sortBy}
+            onChange={(e) => setSortBy((e.target.value as WorkOrderSort) || 'due_date')}
           />
 
           <div className="flex items-center gap-2">
