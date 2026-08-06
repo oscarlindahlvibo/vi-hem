@@ -255,9 +255,7 @@ function SwipeableCleaningCard({
           </Badge>
         </div>
         <p className="text-sm text-slate-500">Efter {booking.guest_name || booking.title || 'bokning'} · ut {formatShortDate(booking.end_date)}</p>
-        {booking.cleaning_work_order_id && (
-          <p className="mt-1 text-xs font-medium text-blue-700">Arbetsorder skapad · svep vänster för klar</p>
-        )}
+        <p className="mt-1 text-xs font-medium text-blue-700">Svep vänster när kontroll/städ är klar</p>
       </div>
     </div>
   );
@@ -418,14 +416,12 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
 
   const stats = useMemo(() => {
     const today = todayKey();
-    const cleaningArchiveCutoff = toDateKey(addDays(new Date(`${today}T12:00:00`), -3));
     const activeUnits = units.filter(unit => unit.is_active);
     const current = bookings.filter(booking => overlaps(booking, today) && booking.booking_type === 'booking');
     const checkIns = bookings.filter(booking => booking.start_date === today && booking.booking_type === 'booking');
     const checkOuts = bookings.filter(booking => booking.end_date === today && booking.booking_type === 'booking');
     const cleaning = bookings.filter(booking =>
       booking.end_date <= today &&
-      booking.end_date >= cleaningArchiveCutoff &&
       booking.cleaning_status !== 'clean' &&
       booking.cleaning_status !== 'not_needed'
     );
@@ -758,20 +754,6 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
         .eq('id', booking.id);
 
       if (updateError) throw updateError;
-
-      if (booking.cleaning_work_order_id) {
-        const actor = user.name || user.email || 'Okänd användare';
-        const { error: commentError } = await supabase
-          .from('vihem_work_order_comments')
-          .insert({
-            work_order_id: booking.cleaning_work_order_id,
-            user_id: user.id,
-            internal: true,
-            comment: `Städorder klarmarkerad via svep i korttidsuthyrning av ${actor}.`,
-          });
-
-        if (commentError) throw commentError;
-      }
 
       setBookings((current) => current.map((item) => (
         item.id === booking.id ? { ...item, cleaning_status: 'clean' } : item
@@ -1228,7 +1210,6 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                     <div className="flex flex-wrap gap-2">
                       <Badge className="bg-emerald-100 text-emerald-700">{paymentLabels[booking.payment_status]}</Badge>
                       <Badge className="bg-amber-100 text-amber-700">{cleaningLabels[booking.cleaning_status]}</Badge>
-                      {booking.cleaning_work_order_id && <Badge className="bg-blue-100 text-blue-700">Städorder</Badge>}
                     </div>
                   </div>
                 </Card>
