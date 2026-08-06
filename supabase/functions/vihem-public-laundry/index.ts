@@ -14,6 +14,10 @@ function json(body: unknown, status = 200) {
   });
 }
 
+function errorResponse(message: string) {
+  return json({ error: message });
+}
+
 function localDateKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
@@ -49,7 +53,7 @@ Deno.serve(async (req) => {
     const action = (body.action || url.searchParams.get('action') || 'get') as Action;
     const token = cleanText(body.token || url.searchParams.get('token'));
 
-    if (!token) return json({ error: 'Saknar gästlänk.' }, 400);
+    if (!token) return errorResponse('Saknar gästlänk.');
 
     const { data: link, error: linkError } = await serviceClient
       .from('vihem_laundry_guest_links')
@@ -63,7 +67,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (linkError) throw linkError;
-    if (!link || isExpired(link)) return json({ error: 'Länken är inte aktiv.' }, 404);
+    if (!link || isExpired(link)) return errorResponse('Länken är inte aktiv.');
 
     const loadState = async () => {
       const today = new Date();
@@ -138,7 +142,7 @@ Deno.serve(async (req) => {
       const guestEmail = cleanText(body.guest_email);
       const guestPhone = cleanText(body.guest_phone);
 
-      if (!slotId) return json({ error: 'Välj en tvättid.' }, 400);
+      if (!slotId) return errorResponse('Välj en tvättid.');
 
       const { data: activeBookings, error: activeError } = await serviceClient
         .from('vihem_laundry_bookings')
@@ -147,22 +151,30 @@ Deno.serve(async (req) => {
         .eq('status', 'active');
       if (activeError) throw activeError;
       if ((activeBookings || []).length >= link.max_bookings) {
-        return json({ error: `Max ${link.max_bookings} aktiva bokningar är redan gjorda med denna länk.` }, 409);
+        return errorResponse(`Max ${link.max_bookings} aktiva bokningar är redan gjorda med denna länk.`);
       }
 
       const { data: slot, error: slotError } = await serviceClient
         .from('vihem_laundry_slots')
-        .select('*, laundry_room:vihem_laundry_rooms(id, property_id, organisation_id, active)')
+        .select('*')
         .eq('id', slotId)
         .maybeSingle();
       if (slotError) throw slotError;
-      if (!slot || !slot.laundry_room?.active) return json({ error: 'Tvättiden finns inte längre.' }, 404);
-      if (slot.laundry_room.property_id !== link.property_id || slot.laundry_room.organisation_id !== link.organisation_id) {
-        return json({ error: 'Tvättiden hör inte till denna gästlänk.' }, 403);
+      if (!slot) return errorResponse('Tvättiden finns inte längre.');
+
+      const { data: room, error: roomError } = await serviceClient
+        .from('vihem_laundry_rooms')
+        .select('id, property_id, organisation_id, active')
+        .eq('id', slot.laundry_room_id)
+        .maybeSingle();
+      if (roomError) throw roomError;
+      if (!room?.active) return errorResponse('Tvättiden finns inte längre.');
+      if (room.property_id !== link.property_id || room.organisation_id !== link.organisation_id) {
+        return errorResponse('Tvättiden hör inte till denna gästlänk.');
       }
-      if (slot.is_blocked) return json({ error: 'Tvättiden är blockerad.' }, 409);
+      if (slot.is_blocked) return errorResponse('Tvättiden är blockerad.');
       if (new Date(`${slot.date}T${slot.end_time}`).getTime() < Date.now()) {
-        return json({ error: 'Tvättiden har redan passerat.' }, 409);
+        return errorResponse('Tvättiden har redan passerat.');
       }
 
       const { data: existingBooking, error: existingError } = await serviceClient
@@ -172,7 +184,7 @@ Deno.serve(async (req) => {
         .eq('status', 'active')
         .maybeSingle();
       if (existingError) throw existingError;
-      if (existingBooking) return json({ error: 'Tvättiden är redan bokad.' }, 409);
+      if (existingBooking) return errorResponse('Tvättiden är redan bokad.');
 
       const { error: insertError } = await serviceClient
         .from('vihem_laundry_bookings')
@@ -192,7 +204,7 @@ Deno.serve(async (req) => {
 
     if (action === 'cancel') {
       const bookingId = cleanText(body.booking_id);
-      if (!bookingId) return json({ error: 'Saknar bokning.' }, 400);
+      if (!bookingId) return errorResponse('Saknar bokning.');
 
       const { error: cancelError } = await serviceClient
         .from('vihem_laundry_bookings')
@@ -207,6 +219,6 @@ Deno.serve(async (req) => {
     return json({ data: await loadState() });
   } catch (error) {
     console.error('vihem-public-laundry error:', error);
-    return json({ error: error instanceof Error ? error.message : 'Något gick fel.' }, 500);
+    return errorResponse(error instanceof Error ? error.message : 'Något gick fel.');
   }
 });
