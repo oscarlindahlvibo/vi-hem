@@ -95,14 +95,23 @@ const formatShortDate = (value: string) =>
 const formatDateRange = (start: string, end: string) =>
   `${formatShortDate(start)} - ${formatShortDate(end)}`;
 
-const monthLabel = (date: Date) =>
-  date.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' });
+const CALENDAR_DAY_WIDTH = 72;
+const CALENDAR_UNIT_WIDTH = 230;
+const CALENDAR_WINDOW_DAYS = 31;
 
-const getMonthDays = (date: Date) => {
-  const start = new Date(date.getFullYear(), date.getMonth(), 1, 12);
-  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 12);
-  const daysInMonth = end.getDate();
-  return Array.from({ length: daysInMonth }, (_, index) => toDateKey(addDays(start, index)));
+const getCalendarDays = (date: Date) =>
+  Array.from({ length: CALENDAR_WINDOW_DAYS }, (_, index) => toDateKey(addDays(date, index)));
+
+const calendarRangeLabel = (days: string[]) => {
+  if (days.length === 0) return '';
+  const start = days[0];
+  const end = days[days.length - 1];
+  const startDate = new Date(`${start}T12:00:00`);
+  const endDate = new Date(`${end}T12:00:00`);
+  const sameYear = startDate.getFullYear() === endDate.getFullYear();
+  const startLabel = startDate.toLocaleDateString('sv-SE', sameYear ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' });
+  const endLabel = endDate.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' });
+  return `${startLabel} - ${endLabel}`;
 };
 
 const defaultUnitForm: UnitForm = {
@@ -180,8 +189,8 @@ function bookingBandStyle(booking: ShortStayBooking, days: string[]) {
   if (startIndex < 0 || endIndex < startIndex) return null;
 
   return {
-    left: `${(startIndex / days.length) * 100}%`,
-    width: `${((endIndex - startIndex + 1) / days.length) * 100}%`,
+    left: `${startIndex * CALENDAR_DAY_WIDTH}px`,
+    width: `${(endIndex - startIndex + 1) * CALENDAR_DAY_WIDTH}px`,
   };
 }
 
@@ -230,9 +239,9 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   const [saving, setSaving] = useState(false);
   const [syncingUnitId, setSyncingUnitId] = useState<string | null>(null);
   const [formError, setFormError] = useState('');
-  const [calendarMonth, setCalendarMonth] = useState(() => {
+  const [calendarStartDate, setCalendarStartDate] = useState(() => {
     const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1, 12);
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
   });
   const [beds24Connection, setBeds24Connection] = useState<Beds24Connection | null>(null);
   const [beds24Logs, setBeds24Logs] = useState<Beds24Log[]>([]);
@@ -245,7 +254,9 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   const isAdmin = user?.role === 'admin';
   const organisationId = user?.organisation_id;
 
-  const days = useMemo(() => getMonthDays(calendarMonth), [calendarMonth]);
+  const days = useMemo(() => getCalendarDays(calendarStartDate), [calendarStartDate]);
+  const calendarGridWidth = days.length * CALENDAR_DAY_WIDTH;
+  const calendarTotalWidth = CALENDAR_UNIT_WIDTH + calendarGridWidth;
 
   const bookingsByUnit = useMemo(() => {
     const map = new Map<string, ShortStayBooking[]>();
@@ -760,13 +771,13 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
         <Card className="overflow-hidden">
           <div className="flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-base font-semibold text-slate-900 capitalize">{monthLabel(calendarMonth)}</h2>
-              <p className="text-sm text-slate-500">Ankomster, avresor, beläggning och städbehov per enhet</p>
+              <h2 className="text-base font-semibold text-slate-900 capitalize">{calendarRangeLabel(days)}</h2>
+              <p className="text-sm text-slate-500">Visar 31 dagar från valt startdatum</p>
             </div>
             <div className="flex items-center gap-2">
               <Button
                 variant="secondary"
-                onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1, 12))}
+                onClick={() => setCalendarStartDate(addDays(calendarStartDate, -31))}
               >
                 <ChevronLeft className="w-4 h-4" />
               </Button>
@@ -774,22 +785,22 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                 variant="secondary"
                 onClick={() => {
                   const now = new Date();
-                  setCalendarMonth(new Date(now.getFullYear(), now.getMonth(), 1, 12));
+                  setCalendarStartDate(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12));
                 }}
               >
                 Idag
               </Button>
               <Button
                 variant="secondary"
-                onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1, 12))}
+                onClick={() => setCalendarStartDate(addDays(calendarStartDate, 31))}
               >
                 <ChevronRight className="w-4 h-4" />
               </Button>
             </div>
           </div>
           <div className="overflow-x-auto">
-            <div className="min-w-[1120px]">
-              <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `230px repeat(${days.length}, minmax(72px, 1fr))` }}>
+            <div style={{ width: `${calendarTotalWidth}px` }}>
+              <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `${CALENDAR_UNIT_WIDTH}px repeat(${days.length}, ${CALENDAR_DAY_WIDTH}px)` }}>
                 <div className="sticky left-0 z-10 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Rum/lägenhet</div>
                 {days.map((day) => (
                   <div key={day} className={`px-2 py-3 text-center text-xs font-medium ${day === todayKey() ? 'bg-blue-50 text-blue-700' : 'text-slate-500'}`}>
@@ -806,7 +817,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                   item.end_date > days[0]
                 );
                 return (
-                  <div key={unit.id} className="grid border-b border-slate-100" style={{ gridTemplateColumns: `230px minmax(0, 1fr)` }}>
+                  <div key={unit.id} className="grid border-b border-slate-100" style={{ gridTemplateColumns: `${CALENDAR_UNIT_WIDTH}px ${calendarGridWidth}px` }}>
                     <div className="sticky left-0 z-10 bg-white px-4 py-3">
                       <p className="text-sm font-semibold text-slate-900">{unit.name}</p>
                       <p className="text-xs text-slate-500">{unit.apartment?.apartment_number || unit.property?.name || 'Fristående'}</p>
@@ -814,7 +825,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                         <Users className="h-3 w-3" /> Max {unit.max_guests || 2}
                       </p>
                     </div>
-                    <div className="relative grid min-h-[72px]" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(72px, 1fr))` }}>
+                    <div className="relative grid min-h-[72px]" style={{ gridTemplateColumns: `repeat(${days.length}, ${CALENDAR_DAY_WIDTH}px)` }}>
                       {visibleBookings.map((booking, index) => {
                         const style = bookingBandStyle(booking, days);
                         if (!style) return null;
