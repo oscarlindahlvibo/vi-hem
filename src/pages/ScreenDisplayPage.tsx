@@ -575,7 +575,7 @@ function PresentationScreen({
   const checkIns = bookings.filter(booking => booking.booking_type === 'booking' && booking.start_date === todayValue);
   const checkOuts = bookings.filter(booking => booking.booking_type === 'booking' && booking.end_date === todayValue);
   const activeNews = news.slice(0, 4);
-  const activeWorkOrders = workOrders.slice(0, 6);
+  const activeWorkOrders = workOrders.slice(0, 8);
   const activeMeetings = meetings.slice(0, 5);
   const tickerParts = [
     settings.weatherLocation ? `Väder · ${weatherText}` : '',
@@ -589,6 +589,8 @@ function PresentationScreen({
     if (entry.entry_type === 'break') return 'Rast';
     return entry.work_order?.title || entry.customer_project?.title || entry.customer_project?.name || entry.property?.name || TIME_CATEGORY_LABELS[entry.category] || 'Arbete';
   };
+  const isOrderOverdue = (order: WorkOrder) => Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
+  const assigneeLabel = (order: WorkOrder) => order.assigned?.name || (order.assigned_to_ids?.length ? `${order.assigned_to_ids.length} tilldelade` : 'Ej tilldelad');
 
   return (
     <div className="relative h-[calc(100vh-54px)] overflow-hidden rounded-xl bg-slate-950 text-white">
@@ -596,42 +598,57 @@ function PresentationScreen({
       <div className="relative grid h-full grid-rows-[1fr_auto]">
         <main className="grid min-h-0 gap-3 p-4 xl:grid-cols-[1.15fr_0.85fr]">
           <section className="grid min-h-0 gap-3">
-            <div className="rounded-3xl bg-white/10 p-6 ring-1 ring-white/10">
-              <div className="flex items-start justify-between gap-6">
+            <div className="rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
+              <div className="flex items-center justify-between gap-5">
                 <div>
                   <p className="text-sm font-black uppercase tracking-[0.22em] text-blue-200">VI-HEM Presentation</p>
-                  <h2 className="mt-2 text-6xl font-black leading-none tracking-tight">
+                  <h2 className="mt-1 text-5xl font-black leading-none tracking-tight">
                     {now.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
                   </h2>
-                  <p className="mt-2 text-2xl font-bold text-slate-200">
+                  <p className="mt-1 text-xl font-bold text-slate-200">
                     {now.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}
                   </p>
                 </div>
-                <div className="min-w-[18rem] rounded-3xl bg-white/10 p-4 text-right ring-1 ring-white/10">
-                  <CloudSun className="ml-auto h-8 w-8 text-amber-200" />
-                  <p className="mt-2 text-sm font-bold text-slate-300">Dagens väder</p>
-                  <p className="mt-1 text-lg font-black leading-tight">{weatherText}</p>
+                <div className="min-w-[22rem] rounded-2xl bg-white/10 p-3 text-right ring-1 ring-white/10">
+                  <div className="flex items-center justify-end gap-2">
+                    <CloudSun className="h-6 w-6 text-amber-200" />
+                    <p className="text-sm font-bold text-slate-300">Dagens väder</p>
+                  </div>
+                  <p className="mt-1 text-base font-black leading-tight">{weatherText}</p>
                 </div>
               </div>
             </div>
 
-            {settings.showNews && (
+            {settings.showWorkOrders && (
               <div className="min-h-0 rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
-                <div className="mb-3 flex items-center gap-2">
-                  <Newspaper className="h-5 w-5 text-blue-200" />
-                  <h3 className="text-xl font-black">Aktuella nyheter</h3>
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-2xl font-black"><ClipboardList className="h-6 w-6 text-amber-200" /> Arbetsordrar</h3>
+                  <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-black">{workOrders.length}</span>
                 </div>
-                <div className="grid gap-2">
-                  {activeNews.length === 0 ? (
-                    <p className="rounded-2xl bg-white/5 px-4 py-5 text-lg font-bold text-slate-300">Inga publicerade nyheter.</p>
-                  ) : activeNews.map(item => (
-                    <div key={item.id} className="rounded-2xl bg-white/10 px-4 py-3">
+                <div className="grid gap-2 xl:grid-cols-2">
+                  {activeWorkOrders.length === 0 ? (
+                    <p className="rounded-2xl bg-white/5 px-4 py-5 text-lg font-bold text-slate-300 xl:col-span-2">Inga aktiva arbetsordrar.</p>
+                  ) : activeWorkOrders.map(order => (
+                    <div key={order.id} className="rounded-2xl bg-white/10 px-4 py-3">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate text-lg font-black">{item.title}</p>
-                          <p className="mt-1 line-clamp-2 text-sm font-semibold leading-5 text-slate-300">{item.content}</p>
+                          <p className="truncate text-lg font-black">{order.title}</p>
+                          <p className="mt-1 truncate text-sm font-semibold text-slate-300">
+                            {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
+                          </p>
                         </div>
-                        {item.priority === 'urgent' && <span className="rounded-full bg-rose-400 px-2.5 py-1 text-xs font-black text-white">Viktigt</span>}
+                        <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-xs font-black">{WO_STATUS_LABELS[order.status]}</span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="rounded-full bg-blue-400/15 px-2.5 py-1 text-xs font-black text-blue-100">
+                          {assigneeLabel(order)}
+                        </span>
+                        <span className="rounded-full bg-amber-400/15 px-2.5 py-1 text-xs font-black text-amber-100">
+                          {WO_PRIORITY_LABELS[order.priority] || order.priority}
+                        </span>
+                        {isOrderOverdue(order) && (
+                          <span className="rounded-full bg-rose-500 px-2.5 py-1 text-xs font-black text-white">Försenad</span>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -641,6 +658,30 @@ function PresentationScreen({
           </section>
 
           <section className="grid min-h-0 gap-3">
+            {settings.showNews && (
+              <div className="rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
+                <div className="mb-3 flex items-center gap-2">
+                  <Newspaper className="h-5 w-5 text-blue-200" />
+                  <h3 className="text-xl font-black">Aktuella nyheter</h3>
+                </div>
+                <div className="grid gap-2">
+                  {activeNews.length === 0 ? (
+                    <p className="rounded-2xl bg-white/5 px-4 py-4 font-bold text-slate-300">Inga publicerade nyheter.</p>
+                  ) : activeNews.map(item => (
+                    <div key={item.id} className="rounded-2xl bg-white/10 px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-base font-black">{item.title}</p>
+                          <p className="mt-1 line-clamp-2 text-sm font-semibold leading-5 text-slate-300">{item.content}</p>
+                        </div>
+                        {item.priority === 'urgent' && <span className="rounded-full bg-rose-400 px-2.5 py-1 text-xs font-black text-white">Viktigt</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {settings.showClockedIn && (
               <div className="rounded-3xl bg-emerald-400/10 p-4 ring-1 ring-emerald-300/20">
                 <div className="mb-3 flex items-center justify-between">
@@ -655,30 +696,6 @@ function PresentationScreen({
                       <p className="truncate text-base font-black">{entry.user?.name || 'Personal'}</p>
                       <p className="truncate text-sm font-semibold text-emerald-100">{timeEntryTitle(entry)}</p>
                       <p className="mt-1 text-xs font-bold text-slate-400">Sedan {formatDateTime(entry.start_time)}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {settings.showWorkOrders && (
-              <div className="rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="flex items-center gap-2 text-xl font-black"><ClipboardList className="h-5 w-5 text-amber-200" /> Arbetsordrar</h3>
-                  <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-black">{workOrders.length}</span>
-                </div>
-                <div className="grid gap-2">
-                  {activeWorkOrders.length === 0 ? (
-                    <p className="rounded-2xl bg-white/5 px-4 py-4 font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
-                  ) : activeWorkOrders.map(order => (
-                    <div key={order.id} className="rounded-2xl bg-white/10 px-4 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="min-w-0 truncate text-base font-black">{order.title}</p>
-                        <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-xs font-black">{WO_STATUS_LABELS[order.status]}</span>
-                      </div>
-                      <p className="mt-1 truncate text-sm font-semibold text-slate-300">
-                        {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
-                      </p>
                     </div>
                   ))}
                 </div>
