@@ -22,6 +22,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
 
     let organisationId = String(body.organisation_id || "");
+    let syncAllOrganisations = false;
     if (authHeader) {
       const userClient = createClient(supabaseUrl, anonKey, {
         global: { headers: { Authorization: authHeader } },
@@ -38,17 +39,64 @@ Deno.serve(async (req: Request) => {
       organisationId = profile.role === "superadmin" && organisationId ? organisationId : profile.organisation_id;
       if (!organisationId) return json({ error: "Saknar organisation." }, 400);
     } else {
-      const internalSecret = Deno.env.get("VIHEM_INTERNAL_SYNC_SECRET") || "";
-      if (!internalSecret || req.headers.get("x-vihem-sync-secret") !== internalSecret) return json({ error: "Unauthorized" }, 401);
+      const providedSecret = req.headers.get("x-vihem-sync-secret") || "";
+      const envSecret = Deno.env.get("VIHEM_INTERNAL_SYNC_SECRET") || "";
+      const dbSecret = await readSchedulerSecret(serviceClient);
+      if (!providedSecret || (providedSecret !== envSecret && providedSecret !== dbSecret)) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+      syncAllOrganisations = !organisationId;
     }
 
-    const result = await syncOrganisation(serviceClient, organisationId, body);
+    const result = syncAllOrganisations
+      ? await syncEnabledOrganisations(serviceClient, body)
+      : await syncOrganisation(serviceClient, organisationId, body);
     return json(result);
   } catch (err) {
     console.error(err);
     return json({ error: err instanceof Error ? err.message : "Synk misslyckades." }, 400);
   }
 });
+
+async function readSchedulerSecret(serviceClient: any) {
+  const { data, error } = await serviceClient
+    .from("vihem_system_settings")
+    .select("value")
+    .eq("key", "beds24_scheduled_sync")
+    .maybeSingle();
+  if (error || !data?.value?.secret) return "";
+  return String(data.value.secret);
+}
+
+async function syncEnabledOrganisations(serviceClient: any, options: any = {}) {
+  const { data: connections, error } = await serviceClient
+    .from("vihem_beds24_connections")
+    .select("organisation_id")
+    .eq("enabled", true)
+    .neq("refresh_token", "");
+  if (error) throw error;
+
+  const results = [];
+  let imported = 0;
+  for (const connection of connections || []) {
+    try {
+      const result = await syncOrganisation(serviceClient, connection.organisation_id, options);
+      imported += Number(result.imported || 0);
+      results.push({ organisation_id: connection.organisation_id, ...result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Synk misslyckades.";
+      results.push({ organisation_id: connection.organisation_id, ok: false, error: message });
+      await log(serviceClient, {
+        organisation_id: connection.organisation_id,
+        status: "error",
+        event_type: "scheduled_sync",
+        message,
+      });
+    }
+  }
+
+  return { ok: true, scheduled: true, organisations: results.length, imported, results };
+}
 
 async function syncOrganisation(serviceClient: any, organisationId: string, options: any = {}) {
   const { data: connection, error: connectionError } = await serviceClient
