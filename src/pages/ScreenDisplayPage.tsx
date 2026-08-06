@@ -9,8 +9,10 @@ import { formatDate, formatDateTime, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, W
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import {
   DEFAULT_SCREEN_KEY,
+  isMissingScreenSettingsTable,
   normalizePresentationSettings,
   PRESENTATION_SETTINGS_STORAGE_KEY,
+  readOrganisationScreenSettings,
   readStoredPresentationSettings,
   readStoredScreenView,
   screenViewLabel,
@@ -178,7 +180,7 @@ export function ScreenDisplayPage() {
     const [organisationResult, screenSettingsResult, staffResult, unitsResult, bookingsResult, workOrdersResult, newsResult, clockedInResult, meetingsResult] = await Promise.all([
       supabase
         .from('vihem_organisations')
-        .select('name')
+        .select('name, settings')
         .eq('id', user.organisation_id)
         .maybeSingle(),
       supabase
@@ -239,7 +241,9 @@ export function ScreenDisplayPage() {
         .limit(8),
     ]);
 
-    if (organisationResult.error || screenSettingsResult.error || staffResult.error || unitsResult.error || bookingsResult.error || workOrdersResult.error || newsResult.error || clockedInResult.error || meetingsResult.error) {
+    const screenSettingsUnavailable = isMissingScreenSettingsTable(screenSettingsResult.error);
+
+    if (organisationResult.error || (screenSettingsResult.error && !screenSettingsUnavailable) || staffResult.error || unitsResult.error || bookingsResult.error || workOrdersResult.error || newsResult.error || clockedInResult.error || meetingsResult.error) {
       setDataError(
         organisationResult.error?.message ||
         screenSettingsResult.error?.message ||
@@ -254,11 +258,17 @@ export function ScreenDisplayPage() {
       );
     } else {
       setOrganisationName(organisationResult.data?.name || 'VI-HEM');
-      if (screenSettingsResult.data?.screen_view) {
-        setView(screenSettingsResult.data.screen_view as ScreenView);
+      const fallbackScreenSettings = readOrganisationScreenSettings((organisationResult.data as any)?.settings);
+      const nextScreenView = screenSettingsResult.data?.screen_view || fallbackScreenSettings.screenView;
+      const nextPresentationSettings = screenSettingsResult.data?.presentation_settings
+        ? normalizePresentationSettings(screenSettingsResult.data.presentation_settings)
+        : fallbackScreenSettings.presentationSettings;
+
+      if (nextScreenView) {
+        setView(nextScreenView as ScreenView);
       }
-      if (screenSettingsResult.data?.presentation_settings) {
-        setPresentationSettings(normalizePresentationSettings(screenSettingsResult.data.presentation_settings));
+      if (nextPresentationSettings) {
+        setPresentationSettings(nextPresentationSettings);
       }
       setStaffMembers((staffResult.data || []) as Pick<Profile, 'id' | 'name'>[]);
       setUnits((unitsResult.data || []) as ShortStayUnit[]);

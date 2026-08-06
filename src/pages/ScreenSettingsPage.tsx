@@ -4,8 +4,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Button, Card, EmptyState, Input, LoadingPage, PageHeader, Select } from '../components/ui';
 import {
+  buildOrganisationScreenSettings,
   DEFAULT_SCREEN_KEY,
+  isMissingScreenSettingsTable,
   normalizePresentationSettings,
+  readOrganisationScreenSettings,
   screenViewLabel,
   type PresentationSettings,
   type ScreenView,
@@ -38,6 +41,7 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
   const [success, setSuccess] = useState('');
   const [screenView, setScreenView] = useState<ScreenView>('presentation');
   const [settings, setSettings] = useState<PresentationSettings>(() => normalizePresentationSettings({}));
+  const [organisationSettings, setOrganisationSettings] = useState<Record<string, unknown>>({});
 
   const canManage = user?.role === 'admin' || user?.role === 'superadmin';
 
@@ -54,18 +58,37 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
     setLoading(true);
     setError('');
 
-    const { data, error: fetchError } = await supabase
-      .from('vihem_screen_settings')
-      .select('screen_view, presentation_settings')
-      .eq('organisation_id', user.organisation_id)
-      .eq('screen_key', DEFAULT_SCREEN_KEY)
-      .maybeSingle();
+    const [screenSettingsResult, organisationResult] = await Promise.all([
+      supabase
+        .from('vihem_screen_settings')
+        .select('screen_view, presentation_settings')
+        .eq('organisation_id', user.organisation_id)
+        .eq('screen_key', DEFAULT_SCREEN_KEY)
+        .maybeSingle(),
+      supabase
+        .from('vihem_organisations')
+        .select('settings')
+        .eq('id', user.organisation_id)
+        .maybeSingle(),
+    ]);
 
-    if (fetchError) {
-      setError(fetchError.message);
-    } else if (data) {
-      setScreenView(data.screen_view as ScreenView);
-      setSettings(normalizePresentationSettings(data.presentation_settings));
+    const screenSettingsUnavailable = isMissingScreenSettingsTable(screenSettingsResult.error);
+
+    if (organisationResult.data?.settings && typeof organisationResult.data.settings === 'object') {
+      setOrganisationSettings(organisationResult.data.settings as Record<string, unknown>);
+    }
+
+    if (screenSettingsResult.error && !screenSettingsUnavailable) {
+      setError(screenSettingsResult.error.message);
+    } else if (organisationResult.error) {
+      setError(organisationResult.error.message);
+    } else if (screenSettingsResult.data) {
+      setScreenView(screenSettingsResult.data.screen_view as ScreenView);
+      setSettings(normalizePresentationSettings(screenSettingsResult.data.presentation_settings));
+    } else {
+      const fallbackScreenSettings = readOrganisationScreenSettings(organisationResult.data?.settings);
+      if (fallbackScreenSettings.screenView) setScreenView(fallbackScreenSettings.screenView);
+      if (fallbackScreenSettings.presentationSettings) setSettings(fallbackScreenSettings.presentationSettings);
     }
 
     setLoading(false);
@@ -97,7 +120,7 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
     };
 
     const now = new Date().toISOString();
-    const { error: saveError } = await supabase
+    const saveResult = await supabase
       .from('vihem_screen_settings')
       .upsert({
         organisation_id: user.organisation_id,
@@ -109,10 +132,30 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
         updated_at: now,
       }, { onConflict: 'organisation_id,screen_key' });
 
+    if (saveResult.error && isMissingScreenSettingsTable(saveResult.error)) {
+      const nextOrganisationSettings = buildOrganisationScreenSettings(organisationSettings, screenView, cleanedSettings);
+      const organisationSaveResult = await supabase
+        .from('vihem_organisations')
+        .update({ settings: nextOrganisationSettings })
+        .eq('id', user.organisation_id);
+
+      setSaving(false);
+
+      if (organisationSaveResult.error) {
+        setError(organisationSaveResult.error.message);
+        return;
+      }
+
+      setOrganisationSettings(nextOrganisationSettings);
+      setSettings(cleanedSettings);
+      setSuccess('Skärminställningarna är sparade i organisationens inställningar. TV-skärmen uppdaterar automatiskt inom ungefär en minut.');
+      return;
+    }
+
     setSaving(false);
 
-    if (saveError) {
-      setError(saveError.message);
+    if (saveResult.error) {
+      setError(saveResult.error.message);
       return;
     }
 

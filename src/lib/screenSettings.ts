@@ -18,6 +18,7 @@ export type PresentationSettings = {
 export const SCREEN_VIEW_STORAGE_KEY = 'vihem.screen.view';
 export const PRESENTATION_SETTINGS_STORAGE_KEY = 'vihem.screen.presentationSettings';
 export const DEFAULT_SCREEN_KEY = 'default';
+export const ORGANISATION_SCREEN_SETTINGS_KEY = 'screen_settings';
 
 export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   weatherLocation: 'Värnamo',
@@ -52,6 +53,47 @@ export function normalizePresentationSettings(input: unknown): PresentationSetti
     customTickerText: stored.customTickerText ? String(stored.customTickerText) : '',
     customTickerItems,
   };
+}
+
+export function isMissingScreenSettingsTable(error: unknown) {
+  const message = String((error as { message?: string; code?: string } | null)?.message || '');
+  const code = String((error as { code?: string } | null)?.code || '');
+  return code === 'PGRST205' || (
+    message.includes('vihem_screen_settings') &&
+    (message.includes('schema cache') || message.includes('Could not find the table'))
+  );
+}
+
+export function readOrganisationScreenSettings(settings: unknown): {
+  screenView?: ScreenView;
+  presentationSettings?: PresentationSettings;
+} {
+  const root = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {};
+  const raw = root[ORGANISATION_SCREEN_SETTINGS_KEY] || root.screenSettings;
+  const stored = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const screenView = isScreenView(stored.screen_view) ? stored.screen_view : isScreenView(stored.screenView) ? stored.screenView : undefined;
+  const presentationSettings = stored.presentation_settings || stored.presentationSettings
+    ? normalizePresentationSettings(stored.presentation_settings || stored.presentationSettings)
+    : undefined;
+
+  return { screenView, presentationSettings };
+}
+
+export function buildOrganisationScreenSettings(
+  existingSettings: unknown,
+  screenView: ScreenView,
+  presentationSettings: PresentationSettings
+): Record<string, unknown> {
+  const root = existingSettings && typeof existingSettings === 'object'
+    ? { ...existingSettings as Record<string, unknown> }
+    : {};
+
+  root[ORGANISATION_SCREEN_SETTINGS_KEY] = {
+    screen_view: screenView,
+    presentation_settings: presentationSettings,
+  };
+
+  return root;
 }
 
 export function readStoredScreenView(): ScreenView {
