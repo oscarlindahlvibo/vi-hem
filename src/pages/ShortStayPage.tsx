@@ -3,7 +3,7 @@ import {
   BedDouble, CalendarDays, RefreshCw, Plus, Edit2, ExternalLink,
   Sparkles, Search, ClipboardCheck, AlertTriangle, DoorOpen,
   ChevronLeft, ChevronRight, LogIn, LogOut, Users, Wrench,
-  ReceiptText, Printer,
+  ReceiptText, Printer, CheckCircle2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -176,6 +176,93 @@ const cleaningLabels: Record<ShortStayCleaningStatus, string> = {
   clean: 'Klar',
 };
 
+function SwipeableCleaningCard({
+  booking,
+  unitName,
+  disabled,
+  onOpen,
+  onComplete,
+}: {
+  booking: ShortStayBooking;
+  unitName: string;
+  disabled: boolean;
+  onOpen: () => void;
+  onComplete: () => void;
+}) {
+  const [startX, setStartX] = useState<number | null>(null);
+  const [offsetX, setOffsetX] = useState(0);
+  const threshold = -88;
+
+  function resetSwipe() {
+    setStartX(null);
+    setOffsetX(0);
+  }
+
+  function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (disabled) return;
+    setStartX(event.clientX);
+    setOffsetX(0);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (startX === null || disabled) return;
+    const nextOffset = Math.max(Math.min(event.clientX - startX, 0), -132);
+    setOffsetX(nextOffset);
+  }
+
+  function handlePointerUp() {
+    if (disabled) return;
+    const shouldComplete = offsetX <= threshold;
+    const shouldOpen = Math.abs(offsetX) < 8;
+    resetSwipe();
+    if (shouldComplete) {
+      onComplete();
+      return;
+    }
+    if (shouldOpen) onOpen();
+  }
+
+  return (
+    <div className="relative overflow-hidden rounded-lg bg-emerald-600">
+      <div className="absolute inset-y-0 right-0 flex w-32 items-center justify-center gap-1 px-3 text-sm font-bold text-white">
+        <CheckCircle2 className="h-4 w-4" />
+        Klar
+      </div>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={`Öppna eller svep för att klarmarkera städning för ${unitName}`}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={resetSwipe}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') onOpen();
+        }}
+        className={`touch-pan-y select-none rounded-lg border border-slate-200 bg-white p-3 text-left transition-shadow hover:bg-slate-50 ${
+          disabled ? 'opacity-70' : 'cursor-pointer'
+        }`}
+        style={{
+          transform: `translateX(${offsetX}px)`,
+          transition: startX === null ? 'transform 160ms ease' : 'none',
+        }}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <p className="font-medium text-slate-900">{unitName}</p>
+          <Badge className={disabled ? 'bg-slate-100 text-slate-600' : 'bg-rose-100 text-rose-700'}>
+            {disabled ? 'Klarmarkerar...' : cleaningLabels[booking.cleaning_status]}
+          </Badge>
+        </div>
+        <p className="text-sm text-slate-500">Efter {booking.guest_name || booking.title || 'bokning'} · ut {formatShortDate(booking.end_date)}</p>
+        {booking.cleaning_work_order_id && (
+          <p className="mt-1 text-xs font-medium text-blue-700">Arbetsorder skapad · svep vänster för klar</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const paymentLabels: Record<ShortStayPaymentStatus, string> = {
   unpaid: 'Obetald',
   partial: 'Delbetald',
@@ -312,6 +399,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   const [savingBeds24, setSavingBeds24] = useState(false);
   const [syncingBeds24, setSyncingBeds24] = useState(false);
   const [beds24Message, setBeds24Message] = useState('');
+  const [completingCleaningId, setCompletingCleaningId] = useState<string | null>(null);
 
   const isAdmin = user?.role === 'admin';
   const organisationId = user?.organisation_id;
@@ -334,7 +422,11 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     const current = bookings.filter(booking => overlaps(booking, today) && booking.booking_type === 'booking');
     const checkIns = bookings.filter(booking => booking.start_date === today && booking.booking_type === 'booking');
     const checkOuts = bookings.filter(booking => booking.end_date === today && booking.booking_type === 'booking');
-    const cleaning = bookings.filter(booking => booking.end_date <= today && booking.cleaning_status !== 'clean');
+    const cleaning = bookings.filter(booking =>
+      booking.end_date <= today &&
+      booking.cleaning_status !== 'clean' &&
+      booking.cleaning_status !== 'not_needed'
+    );
     const currentGuests = current.reduce((sum, booking) => sum + (booking.guest_count || 1), 0);
     return { activeUnits, current, currentGuests, checkIns, checkOuts, cleaning };
   }, [bookings, units]);
@@ -650,6 +742,47 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     await fetchData();
   }
 
+  async function completeCleaningOrder(booking: ShortStayBooking) {
+    if (!user || completingCleaningId) return;
+    setError('');
+    setCompletingCleaningId(booking.id);
+    try {
+      const { error: updateError } = await supabase
+        .from('vihem_short_stay_bookings')
+        .update({
+          cleaning_status: 'clean',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', booking.id);
+
+      if (updateError) throw updateError;
+
+      if (booking.cleaning_work_order_id) {
+        const actor = user.name || user.email || 'Okänd användare';
+        const { error: commentError } = await supabase
+          .from('vihem_work_order_comments')
+          .insert({
+            work_order_id: booking.cleaning_work_order_id,
+            user_id: user.id,
+            internal: true,
+            comment: `Städorder klarmarkerad via svep i korttidsuthyrning av ${actor}.`,
+          });
+
+        if (commentError) throw commentError;
+      }
+
+      setBookings((current) => current.map((item) => (
+        item.id === booking.id ? { ...item, cleaning_status: 'clean' } : item
+      )));
+      await fetchData();
+    } catch (err: any) {
+      console.error('Error completing cleaning order:', err);
+      setError(err.message || 'Kunde inte klarmarkera städordern.');
+    } finally {
+      setCompletingCleaningId(null);
+    }
+  }
+
   function printReceipt(booking: ShortStayBooking) {
     const unit = units.find(u => u.id === booking.unit_id);
     const currency = booking.currency || 'SEK';
@@ -895,16 +1028,14 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                   stats.cleaning.slice(0, 8).map((booking) => {
                     const unit = units.find(u => u.id === booking.unit_id);
                     return (
-                      <button key={booking.id} onClick={() => openEditBooking(booking)} className="text-left rounded-lg border border-slate-200 p-3 hover:bg-slate-50">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="font-medium text-slate-900">{unit?.name}</p>
-                          <Badge className="bg-rose-100 text-rose-700">{cleaningLabels[booking.cleaning_status]}</Badge>
-                        </div>
-                        <p className="text-sm text-slate-500">Efter {booking.guest_name || booking.title || 'bokning'} · ut {formatShortDate(booking.end_date)}</p>
-                        {booking.cleaning_work_order_id && (
-                          <p className="mt-1 text-xs font-medium text-blue-700">Arbetsorder skapad</p>
-                        )}
-                      </button>
+                      <SwipeableCleaningCard
+                        key={booking.id}
+                        booking={booking}
+                        unitName={unit?.name || 'Okänd enhet'}
+                        disabled={completingCleaningId === booking.id}
+                        onOpen={() => openEditBooking(booking)}
+                        onComplete={() => completeCleaningOrder(booking)}
+                      />
                     );
                   })
                 )}
