@@ -138,7 +138,6 @@ Deno.serve(async (req) => {
             end_date: event.endDate,
             is_manual: false,
             booking_type: event.summary.toLowerCase().includes('block') ? 'block' : 'booking',
-            cleaning_status: 'dirty',
             updated_at: new Date().toISOString(),
           }));
 

@@ -423,6 +423,7 @@ export interface WorkOrder {
   tenant_id: string | null;
   customer_project_id: string | null;
   maintenance_request_id: string | null;
+  short_stay_booking_id: string | null;
   assigned_to: string | null;
   assigned_to_ids: string[];
   created_by: string | null;
