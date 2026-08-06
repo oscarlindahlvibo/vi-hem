@@ -33,6 +33,11 @@ function guestLabel(booking?: ShortStayBooking) {
   return booking.guest_name || booking.title || booking.channel_name || 'Bokning';
 }
 
+function guestCountLabel(count?: number | null) {
+  const value = Math.max(Number(count || 1), 1);
+  return `${value} ${value === 1 ? 'person' : 'personer'}`;
+}
+
 function screenBookingBandStyle(booking: ShortStayBooking, days: string[]) {
   if (days.length === 0) return null;
   const firstDay = days[0];
@@ -120,7 +125,7 @@ export function ScreenDisplayPage() {
     setDataLoading(true);
     setDataError('');
 
-    const start = days[0];
+    const panelHistoryStart = dateKey(addDays(today(), -30));
     const end = dateKey(addDays(new Date(`${days[days.length - 1]}T12:00:00`), 1));
 
     const [unitsResult, bookingsResult, workOrdersResult] = await Promise.all([
@@ -136,7 +141,7 @@ export function ScreenDisplayPage() {
         .select('*')
         .eq('organisation_id', user.organisation_id)
         .lt('start_date', end)
-        .gt('end_date', start)
+        .gte('end_date', panelHistoryStart)
         .order('start_date'),
       supabase
         .from('vihem_work_orders')
@@ -358,14 +363,23 @@ function TodayEventsPanel({ units, bookings }: { units: ShortStayUnit[]; booking
     booking.cleaning_status !== 'not_needed'
   );
 
-  const renderItems = (items: ShortStayBooking[], emptyText: string) => (
+  const renderItems = (items: ShortStayBooking[], emptyText: string, showGuestCount = false) => (
     <div className="space-y-1.5">
       {items.length === 0 ? (
         <p className="rounded-lg bg-white/5 px-2 py-2 text-xs font-semibold text-slate-400">{emptyText}</p>
       ) : items.slice(0, 5).map(booking => (
         <div key={booking.id} className="rounded-lg bg-white/10 px-2 py-2 ring-1 ring-white/10">
-          <div className="truncate text-xs font-black text-white">{guestLabel(booking)}</div>
-          <div className="mt-0.5 truncate text-[11px] font-semibold text-slate-300">{unitName(booking.unit_id)}</div>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="truncate text-xs font-black text-white">{guestLabel(booking)}</div>
+              <div className="mt-0.5 truncate text-[11px] font-semibold text-slate-300">{unitName(booking.unit_id)}</div>
+            </div>
+            {showGuestCount && (
+              <span className="shrink-0 rounded-full bg-emerald-400/15 px-2 py-0.5 text-[11px] font-black text-emerald-200">
+                {guestCountLabel(booking.guest_count)}
+              </span>
+            )}
+          </div>
         </div>
       ))}
       {items.length > 5 && (
@@ -386,7 +400,7 @@ function TodayEventsPanel({ units, bookings }: { units: ShortStayUnit[]; booking
             <h3 className="text-sm font-black text-emerald-300">Incheckning</h3>
             <span className="rounded-full bg-emerald-400/15 px-2 py-0.5 text-xs font-black text-emerald-200">{checkIns.length}</span>
           </div>
-          {renderItems(checkIns, 'Inga incheckningar')}
+          {renderItems(checkIns, 'Inga incheckningar', true)}
         </section>
         <section>
           <div className="mb-1.5 flex items-center justify-between">
