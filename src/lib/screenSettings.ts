@@ -1,4 +1,4 @@
-export type ScreenView = 'short-stay' | 'work-orders' | 'presentation';
+export type ScreenView = 'short-stay' | 'work-orders' | 'presentation' | 'laundry';
 
 export type PresentationSettings = {
   weatherLocation: string;
@@ -20,6 +20,7 @@ export type ScreenConfig = {
   name: string;
   screenView: ScreenView;
   presentationSettings: PresentationSettings;
+  laundryRoomId?: string;
 };
 
 export const SCREEN_VIEW_STORAGE_KEY = 'vihem.screen.view';
@@ -44,7 +45,7 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
 };
 
 export function isScreenView(value: unknown): value is ScreenView {
-  return value === 'work-orders' || value === 'short-stay' || value === 'presentation';
+  return value === 'work-orders' || value === 'short-stay' || value === 'presentation' || value === 'laundry';
 }
 
 export function normalizePresentationSettings(input: unknown): PresentationSettings {
@@ -69,6 +70,7 @@ export function defaultScreenConfig(index = 1): ScreenConfig {
     name: `Skärm ${index}`,
     screenView: index === 1 ? 'short-stay' : 'presentation',
     presentationSettings: DEFAULT_PRESENTATION_SETTINGS,
+    laundryRoomId: '',
   };
 }
 
@@ -102,6 +104,15 @@ export function normalizeScreenConfig(input: unknown, fallbackIndex = 1): Screen
     name,
     screenView: view,
     presentationSettings: normalizePresentationSettings(stored.presentation_settings || stored.presentationSettings),
+    laundryRoomId: typeof stored.laundry_room_id === 'string'
+      ? stored.laundry_room_id
+      : typeof stored.laundryRoomId === 'string'
+        ? stored.laundryRoomId
+        : typeof (stored.presentation_settings as Record<string, unknown> | undefined)?.laundry_room_id === 'string'
+          ? String((stored.presentation_settings as Record<string, unknown>).laundry_room_id)
+          : typeof (stored.presentationSettings as Record<string, unknown> | undefined)?.laundryRoomId === 'string'
+            ? String((stored.presentationSettings as Record<string, unknown>).laundryRoomId)
+            : '',
   };
 }
 
@@ -175,6 +186,7 @@ export function buildOrganisationScreenSettings(
       screen_key: screen.screenKey,
       name: screen.name,
       screen_view: screen.screenView,
+      laundry_room_id: screen.laundryRoomId || '',
       presentation_settings: screen.presentationSettings,
     })),
   };
@@ -204,5 +216,6 @@ export function readStoredPresentationSettings(): PresentationSettings {
 export function screenViewLabel(view: ScreenView) {
   if (view === 'short-stay') return 'Korttidskalender';
   if (view === 'work-orders') return 'Arbetsordrar';
+  if (view === 'laundry') return 'Tvättstuga';
   return 'Presentation';
 }

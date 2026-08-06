@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
 import { Button, LoadingPage } from '../components/ui';
-import type { Meeting, News, Profile, ShortStayBooking, ShortStayUnit, TimeEntry, WorkOrder } from '../types';
+import type { LaundryBooking, LaundryRoom, LaundrySlot, Meeting, News, Profile, ShortStayBooking, ShortStayUnit, TimeEntry, WorkOrder } from '../types';
 import { formatDate, formatDateTime, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import {
@@ -12,6 +12,7 @@ import {
   defaultScreenConfig,
   isMissingScreenSettingsTable,
   normalizePresentationSettings,
+  normalizeScreenConfig,
   PRESENTATION_SETTINGS_STORAGE_KEY,
   readOrganisationScreenConfigs,
   readOrganisationScreenSettings,
@@ -119,6 +120,9 @@ export function ScreenDisplayPage() {
   const [news, setNews] = useState<News[]>([]);
   const [clockedInEntries, setClockedInEntries] = useState<TimeEntry[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [laundryRooms, setLaundryRooms] = useState<LaundryRoom[]>([]);
+  const [laundrySlots, setLaundrySlots] = useState<LaundrySlot[]>([]);
+  const [laundryBookings, setLaundryBookings] = useState<LaundryBooking[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -128,6 +132,7 @@ export function ScreenDisplayPage() {
   }));
 
   const allowed = user && ['screen', 'admin', 'staff'].includes(user.role);
+  const selectedScreenConfig = screenConfigs.find(screen => screen.screenKey === selectedScreenKey) || screenConfigs[0] || defaultScreenConfig(1);
   const dayCount = screenSize.width < 1400 ? 8 : screenSize.width < 1700 ? 9 : 10;
   const days = useMemo(() => Array.from({ length: dayCount }, (_, index) => dateKey(addDays(today(), index))), [dayCount]);
 
@@ -191,7 +196,7 @@ export function ScreenDisplayPage() {
     const todayStart = dateKey(today());
     const meetingEnd = dateKey(addDays(today(), 7));
 
-    const [organisationResult, screenSettingsResult, staffResult, unitsResult, bookingsResult, workOrdersResult, newsResult, clockedInResult, meetingsResult] = await Promise.all([
+    const [organisationResult, screenSettingsResult, staffResult, unitsResult, bookingsResult, workOrdersResult, newsResult, clockedInResult, meetingsResult, laundryRoomsResult] = await Promise.all([
       supabase
         .from('vihem_organisations')
         .select('name, settings')
@@ -252,11 +257,17 @@ export function ScreenDisplayPage() {
         .lt('starts_at', `${meetingEnd}T23:59:59`)
         .order('starts_at', { ascending: true })
         .limit(8),
+      supabase
+        .from('vihem_laundry_rooms')
+        .select('*, property:vihem_properties(name)')
+        .eq('organisation_id', user.organisation_id)
+        .eq('active', true)
+        .order('name'),
     ]);
 
     const screenSettingsUnavailable = isMissingScreenSettingsTable(screenSettingsResult.error);
 
-    if (organisationResult.error || (screenSettingsResult.error && !screenSettingsUnavailable) || staffResult.error || unitsResult.error || bookingsResult.error || workOrdersResult.error || newsResult.error || clockedInResult.error || meetingsResult.error) {
+    if (organisationResult.error || (screenSettingsResult.error && !screenSettingsUnavailable) || staffResult.error || unitsResult.error || bookingsResult.error || workOrdersResult.error || newsResult.error || clockedInResult.error || meetingsResult.error || laundryRoomsResult.error) {
       setDataError(
         organisationResult.error?.message ||
         screenSettingsResult.error?.message ||
@@ -267,17 +278,53 @@ export function ScreenDisplayPage() {
         newsResult.error?.message ||
         clockedInResult.error?.message ||
         meetingsResult.error?.message ||
+        laundryRoomsResult.error?.message ||
         'Kunde inte ladda skärmdata.'
       );
     } else {
+      const loadedLaundryRooms = (laundryRoomsResult.data || []) as LaundryRoom[];
+      let loadedLaundrySlots: LaundrySlot[] = [];
+      let loadedLaundryBookings: LaundryBooking[] = [];
+      const laundryRoomIds = loadedLaundryRooms.map(room => room.id);
+      if (laundryRoomIds.length > 0) {
+        const laundryEnd = dateKey(addDays(today(), 6));
+        const slotsResult = await supabase
+          .from('vihem_laundry_slots')
+          .select('*')
+          .in('laundry_room_id', laundryRoomIds)
+          .gte('date', todayStart)
+          .lte('date', laundryEnd)
+          .order('date')
+          .order('start_time');
+
+        if (slotsResult.error) {
+          setDataError(slotsResult.error.message);
+          setDataLoading(false);
+          return;
+        }
+
+        loadedLaundrySlots = (slotsResult.data || []) as LaundrySlot[];
+        const slotIds = loadedLaundrySlots.map(slot => slot.id);
+        if (slotIds.length > 0) {
+          const laundryBookingsResult = await supabase
+            .from('vihem_laundry_bookings')
+            .select('*')
+            .in('laundry_slot_id', slotIds)
+            .eq('status', 'active');
+
+          if (laundryBookingsResult.error) {
+            setDataError(laundryBookingsResult.error.message);
+            setDataLoading(false);
+            return;
+          }
+
+          loadedLaundryBookings = (laundryBookingsResult.data || []) as LaundryBooking[];
+        }
+      }
+
       setOrganisationName(organisationResult.data?.name || 'VI-HEM');
       const dbScreenConfigs = Array.isArray(screenSettingsResult.data)
-        ? screenSettingsResult.data.map((row: any, index: number) => ({
-          screenKey: row.screen_key || (index === 0 ? DEFAULT_SCREEN_KEY : `screen-${index + 1}`),
-          name: (row.presentation_settings as any)?.screen_name || `Skärm ${index + 1}`,
-          screenView: row.screen_view as ScreenView,
-          presentationSettings: normalizePresentationSettings(row.presentation_settings),
-        }))
+        ? screenSettingsResult.data.map((row: any, index: number) => normalizeScreenConfig(row, index + 1))
         : [];
       const fallbackScreenConfigs = readOrganisationScreenConfigs((organisationResult.data as any)?.settings);
       const nextScreenConfigs = dbScreenConfigs.length > 0 ? dbScreenConfigs : fallbackScreenConfigs;
@@ -304,6 +351,9 @@ export function ScreenDisplayPage() {
       setBookings((bookingsResult.data || []) as ShortStayBooking[]);
       setWorkOrders((workOrdersResult.data || []) as WorkOrder[]);
       setNews((newsResult.data || []) as News[]);
+      setLaundryRooms(loadedLaundryRooms);
+      setLaundrySlots(loadedLaundrySlots);
+      setLaundryBookings(loadedLaundryBookings);
       const latestEntryByUser = new Map<string, TimeEntry>();
       (clockedInResult.data as TimeEntry[] || []).forEach((entry) => {
         if (!latestEntryByUser.has(entry.user_id)) latestEntryByUser.set(entry.user_id, entry);
@@ -444,6 +494,15 @@ export function ScreenDisplayPage() {
         <ShortStayScreen units={units} bookings={bookings} days={days} screenHeight={screenSize.height} />
       ) : view === 'work-orders' ? (
         <WorkOrderScreen workOrders={workOrders} staffMembers={staffMembers} screenHeight={screenSize.height} />
+      ) : view === 'laundry' ? (
+        <LaundryScreen
+          screen={selectedScreenConfig}
+          rooms={laundryRooms}
+          slots={laundrySlots}
+          bookings={laundryBookings}
+          screenHeight={screenSize.height}
+          lastUpdated={lastUpdated}
+        />
       ) : (
         <PresentationScreen
           settings={presentationSettings}
@@ -866,6 +925,144 @@ function TodayEventsPanel({ units, bookings }: { units: ShortStayUnit[]; booking
         </section>
       </div>
     </aside>
+  );
+}
+
+function LaundryScreen({
+  screen,
+  rooms,
+  slots,
+  bookings,
+  screenHeight,
+  lastUpdated,
+}: {
+  screen: ScreenConfig;
+  rooms: LaundryRoom[];
+  slots: LaundrySlot[];
+  bookings: LaundryBooking[];
+  screenHeight: number;
+  lastUpdated: Date | null;
+}) {
+  const room = rooms.find(item => item.id === screen.laundryRoomId) || rooms[0];
+  const availableHeight = Math.max(screenHeight - 54, 420);
+  const todayValue = dateKey(today());
+  const now = new Date();
+  const roomSlots = room ? slots.filter(slot => slot.laundry_room_id === room.id) : [];
+  const bookingBySlotId = new Map(bookings.map(booking => [booking.laundry_slot_id, booking]));
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const day = addDays(today(), index);
+    const key = dateKey(day);
+    return {
+      key,
+      label: day.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' }),
+      slots: roomSlots.filter(slot => slot.date === key),
+    };
+  });
+  const currentSlot = roomSlots.find(slot => {
+    const start = new Date(`${slot.date}T${slot.start_time}`);
+    const end = new Date(`${slot.date}T${slot.end_time}`);
+    return start <= now && end > now;
+  });
+  const currentBooking = currentSlot ? bookingBySlotId.get(currentSlot.id) : null;
+  const nextBookedSlots = roomSlots
+    .filter(slot => new Date(`${slot.date}T${slot.end_time}`).getTime() >= now.getTime() && bookingBySlotId.has(slot.id))
+    .slice(0, 5);
+
+  const slotStatus = (slot: LaundrySlot) => {
+    if (slot.is_blocked) return { label: slot.block_reason || 'Blockerad', className: 'bg-amber-400/15 text-amber-100 ring-amber-300/20' };
+    if (bookingBySlotId.has(slot.id)) return { label: 'Bokad', className: 'bg-rose-400/15 text-rose-100 ring-rose-300/20' };
+    return { label: 'Ledig', className: 'bg-emerald-400/15 text-emerald-100 ring-emerald-300/20' };
+  };
+
+  if (!room) {
+    return (
+      <div className="flex items-center justify-center rounded-2xl bg-white p-12 text-center text-2xl font-black text-slate-700" style={{ height: availableHeight }}>
+        Ingen tvättstuga vald för den här skärmen.
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-3 overflow-hidden text-white xl:grid-cols-[0.9fr_1.1fr]" style={{ height: availableHeight }}>
+      <section className="flex min-h-0 flex-col rounded-3xl bg-slate-900 p-6 ring-1 ring-white/10">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-black uppercase tracking-[0.22em] text-blue-200">Tvättstuga</p>
+            <h1 className="mt-2 truncate text-5xl font-black tracking-tight">{room.name}</h1>
+            <p className="mt-2 text-xl font-bold text-slate-300">{room.property?.name || room.description || 'VI-HEM'}</p>
+          </div>
+          <div className="rounded-2xl bg-white/10 px-4 py-3 text-right ring-1 ring-white/10">
+            <p className="text-sm font-bold text-slate-300">Idag</p>
+            <p className="text-2xl font-black">{new Date(`${todayValue}T12:00:00`).toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+          </div>
+        </div>
+
+        <div className="mt-8 rounded-3xl bg-white/10 p-5 ring-1 ring-white/10">
+          <p className="text-sm font-black uppercase tracking-wide text-slate-400">Just nu</p>
+          {currentSlot ? (
+            <div className="mt-3 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-4xl font-black">{currentSlot.start_time.slice(0, 5)}-{currentSlot.end_time.slice(0, 5)}</p>
+                <p className="mt-2 text-xl font-bold text-slate-300">{currentBooking ? 'Pågående bokning' : currentSlot.is_blocked ? currentSlot.block_reason || 'Blockerad tid' : 'Ledig just nu'}</p>
+              </div>
+              <span className={`rounded-full px-5 py-3 text-2xl font-black ring-1 ${slotStatus(currentSlot).className}`}>{slotStatus(currentSlot).label}</span>
+            </div>
+          ) : (
+            <p className="mt-3 text-3xl font-black text-slate-200">Ingen aktiv tid just nu</p>
+          )}
+        </div>
+
+        <div className="mt-5 min-h-0 flex-1 rounded-3xl bg-white/10 p-5 ring-1 ring-white/10">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-2xl font-black">Nästa bokningar</h2>
+            <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-black">{nextBookedSlots.length}</span>
+          </div>
+          <div className="space-y-3">
+            {nextBookedSlots.length === 0 ? (
+              <p className="rounded-2xl bg-white/5 px-4 py-4 text-lg font-bold text-slate-300">Inga kommande bokningar.</p>
+            ) : nextBookedSlots.map(slot => (
+              <div key={slot.id} className="flex items-center justify-between rounded-2xl bg-white/10 px-4 py-3">
+                <div>
+                  <p className="text-xl font-black">{new Date(`${slot.date}T12:00:00`).toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'short' })}</p>
+                  <p className="text-sm font-bold text-slate-300">{slot.start_time.slice(0, 5)}-{slot.end_time.slice(0, 5)}</p>
+                </div>
+                <span className="rounded-full bg-rose-400/15 px-4 py-2 text-lg font-black text-rose-100 ring-1 ring-rose-300/20">Bokad</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <p className="mt-4 text-sm font-bold text-slate-400">
+          Uppdaterad {lastUpdated ? lastUpdated.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : 'nyss'}
+        </p>
+      </section>
+
+      <section className="grid min-h-0 grid-cols-1 gap-2 overflow-hidden">
+        {days.map(day => (
+          <div key={day.key} className={`grid min-h-0 grid-cols-[9rem_1fr] overflow-hidden rounded-2xl ring-1 ring-white/10 ${day.key === todayValue ? 'bg-blue-500/20' : 'bg-white/10'}`}>
+            <div className="flex items-center px-4">
+              <div>
+                <p className="text-xl font-black capitalize">{day.label}</p>
+                <p className="mt-1 text-xs font-bold uppercase tracking-wide text-slate-400">{day.slots.length} tider</p>
+              </div>
+            </div>
+            <div className="grid min-w-0 grid-cols-2 gap-2 p-2 2xl:grid-cols-3">
+              {day.slots.length === 0 ? (
+                <div className="col-span-full rounded-xl bg-white/5 px-3 py-3 text-sm font-bold text-slate-400">Inga tider upplagda</div>
+              ) : day.slots.map(slot => {
+                const status = slotStatus(slot);
+                return (
+                  <div key={slot.id} className={`min-w-0 rounded-xl px-3 py-2 ring-1 ${status.className}`}>
+                    <p className="truncate text-lg font-black">{slot.start_time.slice(0, 5)}-{slot.end_time.slice(0, 5)}</p>
+                    <p className="mt-0.5 truncate text-sm font-bold">{status.label}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </section>
+    </div>
   );
 }
 

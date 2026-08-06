@@ -3,6 +3,7 @@ import { Monitor, Plus, Save, Settings, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Button, Card, EmptyState, Input, LoadingPage, PageHeader, Select } from '../components/ui';
+import type { LaundryRoom } from '../types';
 import {
   buildOrganisationScreenSettings,
   DEFAULT_SCREEN_KEY,
@@ -45,6 +46,7 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
   const [screens, setScreens] = useState<ScreenConfig[]>(() => [defaultScreenConfig(1)]);
   const [selectedScreenKey, setSelectedScreenKey] = useState(DEFAULT_SCREEN_KEY);
   const [organisationSettings, setOrganisationSettings] = useState<Record<string, unknown>>({});
+  const [laundryRooms, setLaundryRooms] = useState<LaundryRoom[]>([]);
 
   const canManage = user?.role === 'admin' || user?.role === 'superadmin';
   const selectedScreen = screens.find(screen => screen.screenKey === selectedScreenKey) || screens[0] || defaultScreenConfig(1);
@@ -64,7 +66,7 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
     setLoading(true);
     setError('');
 
-    const [screenSettingsResult, organisationResult] = await Promise.all([
+    const [screenSettingsResult, organisationResult, laundryRoomsResult] = await Promise.all([
       supabase
         .from('vihem_screen_settings')
         .select('screen_key, screen_view, presentation_settings')
@@ -75,6 +77,12 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
         .select('settings')
         .eq('id', user.organisation_id)
         .maybeSingle(),
+      supabase
+        .from('vihem_laundry_rooms')
+        .select('*, property:vihem_properties(name)')
+        .eq('organisation_id', user.organisation_id)
+        .eq('active', true)
+        .order('name'),
     ]);
 
     const screenSettingsUnavailable = isMissingScreenSettingsTable(screenSettingsResult.error);
@@ -83,10 +91,16 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
       setOrganisationSettings(organisationResult.data.settings as Record<string, unknown>);
     }
 
+    if (!laundryRoomsResult.error) {
+      setLaundryRooms((laundryRoomsResult.data || []) as LaundryRoom[]);
+    }
+
     if (screenSettingsResult.error && !screenSettingsUnavailable) {
       setError(screenSettingsResult.error.message);
     } else if (organisationResult.error) {
       setError(organisationResult.error.message);
+    } else if (laundryRoomsResult.error) {
+      setError(laundryRoomsResult.error.message);
     } else if (screenSettingsResult.data?.length) {
       const nextScreens = screenSettingsResult.data.map((row: any, index: number) => normalizeScreenConfig(row, index + 1));
       setScreens(nextScreens);
@@ -172,6 +186,7 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
         presentation_settings: {
           ...screen.presentationSettings,
           screen_name: screen.name,
+          laundry_room_id: screen.laundryRoomId || '',
         },
         created_by: user.id,
         updated_by: user.id,
@@ -310,9 +325,26 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
                 { value: 'presentation', label: screenViewLabel('presentation') },
                 { value: 'short-stay', label: screenViewLabel('short-stay') },
                 { value: 'work-orders', label: screenViewLabel('work-orders') },
+                { value: 'laundry', label: screenViewLabel('laundry') },
               ]}
             />
             </div>
+            {screenView === 'laundry' && (
+              <div className="mt-4">
+                <Select
+                  label="Tvättstuga"
+                  value={selectedScreen.laundryRoomId || ''}
+                  onChange={(event) => updateSelectedScreen({ laundryRoomId: event.target.value })}
+                  options={[
+                    { value: '', label: 'Välj tvättstuga' },
+                    ...laundryRooms.map(room => ({
+                      value: room.id,
+                      label: `${room.name}${room.property?.name ? ` · ${room.property.name}` : ''}`,
+                    })),
+                  ]}
+                />
+              </div>
+            )}
             <p className="mt-3 text-sm leading-6 text-slate-500">
               När TV:n har valts som {selectedScreen.name || selectedScreen.screenKey} hämtar den den här profilen automatiskt.
             </p>
