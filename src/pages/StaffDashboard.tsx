@@ -43,6 +43,10 @@ function absenceStatusColor(status: StaffAbsenceStatus) {
   }[status];
 }
 
+function isUnassignedWorkOrder(order: Pick<WorkOrder, 'assigned_to' | 'assigned_to_ids'>) {
+  return !order.assigned_to && (!order.assigned_to_ids || order.assigned_to_ids.length === 0);
+}
+
 function getGreeting() {
   const hour = new Date().getHours();
   if (hour < 5) return 'God natt';
@@ -59,6 +63,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   const [urgentMRCount, setUrgentMRCount] = useState(0);
   const [myWorkOrdersCount, setMyWorkOrdersCount] = useState(0);
   const [newWorkOrdersCount, setNewWorkOrdersCount] = useState(0);
+  const [attentionWorkOrdersCount, setAttentionWorkOrdersCount] = useState(0);
   const [activeTimeEntry, setActiveTimeEntry] = useState<TimeEntry | null>(null);
   const [myWorkOrders, setMyWorkOrders] = useState<WorkOrder[]>([]);
   const [newWorkOrders, setNewWorkOrders] = useState<WorkOrder[]>([]);
@@ -101,14 +106,14 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           // Count my assigned work orders, including multi-assignee rows.
           supabase
             .from('vihem_work_orders')
-            .select('id', { count: 'exact', head: true })
+            .select('id')
             .or(`assigned_to.eq.${user.id},assigned_to_ids.cs.{${user.id}}`)
             .not('status', 'in', '(completed,cancelled)'),
 
-          // Count new work orders (status='new')
+          // Count new unassigned work orders that staff can pick up.
           supabase
             .from('vihem_work_orders')
-            .select('id', { count: 'exact', head: true })
+            .select('id, assigned_to, assigned_to_ids')
             .eq('status', 'new'),
 
           // Fetch active time entry, regardless of when it started.
@@ -166,8 +171,13 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
 
         setNewMRCount(newMRResult.count || 0);
         setUrgentMRCount(urgentMRResult.count || 0);
-        setMyWorkOrdersCount(myWOResult.count || 0);
-        setNewWorkOrdersCount(newWOResult.count || 0);
+        const myWorkOrderIds = (myWOResult.data || []).map((order) => order.id);
+        const unassignedNewWorkOrderIds = ((newWOResult.data || []) as Pick<WorkOrder, 'id' | 'assigned_to' | 'assigned_to_ids'>[])
+          .filter(isUnassignedWorkOrder)
+          .map((order) => order.id);
+        setMyWorkOrdersCount(myWorkOrderIds.length);
+        setNewWorkOrdersCount(unassignedNewWorkOrderIds.length);
+        setAttentionWorkOrdersCount(new Set([...myWorkOrderIds, ...unassignedNewWorkOrderIds]).size);
 
         setActiveTimeEntry(activeTimeResult.data && activeTimeResult.data.length > 0 ? activeTimeResult.data[0] : null);
 
@@ -176,7 +186,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
         }
 
         if (newWODetailsResult.data) {
-          setNewWorkOrders(newWODetailsResult.data);
+          setNewWorkOrders((newWODetailsResult.data as WorkOrder[]).filter(isUnassignedWorkOrder));
         }
 
         if (todayAbsencesResult.data) {
@@ -219,7 +229,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   }
 
   const firstName = user?.name?.split(' ')[0] || 'där';
-  const attentionCount = newMRCount + urgentMRCount + myWorkOrdersCount + newWorkOrdersCount + todayAbsences.length;
+  const attentionCount = newMRCount + urgentMRCount + attentionWorkOrdersCount + todayAbsences.length;
   const quickTiles = [
     {
       label: 'Nyheter',
@@ -230,7 +240,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
     },
     {
       label: 'Arbetsordrar',
-      count: myWorkOrdersCount + newWorkOrdersCount,
+      count: attentionWorkOrdersCount,
       icon: <ClipboardList className="h-6 w-6" />,
       className: 'bg-orange-50 text-orange-500',
       page: 'workorders',
@@ -402,7 +412,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
                 <ClipboardList className="h-7 w-7 sm:h-8 sm:w-8" />
               </span>
               <p className="min-w-0 text-sm font-semibold leading-5 text-slate-950 sm:text-base">
-                <span className="font-black">{myWorkOrdersCount + newWorkOrdersCount}</span> uppgifter väntar på dig i <span className="font-black">Arbetsordrar</span>
+                <span className="font-black">{attentionWorkOrdersCount}</span> uppgifter väntar på dig i <span className="font-black">Arbetsordrar</span>
               </p>
             </div>
             <span className="hidden shrink-0 rounded-full border border-slate-200 px-4 py-2 text-sm font-bold text-blue-500 sm:inline-flex">Öppna</span>

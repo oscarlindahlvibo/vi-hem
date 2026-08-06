@@ -1,15 +1,31 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, ClipboardList, Monitor, RefreshCw, Users } from 'lucide-react';
+import { CalendarDays, ClipboardList, CloudSun, Monitor, Newspaper, RefreshCw, Settings, Timer, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
 import { Button, LoadingPage } from '../components/ui';
-import type { ShortStayBooking, ShortStayUnit, WorkOrder } from '../types';
-import { formatDate, WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
+import type { Meeting, News, ShortStayBooking, ShortStayUnit, TimeEntry, WorkOrder } from '../types';
+import { formatDate, formatDateTime, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 
-type ScreenView = 'short-stay' | 'work-orders';
+type ScreenView = 'short-stay' | 'work-orders' | 'presentation';
+
+type PresentationSettings = {
+  weatherLocation: string;
+  showNews: boolean;
+  showWorkOrders: boolean;
+  showClockedIn: boolean;
+  showMeetings: boolean;
+};
+
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
+const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
+  weatherLocation: 'Värnamo',
+  showNews: true,
+  showWorkOrders: true,
+  showClockedIn: true,
+  showMeetings: true,
+};
 
 const addDays = (date: Date, days: number) => {
   const next = new Date(date);
@@ -73,9 +89,24 @@ function screenBookingBandStyle(booking: ShortStayBooking, days: string[]) {
 
 function readStoredScreenView(): ScreenView {
   const urlView = new URLSearchParams(window.location.search).get('view');
-  if (urlView === 'work-orders' || urlView === 'short-stay') return urlView;
+  if (urlView === 'work-orders' || urlView === 'short-stay' || urlView === 'presentation') return urlView;
   const storedView = localStorage.getItem('vihem.screen.view');
-  return storedView === 'work-orders' || storedView === 'short-stay' ? storedView : 'short-stay';
+  return storedView === 'work-orders' || storedView === 'short-stay' || storedView === 'presentation' ? storedView : 'short-stay';
+}
+
+function readStoredPresentationSettings(): PresentationSettings {
+  try {
+    const stored = JSON.parse(localStorage.getItem('vihem.screen.presentationSettings') || '{}');
+    return { ...DEFAULT_PRESENTATION_SETTINGS, ...stored };
+  } catch {
+    return DEFAULT_PRESENTATION_SETTINGS;
+  }
+}
+
+function screenViewLabel(view: ScreenView) {
+  if (view === 'short-stay') return 'Korttidskalender';
+  if (view === 'work-orders') return 'Arbetsordrar';
+  return 'Presentation';
 }
 
 export function ScreenDisplayPage() {
@@ -85,9 +116,14 @@ export function ScreenDisplayPage() {
   const [loginError, setLoginError] = useState('');
   const [loggingIn, setLoggingIn] = useState(false);
   const [view, setView] = useState<ScreenView>(readStoredScreenView);
+  const [showViewChooser, setShowViewChooser] = useState(false);
+  const [presentationSettings, setPresentationSettings] = useState<PresentationSettings>(readStoredPresentationSettings);
   const [units, setUnits] = useState<ShortStayUnit[]>([]);
   const [bookings, setBookings] = useState<ShortStayBooking[]>([]);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
+  const [news, setNews] = useState<News[]>([]);
+  const [clockedInEntries, setClockedInEntries] = useState<TimeEntry[]>([]);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -103,6 +139,15 @@ export function ScreenDisplayPage() {
   useEffect(() => {
     localStorage.setItem('vihem.screen.view', view);
   }, [view]);
+
+  useEffect(() => {
+    localStorage.setItem('vihem.screen.presentationSettings', JSON.stringify(presentationSettings));
+  }, [presentationSettings]);
+
+  const chooseScreenView = (nextView: ScreenView) => {
+    setView(nextView);
+    setShowViewChooser(false);
+  };
 
   useEffect(() => {
     const updateScreenSize = () => setScreenSize({
@@ -141,7 +186,10 @@ export function ScreenDisplayPage() {
     const panelHistoryStart = dateKey(addDays(today(), -30));
     const end = dateKey(addDays(new Date(`${days[days.length - 1]}T12:00:00`), 1));
 
-    const [unitsResult, bookingsResult, workOrdersResult] = await Promise.all([
+    const todayStart = dateKey(today());
+    const meetingEnd = dateKey(addDays(today(), 7));
+
+    const [unitsResult, bookingsResult, workOrdersResult, newsResult, clockedInResult, meetingsResult] = await Promise.all([
       supabase
         .from('vihem_short_stay_units')
         .select('*, property:vihem_properties(*), apartment:vihem_apartments(*)')
@@ -163,14 +211,51 @@ export function ScreenDisplayPage() {
         .not('status', 'in', '(completed,cancelled)')
         .order('due_date', { ascending: true, nullsFirst: false })
         .order('priority', { ascending: false }),
+      supabase
+        .from('vihem_news')
+        .select('*')
+        .eq('organisation_id', user.organisation_id)
+        .eq('status', 'published')
+        .order('published_at', { ascending: false })
+        .limit(8),
+      supabase
+        .from('vihem_time_entries')
+        .select('*, user:vihem_profiles(id, name, email), work_order:vihem_work_orders(id, title), customer_project:vihem_customer_projects(id, title, name, customer_name), property:vihem_properties(id, name)')
+        .eq('organisation_id', user.organisation_id)
+        .is('end_time', null)
+        .order('start_time', { ascending: false }),
+      supabase
+        .from('vihem_meetings')
+        .select('*')
+        .eq('organisation_id', user.organisation_id)
+        .not('status', 'in', '(completed,locked,cancelled)')
+        .gte('starts_at', `${todayStart}T00:00:00`)
+        .lt('starts_at', `${meetingEnd}T23:59:59`)
+        .order('starts_at', { ascending: true })
+        .limit(8),
     ]);
 
-    if (unitsResult.error || bookingsResult.error || workOrdersResult.error) {
-      setDataError(unitsResult.error?.message || bookingsResult.error?.message || workOrdersResult.error?.message || 'Kunde inte ladda skärmdata.');
+    if (unitsResult.error || bookingsResult.error || workOrdersResult.error || newsResult.error || clockedInResult.error || meetingsResult.error) {
+      setDataError(
+        unitsResult.error?.message ||
+        bookingsResult.error?.message ||
+        workOrdersResult.error?.message ||
+        newsResult.error?.message ||
+        clockedInResult.error?.message ||
+        meetingsResult.error?.message ||
+        'Kunde inte ladda skärmdata.'
+      );
     } else {
       setUnits((unitsResult.data || []) as ShortStayUnit[]);
       setBookings((bookingsResult.data || []) as ShortStayBooking[]);
       setWorkOrders((workOrdersResult.data || []) as WorkOrder[]);
+      setNews((newsResult.data || []) as News[]);
+      const latestEntryByUser = new Map<string, TimeEntry>();
+      (clockedInResult.data as TimeEntry[] || []).forEach((entry) => {
+        if (!latestEntryByUser.has(entry.user_id)) latestEntryByUser.set(entry.user_id, entry);
+      });
+      setClockedInEntries(Array.from(latestEntryByUser.values()));
+      setMeetings((meetingsResult.data || []) as Meeting[]);
       setLastUpdated(new Date());
     }
 
@@ -195,10 +280,10 @@ export function ScreenDisplayPage() {
           <div className="space-y-4">
             <div>
               <p className="mb-2 text-sm font-semibold text-slate-700">Vad ska skärmen visa?</p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <button
                   type="button"
-                  onClick={() => setView('short-stay')}
+                  onClick={() => chooseScreenView('short-stay')}
                   className={`rounded-2xl border px-4 py-4 text-left transition ${
                     view === 'short-stay'
                       ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
@@ -211,7 +296,7 @@ export function ScreenDisplayPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setView('work-orders')}
+                  onClick={() => chooseScreenView('work-orders')}
                   className={`rounded-2xl border px-4 py-4 text-left transition ${
                     view === 'work-orders'
                       ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
@@ -221,6 +306,19 @@ export function ScreenDisplayPage() {
                   <ClipboardList className="mb-2 h-5 w-5" />
                   <span className="block font-black">Arbetsordrar</span>
                   <span className="mt-1 block text-xs text-slate-500">Aktiva jobb efter förfallodatum.</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => chooseScreenView('presentation')}
+                  className={`rounded-2xl border px-4 py-4 text-left transition ${
+                    view === 'presentation'
+                      ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Monitor className="mb-2 h-5 w-5" />
+                  <span className="block font-black">Presentation</span>
+                  <span className="mt-1 block text-xs text-slate-500">Klocka, nyheter och drift.</span>
                 </button>
               </div>
             </div>
@@ -263,16 +361,124 @@ export function ScreenDisplayPage() {
     );
   }
 
+  if (showViewChooser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
+        <div className="w-full max-w-5xl rounded-3xl bg-white p-8 text-slate-950 shadow-2xl">
+          <div className="mb-7 flex items-center gap-3">
+            <div className="h-12 w-12 overflow-hidden rounded-2xl">
+              <AppLogo className="h-full w-full" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-black">Välj skärm</h1>
+              <p className="text-sm text-slate-500">Välj vad den här VI-HEM-skärmen ska visa.</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <button
+              type="button"
+              onClick={() => chooseScreenView('short-stay')}
+              className={`rounded-3xl border px-5 py-6 text-left transition ${
+                view === 'short-stay'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <CalendarDays className="mb-3 h-8 w-8" />
+              <span className="block text-xl font-black">Korttidskalender</span>
+              <span className="mt-2 block text-sm text-slate-500">Ankomster, avresor, bokningsläge och städstatus.</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => chooseScreenView('work-orders')}
+              className={`rounded-3xl border px-5 py-6 text-left transition ${
+                view === 'work-orders'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <ClipboardList className="mb-3 h-8 w-8" />
+              <span className="block text-xl font-black">Arbetsordrar</span>
+              <span className="mt-2 block text-sm text-slate-500">Aktiva arbetsordrar sorterade efter förfallodatum.</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => chooseScreenView('presentation')}
+              className={`rounded-3xl border px-5 py-6 text-left transition ${
+                view === 'presentation'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <Monitor className="mb-3 h-8 w-8" />
+              <span className="block text-xl font-black">Presentation</span>
+              <span className="mt-2 block text-sm text-slate-500">Klocka, väderbanner, nyheter och driftstatus.</span>
+            </button>
+          </div>
+
+          <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Settings className="h-5 w-5 text-slate-500" />
+              <h2 className="text-lg font-black text-slate-900">Presentationsinställningar</h2>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-[1.3fr_2fr]">
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">Plats för väder</span>
+                <input
+                  value={presentationSettings.weatherLocation}
+                  onChange={(event) => setPresentationSettings({ ...presentationSettings, weatherLocation: event.target.value })}
+                  placeholder="Ex. Värnamo"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base outline-none ring-blue-500 focus:ring-2"
+                />
+              </label>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {[
+                  ['showNews', 'Nyheter'],
+                  ['showWorkOrders', 'Arbetsordrar'],
+                  ['showClockedIn', 'Instämplad personal'],
+                  ['showMeetings', 'Kalenderhändelser'],
+                ].map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(presentationSettings[key as keyof PresentationSettings])}
+                      onChange={(event) => setPresentationSettings({ ...presentationSettings, [key]: event.target.checked })}
+                      className="h-4 w-4 rounded border-slate-300 accent-blue-600"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex justify-end">
+            <Button variant="secondary" onClick={() => setShowViewChooser(false)}>
+              Tillbaka
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen overflow-hidden bg-slate-950 p-2 text-white">
       <header className="mb-1 flex h-10 items-center justify-between gap-3 rounded-xl bg-white/10 px-3 ring-1 ring-white/10">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="h-7 w-7 shrink-0 overflow-hidden rounded-lg">
+          <button
+            type="button"
+            onClick={() => setShowViewChooser(true)}
+            className="h-7 w-7 shrink-0 overflow-hidden rounded-lg outline-none ring-blue-300 transition-transform hover:scale-105 focus:ring-2"
+            aria-label="Välj skärmläge"
+          >
             <AppLogo className="h-full w-full" />
-          </div>
+          </button>
           <h1 className="truncate text-sm font-black">VI-HEM Skärm</h1>
           <span className="hidden truncate text-xs font-semibold text-slate-300 sm:inline">
-            {view === 'short-stay' ? 'Korttidskalender' : 'Arbetsordrar'}
+            {screenViewLabel(view)}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2 text-xs font-semibold text-slate-300">
@@ -285,9 +491,234 @@ export function ScreenDisplayPage() {
 
       {view === 'short-stay' ? (
         <ShortStayScreen units={units} bookings={bookings} days={days} screenHeight={screenSize.height} />
-      ) : (
+      ) : view === 'work-orders' ? (
         <WorkOrderScreen workOrders={workOrders} screenHeight={screenSize.height} />
+      ) : (
+        <PresentationScreen
+          settings={presentationSettings}
+          news={news}
+          workOrders={workOrders}
+          clockedInEntries={clockedInEntries}
+          meetings={meetings}
+          bookings={bookings}
+          lastUpdated={lastUpdated}
+        />
       )}
+    </div>
+  );
+}
+
+function PresentationScreen({
+  settings,
+  news,
+  workOrders,
+  clockedInEntries,
+  meetings,
+  bookings,
+  lastUpdated,
+}: {
+  settings: PresentationSettings;
+  news: News[];
+  workOrders: WorkOrder[];
+  clockedInEntries: TimeEntry[];
+  meetings: Meeting[];
+  bookings: ShortStayBooking[];
+  lastUpdated: Date | null;
+}) {
+  const [now, setNow] = useState(new Date());
+  const [weatherText, setWeatherText] = useState('Laddar väder...');
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(new Date()), 15_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchWeather() {
+      const location = settings.weatherLocation.trim();
+      if (!location) {
+        setWeatherText('Ingen väderplats vald');
+        return;
+      }
+
+      try {
+        setWeatherText(`Hämtar väder för ${location}...`);
+        const geocodeResponse = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=sv&format=json`);
+        const geocode = await geocodeResponse.json();
+        const place = geocode.results?.[0];
+        if (!place) {
+          if (!cancelled) setWeatherText(`Hittar inget väder för ${location}`);
+          return;
+        }
+
+        const weatherResponse = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,precipitation,wind_speed_10m&timezone=auto`);
+        const weather = await weatherResponse.json();
+        const current = weather.current;
+        if (!cancelled && current) {
+          setWeatherText(`${place.name}: ${Math.round(current.temperature_2m)}°C · vind ${Math.round(current.wind_speed_10m)} km/h · nederbörd ${Number(current.precipitation || 0).toLocaleString('sv-SE')} mm`);
+        }
+      } catch {
+        if (!cancelled) setWeatherText(`Väder kunde inte hämtas för ${location}`);
+      }
+    }
+
+    fetchWeather();
+    const interval = window.setInterval(fetchWeather, 15 * 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [settings.weatherLocation]);
+
+  const todayValue = dateKey(today());
+  const checkIns = bookings.filter(booking => booking.booking_type === 'booking' && booking.start_date === todayValue);
+  const checkOuts = bookings.filter(booking => booking.booking_type === 'booking' && booking.end_date === todayValue);
+  const activeNews = news.slice(0, 4);
+  const activeWorkOrders = workOrders.slice(0, 6);
+  const activeMeetings = meetings.slice(0, 5);
+  const tickerParts = [
+    settings.weatherLocation ? `Väder · ${weatherText}` : '',
+    checkIns.length > 0 ? `${checkIns.length} incheckning${checkIns.length === 1 ? '' : 'ar'} idag` : 'Inga incheckningar idag',
+    checkOuts.length > 0 ? `${checkOuts.length} utcheckning${checkOuts.length === 1 ? '' : 'ar'} idag` : 'Inga utcheckningar idag',
+    `${clockedInEntries.length} instämplad${clockedInEntries.length === 1 ? '' : 'e'} just nu`,
+    lastUpdated ? `Uppdaterad ${lastUpdated.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}` : '',
+  ].filter(Boolean);
+
+  const timeEntryTitle = (entry: TimeEntry) => {
+    if (entry.entry_type === 'break') return 'Rast';
+    return entry.work_order?.title || entry.customer_project?.title || entry.customer_project?.name || entry.property?.name || TIME_CATEGORY_LABELS[entry.category] || 'Arbete';
+  };
+
+  return (
+    <div className="relative h-[calc(100vh-54px)] overflow-hidden rounded-xl bg-slate-950 text-white">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.28),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(20,184,166,0.18),transparent_32%)]" />
+      <div className="relative grid h-full grid-rows-[1fr_auto]">
+        <main className="grid min-h-0 gap-3 p-4 xl:grid-cols-[1.15fr_0.85fr]">
+          <section className="grid min-h-0 gap-3">
+            <div className="rounded-3xl bg-white/10 p-6 ring-1 ring-white/10">
+              <div className="flex items-start justify-between gap-6">
+                <div>
+                  <p className="text-sm font-black uppercase tracking-[0.22em] text-blue-200">VI-HEM Presentation</p>
+                  <h2 className="mt-2 text-6xl font-black leading-none tracking-tight">
+                    {now.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+                  </h2>
+                  <p className="mt-2 text-2xl font-bold text-slate-200">
+                    {now.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  </p>
+                </div>
+                <div className="min-w-[18rem] rounded-3xl bg-white/10 p-4 text-right ring-1 ring-white/10">
+                  <CloudSun className="ml-auto h-8 w-8 text-amber-200" />
+                  <p className="mt-2 text-sm font-bold text-slate-300">Dagens väder</p>
+                  <p className="mt-1 text-lg font-black leading-tight">{weatherText}</p>
+                </div>
+              </div>
+            </div>
+
+            {settings.showNews && (
+              <div className="min-h-0 rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
+                <div className="mb-3 flex items-center gap-2">
+                  <Newspaper className="h-5 w-5 text-blue-200" />
+                  <h3 className="text-xl font-black">Aktuella nyheter</h3>
+                </div>
+                <div className="grid gap-2">
+                  {activeNews.length === 0 ? (
+                    <p className="rounded-2xl bg-white/5 px-4 py-5 text-lg font-bold text-slate-300">Inga publicerade nyheter.</p>
+                  ) : activeNews.map(item => (
+                    <div key={item.id} className="rounded-2xl bg-white/10 px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-lg font-black">{item.title}</p>
+                          <p className="mt-1 line-clamp-2 text-sm font-semibold leading-5 text-slate-300">{item.content}</p>
+                        </div>
+                        {item.priority === 'urgent' && <span className="rounded-full bg-rose-400 px-2.5 py-1 text-xs font-black text-white">Viktigt</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="grid min-h-0 gap-3">
+            {settings.showClockedIn && (
+              <div className="rounded-3xl bg-emerald-400/10 p-4 ring-1 ring-emerald-300/20">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-xl font-black"><Timer className="h-5 w-5 text-emerald-200" /> Instämplade</h3>
+                  <span className="rounded-full bg-emerald-300/20 px-3 py-1 text-sm font-black text-emerald-100">{clockedInEntries.length}</span>
+                </div>
+                <div className="grid gap-2">
+                  {clockedInEntries.length === 0 ? (
+                    <p className="rounded-2xl bg-white/5 px-4 py-4 font-bold text-slate-300">Ingen är instämplad just nu.</p>
+                  ) : clockedInEntries.slice(0, 5).map(entry => (
+                    <div key={entry.id} className="rounded-2xl bg-white/10 px-4 py-3">
+                      <p className="truncate text-base font-black">{entry.user?.name || 'Personal'}</p>
+                      <p className="truncate text-sm font-semibold text-emerald-100">{timeEntryTitle(entry)}</p>
+                      <p className="mt-1 text-xs font-bold text-slate-400">Sedan {formatDateTime(entry.start_time)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {settings.showWorkOrders && (
+              <div className="rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-xl font-black"><ClipboardList className="h-5 w-5 text-amber-200" /> Arbetsordrar</h3>
+                  <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-black">{workOrders.length}</span>
+                </div>
+                <div className="grid gap-2">
+                  {activeWorkOrders.length === 0 ? (
+                    <p className="rounded-2xl bg-white/5 px-4 py-4 font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
+                  ) : activeWorkOrders.map(order => (
+                    <div key={order.id} className="rounded-2xl bg-white/10 px-4 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="min-w-0 truncate text-base font-black">{order.title}</p>
+                        <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-xs font-black">{WO_STATUS_LABELS[order.status]}</span>
+                      </div>
+                      <p className="mt-1 truncate text-sm font-semibold text-slate-300">
+                        {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {settings.showMeetings && (
+              <div className="rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-xl font-black"><CalendarDays className="h-5 w-5 text-blue-200" /> Kalender</h3>
+                  <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-black">{meetings.length}</span>
+                </div>
+                <div className="grid gap-2">
+                  {activeMeetings.length === 0 ? (
+                    <p className="rounded-2xl bg-white/5 px-4 py-4 font-bold text-slate-300">Inga kommande kalenderhändelser.</p>
+                  ) : activeMeetings.map(meeting => (
+                    <div key={meeting.id} className="rounded-2xl bg-white/10 px-4 py-3">
+                      <p className="truncate text-base font-black">{meeting.title}</p>
+                      <p className="mt-1 truncate text-sm font-semibold text-slate-300">
+                        {meeting.starts_at ? formatDateTime(meeting.starts_at) : 'Ingen tid'}{meeting.location ? ` · ${meeting.location}` : ''}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+        </main>
+
+        <footer className="overflow-hidden border-t border-white/10 bg-black/35 py-3">
+          <div className="animate-[vihemTicker_38s_linear_infinite] whitespace-nowrap text-2xl font-black text-white">
+            {[...tickerParts, ...tickerParts].map((part, index) => (
+              <span key={`${part}-${index}`} className="mx-8 inline-flex items-center gap-3">
+                <span className="h-2 w-2 rounded-full bg-blue-300" />
+                {part}
+              </span>
+            ))}
+          </div>
+        </footer>
+      </div>
     </div>
   );
 }

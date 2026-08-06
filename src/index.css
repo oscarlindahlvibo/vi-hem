@@ -45,6 +45,15 @@
     box-sizing: border-box;
   }
 
+  @keyframes vihemTicker {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
   button,
   a,
   input,
