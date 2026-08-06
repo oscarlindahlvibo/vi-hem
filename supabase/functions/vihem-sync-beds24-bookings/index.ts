@@ -223,6 +223,7 @@ function normalizeBooking(booking: any, unit: any, organisationId: string) {
   const children = Number(booking.numChild ?? booking.children ?? booking.child ?? 0);
   const guests = Number(booking.numGuest ?? booking.guests ?? booking.guestCount ?? 0) || adults + children || 1;
   const channel = booking.referer || booking.channel || booking.apiSource || booking.bookingChannel || "Beds24";
+  const prepaidChannel = isPrepaidBookingChannel(channel);
   const totalPrice = readMoneyValue(
     booking.totalPrice,
     booking.price,
@@ -267,11 +268,11 @@ function normalizeBooking(booking: any, unit: any, organisationId: string) {
     guest_phone: String(booking.phone || booking.mobile || booking.guestPhone || ""),
     guest_count: guests,
     total_price: totalPrice,
-    paid_amount: paidAmount,
-    balance_due: Math.max(balanceDue, 0),
+    paid_amount: prepaidChannel ? totalPrice : paidAmount,
+    balance_due: prepaidChannel ? 0 : Math.max(balanceDue, 0),
     currency: readCurrency(booking),
     price_breakdown: readPriceBreakdown(booking),
-    payment_status: mapPaymentStatus(booking),
+    payment_status: prepaidChannel ? "paid" : mapPaymentStatus(booking),
     notes: String(booking.notes || booking.comment || ""),
     source_payload: booking,
     updated_at: new Date().toISOString(),
@@ -381,6 +382,18 @@ function mapPaymentStatus(booking: any) {
   if (status.includes("paid") || status.includes("complete")) return "paid";
   if (status.includes("partial")) return "partial";
   return "unpaid";
+}
+
+function isPrepaidBookingChannel(channel: unknown) {
+  const value = String(channel || "").toLowerCase().replace(/[\s._-]+/g, "");
+  return (
+    value.includes("airbnb") ||
+    value.includes("booking") ||
+    value.includes("expedia") ||
+    value.includes("hotelscom") ||
+    value.includes("vrbo") ||
+    value.includes("homeaway")
+  );
 }
 
 function toDateKey(date: Date) {

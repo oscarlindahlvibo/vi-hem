@@ -32,6 +32,18 @@ function readValue(line: string) {
   return index >= 0 ? line.slice(index + 1).replace(/\\n/g, '\n').trim() : '';
 }
 
+function isPrepaidBookingChannel(channel: unknown) {
+  const value = String(channel || '').toLowerCase().replace(/[\s._-]+/g, '');
+  return (
+    value.includes('airbnb') ||
+    value.includes('booking') ||
+    value.includes('expedia') ||
+    value.includes('hotelscom') ||
+    value.includes('vrbo') ||
+    value.includes('homeaway')
+  );
+}
+
 function parseICal(text: string): ICalEvent[] {
   const lines = unfoldICal(text).split(/\r?\n/);
   const events: ICalEvent[] = [];
@@ -126,20 +138,26 @@ Deno.serve(async (req) => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
           const events = parseICal(await response.text());
-          const rows = events.map((event) => ({
-            organisation_id: unit.organisation_id,
-            unit_id: unit.id,
-            external_uid: `${channelNumber}:${event.uid}`,
-            channel_number: channelNumber,
-            channel_name: channelName,
-            title: event.summary,
-            description: event.description,
-            start_date: event.startDate,
-            end_date: event.endDate,
-            is_manual: false,
-            booking_type: event.summary.toLowerCase().includes('block') ? 'block' : 'booking',
-            updated_at: new Date().toISOString(),
-          }));
+          const rows = events.map((event) => {
+            const prepaidChannel = isPrepaidBookingChannel(channelName);
+            return {
+              organisation_id: unit.organisation_id,
+              unit_id: unit.id,
+              external_uid: `${channelNumber}:${event.uid}`,
+              channel_number: channelNumber,
+              channel_name: channelName,
+              title: event.summary,
+              description: event.description,
+              start_date: event.startDate,
+              end_date: event.endDate,
+              is_manual: false,
+              booking_type: event.summary.toLowerCase().includes('block') ? 'block' : 'booking',
+              payment_status: prepaidChannel ? 'paid' : 'unpaid',
+              paid_amount: 0,
+              balance_due: 0,
+              updated_at: new Date().toISOString(),
+            };
+          });
 
           if (rows.length > 0) {
             const { error: upsertError } = await serviceClient
