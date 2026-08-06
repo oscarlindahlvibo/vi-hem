@@ -43,6 +43,15 @@ function absenceStatusColor(status: StaffAbsenceStatus) {
   }[status];
 }
 
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 5) return 'God natt';
+  if (hour < 11) return 'God morgon';
+  if (hour < 17) return 'God dag';
+  if (hour < 23) return 'God kväll';
+  return 'God natt';
+}
+
 export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -259,7 +268,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
             </div>
             <div className="min-w-0">
               <h1 className="truncate text-xl font-black text-slate-950 sm:text-2xl">
-                God kväll, {firstName}
+                {getGreeting()}, {firstName}
               </h1>
               <p className="mt-0.5 truncate text-sm font-medium text-slate-500">
                 {user?.role === 'admin' ? 'Överblick över dagens drift' : 'Din arbetsdag i VI-HEM'}

@@ -173,6 +173,28 @@ function normalizeBooking(booking: any, unit: any, organisationId: string) {
   const children = Number(booking.numChild ?? booking.children ?? booking.child ?? 0);
   const guests = Number(booking.numGuest ?? booking.guests ?? booking.guestCount ?? 0) || adults + children || 1;
   const channel = booking.referer || booking.channel || booking.apiSource || booking.bookingChannel || "Beds24";
+  const totalPrice = readMoneyValue(
+    booking.totalPrice,
+    booking.price,
+    booking.bookingPrice,
+    booking.invoiceTotal,
+    booking.roomPrice,
+    booking.amount,
+    booking.total,
+  );
+  const paidAmount = readMoneyValue(
+    booking.paidAmount,
+    booking.paid,
+    booking.paymentAmount,
+    booking.paymentsTotal,
+    sumMoneyList(booking.payments),
+  );
+  const balanceDue = readMoneyValue(
+    booking.balanceDue,
+    booking.balance,
+    booking.outstanding,
+    totalPrice - paidAmount,
+  );
 
   return {
     organisation_id: organisationId,
@@ -194,6 +216,11 @@ function normalizeBooking(booking: any, unit: any, organisationId: string) {
     guest_email: String(booking.email || booking.guestEmail || ""),
     guest_phone: String(booking.phone || booking.mobile || booking.guestPhone || ""),
     guest_count: guests,
+    total_price: totalPrice,
+    paid_amount: paidAmount,
+    balance_due: Math.max(balanceDue, 0),
+    currency: readCurrency(booking),
+    price_breakdown: readPriceBreakdown(booking),
     payment_status: mapPaymentStatus(booking),
     notes: String(booking.notes || booking.comment || ""),
     source_payload: booking,
@@ -239,6 +266,59 @@ function readTime(value: unknown) {
   if (!value) return "";
   const match = String(value).match(/\d{2}:\d{2}/);
   return match ? match[0] : "";
+}
+
+function readMoneyValue(...values: unknown[]) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    if (typeof value === "number" && Number.isFinite(value)) return Math.max(value, 0);
+    if (typeof value === "string") {
+      const parsed = Number(value.replace(/\s/g, "").replace(",", "."));
+      if (Number.isFinite(parsed)) return Math.max(parsed, 0);
+    }
+    if (typeof value === "object") {
+      const objectValue = value as Record<string, unknown>;
+      const parsed = readMoneyValue(
+        objectValue.amount,
+        objectValue.value,
+        objectValue.total,
+        objectValue.gross,
+        objectValue.price,
+      );
+      if (parsed > 0) return parsed;
+    }
+  }
+  return 0;
+}
+
+function sumMoneyList(value: unknown) {
+  if (!Array.isArray(value)) return 0;
+  return value.reduce((sum, item) => sum + readMoneyValue(item), 0);
+}
+
+function readCurrency(booking: any) {
+  return String(
+    booking.currency ||
+    booking.currencyCode ||
+    booking.invoiceCurrency ||
+    booking.priceCurrency ||
+    "SEK",
+  ).toUpperCase();
+}
+
+function readPriceBreakdown(booking: any) {
+  return {
+    invoiceItems: booking.invoiceItems || booking.invoice || booking.charges || booking.fees || [],
+    payments: booking.payments || [],
+    raw: {
+      totalPrice: booking.totalPrice,
+      price: booking.price,
+      bookingPrice: booking.bookingPrice,
+      invoiceTotal: booking.invoiceTotal,
+      paidAmount: booking.paidAmount,
+      balanceDue: booking.balanceDue,
+    },
+  };
 }
 
 function isCancelledBooking(booking: any) {

@@ -3,6 +3,7 @@ import {
   BedDouble, CalendarDays, RefreshCw, Plus, Edit2, ExternalLink,
   Sparkles, Search, ClipboardCheck, AlertTriangle, DoorOpen,
   ChevronLeft, ChevronRight, LogIn, LogOut, Users, Wrench,
+  ReceiptText, Printer,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -19,7 +20,7 @@ interface ShortStayPageProps {
   onNavigate: (page: string) => void;
 }
 
-type Tab = 'overview' | 'calendar' | 'bookings' | 'settings';
+type Tab = 'overview' | 'calendar' | 'bookings' | 'receipts' | 'settings';
 
 interface UnitForm {
   name: string;
@@ -51,6 +52,9 @@ interface BookingForm {
   guest_email: string;
   guest_phone: string;
   guest_count: string;
+  total_price: string;
+  paid_amount: string;
+  currency: string;
   payment_status: ShortStayPaymentStatus;
   cleaning_status: ShortStayCleaningStatus;
   notes: string;
@@ -144,6 +148,9 @@ const defaultBookingForm: BookingForm = {
   guest_email: '',
   guest_phone: '',
   guest_count: '1',
+  total_price: '',
+  paid_amount: '',
+  currency: 'SEK',
   payment_status: 'unpaid',
   cleaning_status: 'dirty',
   notes: '',
@@ -166,6 +173,48 @@ const bookingTypeLabels: Record<ShortStayBookingType, string> = {
   booking: 'Bokning',
   block: 'Spärr',
 };
+
+const moneyFormatterCache = new Map<string, Intl.NumberFormat>();
+
+function formatMoney(amount: number | string | null | undefined, currency = 'SEK') {
+  const numeric = Number(amount || 0);
+  let normalizedCurrency = (currency || 'SEK').toUpperCase();
+  const key = `sv-SE-${normalizedCurrency}`;
+  try {
+    if (!moneyFormatterCache.has(key)) {
+      moneyFormatterCache.set(key, new Intl.NumberFormat('sv-SE', {
+        style: 'currency',
+        currency: normalizedCurrency,
+        maximumFractionDigits: 2,
+      }));
+    }
+  } catch {
+    normalizedCurrency = 'SEK';
+    if (!moneyFormatterCache.has('sv-SE-SEK')) {
+      moneyFormatterCache.set('sv-SE-SEK', new Intl.NumberFormat('sv-SE', {
+        style: 'currency',
+        currency: 'SEK',
+        maximumFractionDigits: 2,
+      }));
+    }
+  }
+  return moneyFormatterCache.get(`sv-SE-${normalizedCurrency}`)!.format(numeric);
+}
+
+function parseMoneyInput(value: string) {
+  const normalized = value.replace(/\s/g, '').replace(',', '.');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? Math.max(parsed, 0) : 0;
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 function overlaps(booking: ShortStayBooking, day: string) {
   return booking.start_date <= day && booking.end_date > day;
@@ -466,6 +515,9 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
       guest_email: booking.guest_email || '',
       guest_phone: booking.guest_phone || '',
       guest_count: String(booking.guest_count || 1),
+      total_price: booking.total_price ? String(booking.total_price) : '',
+      paid_amount: booking.paid_amount ? String(booking.paid_amount) : '',
+      currency: booking.currency || 'SEK',
       payment_status: booking.payment_status,
       cleaning_status: booking.cleaning_status,
       notes: booking.notes || '',
@@ -543,6 +595,8 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     }
 
     setSaving(true);
+    const totalPrice = parseMoneyInput(bookingForm.total_price);
+    const paidAmount = parseMoneyInput(bookingForm.paid_amount);
     const payload = {
       organisation_id: organisationId,
       unit_id: bookingForm.unit_id,
@@ -558,6 +612,10 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
       guest_email: bookingForm.booking_type === 'booking' ? bookingForm.guest_email.trim() : '',
       guest_phone: bookingForm.booking_type === 'booking' ? bookingForm.guest_phone.trim() : '',
       guest_count: parseInt(bookingForm.guest_count) || 1,
+      total_price: bookingForm.booking_type === 'booking' ? totalPrice : 0,
+      paid_amount: bookingForm.booking_type === 'booking' ? paidAmount : 0,
+      balance_due: bookingForm.booking_type === 'booking' ? Math.max(totalPrice - paidAmount, 0) : 0,
+      currency: (bookingForm.currency.trim() || 'SEK').toUpperCase(),
       payment_status: bookingForm.payment_status,
       cleaning_status: bookingForm.cleaning_status,
       notes: bookingForm.notes.trim(),
@@ -577,6 +635,76 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
 
     setBookingModalOpen(false);
     await fetchData();
+  }
+
+  function printReceipt(booking: ShortStayBooking) {
+    const unit = units.find(u => u.id === booking.unit_id);
+    const currency = booking.currency || 'SEK';
+    const total = Number(booking.total_price || 0);
+    const paid = Number(booking.paid_amount || 0);
+    const due = Number(booking.balance_due ?? Math.max(total - paid, 0));
+    const receiptWindow = window.open('', '_blank');
+    if (!receiptWindow) {
+      setError('Kunde inte öppna kvittot. Tillåt popup-fönster och försök igen.');
+      return;
+    }
+
+    receiptWindow.document.write(`<!doctype html>
+      <html lang="sv">
+        <head>
+          <meta charset="utf-8" />
+          <title>Kvitto ${escapeHtml(booking.guest_name || booking.title)}</title>
+          <style>
+            body { margin: 0; padding: 32px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #0f172a; background: #f8fafc; }
+            main { max-width: 720px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 32px; }
+            header { display: flex; justify-content: space-between; gap: 24px; border-bottom: 1px solid #e2e8f0; padding-bottom: 22px; }
+            h1 { margin: 0; font-size: 28px; }
+            h2 { margin: 26px 0 10px; font-size: 16px; }
+            p { margin: 4px 0; color: #475569; }
+            table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+            th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 0; text-align: left; }
+            th:last-child, td:last-child { text-align: right; }
+            .total td { border-bottom: 0; font-size: 18px; font-weight: 800; color: #0f172a; }
+            .muted { color: #64748b; font-size: 13px; }
+            .print { margin: 0 auto 16px; display: block; border: 0; border-radius: 999px; background: #2563eb; color: white; padding: 12px 20px; font-weight: 700; }
+            @media print { body { background: #fff; padding: 0; } main { border: 0; border-radius: 0; } .print { display: none; } }
+          </style>
+        </head>
+        <body>
+          <button class="print" onclick="window.print()">Skriv ut / spara som PDF</button>
+          <main>
+            <header>
+              <div>
+                <h1>Kvitto</h1>
+                <p>VI-HEM korttidsuthyrning</p>
+              </div>
+              <div>
+                <p><strong>Datum:</strong> ${escapeHtml(new Date().toLocaleDateString('sv-SE'))}</p>
+                <p><strong>Bokning:</strong> ${escapeHtml(booking.beds24_booking_id || booking.external_uid || booking.id)}</p>
+              </div>
+            </header>
+            <h2>Kund</h2>
+            <p>${escapeHtml(booking.guest_name || booking.title || 'Gäst')}</p>
+            ${booking.guest_email ? `<p>${escapeHtml(booking.guest_email)}</p>` : ''}
+            ${booking.guest_phone ? `<p>${escapeHtml(booking.guest_phone)}</p>` : ''}
+            <h2>Bokning</h2>
+            <p><strong>${escapeHtml(unit?.name || 'Enhet')}</strong></p>
+            <p>${escapeHtml(formatDateRange(booking.start_date, booking.end_date))}</p>
+            <p>${escapeHtml(booking.guest_count || 1)} gäster · ${escapeHtml(booking.channel_name || 'VI-HEM')}</p>
+            <table>
+              <thead><tr><th>Rad</th><th>Belopp</th></tr></thead>
+              <tbody>
+                <tr><td>Boende</td><td>${escapeHtml(formatMoney(total, currency))}</td></tr>
+                <tr><td>Betalt</td><td>${escapeHtml(formatMoney(paid, currency))}</td></tr>
+                <tr class="total"><td>Kvar att betala</td><td>${escapeHtml(formatMoney(due, currency))}</td></tr>
+              </tbody>
+            </table>
+            <p class="muted">Kvitto skapat från bokningsuppgifter i VI-HEM. Kontrollera moms- och bolagsuppgifter innan kvittot används externt.</p>
+          </main>
+        </body>
+      </html>`);
+    receiptWindow.document.close();
+    receiptWindow.focus();
   }
 
   async function deleteBooking() {
@@ -645,6 +773,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
           ['overview', 'Översikt'],
           ['calendar', 'Kalender'],
           ['bookings', 'Bokningar'],
+          ['receipts', 'Kvitton'],
           ...(isAdmin ? [['settings', 'Inställningar']] : []),
         ].map(([value, label]) => (
           <button
@@ -925,8 +1054,13 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                         <Badge className={booking.booking_type === 'block' ? 'bg-slate-100 text-slate-700' : 'bg-blue-100 text-blue-700'}>
                           {bookingTypeLabels[booking.booking_type]}
                         </Badge>
-                        <Badge className="bg-slate-100 text-slate-600">{booking.channel_name || 'Manuell'}</Badge>
-                      </div>
+                      <Badge className="bg-slate-100 text-slate-600">{booking.channel_name || 'Manuell'}</Badge>
+                      {Number(booking.total_price || 0) > 0 && (
+                        <Badge className="bg-emerald-100 text-emerald-700">
+                          {formatMoney(booking.total_price, booking.currency)}
+                        </Badge>
+                      )}
+                    </div>
                       <p className="mt-1 text-sm text-slate-500">{unit?.name} · {formatDateRange(booking.start_date, booking.end_date)}</p>
                       {booking.booking_type === 'booking' && (
                         <p className="mt-1 text-xs text-slate-500">
@@ -945,6 +1079,63 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                 </Card>
               );
             })}
+          </div>
+        </div>
+      ) : tab === 'receipts' ? (
+        <div className="space-y-4">
+          <Card className="p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Kvitton</h2>
+                <p className="text-sm text-slate-500">Skapa utskriftsvänliga kvitton från korttidsbokningar.</p>
+              </div>
+              <ReceiptText className="h-8 w-8 text-blue-600" />
+            </div>
+          </Card>
+          <div className="grid gap-3">
+            {bookings.filter(booking => booking.booking_type === 'booking').length === 0 ? (
+              <Card className="p-8">
+                <EmptyState icon={<ReceiptText className="w-12 h-12" />} title="Inga bokningar att skapa kvitto för" />
+              </Card>
+            ) : bookings
+              .filter(booking => booking.booking_type === 'booking')
+              .sort((a, b) => b.start_date.localeCompare(a.start_date))
+              .map((booking) => {
+                const unit = units.find(u => u.id === booking.unit_id);
+                const total = Number(booking.total_price || 0);
+                const paid = Number(booking.paid_amount || 0);
+                const due = Number(booking.balance_due ?? Math.max(total - paid, 0));
+                return (
+                  <Card key={booking.id} className="p-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-semibold text-slate-900">{booking.guest_name || booking.title}</p>
+                          <Badge className="bg-slate-100 text-slate-600">{booking.channel_name || 'VI-HEM'}</Badge>
+                          <Badge className={due > 0 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
+                            {due > 0 ? `${formatMoney(due, booking.currency)} kvar` : 'Betald'}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-sm text-slate-500">{unit?.name} · {formatDateRange(booking.start_date, booking.end_date)}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Totalt {formatMoney(total, booking.currency)} · betalt {formatMoney(paid, booking.currency)}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="secondary" onClick={() => openEditBooking(booking)}>
+                          <Edit2 className="w-4 h-4" /> Redigera pris
+                        </Button>
+                        <Button onClick={() => printReceipt(booking)} disabled={total <= 0}>
+                          <Printer className="w-4 h-4" /> Skapa kvitto
+                        </Button>
+                      </div>
+                    </div>
+                    {total <= 0 && (
+                      <p className="mt-3 text-sm text-amber-700">Lägg in pris på bokningen innan kvitto skapas.</p>
+                    )}
+                  </Card>
+                );
+              })}
           </div>
         </div>
       ) : (
@@ -1246,6 +1437,36 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
               <Input label="Antal gäster" type="number" min={1} value={bookingForm.guest_count} onChange={e => setBookingForm({ ...bookingForm, guest_count: e.target.value })} />
               <Input label="E-post" type="email" value={bookingForm.guest_email} onChange={e => setBookingForm({ ...bookingForm, guest_email: e.target.value })} />
               <Input label="Telefon" value={bookingForm.guest_phone} onChange={e => setBookingForm({ ...bookingForm, guest_phone: e.target.value })} />
+            </div>
+          )}
+          {bookingForm.booking_type === 'booking' && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="mb-3 text-sm font-semibold text-slate-800">Pris och kvitto</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <Input
+                  label="Totalpris"
+                  inputMode="decimal"
+                  value={bookingForm.total_price}
+                  onChange={e => setBookingForm({ ...bookingForm, total_price: e.target.value })}
+                  placeholder="0"
+                />
+                <Input
+                  label="Betalt"
+                  inputMode="decimal"
+                  value={bookingForm.paid_amount}
+                  onChange={e => setBookingForm({ ...bookingForm, paid_amount: e.target.value })}
+                  placeholder="0"
+                />
+                <Input
+                  label="Valuta"
+                  value={bookingForm.currency}
+                  onChange={e => setBookingForm({ ...bookingForm, currency: e.target.value.toUpperCase() })}
+                  placeholder="SEK"
+                />
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                Kvar att betala: {formatMoney(Math.max(parseMoneyInput(bookingForm.total_price) - parseMoneyInput(bookingForm.paid_amount), 0), bookingForm.currency || 'SEK')}
+              </p>
             </div>
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

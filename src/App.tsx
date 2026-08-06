@@ -56,9 +56,21 @@ const DEFAULT_MODULE_STATE: ModuleState = {
   inspections: true,
 };
 
+function normalizeAppPath(path: string) {
+  const withoutTrailingSlash = path.replace(/\/+$/, '');
+  return withoutTrailingSlash || '/';
+}
+
+function isScreenRoute() {
+  const path = normalizeAppPath(window.location.pathname);
+  const hashPath = normalizeAppPath(window.location.hash.replace(/^#/, '').split('?')[0] || '/');
+  const queryMode = new URLSearchParams(window.location.search).get('mode');
+  return path === '/screen' || hashPath === '/screen' || queryMode === 'screen';
+}
+
 function AppInner() {
   const { user, loading, passwordRecovery } = useAuth();
-  const isScreenPath = window.location.pathname === '/screen';
+  const isScreenPath = isScreenRoute();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [notificationCount, setNotificationCount] = useState(0);
   const [enabledModules, setEnabledModules] = useState<ModuleState>(DEFAULT_MODULE_STATE);

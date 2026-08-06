@@ -817,6 +817,11 @@ export interface ShortStayBooking {
   cleaning_status: ShortStayCleaningStatus;
   cleaning_work_order_id: string | null;
   notes: string;
+  total_price: number;
+  paid_amount: number;
+  balance_due: number;
+  currency: string;
+  price_breakdown: Record<string, unknown>;
   source_payload: Record<string, unknown>;
   created_by: string | null;
   created_at: string;
