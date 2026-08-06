@@ -16,6 +16,12 @@ type PresentationSettings = {
   showWorkOrders: boolean;
   showClockedIn: boolean;
   showMeetings: boolean;
+  showTickerWeather: boolean;
+  showTickerCheckIns: boolean;
+  showTickerCheckOuts: boolean;
+  showTickerClockedIn: boolean;
+  showTickerUpdated: boolean;
+  customTickerText: string;
 };
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
@@ -25,6 +31,12 @@ const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   showWorkOrders: true,
   showClockedIn: true,
   showMeetings: true,
+  showTickerWeather: true,
+  showTickerCheckIns: true,
+  showTickerCheckOuts: true,
+  showTickerClockedIn: true,
+  showTickerUpdated: true,
+  customTickerText: '',
 };
 
 const addDays = (date: Date, days: number) => {
@@ -460,6 +472,37 @@ export function ScreenDisplayPage() {
                 ))}
               </div>
             </div>
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
+              <p className="mb-3 text-sm font-black text-slate-900">Rullande banner</p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {[
+                  ['showTickerWeather', 'Väder'],
+                  ['showTickerCheckIns', 'Incheckningar'],
+                  ['showTickerCheckOuts', 'Utcheckningar'],
+                  ['showTickerClockedIn', 'Instämplade'],
+                  ['showTickerUpdated', 'Senast uppdaterad'],
+                ].map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(presentationSettings[key as keyof PresentationSettings])}
+                      onChange={(event) => setPresentationSettings({ ...presentationSettings, [key]: event.target.checked })}
+                      className="h-4 w-4 rounded border-slate-300 accent-blue-600"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <label className="mt-4 block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">Egen rullande text</span>
+                <input
+                  value={presentationSettings.customTickerText}
+                  onChange={(event) => setPresentationSettings({ ...presentationSettings, customTickerText: event.target.value })}
+                  placeholder="Ex. Välkommen till kvällens information..."
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base outline-none ring-blue-500 focus:ring-2"
+                />
+              </label>
+            </div>
           </div>
 
           <div className="mt-6 flex justify-end">
@@ -594,11 +637,12 @@ function PresentationScreen({
     .slice(0, 9);
   const activeMeetings = meetings.slice(0, 5);
   const tickerParts = [
-    settings.weatherLocation ? `Väder · ${weatherText}` : '',
-    checkIns.length > 0 ? `${checkIns.length} incheckning${checkIns.length === 1 ? '' : 'ar'} idag` : 'Inga incheckningar idag',
-    checkOuts.length > 0 ? `${checkOuts.length} utcheckning${checkOuts.length === 1 ? '' : 'ar'} idag` : 'Inga utcheckningar idag',
-    `${clockedInEntries.length} instämplad${clockedInEntries.length === 1 ? '' : 'e'} just nu`,
-    lastUpdated ? `Uppdaterad ${lastUpdated.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}` : '',
+    settings.customTickerText.trim(),
+    settings.showTickerWeather && settings.weatherLocation ? `Väder · ${weatherText}` : '',
+    settings.showTickerCheckIns ? (checkIns.length > 0 ? `${checkIns.length} incheckning${checkIns.length === 1 ? '' : 'ar'} idag` : 'Inga incheckningar idag') : '',
+    settings.showTickerCheckOuts ? (checkOuts.length > 0 ? `${checkOuts.length} utcheckning${checkOuts.length === 1 ? '' : 'ar'} idag` : 'Inga utcheckningar idag') : '',
+    settings.showTickerClockedIn ? `${clockedInEntries.length} instämplad${clockedInEntries.length === 1 ? '' : 'e'} just nu` : '',
+    settings.showTickerUpdated && lastUpdated ? `Uppdaterad ${lastUpdated.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}` : '',
   ].filter(Boolean);
 
   const timeEntryTitle = (entry: TimeEntry) => {
@@ -613,7 +657,7 @@ function PresentationScreen({
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.28),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(20,184,166,0.18),transparent_32%)]" />
       <div className="relative grid h-full grid-rows-[1fr_auto]">
         <main className="grid min-h-0 gap-3 p-4 xl:grid-cols-[1.15fr_0.85fr]">
-          <section className="grid min-h-0 gap-3">
+          <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
             <div className="self-start rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
               <div className="flex items-center justify-between gap-5">
                 <div>
@@ -636,12 +680,12 @@ function PresentationScreen({
             </div>
 
             {settings.showWorkOrders && (
-              <div className="min-h-0 rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
+              <div className="flex min-h-0 flex-col rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
                 <div className="mb-3 flex items-center justify-between">
                   <h3 className="flex items-center gap-2 text-2xl font-black"><ClipboardList className="h-6 w-6 text-amber-200" /> Arbetsordrar</h3>
                   <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-black">{workOrders.length}</span>
                 </div>
-                <div className="grid gap-2">
+                <div className="min-h-0 flex-1 space-y-2 overflow-hidden">
                   {activeWorkOrders.length === 0 ? (
                     <p className="rounded-2xl bg-white/5 px-4 py-5 text-lg font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
                   ) : activeWorkOrders.map(order => (
