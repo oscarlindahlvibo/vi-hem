@@ -300,9 +300,14 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   }
 
   const firstName = user?.name?.split(' ')[0] || 'där';
-  const todayCheckIns = todayShortStayBookings.filter(booking => booking.start_date === localDateKey());
-  const todayCheckOuts = todayShortStayBookings.filter(booking => booking.end_date === localDateKey());
-  const shortStayAttentionCount = todayCheckIns.length + todayCheckOuts.length;
+  const dashboardToday = localDateKey();
+  const todayCheckIns = todayShortStayBookings.filter(booking => booking.start_date === dashboardToday);
+  const todayCheckOuts = todayShortStayBookings.filter(booking => booking.end_date === dashboardToday);
+  const shortStayEvents = [
+    ...todayCheckIns.map(booking => ({ booking, type: 'in' as const })),
+    ...todayCheckOuts.map(booking => ({ booking, type: 'out' as const })),
+  ];
+  const shortStayAttentionCount = shortStayEvents.length;
   const attentionCount = attentionWorkOrdersCount + shortStayAttentionCount + ongoingCustomerProjects.length;
   const quickTiles = [
     {
@@ -512,12 +517,31 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
                 <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500">
                   {todayCheckIns.length} incheckning{todayCheckIns.length === 1 ? '' : 'ar'} · {todayCheckOuts.length} utcheckning{todayCheckOuts.length === 1 ? '' : 'ar'}
                 </span>
-                {todayShortStayBookings.length > 0 && (
-                  <span className="mt-2 flex flex-wrap gap-1.5">
-                    {todayShortStayBookings.slice(0, 3).map((booking) => (
-                      <Badge key={booking.id} className={booking.start_date === localDateKey() ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}>
-                        {booking.start_date === localDateKey() ? 'In' : 'Ut'} · {booking.unit?.name || booking.guest_name || booking.title}
-                      </Badge>
+                {shortStayEvents.length > 0 && (
+                  <span className="mt-3 grid max-h-40 gap-1.5 overflow-y-auto rounded-2xl bg-slate-50 p-2 pr-1 sm:max-h-48 sm:grid-cols-2 lg:grid-cols-3">
+                    {shortStayEvents.map(({ booking, type }) => (
+                      <span
+                        key={`${booking.id}-${type}`}
+                        className={`min-w-0 rounded-xl px-3 py-2 ring-1 ${
+                          type === 'in'
+                            ? 'bg-emerald-50 text-emerald-800 ring-emerald-100'
+                            : 'bg-amber-50 text-amber-800 ring-amber-100'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${
+                            type === 'in' ? 'bg-emerald-200/70 text-emerald-900' : 'bg-amber-200/80 text-amber-900'
+                          }`}>
+                            {type === 'in' ? 'In' : 'Ut'}
+                          </span>
+                          <span className="min-w-0 truncate text-xs font-black text-slate-900">
+                            {booking.unit?.name || booking.title || 'Korttidsboende'}
+                          </span>
+                        </span>
+                        <span className="mt-1 block truncate text-[11px] font-semibold text-slate-500">
+                          {booking.guest_name || 'Gäst'} · {type === 'in' ? booking.arrival_time?.slice(0, 5) || 'incheckning' : booking.departure_time?.slice(0, 5) || 'utcheckning'}
+                        </span>
+                      </span>
                     ))}
                   </span>
                 )}
