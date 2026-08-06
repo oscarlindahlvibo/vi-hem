@@ -3,8 +3,8 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, Badge, StatCard, LoadingPage } from '../components/ui';
 import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, TIME_CATEGORY_LABELS } from '../lib/utils';
-import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News, Profile } from '../types';
-import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, MessageCircle, Users, Square, Repeat2, Coffee } from 'lucide-react';
+import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News, Profile, ShortStayBooking, CustomerProject } from '../types';
+import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, MessageCircle, Users, Square, Repeat2, Coffee, BedDouble, Briefcase } from 'lucide-react';
 
 interface StaffDashboardProps {
   onNavigate: (page: string) => void;
@@ -24,6 +24,21 @@ const ABSENCE_STATUS_LABEL: Record<StaffAbsenceStatus, string> = {
   rejected: 'Avvisad',
   cancelled: 'Avbruten',
 };
+
+const ACTIVE_CUSTOMER_PROJECT_STATUSES = [
+  'draft',
+  'quote_created',
+  'quote_sent',
+  'quote_accepted',
+  'planned',
+  'in_progress',
+  'paused',
+  'waiting_customer',
+  'waiting_material',
+  'ready_for_inspection',
+  'inspected_with_remarks',
+  'approved',
+];
 
 function customerProjectLabel(project: any) {
   return project?.title || project?.name || project?.customer_name || '';
@@ -74,6 +89,8 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   const [todayAbsences, setTodayAbsences] = useState<StaffAbsenceRequest[]>([]);
   const [clockedInEntries, setClockedInEntries] = useState<TimeEntry[]>([]);
   const [dashboardNews, setDashboardNews] = useState<News[]>([]);
+  const [todayShortStayBookings, setTodayShortStayBookings] = useState<ShortStayBooking[]>([]);
+  const [ongoingCustomerProjects, setOngoingCustomerProjects] = useState<CustomerProject[]>([]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -93,6 +110,8 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           staffProfilesResult,
           todayAbsencesResult,
           clockedInResult,
+          shortStayTodayResult,
+          customerProjectsResult,
           newsResult,
         ] = await Promise.all([
           // Count new maintenance requests (status='received')
@@ -175,6 +194,26 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
                 .order('start_time', { ascending: false })
             : Promise.resolve({ data: [], error: null }),
 
+          user.role === 'admin' || user.role === 'staff'
+            ? supabase
+                .from('vihem_short_stay_bookings')
+                .select('*, unit:vihem_short_stay_units(id, name)')
+                .eq('organisation_id', user.organisation_id)
+                .eq('booking_type', 'booking')
+                .or(`start_date.eq.${localDateKey()},end_date.eq.${localDateKey()}`)
+                .order('start_date', { ascending: true })
+            : Promise.resolve({ data: [], error: null }),
+
+          user.role === 'admin' || user.role === 'staff'
+            ? supabase
+                .from('vihem_customer_projects')
+                .select('*, project_manager:project_manager_id(id, name, email)')
+                .eq('organisation_id', user.organisation_id)
+                .in('status', ACTIVE_CUSTOMER_PROJECT_STATUSES)
+                .order('updated_at', { ascending: false })
+                .limit(12)
+            : Promise.resolve({ data: [], error: null }),
+
           supabase
             .from('vihem_news')
             .select('*')
@@ -233,6 +272,9 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
         if (newsResult.data) {
           setDashboardNews((newsResult.data as News[]).filter(item => ['staff', 'all'].includes(item.audience || 'staff')));
         }
+
+        setTodayShortStayBookings((shortStayTodayResult.data || []) as ShortStayBooking[]);
+        setOngoingCustomerProjects((customerProjectsResult.data || []) as CustomerProject[]);
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
@@ -246,6 +288,8 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
       .channel(`staff-dashboard-${user.organisation_id || user.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_staff_absence_requests' }, () => fetchDashboardData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_time_entries' }, () => fetchDashboardData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_short_stay_bookings' }, () => fetchDashboardData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_customer_projects' }, () => fetchDashboardData())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -256,7 +300,10 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   }
 
   const firstName = user?.name?.split(' ')[0] || 'där';
-  const attentionCount = attentionWorkOrdersCount;
+  const todayCheckIns = todayShortStayBookings.filter(booking => booking.start_date === localDateKey());
+  const todayCheckOuts = todayShortStayBookings.filter(booking => booking.end_date === localDateKey());
+  const shortStayAttentionCount = todayCheckIns.length + todayCheckOuts.length;
+  const attentionCount = attentionWorkOrdersCount + shortStayAttentionCount + ongoingCustomerProjects.length;
   const quickTiles = [
     {
       label: 'Nyheter',
@@ -429,20 +476,83 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           </div>
           <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
         </button>
-        <div className="border-t border-slate-100 px-4 py-4 sm:px-6">
+        <div className="divide-y divide-slate-100 border-t border-slate-100">
           <button
             onClick={() => onNavigate(myWorkOrdersCount > 0 ? 'workorders' : 'maintenance')}
-            className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl bg-white text-left"
+            className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 sm:px-6"
           >
             <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 shadow-sm sm:h-16 sm:w-16">
-                <ClipboardList className="h-7 w-7 sm:h-8 sm:w-8" />
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 shadow-sm sm:h-14 sm:w-14">
+                <ClipboardList className="h-6 w-6 sm:h-7 sm:w-7" />
               </span>
-              <p className="min-w-0 text-sm font-semibold leading-5 text-slate-950 sm:text-base">
-                <span className="font-black">{attentionWorkOrdersCount}</span> uppgifter väntar på dig i <span className="font-black">Arbetsordrar</span>
-              </p>
+              <span className="min-w-0">
+                <span className="block text-sm font-black leading-5 text-slate-950 sm:text-base">
+                  {attentionWorkOrdersCount} arbetsordrar
+                </span>
+                <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500">
+                  Mina och ej tilldelade aktiva arbetsordrar
+                </span>
+              </span>
             </div>
             <span className="hidden shrink-0 rounded-full border border-slate-200 px-4 py-2 text-sm font-bold text-blue-500 sm:inline-flex">Öppna</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('short-stay')}
+            className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 sm:px-6"
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 shadow-sm sm:h-14 sm:w-14">
+                <BedDouble className="h-6 w-6 sm:h-7 sm:w-7" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-black leading-5 text-slate-950 sm:text-base">
+                  {shortStayAttentionCount} in- och utcheckningar idag
+                </span>
+                <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500">
+                  {todayCheckIns.length} incheckning{todayCheckIns.length === 1 ? '' : 'ar'} · {todayCheckOuts.length} utcheckning{todayCheckOuts.length === 1 ? '' : 'ar'}
+                </span>
+                {todayShortStayBookings.length > 0 && (
+                  <span className="mt-2 flex flex-wrap gap-1.5">
+                    {todayShortStayBookings.slice(0, 3).map((booking) => (
+                      <Badge key={booking.id} className={booking.start_date === localDateKey() ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}>
+                        {booking.start_date === localDateKey() ? 'In' : 'Ut'} · {booking.unit?.name || booking.guest_name || booking.title}
+                      </Badge>
+                    ))}
+                  </span>
+                )}
+              </span>
+            </div>
+            <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
+          </button>
+
+          <button
+            onClick={() => onNavigate('customer-projects')}
+            className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 sm:px-6"
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-600 shadow-sm sm:h-14 sm:w-14">
+                <Briefcase className="h-6 w-6 sm:h-7 sm:w-7" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-black leading-5 text-slate-950 sm:text-base">
+                  {ongoingCustomerProjects.length} pågående kundprojekt
+                </span>
+                <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500">
+                  Aktiva projekt som inte är slutförda eller arkiverade
+                </span>
+                {ongoingCustomerProjects.length > 0 && (
+                  <span className="mt-2 flex flex-wrap gap-1.5">
+                    {ongoingCustomerProjects.slice(0, 3).map((project) => (
+                      <Badge key={project.id} className="max-w-full bg-slate-100 text-slate-700">
+                        <span className="truncate">{customerProjectLabel(project) || 'Kundprojekt'}</span>
+                      </Badge>
+                    ))}
+                  </span>
+                )}
+              </span>
+            </div>
+            <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
           </button>
         </div>
       </section>
