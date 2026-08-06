@@ -32,6 +32,7 @@ import { ShortStayPage } from './pages/ShortStayPage';
 import { YearPlanningPage } from './pages/YearPlanningPage';
 import { MeetingsPage } from './pages/MeetingsPage';
 import { ScreenDisplayPage } from './pages/ScreenDisplayPage';
+import { ScreenSettingsPage } from './pages/ScreenSettingsPage';
 import type { ModuleKey } from './types';
 
 type ModuleState = Partial<Record<ModuleKey, boolean>>;
@@ -444,6 +445,10 @@ function AppInner() {
       case 'admin-staff':
         if (!isAdmin) return renderDashboard();
         return <AdminStaffPage onNavigate={navigate} />;
+
+      case 'screen-settings':
+        if (!isAdmin) return renderDashboard();
+        return <ScreenSettingsPage onNavigate={navigate} />;
 
       case 'admin-payroll':
         if (!isAdmin) return renderDashboard();

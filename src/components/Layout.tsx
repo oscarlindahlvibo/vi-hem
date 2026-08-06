@@ -8,7 +8,7 @@ import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
   ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase,
-  BedDouble, CalendarDays, MessageSquareText,
+  BedDouble, CalendarDays, MessageSquareText, Monitor,
 } from 'lucide-react';
 
 interface NavItem {
@@ -61,6 +61,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     { label: 'Fastigheter', icon: <Building2 className="w-5 h-5" />, page: 'admin-properties', roles: ['admin'] },
     { label: 'Hyresgäster', icon: <Users className="w-5 h-5" />, page: 'admin-tenants', roles: ['admin'] },
     { label: 'Personal', icon: <Settings className="w-5 h-5" />, page: 'admin-staff', roles: ['admin'] },
+    { label: 'TV-skärm', icon: <Monitor className="w-5 h-5" />, page: 'screen-settings', roles: ['admin'] },
     { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['admin'] },
     { label: 'Uppsägningar', icon: <FileX className="w-5 h-5" />, page: 'admin-terminations', roles: ['admin'] },
     // ── Superadmin ─────────────────────────────────────────────────────────

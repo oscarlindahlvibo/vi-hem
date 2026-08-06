@@ -7,39 +7,19 @@ import { Button, LoadingPage } from '../components/ui';
 import type { Meeting, News, Profile, ShortStayBooking, ShortStayUnit, TimeEntry, WorkOrder } from '../types';
 import { formatDate, formatDateTime, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
-
-type ScreenView = 'short-stay' | 'work-orders' | 'presentation';
-
-type PresentationSettings = {
-  weatherLocation: string;
-  showNews: boolean;
-  showWorkOrders: boolean;
-  showClockedIn: boolean;
-  showMeetings: boolean;
-  showTickerWeather: boolean;
-  showTickerCheckIns: boolean;
-  showTickerCheckOuts: boolean;
-  showTickerClockedIn: boolean;
-  showTickerUpdated: boolean;
-  customTickerText?: string;
-  customTickerItems: string[];
-};
+import {
+  DEFAULT_SCREEN_KEY,
+  normalizePresentationSettings,
+  PRESENTATION_SETTINGS_STORAGE_KEY,
+  readStoredPresentationSettings,
+  readStoredScreenView,
+  screenViewLabel,
+  SCREEN_VIEW_STORAGE_KEY,
+  type PresentationSettings,
+  type ScreenView,
+} from '../lib/screenSettings';
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
-const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
-  weatherLocation: 'Värnamo',
-  showNews: true,
-  showWorkOrders: true,
-  showClockedIn: true,
-  showMeetings: true,
-  showTickerWeather: true,
-  showTickerCheckIns: true,
-  showTickerCheckOuts: true,
-  showTickerClockedIn: true,
-  showTickerUpdated: true,
-  customTickerText: '',
-  customTickerItems: [],
-};
 
 const addDays = (date: Date, days: number) => {
   const next = new Date(date);
@@ -101,33 +81,6 @@ function screenBookingBandStyle(booking: ShortStayBooking, days: string[]) {
   };
 }
 
-function readStoredScreenView(): ScreenView {
-  const urlView = new URLSearchParams(window.location.search).get('view');
-  if (urlView === 'work-orders' || urlView === 'short-stay' || urlView === 'presentation') return urlView;
-  const storedView = localStorage.getItem('vihem.screen.view');
-  return storedView === 'work-orders' || storedView === 'short-stay' || storedView === 'presentation' ? storedView : 'short-stay';
-}
-
-function readStoredPresentationSettings(): PresentationSettings {
-  try {
-    const stored = JSON.parse(localStorage.getItem('vihem.screen.presentationSettings') || '{}');
-    const customTickerItems = Array.isArray(stored.customTickerItems)
-      ? stored.customTickerItems
-      : stored.customTickerText
-        ? [stored.customTickerText]
-        : [];
-    return { ...DEFAULT_PRESENTATION_SETTINGS, ...stored, customTickerItems };
-  } catch {
-    return DEFAULT_PRESENTATION_SETTINGS;
-  }
-}
-
-function screenViewLabel(view: ScreenView) {
-  if (view === 'short-stay') return 'Korttidskalender';
-  if (view === 'work-orders') return 'Arbetsordrar';
-  return 'Presentation';
-}
-
 function workOrderAssigneeLabel(order: WorkOrder, staffMembers: Pick<Profile, 'id' | 'name'>[]) {
   const ids = order.assigned_to_ids?.length ? order.assigned_to_ids : order.assigned_to ? [order.assigned_to] : [];
   if (ids.length === 0) return 'Ej tilldelad';
@@ -170,11 +123,11 @@ export function ScreenDisplayPage() {
   const days = useMemo(() => Array.from({ length: dayCount }, (_, index) => dateKey(addDays(today(), index))), [dayCount]);
 
   useEffect(() => {
-    localStorage.setItem('vihem.screen.view', view);
+    localStorage.setItem(SCREEN_VIEW_STORAGE_KEY, view);
   }, [view]);
 
   useEffect(() => {
-    localStorage.setItem('vihem.screen.presentationSettings', JSON.stringify(presentationSettings));
+    localStorage.setItem(PRESENTATION_SETTINGS_STORAGE_KEY, JSON.stringify(presentationSettings));
   }, [presentationSettings]);
 
   const chooseScreenView = (nextView: ScreenView) => {
@@ -222,11 +175,17 @@ export function ScreenDisplayPage() {
     const todayStart = dateKey(today());
     const meetingEnd = dateKey(addDays(today(), 7));
 
-    const [organisationResult, staffResult, unitsResult, bookingsResult, workOrdersResult, newsResult, clockedInResult, meetingsResult] = await Promise.all([
+    const [organisationResult, screenSettingsResult, staffResult, unitsResult, bookingsResult, workOrdersResult, newsResult, clockedInResult, meetingsResult] = await Promise.all([
       supabase
         .from('vihem_organisations')
         .select('name')
         .eq('id', user.organisation_id)
+        .maybeSingle(),
+      supabase
+        .from('vihem_screen_settings')
+        .select('screen_view, presentation_settings')
+        .eq('organisation_id', user.organisation_id)
+        .eq('screen_key', DEFAULT_SCREEN_KEY)
         .maybeSingle(),
       supabase
         .from('vihem_profiles')
@@ -280,9 +239,10 @@ export function ScreenDisplayPage() {
         .limit(8),
     ]);
 
-    if (organisationResult.error || staffResult.error || unitsResult.error || bookingsResult.error || workOrdersResult.error || newsResult.error || clockedInResult.error || meetingsResult.error) {
+    if (organisationResult.error || screenSettingsResult.error || staffResult.error || unitsResult.error || bookingsResult.error || workOrdersResult.error || newsResult.error || clockedInResult.error || meetingsResult.error) {
       setDataError(
         organisationResult.error?.message ||
+        screenSettingsResult.error?.message ||
         staffResult.error?.message ||
         unitsResult.error?.message ||
         bookingsResult.error?.message ||
@@ -294,6 +254,12 @@ export function ScreenDisplayPage() {
       );
     } else {
       setOrganisationName(organisationResult.data?.name || 'VI-HEM');
+      if (screenSettingsResult.data?.screen_view) {
+        setView(screenSettingsResult.data.screen_view as ScreenView);
+      }
+      if (screenSettingsResult.data?.presentation_settings) {
+        setPresentationSettings(normalizePresentationSettings(screenSettingsResult.data.presentation_settings));
+      }
       setStaffMembers((staffResult.data || []) as Pick<Profile, 'id' | 'name'>[]);
       setUnits((unitsResult.data || []) as ShortStayUnit[]);
       setBookings((bookingsResult.data || []) as ShortStayBooking[]);
