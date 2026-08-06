@@ -948,6 +948,9 @@ function LaundryScreen({
 }) {
   const room = rooms.find(item => item.id === screen.laundryRoomId) || rooms[0];
   const availableHeight = Math.max(screenHeight - 54, 420);
+  const dayGap = 8;
+  const dayRowHeight = Math.max(72, Math.floor((availableHeight - dayGap * 6) / 7));
+  const compactSchedule = dayRowHeight < 128;
   const todayValue = dateKey(today());
   const now = new Date();
   const roomSlots = room ? slots.filter(slot => slot.laundry_room_id === room.id) : [];
@@ -1040,24 +1043,36 @@ function LaundryScreen({
         </p>
       </section>
 
-      <section className="grid min-h-0 grid-cols-1 gap-2 overflow-hidden">
+      <section
+        className="grid min-h-0 grid-cols-1 overflow-hidden"
+        style={{ gap: dayGap, gridTemplateRows: 'repeat(7, minmax(0, 1fr))' }}
+      >
         {days.map(day => (
-          <div key={day.key} className={`grid min-h-0 grid-cols-[9rem_1fr] overflow-hidden rounded-2xl ring-1 ring-white/10 ${day.key === todayValue ? 'bg-blue-500/20' : 'bg-white/10'}`}>
-            <div className="flex items-center px-4">
+          <div
+            key={day.key}
+            className={`grid min-h-0 overflow-hidden rounded-2xl ring-1 ring-white/10 ${day.key === todayValue ? 'bg-blue-500/20' : 'bg-white/10'}`}
+            style={{ gridTemplateColumns: compactSchedule ? '7.5rem minmax(0, 1fr)' : '9rem minmax(0, 1fr)' }}
+          >
+            <div className={`flex min-h-0 items-center ${compactSchedule ? 'px-3' : 'px-4'}`}>
               <div>
-                <p className="text-xl font-black capitalize">{day.label}</p>
-                <p className="mt-1 text-xs font-bold uppercase tracking-wide text-slate-400">{day.slots.length} tider</p>
+                <p className={`${compactSchedule ? 'text-base' : 'text-xl'} font-black capitalize leading-tight`}>{day.label}</p>
+                <p className={`${compactSchedule ? 'mt-0 text-[10px]' : 'mt-1 text-xs'} font-bold uppercase tracking-wide text-slate-400`}>{day.slots.length} tider</p>
               </div>
             </div>
-            <div className="grid min-w-0 grid-cols-2 gap-2 p-2 2xl:grid-cols-3">
+            <div
+              className={`grid min-h-0 min-w-0 grid-cols-3 ${compactSchedule ? 'gap-1.5 p-1.5' : 'gap-2 p-2'}`}
+              style={{
+                gridTemplateRows: `repeat(${Math.max(1, Math.ceil(Math.max(day.slots.length, 1) / 3))}, minmax(0, 1fr))`,
+              }}
+            >
               {day.slots.length === 0 ? (
                 <div className="col-span-full rounded-xl bg-white/5 px-3 py-3 text-sm font-bold text-slate-400">Inga tider upplagda</div>
               ) : day.slots.map(slot => {
                 const status = slotStatus(slot);
                 return (
-                  <div key={slot.id} className={`min-w-0 rounded-xl px-3 py-2 ring-1 ${status.className}`}>
-                    <p className="truncate text-lg font-black">{slot.start_time.slice(0, 5)}-{slot.end_time.slice(0, 5)}</p>
-                    <p className="mt-0.5 truncate text-sm font-bold">{status.label}</p>
+                  <div key={slot.id} className={`flex min-h-0 min-w-0 flex-col justify-center rounded-xl ring-1 ${compactSchedule ? 'px-2 py-1' : 'px-3 py-2'} ${status.className}`}>
+                    <p className={`truncate font-black leading-tight ${compactSchedule ? 'text-sm' : 'text-lg'}`}>{slot.start_time.slice(0, 5)}-{slot.end_time.slice(0, 5)}</p>
+                    <p className={`truncate font-bold leading-tight ${compactSchedule ? 'mt-0 text-[11px]' : 'mt-0.5 text-sm'}`}>{status.label}</p>
                   </div>
                 );
               })}

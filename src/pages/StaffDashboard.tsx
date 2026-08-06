@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, Badge, StatCard, LoadingPage } from '../components/ui';
 import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, TIME_CATEGORY_LABELS } from '../lib/utils';
-import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News } from '../types';
+import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News, Profile } from '../types';
 import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, MessageCircle, Users, Square, Repeat2, Coffee } from 'lucide-react';
 
 interface StaffDashboardProps {
@@ -56,6 +56,10 @@ function getGreeting() {
   return 'God natt';
 }
 
+function localDateKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -86,6 +90,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           activeTimeResult,
           myWODetailsResult,
           newWODetailsResult,
+          staffProfilesResult,
           todayAbsencesResult,
           clockedInResult,
           newsResult,
@@ -144,10 +149,20 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
 
           user.role === 'admin'
             ? supabase
+                .from('vihem_profiles')
+                .select('id, name, email, role, organisation_id, active')
+                .eq('organisation_id', user.organisation_id)
+                .in('role', ['staff', 'admin'])
+                .eq('active', true)
+                .order('name')
+            : Promise.resolve({ data: [], error: null }),
+
+          user.role === 'admin'
+            ? supabase
                 .from('vihem_staff_absence_requests')
-                .select('*, user:vihem_profiles(id, name, email)')
-                .lte('start_date', new Date().toISOString().slice(0, 10))
-                .gte('end_date', new Date().toISOString().slice(0, 10))
+                .select('*, user:user_id(id, name, email, organisation_id)')
+                .lte('start_date', localDateKey())
+                .gte('end_date', localDateKey())
                 .in('status', ['submitted', 'approved'])
                 .order('created_at', { ascending: false })
             : Promise.resolve({ data: [], error: null }),
@@ -155,9 +170,8 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           user.role === 'admin'
             ? supabase
                 .from('vihem_time_entries')
-                .select('*, user:vihem_profiles(id, name, email), work_order:vihem_work_orders(id, title), customer_project:vihem_customer_projects(id, title, name, customer_name)')
+                .select('*, user:user_id(id, name, email, organisation_id), work_order:vihem_work_orders(id, title), customer_project:vihem_customer_projects(id, title, name, customer_name)')
                 .is('end_time', null)
-                .eq('organisation_id', user.organisation_id)
                 .order('start_time', { ascending: false })
             : Promise.resolve({ data: [], error: null }),
 
@@ -189,15 +203,28 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           setNewWorkOrders((newWODetailsResult.data as WorkOrder[]).filter(isUnassignedWorkOrder));
         }
 
+        const organisationStaff = (staffProfilesResult.data || []) as Pick<Profile, 'id' | 'name' | 'email' | 'role' | 'organisation_id' | 'active'>[];
+        const organisationStaffIds = new Set(organisationStaff.map(staff => staff.id));
+
         if (todayAbsencesResult.data) {
-          setTodayAbsences(todayAbsencesResult.data as StaffAbsenceRequest[]);
+          setTodayAbsences((todayAbsencesResult.data as StaffAbsenceRequest[]).filter(absence =>
+            absence.organisation_id === user.organisation_id ||
+            organisationStaffIds.has(absence.user_id) ||
+            absence.user?.organisation_id === user.organisation_id
+          ));
         }
 
         if (clockedInResult.data) {
           const latestEntryByUser = new Map<string, TimeEntry>();
-          (clockedInResult.data as TimeEntry[]).forEach((entry) => {
-            if (!latestEntryByUser.has(entry.user_id)) latestEntryByUser.set(entry.user_id, entry);
-          });
+          (clockedInResult.data as TimeEntry[])
+            .filter(entry =>
+              entry.organisation_id === user.organisation_id ||
+              organisationStaffIds.has(entry.user_id) ||
+              entry.user?.organisation_id === user.organisation_id
+            )
+            .forEach((entry) => {
+              if (!latestEntryByUser.has(entry.user_id)) latestEntryByUser.set(entry.user_id, entry);
+            });
           setClockedInEntries(Array.from(latestEntryByUser.values()));
         } else {
           setClockedInEntries([]);
@@ -222,14 +249,14 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [user?.id, user?.organisation_id]);
+  }, [user?.id, user?.organisation_id, user?.role]);
 
   if (loading) {
     return <LoadingPage />;
   }
 
   const firstName = user?.name?.split(' ')[0] || 'där';
-  const attentionCount = newMRCount + urgentMRCount + attentionWorkOrdersCount + todayAbsences.length;
+  const attentionCount = attentionWorkOrdersCount;
   const quickTiles = [
     {
       label: 'Nyheter',

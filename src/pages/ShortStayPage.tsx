@@ -437,6 +437,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   }, [bookings, units]);
 
   const conflicts = useMemo(() => {
+    const today = todayKey();
     const found: Array<[ShortStayBooking, ShortStayBooking]> = [];
     units.forEach((unit) => {
       const unitBookings = (bookingsByUnit.get(unit.id) || [])
@@ -444,7 +445,8 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
         .sort((a, b) => a.start_date.localeCompare(b.start_date));
       unitBookings.forEach((booking, index) => {
         unitBookings.slice(index + 1).forEach((other) => {
-          if (rangeOverlaps(booking.start_date, booking.end_date, other.start_date, other.end_date)) {
+          const overlapEnds = booking.end_date < other.end_date ? booking.end_date : other.end_date;
+          if (overlapEnds >= today && rangeOverlaps(booking.start_date, booking.end_date, other.start_date, other.end_date)) {
             found.push([booking, other]);
           }
         });
