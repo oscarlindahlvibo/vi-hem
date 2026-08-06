@@ -23,7 +23,9 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Edit2,
   Plus,
+  Trash2,
 } from 'lucide-react';
 
 interface SlotWithBooking extends Omit<LaundrySlot, 'booking'> {
@@ -74,6 +76,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
   const [createRoomModalOpen, setCreateRoomModalOpen] = useState(false);
   const [createRoomLoading, setCreateRoomLoading] = useState(false);
   const [createRoomForm, setCreateRoomForm] = useState(INITIAL_LAUNDRY_ROOM_FORM);
+  const [editingRoom, setEditingRoom] = useState<LaundryRoom | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
     open: boolean;
     slot: SlotWithBooking | null;
@@ -85,6 +88,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
   const [bookingInProgress, setBookingInProgress] = useState(false);
   const [cancellingBookingId, setCancellingBookingId] = useState('');
   const [mobileViewDay, setMobileViewDay] = useState(() => getTodayWeekdayIndex());
+  const [slotsRefreshKey, setSlotsRefreshKey] = useState(0);
   const canViewAllLaundryRooms = user?.role === 'staff' || user?.role === 'admin' || user?.role === 'superadmin';
   const canManageLaundryRooms = user?.role === 'admin' || user?.role === 'superadmin';
 
@@ -280,7 +284,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
     };
 
     fetchSlotsAndBookings();
-  }, [selectedRoomId, user, weekOffset]);
+  }, [selectedRoomId, user, weekOffset, slotsRefreshKey]);
 
   // Get slots for a specific day (for mobile view)
   const getSlotsForDay = (dayDate: Date) => {
@@ -421,7 +425,66 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
     }
   };
 
-  const handleCreateLaundryRoom = async () => {
+  const generateMissingSlots = async (laundryRoomId: string, weeksToGenerate: number) => {
+    const today = new Date();
+    const endDate = formatDateString(addDays(today, weeksToGenerate * 7 - 1));
+    const startDate = formatDateString(today);
+
+    const { data: existingSlots, error: existingSlotsErr } = await supabase
+      .from('vihem_laundry_slots')
+      .select('date, start_time, end_time')
+      .eq('laundry_room_id', laundryRoomId)
+      .gte('date', startDate)
+      .lte('date', endDate);
+
+    if (existingSlotsErr) throw existingSlotsErr;
+
+    const existingKeys = new Set((existingSlots || []).map((slot) => `${slot.date}|${slot.start_time}|${slot.end_time}`));
+    const slotRows = Array.from({ length: weeksToGenerate * 7 }).flatMap((_, dayIndex) => {
+      const date = formatDateString(addDays(today, dayIndex));
+      return SLOT_TIMES
+        .filter((slot) => !existingKeys.has(`${date}|${slot.start}|${slot.end}`))
+        .map((slot) => ({
+          laundry_room_id: laundryRoomId,
+          date,
+          start_time: slot.start,
+          end_time: slot.end,
+          is_blocked: false,
+        }));
+    });
+
+    if (slotRows.length === 0) return 0;
+
+    const { error: slotsErr } = await supabase
+      .from('vihem_laundry_slots')
+      .insert(slotRows);
+
+    if (slotsErr) throw slotsErr;
+    return slotRows.length;
+  };
+
+  const openCreateRoomModal = () => {
+    setEditingRoom(null);
+    setCreateRoomForm({
+      ...INITIAL_LAUNDRY_ROOM_FORM,
+      property_id: createRoomForm.property_id || properties[0]?.id || '',
+    });
+    setCreateRoomModalOpen(true);
+  };
+
+  const openEditRoomModal = (room: LaundryRoom) => {
+    setEditingRoom(room);
+    setCreateRoomForm({
+      property_id: room.property_id || properties[0]?.id || '',
+      name: room.name || '',
+      description: room.description || '',
+      max_bookings_per_tenant: String(room.max_bookings_per_tenant || 3),
+      weeks_to_generate: '8',
+    });
+    setCreateRoomModalOpen(true);
+  };
+
+  const handleSaveLaundryRoom = async () => {
     if (!user || !canManageLaundryRooms) return;
 
     const name = createRoomForm.name.trim();
@@ -453,6 +516,34 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
       setCreateRoomLoading(true);
       setError('');
 
+      if (editingRoom) {
+        const { data: roomData, error: roomErr } = await supabase
+          .from('vihem_laundry_rooms')
+          .update({
+            property_id: createRoomForm.property_id,
+            name,
+            description,
+            max_bookings_per_tenant: maxBookings,
+          })
+          .eq('id', editingRoom.id)
+          .eq('organisation_id', user.organisation_id)
+          .select('*')
+          .single();
+
+        if (roomErr) throw roomErr;
+
+        const createdSlots = await generateMissingSlots(editingRoom.id, weeksToGenerate);
+        const updatedRoom = roomData as LaundryRoom;
+        setRooms((current) => current.map((room) => room.id === updatedRoom.id ? updatedRoom : room).sort((a, b) => a.name.localeCompare(b.name)));
+        setSelectedRoomId(updatedRoom.id);
+        setSlotsRefreshKey((key) => key + 1);
+        setCreateRoomModalOpen(false);
+        setEditingRoom(null);
+        setSuccess(createdSlots > 0 ? `Tvättstugan uppdaterades och ${createdSlots} saknade tider skapades.` : 'Tvättstugan uppdaterades.');
+        setTimeout(() => setSuccess(''), 2500);
+        return;
+      }
+
       const { data: roomData, error: roomErr } = await supabase
         .from('vihem_laundry_rooms')
         .insert({
@@ -469,40 +560,56 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
 
       if (roomErr) throw roomErr;
 
-      const today = new Date();
-      const slotRows = Array.from({ length: weeksToGenerate * 7 }).flatMap((_, dayIndex) => {
-        const date = formatDateString(addDays(today, dayIndex));
-        return SLOT_TIMES.map((slot) => ({
-          laundry_room_id: roomData.id,
-          date,
-          start_time: slot.start,
-          end_time: slot.end,
-          is_blocked: false,
-        }));
-      });
-
-      const { error: slotsErr } = await supabase
-        .from('vihem_laundry_slots')
-        .insert(slotRows);
-
-      if (slotsErr) throw slotsErr;
+      await generateMissingSlots(roomData.id, weeksToGenerate);
 
       setRooms((current) => [...current, roomData as LaundryRoom].sort((a, b) => a.name.localeCompare(b.name)));
       setSelectedRoomId(roomData.id);
       setWeekOffset(0);
       setMobileViewDay(0);
+      setSlotsRefreshKey((key) => key + 1);
       setCreateRoomForm({
         ...INITIAL_LAUNDRY_ROOM_FORM,
         property_id: createRoomForm.property_id,
       });
       setCreateRoomModalOpen(false);
+      setEditingRoom(null);
       setSuccess('Tvättstugan skapades med bokningsbara tider.');
       setTimeout(() => setSuccess(''), 2000);
     } catch (e) {
-      console.error('Error creating laundry room:', e);
-      setError('Kunde inte skapa tvättstugan. Kontrollera behörighet och försök igen.');
+      console.error('Error saving laundry room:', e);
+      setError('Kunde inte spara tvättstugan. Kontrollera behörighet och försök igen.');
     } finally {
       setCreateRoomLoading(false);
+    }
+  };
+
+  const handleDeleteLaundryRoom = async (room: LaundryRoom) => {
+    if (!user || !canManageLaundryRooms) return;
+    const confirmed = window.confirm(`Vill du ta bort ${room.name}? Tvättstugan inaktiveras och visas inte längre för bokning.`);
+    if (!confirmed) return;
+
+    try {
+      setError('');
+      const { error: deleteErr } = await supabase
+        .from('vihem_laundry_rooms')
+        .update({ active: false })
+        .eq('id', room.id)
+        .eq('organisation_id', user.organisation_id);
+
+      if (deleteErr) throw deleteErr;
+
+      setRooms((current) => {
+        const nextRooms = current.filter((item) => item.id !== room.id);
+        if (selectedRoomId === room.id) {
+          setSelectedRoomId(nextRooms[0]?.id || '');
+        }
+        return nextRooms;
+      });
+      setSuccess('Tvättstugan togs bort.');
+      setTimeout(() => setSuccess(''), 2000);
+    } catch (e) {
+      console.error('Error deleting laundry room:', e);
+      setError('Kunde inte ta bort tvättstugan.');
     }
   };
 
@@ -516,7 +623,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
   };
 
   const createRoomAction = canManageLaundryRooms ? (
-    <Button variant="primary" onClick={() => setCreateRoomModalOpen(true)}>
+    <Button variant="primary" onClick={openCreateRoomModal}>
       <Plus className="w-4 h-4" />
       Ny tvättstuga
     </Button>
@@ -525,8 +632,11 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
   const createRoomModal = (
     <Modal
       open={createRoomModalOpen}
-      onClose={() => setCreateRoomModalOpen(false)}
-      title="Skapa tvättstuga"
+      onClose={() => {
+        setCreateRoomModalOpen(false);
+        setEditingRoom(null);
+      }}
+      title={editingRoom ? 'Redigera tvättstuga' : 'Skapa tvättstuga'}
     >
       <div className="space-y-4">
         {properties.length === 0 ? (
@@ -593,23 +703,26 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
                     weeks_to_generate: event.target.value,
                   }))
                 }
-                hint="Standard är 8 veckor framåt"
+                hint={editingRoom ? 'Skapar bara saknade tider framåt' : 'Standard är 8 veckor framåt'}
               />
             </div>
           </>
         )}
 
         <div className="flex gap-3 justify-end pt-4">
-          <Button variant="outline" onClick={() => setCreateRoomModalOpen(false)}>
+          <Button variant="outline" onClick={() => {
+            setCreateRoomModalOpen(false);
+            setEditingRoom(null);
+          }}>
             Avbryt
           </Button>
           <Button
             variant="primary"
-            onClick={handleCreateLaundryRoom}
+            onClick={handleSaveLaundryRoom}
             loading={createRoomLoading}
             disabled={properties.length === 0}
           >
-            Skapa
+            {editingRoom ? 'Spara' : 'Skapa'}
           </Button>
         </div>
       </div>
@@ -736,6 +849,30 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
               </button>
             ))}
           </div>
+
+          {canManageLaundryRooms && currentRoom && (
+            <Card className="mb-6 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-500">Vald tvättstuga</p>
+                  <h2 className="truncate text-lg font-bold text-slate-900">{currentRoom.name}</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {currentRoom.description || 'Ingen beskrivning'} · Max {currentRoom.max_bookings_per_tenant} aktiva bokningar per hyresgäst
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button variant="secondary" size="sm" onClick={() => openEditRoomModal(currentRoom)}>
+                    <Edit2 className="w-4 h-4" />
+                    Redigera
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => handleDeleteLaundryRoom(currentRoom)}>
+                    <Trash2 className="w-4 h-4" />
+                    Ta bort
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
 
           {/* Week navigation */}
           <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between">
