@@ -31,6 +31,7 @@ import { CustomerProjectsPage } from './pages/CustomerProjectsPage';
 import { ShortStayPage } from './pages/ShortStayPage';
 import { YearPlanningPage } from './pages/YearPlanningPage';
 import { MeetingsPage } from './pages/MeetingsPage';
+import { ScreenDisplayPage } from './pages/ScreenDisplayPage';
 import type { ModuleKey } from './types';
 
 type ModuleState = Partial<Record<ModuleKey, boolean>>;
@@ -57,6 +58,7 @@ const DEFAULT_MODULE_STATE: ModuleState = {
 
 function AppInner() {
   const { user, loading, passwordRecovery } = useAuth();
+  const isScreenPath = window.location.pathname === '/screen';
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [notificationCount, setNotificationCount] = useState(0);
   const [enabledModules, setEnabledModules] = useState<ModuleState>(DEFAULT_MODULE_STATE);
@@ -317,6 +319,8 @@ function AppInner() {
 
   if (passwordRecovery) return <ResetPasswordPage />;
 
+  if (isScreenPath) return <ScreenDisplayPage />;
+
   if (!user) return <LoginPage />;
 
   const navigate = (page: string) => {
@@ -329,6 +333,7 @@ function AppInner() {
   const isSuperadmin = user.role === 'superadmin';
   const isStaff = user.role === 'staff' || isAdmin;
   const isTenant = user.role === 'tenant';
+  const isScreen = user.role === 'screen';
 
   const renderDashboard = () => {
     if (isTenant) return <TenantDashboard onNavigate={navigate} />;
@@ -339,6 +344,10 @@ function AppInner() {
     // Superadmin sees only the organisations page
     if (isSuperadmin) {
       return <AdminOrganisationsPage onNavigate={navigate} />;
+    }
+
+    if (isScreen) {
+      return <ScreenDisplayPage />;
     }
 
     if (currentPage.startsWith('timetracking')) {
@@ -438,6 +447,8 @@ function AppInner() {
 
     }
   }
+
+  if (isScreen) return <ScreenDisplayPage />;
 
   return (
     <Layout

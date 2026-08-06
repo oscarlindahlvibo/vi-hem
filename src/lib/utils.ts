@@ -65,6 +65,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   staff: 'Personal',
   admin: 'Admin',
   superadmin: 'Superadmin',
+  screen: 'TV-skärm',
 };
 
 export const APARTMENT_STATUS_LABELS: Record<string, string> = {

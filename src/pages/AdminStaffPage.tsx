@@ -83,12 +83,14 @@ const ROLE_LABELS: Record<string, string> = {
   staff: 'Personal',
   admin: 'Admin',
   superadmin: 'Superadmin',
+  screen: 'TV-skärm',
 };
 
 const ROLE_COLORS: Record<string, string> = {
   staff: 'text-blue-700 bg-blue-100',
   admin: 'text-teal-700 bg-teal-100',
   superadmin: 'text-red-700 bg-red-100',
+  screen: 'text-violet-700 bg-violet-100',
 };
 
 interface AdminStaffPageProps { onNavigate: (page: string) => void; }
@@ -163,7 +165,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       const { data, error } = await supabase
         .from('vihem_profiles')
         .select('*')
-        .in('role', ['staff', 'admin', 'superadmin'])
+        .in('role', ['staff', 'admin', 'superadmin', 'screen'])
         .order('name');
       if (error) throw error;
       if (data) setStaff(data);
@@ -553,6 +555,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
             >
               <option value="staff">Personal</option>
               <option value="admin">Admin</option>
+              <option value="screen">TV-skärm</option>
               {user?.role === 'superadmin' && <option value="superadmin">Superadmin</option>}
             </select>
           </div>

@@ -1,4 +1,4 @@
-export type Role = 'tenant' | 'staff' | 'admin' | 'superadmin';
+export type Role = 'tenant' | 'staff' | 'admin' | 'superadmin' | 'screen';
 
 export type ModuleKey =
   | 'properties'

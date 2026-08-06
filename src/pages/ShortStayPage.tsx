@@ -801,7 +801,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
           <div className="overflow-x-auto">
             <div style={{ width: `${calendarTotalWidth}px` }}>
               <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `${CALENDAR_UNIT_WIDTH}px repeat(${days.length}, ${CALENDAR_DAY_WIDTH}px)` }}>
-                <div className="sticky left-0 z-10 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Rum/lägenhet</div>
+                <div className="sticky left-0 z-40 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 shadow-[8px_0_12px_-12px_rgba(15,23,42,0.45)]">Rum/lägenhet</div>
                 {days.map((day) => (
                   <div key={day} className={`px-2 py-3 text-center text-xs font-medium ${day === todayKey() ? 'bg-blue-50 text-blue-700' : 'text-slate-500'}`}>
                     <div>{new Date(`${day}T12:00:00`).toLocaleDateString('sv-SE', { weekday: 'short' })}</div>
@@ -818,7 +818,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                 );
                 return (
                   <div key={unit.id} className="grid border-b border-slate-100" style={{ gridTemplateColumns: `${CALENDAR_UNIT_WIDTH}px ${calendarGridWidth}px` }}>
-                    <div className="sticky left-0 z-10 bg-white px-4 py-3">
+                    <div className="sticky left-0 z-40 bg-white px-4 py-3 shadow-[8px_0_12px_-12px_rgba(15,23,42,0.45)]">
                       <p className="text-sm font-semibold text-slate-900">{unit.name}</p>
                       <p className="text-xs text-slate-500">{unit.apartment?.apartment_number || unit.property?.name || 'Fristående'}</p>
                       <p className="mt-1 inline-flex items-center gap-1 text-xs text-slate-400">
@@ -868,7 +868,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                             }`}
                             title={booking ? `${booking.guest_name || booking.title || booking.channel_name} (${formatDateRange(booking.start_date, booking.end_date)})` : 'Skapa bokning'}
                           >
-                            <div className="relative z-20 flex flex-wrap items-center gap-1 overflow-hidden">
+                            <div className="relative z-10 flex flex-wrap items-center gap-1 overflow-hidden">
                               {arrival && (
                                 <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1 py-0.5 text-[9px] font-semibold text-emerald-700">
                                   <LogIn className="h-2.5 w-2.5" /> In
