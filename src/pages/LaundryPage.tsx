@@ -14,7 +14,7 @@ import {
   Textarea,
 } from '../components/ui';
 import { formatDate } from '../lib/utils';
-import type { LaundryRoom, LaundrySlot, LaundryBooking, Property } from '../types';
+import type { Apartment, LaundryGuestLink, LaundryRoom, LaundrySlot, LaundryBooking, Property, ShortStayUnit } from '../types';
 import {
   WashingMachine,
   Calendar,
@@ -26,6 +26,9 @@ import {
   Edit2,
   Plus,
   Trash2,
+  QrCode,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 
 interface SlotWithBooking extends Omit<LaundrySlot, 'booking'> {
@@ -59,6 +62,16 @@ const INITIAL_LAUNDRY_ROOM_FORM = {
   weeks_to_generate: '8',
 };
 
+const INITIAL_GUEST_LINK_FORM = {
+  property_id: '',
+  apartment_id: '',
+  short_stay_unit_id: '',
+  label: '',
+  valid_from: '',
+  valid_until: '',
+  max_bookings: '3',
+};
+
 const getTodayWeekdayIndex = () => {
   const today = new Date().getDay();
   return today === 0 ? 6 : today - 1;
@@ -69,6 +82,9 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
   const [loading, setLoading] = useState(true);
   const [rooms, setRooms] = useState<LaundryRoom[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
+  const [apartments, setApartments] = useState<Apartment[]>([]);
+  const [shortStayUnits, setShortStayUnits] = useState<ShortStayUnit[]>([]);
+  const [guestLinks, setGuestLinks] = useState<LaundryGuestLink[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string>('');
   const [weekOffset, setWeekOffset] = useState(0);
   const [slots, setSlots] = useState<SlotWithBooking[]>([]);
@@ -76,6 +92,9 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
   const [createRoomModalOpen, setCreateRoomModalOpen] = useState(false);
   const [createRoomLoading, setCreateRoomLoading] = useState(false);
   const [createRoomForm, setCreateRoomForm] = useState(INITIAL_LAUNDRY_ROOM_FORM);
+  const [guestLinkModalOpen, setGuestLinkModalOpen] = useState(false);
+  const [guestLinkLoading, setGuestLinkLoading] = useState(false);
+  const [guestLinkForm, setGuestLinkForm] = useState(INITIAL_GUEST_LINK_FORM);
   const [editingRoom, setEditingRoom] = useState<LaundryRoom | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
     open: boolean;
@@ -186,26 +205,53 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
   useEffect(() => {
     if (authLoading || !user || !canManageLaundryRooms) return;
 
-    const fetchProperties = async () => {
-      const { data, error: err } = await supabase
-        .from('vihem_properties')
-        .select('*')
-        .eq('active', true)
-        .order('name');
+    const fetchAdminData = async () => {
+      const [propertiesResult, apartmentsResult, shortStayUnitsResult, guestLinksResult] = await Promise.all([
+        supabase
+          .from('vihem_properties')
+          .select('*')
+          .eq('active', true)
+          .order('name'),
+        supabase
+          .from('vihem_apartments')
+          .select('*')
+          .order('apartment_number'),
+        supabase
+          .from('vihem_short_stay_units')
+          .select('*')
+          .eq('is_active', true)
+          .order('sort_order')
+          .order('name'),
+        supabase
+          .from('vihem_laundry_guest_links')
+          .select('*, property:vihem_properties(id, name, address), apartment:vihem_apartments(id, apartment_number), short_stay_unit:vihem_short_stay_units(id, name)')
+          .order('created_at', { ascending: false }),
+      ]);
 
-      if (err) {
-        console.error('Error fetching vihem_properties:', err);
+      if (propertiesResult.error) {
+        console.error('Error fetching vihem_properties:', propertiesResult.error);
         return;
       }
+      if (apartmentsResult.error) console.error('Error fetching vihem_apartments:', apartmentsResult.error);
+      if (shortStayUnitsResult.error) console.error('Error fetching vihem_short_stay_units:', shortStayUnitsResult.error);
+      if (guestLinksResult.error) console.error('Error fetching vihem_laundry_guest_links:', guestLinksResult.error);
 
-      setProperties((data || []) as Property[]);
+      const nextProperties = (propertiesResult.data || []) as Property[];
+      setProperties(nextProperties);
+      setApartments((apartmentsResult.data || []) as Apartment[]);
+      setShortStayUnits((shortStayUnitsResult.data || []) as ShortStayUnit[]);
+      setGuestLinks((guestLinksResult.data || []) as LaundryGuestLink[]);
       setCreateRoomForm((current) => ({
         ...current,
-        property_id: current.property_id || data?.[0]?.id || '',
+        property_id: current.property_id || nextProperties[0]?.id || '',
+      }));
+      setGuestLinkForm((current) => ({
+        ...current,
+        property_id: current.property_id || nextProperties[0]?.id || '',
       }));
     };
 
-    fetchProperties();
+    fetchAdminData();
   }, [authLoading, user, canManageLaundryRooms]);
 
   // Fetch slots and bookings
@@ -613,6 +659,109 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
     }
   };
 
+  const getGuestLaundryUrl = (link: Pick<LaundryGuestLink, 'token'>) =>
+    `${window.location.origin}/laundry-guest?token=${encodeURIComponent(link.token)}`;
+
+  const getGuestQrUrl = (link: Pick<LaundryGuestLink, 'token'>) =>
+    `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=12&data=${encodeURIComponent(getGuestLaundryUrl(link))}`;
+
+  const openGuestLinkModal = () => {
+    setGuestLinkForm({
+      ...INITIAL_GUEST_LINK_FORM,
+      property_id: guestLinkForm.property_id || currentRoom?.property_id || properties[0]?.id || '',
+    });
+    setGuestLinkModalOpen(true);
+  };
+
+  const handleCreateGuestLink = async () => {
+    if (!user || !canManageLaundryRooms) return;
+    const maxBookings = Number(guestLinkForm.max_bookings);
+    const label = guestLinkForm.label.trim();
+    const selectedApartment = apartments.find((apartment) => apartment.id === guestLinkForm.apartment_id);
+    const selectedUnit = shortStayUnits.find((unit) => unit.id === guestLinkForm.short_stay_unit_id);
+
+    if (!guestLinkForm.property_id) {
+      setError('Välj en fastighet för gästlänken.');
+      return;
+    }
+    if (!Number.isFinite(maxBookings) || maxBookings < 1 || maxBookings > 10) {
+      setError('Max aktiva bokningar måste vara mellan 1 och 10.');
+      return;
+    }
+
+    try {
+      setGuestLinkLoading(true);
+      setError('');
+
+      const { data: linkData, error: linkErr } = await supabase
+        .from('vihem_laundry_guest_links')
+        .insert({
+          organisation_id: user.organisation_id,
+          property_id: guestLinkForm.property_id,
+          apartment_id: guestLinkForm.apartment_id || null,
+          short_stay_unit_id: guestLinkForm.short_stay_unit_id || null,
+          label: label || selectedUnit?.name || selectedApartment?.apartment_number || 'Gästlänk tvättbokning',
+          valid_from: guestLinkForm.valid_from || null,
+          valid_until: guestLinkForm.valid_until || null,
+          max_bookings: maxBookings,
+          active: true,
+          created_by: user.id,
+          updated_by: user.id,
+        })
+        .select('*, property:vihem_properties(id, name, address), apartment:vihem_apartments(id, apartment_number), short_stay_unit:vihem_short_stay_units(id, name)')
+        .single();
+
+      if (linkErr) throw linkErr;
+
+      setGuestLinks((current) => [linkData as LaundryGuestLink, ...current]);
+      setGuestLinkModalOpen(false);
+      setSuccess('Gästlänk och QR-kod skapades.');
+      setTimeout(() => setSuccess(''), 2500);
+    } catch (e) {
+      console.error('Error creating laundry guest link:', e);
+      setError('Kunde inte skapa gästlänken.');
+    } finally {
+      setGuestLinkLoading(false);
+    }
+  };
+
+  const handleToggleGuestLink = async (link: LaundryGuestLink) => {
+    if (!user || !canManageLaundryRooms) return;
+    const { data, error: updateErr } = await supabase
+      .from('vihem_laundry_guest_links')
+      .update({ active: !link.active, updated_by: user.id })
+      .eq('id', link.id)
+      .select('*, property:vihem_properties(id, name, address), apartment:vihem_apartments(id, apartment_number), short_stay_unit:vihem_short_stay_units(id, name)')
+      .single();
+    if (updateErr) {
+      setError('Kunde inte uppdatera gästlänken.');
+      return;
+    }
+    setGuestLinks((current) => current.map((item) => item.id === link.id ? data as LaundryGuestLink : item));
+  };
+
+  const handleDeleteGuestLink = async (link: LaundryGuestLink) => {
+    if (!canManageLaundryRooms) return;
+    const confirmed = window.confirm(`Vill du ta bort gästlänken "${link.label}"? Befintliga bokningar ligger kvar men länken slutar fungera.`);
+    if (!confirmed) return;
+
+    const { error: deleteErr } = await supabase
+      .from('vihem_laundry_guest_links')
+      .delete()
+      .eq('id', link.id);
+    if (deleteErr) {
+      setError('Kunde inte ta bort gästlänken.');
+      return;
+    }
+    setGuestLinks((current) => current.filter((item) => item.id !== link.id));
+  };
+
+  const copyGuestLink = async (link: LaundryGuestLink) => {
+    await navigator.clipboard.writeText(getGuestLaundryUrl(link));
+    setSuccess('Länken kopierades.');
+    setTimeout(() => setSuccess(''), 1500);
+  };
+
   if (authLoading || loading) return <LoadingPage />;
 
   if (!user) return null;
@@ -622,11 +771,22 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
     setBookingModalError('');
   };
 
+  const currentRoom = rooms.find((r) => r.id === selectedRoomId);
+  const guestLinkPropertyId = guestLinkForm.property_id || currentRoom?.property_id || properties[0]?.id || '';
+  const guestLinkApartments = apartments.filter((apartment) => apartment.property_id === guestLinkPropertyId);
+  const guestLinkShortStayUnits = shortStayUnits.filter((unit) => unit.property_id === guestLinkPropertyId);
+
   const createRoomAction = canManageLaundryRooms ? (
-    <Button variant="primary" onClick={openCreateRoomModal}>
-      <Plus className="w-4 h-4" />
-      Ny tvättstuga
-    </Button>
+    <div className="flex flex-col gap-2 sm:flex-row">
+      <Button variant="outline" onClick={openGuestLinkModal}>
+        <QrCode className="w-4 h-4" />
+        Gästlänk
+      </Button>
+      <Button variant="primary" onClick={openCreateRoomModal}>
+        <Plus className="w-4 h-4" />
+        Ny tvättstuga
+      </Button>
+    </div>
   ) : null;
 
   const createRoomModal = (
@@ -729,6 +889,108 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
     </Modal>
   );
 
+  const createGuestLinkModal = (
+    <Modal
+      open={guestLinkModalOpen}
+      onClose={() => setGuestLinkModalOpen(false)}
+      title="Skapa gästlänk till tvättbokning"
+      size="lg"
+    >
+      <div className="space-y-4">
+        <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
+          Länken kan användas utan inloggning. Gästen får bara se tvättstugor på vald fastighet.
+        </div>
+
+        <Select
+          label="Fastighet"
+          value={guestLinkPropertyId}
+          onChange={(event) =>
+            setGuestLinkForm((current) => ({
+              ...current,
+              property_id: event.target.value,
+              apartment_id: '',
+              short_stay_unit_id: '',
+            }))
+          }
+          options={properties.map((property) => ({
+            value: property.id,
+            label: `${property.name}${property.address ? `, ${property.address}` : ''}`,
+          }))}
+        />
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Select
+            label="Lägenhet"
+            value={guestLinkForm.apartment_id}
+            onChange={(event) =>
+              setGuestLinkForm((current) => ({ ...current, apartment_id: event.target.value }))
+            }
+            options={[
+              { value: '', label: 'Ingen specifik lägenhet' },
+              ...guestLinkApartments.map((apartment) => ({
+                value: apartment.id,
+                label: apartment.apartment_number,
+              })),
+            ]}
+          />
+          <Select
+            label="Korttidsenhet"
+            value={guestLinkForm.short_stay_unit_id}
+            onChange={(event) =>
+              setGuestLinkForm((current) => ({ ...current, short_stay_unit_id: event.target.value }))
+            }
+            options={[
+              { value: '', label: 'Ingen specifik korttidsenhet' },
+              ...guestLinkShortStayUnits.map((unit) => ({
+                value: unit.id,
+                label: unit.name,
+              })),
+            ]}
+          />
+        </div>
+
+        <Input
+          label="Rubrik på länken"
+          value={guestLinkForm.label}
+          onChange={(event) => setGuestLinkForm((current) => ({ ...current, label: event.target.value }))}
+          placeholder="Ex. Airbnb Rum 1 augusti"
+        />
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Input
+            label="Gäller från"
+            type="date"
+            value={guestLinkForm.valid_from}
+            onChange={(event) => setGuestLinkForm((current) => ({ ...current, valid_from: event.target.value }))}
+          />
+          <Input
+            label="Gäller till"
+            type="date"
+            value={guestLinkForm.valid_until}
+            onChange={(event) => setGuestLinkForm((current) => ({ ...current, valid_until: event.target.value }))}
+          />
+          <Input
+            label="Max aktiva bokningar"
+            type="number"
+            min={1}
+            max={10}
+            value={guestLinkForm.max_bookings}
+            onChange={(event) => setGuestLinkForm((current) => ({ ...current, max_bookings: event.target.value }))}
+          />
+        </div>
+
+        <div className="flex justify-end gap-3 pt-4">
+          <Button variant="outline" onClick={() => setGuestLinkModalOpen(false)}>
+            Avbryt
+          </Button>
+          <Button variant="primary" onClick={handleCreateGuestLink} loading={guestLinkLoading} disabled={properties.length === 0}>
+            Skapa länk
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+
   if (rooms.length === 0) {
     return (
       <div className="p-4 md:p-6">
@@ -754,11 +1016,10 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
           }
         />
         {createRoomModal}
+        {createGuestLinkModal}
       </div>
     );
   }
-
-  const currentRoom = rooms.find((r) => r.id === selectedRoomId);
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
@@ -774,6 +1035,77 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
         <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-600">
           {success}
         </div>
+      )}
+
+      {canManageLaundryRooms && (
+        <Card className="mb-6 p-4 sm:p-5">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="flex items-center gap-2 text-lg font-bold text-slate-950">
+                <QrCode className="h-5 w-5 text-blue-600" />
+                Gästlänkar för korttidsboende
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Skapa QR-koder som kan sättas upp i lägenheter eller rum. Länken kräver ingen inloggning.
+              </p>
+            </div>
+            <Button variant="primary" size="sm" onClick={openGuestLinkModal}>
+              <Plus className="h-4 w-4" />
+              Ny gästlänk
+            </Button>
+          </div>
+
+          {guestLinks.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+              Inga gästlänkar skapade ännu.
+            </div>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {guestLinks.map((link) => (
+                <div key={link.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex gap-4">
+                    <img
+                      src={getGuestQrUrl(link)}
+                      alt={`QR-kod för ${link.label}`}
+                      className="h-24 w-24 flex-shrink-0 rounded-lg border border-slate-200 bg-white p-1"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <h3 className="truncate font-bold text-slate-950">{link.label}</h3>
+                          <p className="truncate text-sm text-slate-500">
+                            {link.short_stay_unit?.name || link.apartment?.apartment_number || link.property?.name || 'Gästlänk'}
+                          </p>
+                        </div>
+                        <Badge className={link.active ? 'bg-green-50 text-green-700' : 'bg-slate-100 text-slate-500'}>
+                          {link.active ? 'Aktiv' : 'Avstängd'}
+                        </Badge>
+                      </div>
+                      <p className="mt-2 break-all text-xs text-slate-500">{getGuestLaundryUrl(link)}</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button variant="outline" size="sm" onClick={() => copyGuestLink(link)}>
+                          <Copy className="h-4 w-4" />
+                          Kopiera
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => window.open(getGuestLaundryUrl(link), '_blank', 'noopener,noreferrer')}>
+                          <ExternalLink className="h-4 w-4" />
+                          Öppna
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={() => handleToggleGuestLink(link)}>
+                          {link.active ? 'Stäng av' : 'Aktivera'}
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleDeleteGuestLink(link)}>
+                          <Trash2 className="h-4 w-4" />
+                          Ta bort
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -1084,6 +1416,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
         </div>
       </Modal>
       {createRoomModal}
+      {createGuestLinkModal}
     </div>
   );
 }

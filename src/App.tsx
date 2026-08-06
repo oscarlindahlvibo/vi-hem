@@ -34,6 +34,7 @@ import { YearPlanningPage } from './pages/YearPlanningPage';
 import { MeetingsPage } from './pages/MeetingsPage';
 import { ScreenDisplayPage } from './pages/ScreenDisplayPage';
 import { ScreenSettingsPage } from './pages/ScreenSettingsPage';
+import { GuestLaundryPage } from './pages/GuestLaundryPage';
 import type { ModuleKey } from './types';
 
 type ModuleState = Partial<Record<ModuleKey, boolean>>;
@@ -70,9 +71,16 @@ function isScreenRoute() {
   return path === '/screen' || hashPath === '/screen' || queryMode === 'screen';
 }
 
+function isGuestLaundryRoute() {
+  const path = normalizeAppPath(window.location.pathname);
+  const hashPath = normalizeAppPath(window.location.hash.replace(/^#/, '').split('?')[0] || '/');
+  return path === '/laundry-guest' || hashPath === '/laundry-guest';
+}
+
 function AppInner() {
   const { user, loading, passwordRecovery } = useAuth();
   const isScreenPath = isScreenRoute();
+  const isGuestLaundryPath = isGuestLaundryRoute();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [notificationCount, setNotificationCount] = useState(0);
   const [enabledModules, setEnabledModules] = useState<ModuleState>(DEFAULT_MODULE_STATE);
@@ -332,6 +340,8 @@ function AppInner() {
   }
 
   if (passwordRecovery) return <ResetPasswordPage />;
+
+  if (isGuestLaundryPath) return <GuestLaundryPage />;
 
   if (isScreenPath) return <ScreenDisplayPage />;
 

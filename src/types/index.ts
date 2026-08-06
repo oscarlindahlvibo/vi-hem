@@ -885,6 +885,7 @@ export type StaffAbsenceStatus = 'submitted' | 'approved' | 'rejected' | 'cancel
 
 export interface TimeEntry {
   id: string;
+  organisation_id: string | null;
   user_id: string;
   work_order_id: string | null;
   maintenance_request_id: string | null;
@@ -973,11 +974,36 @@ export interface LaundrySlot {
 export interface LaundryBooking {
   id: string;
   laundry_slot_id: string;
-  tenant_id: string;
+  tenant_id: string | null;
+  guest_link_id?: string | null;
+  guest_name?: string;
+  guest_email?: string;
+  guest_phone?: string;
   status: 'active' | 'cancelled';
   created_at: string;
   slot?: LaundrySlot;
   tenant?: Profile;
+}
+
+export interface LaundryGuestLink {
+  id: string;
+  organisation_id: string;
+  property_id: string;
+  apartment_id: string | null;
+  short_stay_unit_id: string | null;
+  label: string;
+  token: string;
+  active: boolean;
+  valid_from: string | null;
+  valid_until: string | null;
+  max_bookings: number;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  property?: Property;
+  apartment?: Apartment;
+  short_stay_unit?: ShortStayUnit;
 }
 
 export interface Document {
