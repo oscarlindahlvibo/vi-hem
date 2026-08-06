@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
 import { Button, LoadingPage } from '../components/ui';
-import type { Meeting, News, ShortStayBooking, ShortStayUnit, TimeEntry, WorkOrder } from '../types';
+import type { Meeting, News, Profile, ShortStayBooking, ShortStayUnit, TimeEntry, WorkOrder } from '../types';
 import { formatDate, formatDateTime, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 
@@ -21,7 +21,8 @@ type PresentationSettings = {
   showTickerCheckOuts: boolean;
   showTickerClockedIn: boolean;
   showTickerUpdated: boolean;
-  customTickerText: string;
+  customTickerText?: string;
+  customTickerItems: string[];
 };
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
@@ -37,6 +38,7 @@ const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   showTickerClockedIn: true,
   showTickerUpdated: true,
   customTickerText: '',
+  customTickerItems: [],
 };
 
 const addDays = (date: Date, days: number) => {
@@ -109,7 +111,12 @@ function readStoredScreenView(): ScreenView {
 function readStoredPresentationSettings(): PresentationSettings {
   try {
     const stored = JSON.parse(localStorage.getItem('vihem.screen.presentationSettings') || '{}');
-    return { ...DEFAULT_PRESENTATION_SETTINGS, ...stored };
+    const customTickerItems = Array.isArray(stored.customTickerItems)
+      ? stored.customTickerItems
+      : stored.customTickerText
+        ? [stored.customTickerText]
+        : [];
+    return { ...DEFAULT_PRESENTATION_SETTINGS, ...stored, customTickerItems };
   } catch {
     return DEFAULT_PRESENTATION_SETTINGS;
   }
@@ -119,6 +126,18 @@ function screenViewLabel(view: ScreenView) {
   if (view === 'short-stay') return 'Korttidskalender';
   if (view === 'work-orders') return 'Arbetsordrar';
   return 'Presentation';
+}
+
+function workOrderAssigneeLabel(order: WorkOrder, staffMembers: Pick<Profile, 'id' | 'name'>[]) {
+  const ids = order.assigned_to_ids?.length ? order.assigned_to_ids : order.assigned_to ? [order.assigned_to] : [];
+  if (ids.length === 0) return 'Ej tilldelad';
+
+  const names = ids
+    .map((id) => staffMembers.find((staff) => staff.id === id)?.name)
+    .filter(Boolean);
+
+  if (names.length > 0) return names.join(', ');
+  return order.assigned?.name || `${ids.length} tilldelade`;
 }
 
 export function ScreenDisplayPage() {
@@ -134,6 +153,7 @@ export function ScreenDisplayPage() {
   const [bookings, setBookings] = useState<ShortStayBooking[]>([]);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [organisationName, setOrganisationName] = useState('VI-HEM');
+  const [staffMembers, setStaffMembers] = useState<Pick<Profile, 'id' | 'name'>[]>([]);
   const [news, setNews] = useState<News[]>([]);
   const [clockedInEntries, setClockedInEntries] = useState<TimeEntry[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -202,12 +222,19 @@ export function ScreenDisplayPage() {
     const todayStart = dateKey(today());
     const meetingEnd = dateKey(addDays(today(), 7));
 
-    const [organisationResult, unitsResult, bookingsResult, workOrdersResult, newsResult, clockedInResult, meetingsResult] = await Promise.all([
+    const [organisationResult, staffResult, unitsResult, bookingsResult, workOrdersResult, newsResult, clockedInResult, meetingsResult] = await Promise.all([
       supabase
         .from('vihem_organisations')
         .select('name')
         .eq('id', user.organisation_id)
         .maybeSingle(),
+      supabase
+        .from('vihem_profiles')
+        .select('id, name')
+        .eq('organisation_id', user.organisation_id)
+        .in('role', ['staff', 'admin'])
+        .eq('active', true)
+        .order('name'),
       supabase
         .from('vihem_short_stay_units')
         .select('*, property:vihem_properties(*), apartment:vihem_apartments(*)')
@@ -253,9 +280,10 @@ export function ScreenDisplayPage() {
         .limit(8),
     ]);
 
-    if (organisationResult.error || unitsResult.error || bookingsResult.error || workOrdersResult.error || newsResult.error || clockedInResult.error || meetingsResult.error) {
+    if (organisationResult.error || staffResult.error || unitsResult.error || bookingsResult.error || workOrdersResult.error || newsResult.error || clockedInResult.error || meetingsResult.error) {
       setDataError(
         organisationResult.error?.message ||
+        staffResult.error?.message ||
         unitsResult.error?.message ||
         bookingsResult.error?.message ||
         workOrdersResult.error?.message ||
@@ -266,6 +294,7 @@ export function ScreenDisplayPage() {
       );
     } else {
       setOrganisationName(organisationResult.data?.name || 'VI-HEM');
+      setStaffMembers((staffResult.data || []) as Pick<Profile, 'id' | 'name'>[]);
       setUnits((unitsResult.data || []) as ShortStayUnit[]);
       setBookings((bookingsResult.data || []) as ShortStayBooking[]);
       setWorkOrders((workOrdersResult.data || []) as WorkOrder[]);
@@ -493,15 +522,48 @@ export function ScreenDisplayPage() {
                   </label>
                 ))}
               </div>
-              <label className="mt-4 block">
-                <span className="mb-2 block text-sm font-bold text-slate-700">Egen rullande text</span>
-                <input
-                  value={presentationSettings.customTickerText}
-                  onChange={(event) => setPresentationSettings({ ...presentationSettings, customTickerText: event.target.value })}
-                  placeholder="Ex. Välkommen till kvällens information..."
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base outline-none ring-blue-500 focus:ring-2"
-                />
-              </label>
+              <div className="mt-4">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="block text-sm font-bold text-slate-700">Egna rullande texter</span>
+                  <button
+                    type="button"
+                    onClick={() => setPresentationSettings({
+                      ...presentationSettings,
+                      customTickerItems: [...presentationSettings.customTickerItems, ''],
+                    })}
+                    className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700 hover:bg-blue-100"
+                  >
+                    Lägg till punkt
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {(presentationSettings.customTickerItems.length > 0 ? presentationSettings.customTickerItems : ['']).map((item, index) => (
+                    <div key={index} className="flex gap-2">
+                      <input
+                        value={item}
+                        onChange={(event) => {
+                          const nextItems = [...presentationSettings.customTickerItems];
+                          if (nextItems.length === 0) nextItems.push('');
+                          nextItems[index] = event.target.value;
+                          setPresentationSettings({ ...presentationSettings, customTickerItems: nextItems });
+                        }}
+                        placeholder="Ex. Välkommen till kvällens information..."
+                        className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-base outline-none ring-blue-500 focus:ring-2"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setPresentationSettings({
+                          ...presentationSettings,
+                          customTickerItems: presentationSettings.customTickerItems.filter((_, itemIndex) => itemIndex !== index),
+                        })}
+                        className="rounded-xl border border-slate-200 px-3 text-sm font-black text-slate-500 hover:bg-slate-50"
+                      >
+                        Ta bort
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -540,7 +602,7 @@ export function ScreenDisplayPage() {
       {view === 'short-stay' ? (
         <ShortStayScreen units={units} bookings={bookings} days={days} screenHeight={screenSize.height} />
       ) : view === 'work-orders' ? (
-        <WorkOrderScreen workOrders={workOrders} screenHeight={screenSize.height} />
+        <WorkOrderScreen workOrders={workOrders} staffMembers={staffMembers} screenHeight={screenSize.height} />
       ) : (
         <PresentationScreen
           settings={presentationSettings}
@@ -550,6 +612,7 @@ export function ScreenDisplayPage() {
           meetings={meetings}
           bookings={bookings}
           organisationName={organisationName}
+          staffMembers={staffMembers}
           lastUpdated={lastUpdated}
         />
       )}
@@ -565,6 +628,7 @@ function PresentationScreen({
   meetings,
   bookings,
   organisationName,
+  staffMembers,
   lastUpdated,
 }: {
   settings: PresentationSettings;
@@ -574,6 +638,7 @@ function PresentationScreen({
   meetings: Meeting[];
   bookings: ShortStayBooking[];
   organisationName: string;
+  staffMembers: Pick<Profile, 'id' | 'name'>[];
   lastUpdated: Date | null;
 }) {
   const [now, setNow] = useState(new Date());
@@ -636,8 +701,12 @@ function PresentationScreen({
     })
     .slice(0, 9);
   const activeMeetings = meetings.slice(0, 5);
+  const customTickerItems = [
+    ...(settings.customTickerItems || []),
+    ...(settings.customTickerItems?.length ? [] : settings.customTickerText ? [settings.customTickerText] : []),
+  ].map(item => item.trim()).filter(Boolean);
   const tickerParts = [
-    settings.customTickerText.trim(),
+    ...customTickerItems,
     settings.showTickerWeather && settings.weatherLocation ? `Väder · ${weatherText}` : '',
     settings.showTickerCheckIns ? (checkIns.length > 0 ? `${checkIns.length} incheckning${checkIns.length === 1 ? '' : 'ar'} idag` : 'Inga incheckningar idag') : '',
     settings.showTickerCheckOuts ? (checkOuts.length > 0 ? `${checkOuts.length} utcheckning${checkOuts.length === 1 ? '' : 'ar'} idag` : 'Inga utcheckningar idag') : '',
@@ -650,7 +719,7 @@ function PresentationScreen({
     return entry.work_order?.title || entry.customer_project?.title || entry.customer_project?.name || entry.property?.name || TIME_CATEGORY_LABELS[entry.category] || 'Arbete';
   };
   const isOrderOverdue = (order: WorkOrder) => Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
-  const assigneeLabel = (order: WorkOrder) => order.assigned?.name || (order.assigned_to_ids?.length ? `${order.assigned_to_ids.length} tilldelade` : 'Ej tilldelad');
+  const assigneeLabel = (order: WorkOrder) => workOrderAssigneeLabel(order, staffMembers);
 
   return (
     <div className="relative h-[calc(100vh-54px)] overflow-hidden rounded-xl bg-slate-950 text-white">
@@ -959,7 +1028,7 @@ function TodayEventsPanel({ units, bookings }: { units: ShortStayUnit[]; booking
   );
 }
 
-function WorkOrderScreen({ workOrders, screenHeight }: { workOrders: WorkOrder[]; screenHeight: number }) {
+function WorkOrderScreen({ workOrders, staffMembers, screenHeight }: { workOrders: WorkOrder[]; staffMembers: Pick<Profile, 'id' | 'name'>[]; screenHeight: number }) {
   if (workOrders.length === 0) {
     return <div className="rounded-2xl bg-white p-12 text-center text-2xl font-black text-slate-700">Inga aktiva arbetsordrar.</div>;
   }
@@ -980,7 +1049,7 @@ function WorkOrderScreen({ workOrders, screenHeight }: { workOrders: WorkOrder[]
             </div>
             <p className="mt-1 line-clamp-1 text-sm text-slate-600">{order.description || 'Ingen beskrivning'}</p>
             <p className="mt-2 text-sm font-semibold text-slate-500">
-              {[order.property?.name, order.apartment?.apartment_number, order.assigned?.name].filter(Boolean).join(' · ') || 'Ingen plats/tilldelning'}
+              {[order.property?.name, order.apartment?.apartment_number, workOrderAssigneeLabel(order, staffMembers)].filter(Boolean).join(' · ') || 'Ingen plats/tilldelning'}
             </p>
           </div>
           <div className="text-right">
