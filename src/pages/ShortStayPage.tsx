@@ -8,6 +8,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { formatDateTime } from '../lib/utils';
+import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import {
   Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea,
 } from '../components/ui';
@@ -117,6 +118,18 @@ const calendarRangeLabel = (days: string[]) => {
   const endLabel = endDate.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' });
   return `${startLabel} - ${endLabel}`;
 };
+
+function ShortStayChannelBadge({ booking }: { booking: ShortStayBooking }) {
+  const channel = getShortStayChannelMeta(booking.channel_name);
+  return (
+    <Badge className={`${channel.badgeClass} gap-1`}>
+      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white/45 text-[9px] font-black">
+        {channel.shortLabel}
+      </span>
+      {channel.label}
+    </Badge>
+  );
+}
 
 const defaultUnitForm: UnitForm = {
   name: '',
@@ -853,9 +866,12 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                       <button key={`${booking.id}-${isCheckOut ? 'out' : 'in'}`} onClick={() => openEditBooking(booking)} className="text-left rounded-lg border border-slate-200 p-3 hover:bg-slate-50">
                         <div className="flex items-center justify-between gap-3">
                           <p className="font-medium text-slate-900">{booking.guest_name || booking.title}</p>
-                          <Badge className={isCheckOut ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
-                            {isCheckOut ? 'Check-out' : 'Check-in'}
-                          </Badge>
+                          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                            <ShortStayChannelBadge booking={booking} />
+                            <Badge className={isCheckOut ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
+                              {isCheckOut ? 'Check-out' : 'Check-in'}
+                            </Badge>
+                          </div>
                         </div>
                         <p className="text-sm text-slate-500">{unit?.name} · {formatDateRange(booking.start_date, booking.end_date)}</p>
                         <p className="mt-1 text-xs text-slate-500">
@@ -960,6 +976,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                         if (!style) return null;
                         const isBlock = booking.booking_type === 'block';
                         const isSingleNight = booking.end_date === toDateKey(addDays(new Date(`${booking.start_date}T12:00:00`), 1));
+                        const channel = getShortStayChannelMeta(booking.channel_name);
                         return (
                           <button
                             key={booking.id}
@@ -967,10 +984,15 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                             onClick={() => openEditBooking(booking)}
                             title={`${booking.guest_name || booking.title || booking.channel_name} (${formatDateRange(booking.start_date, booking.end_date)})`}
                             className={`absolute top-2 z-10 flex h-7 min-w-0 items-center gap-1 rounded-lg px-1.5 text-left text-[10px] font-semibold text-white shadow-sm transition hover:brightness-95 sm:h-8 sm:gap-2 sm:px-2 sm:text-[11px] ${
-                              isBlock ? 'bg-slate-700' : 'bg-blue-600'
+                              isBlock ? 'bg-slate-700' : channel.bandClass
                             }`}
                             style={style}
                           >
+                            {booking.booking_type === 'booking' && (
+                              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white/20 text-[9px] font-black">
+                                {channel.shortLabel}
+                              </span>
+                            )}
                             <span className="min-w-0 flex-1 truncate">{isSingleNight ? (booking.guest_name || booking.title || booking.channel_name).split(' ')[0] : (booking.guest_name || booking.title || booking.channel_name)}</span>
                             {booking.booking_type === 'booking' && (
                               <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-white/20 px-1 py-0.5">
@@ -1054,7 +1076,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                         <Badge className={booking.booking_type === 'block' ? 'bg-slate-100 text-slate-700' : 'bg-blue-100 text-blue-700'}>
                           {bookingTypeLabels[booking.booking_type]}
                         </Badge>
-                      <Badge className="bg-slate-100 text-slate-600">{booking.channel_name || 'Manuell'}</Badge>
+                      {booking.booking_type === 'booking' && <ShortStayChannelBadge booking={booking} />}
                       {Number(booking.total_price || 0) > 0 && (
                         <Badge className="bg-emerald-100 text-emerald-700">
                           {formatMoney(booking.total_price, booking.currency)}
@@ -1111,7 +1133,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="font-semibold text-slate-900">{booking.guest_name || booking.title}</p>
-                          <Badge className="bg-slate-100 text-slate-600">{booking.channel_name || 'VI-HEM'}</Badge>
+                          <ShortStayChannelBadge booking={booking} />
                           <Badge className={due > 0 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
                             {due > 0 ? `${formatMoney(due, booking.currency)} kvar` : 'Betald'}
                           </Badge>

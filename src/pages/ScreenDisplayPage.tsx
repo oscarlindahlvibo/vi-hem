@@ -6,6 +6,7 @@ import { AppLogo } from '../components/AppLogo';
 import { Button, LoadingPage } from '../components/ui';
 import type { ShortStayBooking, ShortStayUnit, WorkOrder } from '../types';
 import { formatDate, WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
+import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 
 type ScreenView = 'short-stay' | 'work-orders';
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
@@ -324,15 +325,21 @@ function ShortStayScreen({ units, bookings, days, screenHeight }: { units: Short
                     const style = screenBookingBandStyle(booking, days);
                     if (!style) return null;
                     const isBlock = booking.booking_type === 'block';
+                    const channel = getShortStayChannelMeta(booking.channel_name);
                     return (
                       <div
                         key={booking.id}
                         className={`absolute z-10 flex items-center gap-1 overflow-hidden rounded-md px-2 font-black leading-none text-white shadow-sm ${compact ? 'top-1/2 h-5 -translate-y-1/2 text-[10px]' : 'top-1/2 h-7 -translate-y-1/2 text-xs'} ${
-                          isBlock ? 'bg-slate-700' : 'bg-blue-600'
+                          isBlock ? 'bg-slate-700' : channel.bandClass
                         }`}
                         style={style}
                         title={`${guestLabel(booking)} (${booking.start_date} - ${booking.end_date})`}
                       >
+                        {booking.booking_type === 'booking' && !ultraCompact && (
+                          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white/20 text-[9px] font-black">
+                            {channel.shortLabel}
+                          </span>
+                        )}
                         <span className="min-w-0 flex-1 truncate">{guestLabel(booking)}</span>
                         {booking.booking_type === 'booking' && !compact && (
                           <span className="shrink-0 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px]">{booking.guest_count || 1}</span>
@@ -371,7 +378,12 @@ function TodayEventsPanel({ units, bookings }: { units: ShortStayUnit[]; booking
         <div key={booking.id} className="rounded-lg bg-white/10 px-2 py-2 ring-1 ring-white/10">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <div className="truncate text-xs font-black text-white">{guestLabel(booking)}</div>
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-black ring-1 ${getShortStayChannelMeta(booking.channel_name).darkBadgeClass}`}>
+                  {getShortStayChannelMeta(booking.channel_name).shortLabel}
+                </span>
+                <div className="truncate text-xs font-black text-white">{guestLabel(booking)}</div>
+              </div>
               <div className="mt-0.5 truncate text-[11px] font-semibold text-slate-300">{unitName(booking.unit_id)}</div>
             </div>
             {showGuestCount && (
