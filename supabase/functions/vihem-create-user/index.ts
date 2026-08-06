@@ -37,8 +37,13 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    const adminClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
     // Fetch caller profile to verify role
-    const { data: callerProfile, error: profileError } = await userClient
+    const { data: callerProfile, error: profileError } = await adminClient
       .from("vihem_profiles")
       .select("role, organisation_id")
       .eq("id", caller.id)
@@ -103,12 +108,6 @@ Deno.serve(async (req: Request) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    // Use service role to create auth user
-    const adminClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
 
     if (role !== "superadmin") {
       const [{ data: org, error: orgError }, { count: userCount, error: countError }] = await Promise.all([

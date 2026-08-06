@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, supabaseAnonKey, supabaseUrl } from './supabase';
 import type { Role } from '../types';
 
 interface CreateUserInput {
@@ -37,17 +37,21 @@ interface UpdateUserResult {
 
 async function callUserFunction<T>(functionName: string, body: unknown): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    throw new Error('Din inloggning kunde inte verifieras. Ladda om sidan och logga in igen.');
+  }
 
-  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${functionName}`, {
+  const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${session?.access_token}`,
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${session.access_token}`,
     },
     body: JSON.stringify(body),
   });
 
-  const result = await response.json();
+  const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(result.error || 'Åtgärden kunde inte slutföras');
   }

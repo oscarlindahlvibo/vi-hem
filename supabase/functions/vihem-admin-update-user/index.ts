@@ -25,7 +25,12 @@ Deno.serve(async (req: Request) => {
     const { data: { user: caller }, error: callerError } = await userClient.auth.getUser();
     if (callerError || !caller) return json({ error: "Unauthorized" }, 401);
 
-    const { data: callerProfile, error: callerProfileError } = await userClient
+    const adminClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
+    const { data: callerProfile, error: callerProfileError } = await adminClient
       .from("vihem_profiles")
       .select("role, organisation_id")
       .eq("id", caller.id)
@@ -44,11 +49,6 @@ Deno.serve(async (req: Request) => {
     if (!user_id) return json({ error: "user_id is required" }, 400);
     if (!name?.trim()) return json({ error: "Namn krävs." }, 400);
     if (!email?.trim()) return json({ error: "E-post krävs." }, 400);
-
-    const adminClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
 
     const { data: targetProfile, error: targetProfileError } = await adminClient
       .from("vihem_profiles")
