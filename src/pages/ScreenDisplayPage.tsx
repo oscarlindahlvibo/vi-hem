@@ -287,14 +287,16 @@ function ShortStayScreen({ units, bookings, days, screenHeight }: { units: Short
   const ultraCompact = rowHeight < 42;
   const unitColumnWidth = ultraCompact ? 170 : 190;
   const calendarHeaderHeight = 34;
+  const bookingBandHeight = Math.max(34, Math.min(46, rowHeight - 8));
+  const denseBookingBand = bookingBandHeight < 40;
 
   return (
     <div className="grid gap-2" style={{ gridTemplateColumns: 'minmax(0, 1fr) 320px', height: availableHeight }}>
-      <div className="overflow-hidden rounded-xl bg-white text-slate-950">
-        <div className="grid border-b border-slate-200 bg-slate-100" style={{ gridTemplateColumns: `${unitColumnWidth}px repeat(${days.length}, minmax(50px, 1fr))`, height: calendarHeaderHeight }}>
-          <div className="px-2 py-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Rum/lgh</div>
+      <div className="overflow-hidden rounded-xl bg-slate-950 text-white ring-1 ring-white/10">
+        <div className="grid border-b border-white/[0.07] bg-slate-900" style={{ gridTemplateColumns: `${unitColumnWidth}px repeat(${days.length}, minmax(50px, 1fr))`, height: calendarHeaderHeight }}>
+          <div className="px-2 py-2 text-[11px] font-black uppercase tracking-wide text-slate-300">Rum/lgh</div>
           {days.map(day => (
-            <div key={day} className={`px-1 py-1.5 text-center text-[11px] font-bold leading-tight ${day === dateKey(today()) ? 'bg-blue-100 text-blue-700' : 'text-slate-600'}`}>
+            <div key={day} className={`border-l border-white/[0.05] px-1 py-1.5 text-center text-[11px] font-bold leading-tight ${day === dateKey(today()) ? 'bg-blue-500/25 text-blue-100' : 'text-slate-300'}`}>
               <div>{new Date(`${day}T12:00:00`).toLocaleDateString('sv-SE', { weekday: 'short' })}</div>
               <div>{new Date(`${day}T12:00:00`).getDate()}</div>
             </div>
@@ -306,19 +308,19 @@ function ShortStayScreen({ units, bookings, days, screenHeight }: { units: Short
             const lastVisibleEnd = dateKey(addDays(new Date(`${days[days.length - 1]}T12:00:00`), 1));
             const visibleBookings = unitBookings.filter(booking => booking.start_date < lastVisibleEnd && booking.end_date > days[0]);
             return (
-              <div key={unit.id} className="grid border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: `${unitColumnWidth}px 1fr`, height: rowHeight }}>
-                <div className="min-w-0 bg-white px-2 py-1.5">
+              <div key={unit.id} className="grid border-b border-white/[0.06] last:border-b-0" style={{ gridTemplateColumns: `${unitColumnWidth}px 1fr`, height: rowHeight }}>
+                <div className="min-w-0 bg-slate-900/95 px-2 py-1.5">
                   <p className={`${compact ? 'text-xs' : 'text-sm'} truncate font-black`}>{unit.name}</p>
                   {!ultraCompact && (
-                    <p className={`${compact ? 'mt-0 text-[10px]' : 'mt-0.5 text-[11px]'} truncate text-slate-500`}>{unit.apartment?.apartment_number || unit.property?.name || unit.description}</p>
+                    <p className={`${compact ? 'mt-0 text-[10px]' : 'mt-0.5 text-[11px]'} truncate text-slate-400`}>{unit.apartment?.apartment_number || unit.property?.name || unit.description}</p>
                   )}
-                  {!compact && <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-slate-400"><Users className="h-3 w-3" /> Max {unit.max_guests || 2}</p>}
+                  {!compact && <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-slate-500"><Users className="h-3 w-3" /> Max {unit.max_guests || 2}</p>}
                 </div>
                 <div className="relative grid overflow-hidden" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(50px, 1fr))` }}>
                   {days.map(day => {
                     const activeBooking = unitBookings.find(item => overlaps(item, day));
                     return (
-                      <div key={`${unit.id}-${day}`} className={`relative overflow-hidden border-l border-slate-100 px-1 ${activeBooking ? 'bg-blue-50' : ''}`} />
+                      <div key={`${unit.id}-${day}`} className={`relative overflow-hidden border-l border-white/[0.04] px-1 ${activeBooking ? 'bg-white/[0.04]' : ''}`} />
                     );
                   })}
                   {visibleBookings.map(booking => {
@@ -329,20 +331,30 @@ function ShortStayScreen({ units, bookings, days, screenHeight }: { units: Short
                     return (
                       <div
                         key={booking.id}
-                        className={`absolute z-10 flex items-center gap-1 overflow-hidden rounded-md px-2 font-black leading-none text-white shadow-sm ${compact ? 'top-1/2 h-5 -translate-y-1/2 text-[10px]' : 'top-1/2 h-7 -translate-y-1/2 text-xs'} ${
+                        className={`absolute top-1/2 z-10 flex -translate-y-1/2 flex-col justify-center overflow-hidden rounded-lg px-2 font-black leading-none text-white shadow-sm ${
                           isBlock ? 'bg-slate-700' : channel.bandClass
                         }`}
-                        style={style}
+                        style={{ ...style, height: `${bookingBandHeight}px` }}
                         title={`${guestLabel(booking)} (${booking.start_date} - ${booking.end_date})`}
                       >
-                        {booking.booking_type === 'booking' && !ultraCompact && (
-                          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white/20 text-[9px] font-black">
-                            {channel.shortLabel}
+                        <span className={`${denseBookingBand ? 'text-[10px]' : 'text-xs'} block w-full truncate`}>
+                          {guestLabel(booking)}
+                        </span>
+                        {booking.booking_type === 'booking' ? (
+                          <span className="mt-1 flex min-w-0 items-center justify-between gap-1 text-[10px]">
+                            <span className="flex min-w-0 items-center gap-1">
+                              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white/25 text-[9px] font-black">
+                                {channel.shortLabel}
+                              </span>
+                              {!denseBookingBand && <span className="truncate">{channel.label}</span>}
+                            </span>
+                            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-white/20 px-1.5 py-0.5">
+                              <Users className="h-3 w-3" />
+                              {booking.guest_count || 1}
+                            </span>
                           </span>
-                        )}
-                        <span className="min-w-0 flex-1 truncate">{guestLabel(booking)}</span>
-                        {booking.booking_type === 'booking' && !compact && (
-                          <span className="shrink-0 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px]">{booking.guest_count || 1}</span>
+                        ) : (
+                          <span className="mt-1 text-[10px] text-white/80">Spärr</span>
                         )}
                       </div>
                     );
