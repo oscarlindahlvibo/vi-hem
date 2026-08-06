@@ -677,11 +677,17 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
     if (!user || !canManageLaundryRooms) return;
     const maxBookings = Number(guestLinkForm.max_bookings);
     const label = guestLinkForm.label.trim();
+    const selectedProperty = properties.find((property) => property.id === guestLinkForm.property_id);
     const selectedApartment = apartments.find((apartment) => apartment.id === guestLinkForm.apartment_id);
     const selectedUnit = shortStayUnits.find((unit) => unit.id === guestLinkForm.short_stay_unit_id);
+    const organisationId = user.organisation_id || selectedProperty?.organisation_id;
 
     if (!guestLinkForm.property_id) {
       setError('Välj en fastighet för gästlänken.');
+      return;
+    }
+    if (!organisationId) {
+      setError('Kunde inte hitta organisationen som fastigheten tillhör.');
       return;
     }
     if (!Number.isFinite(maxBookings) || maxBookings < 1 || maxBookings > 10) {
@@ -696,7 +702,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
       const { data: linkData, error: linkErr } = await supabase
         .from('vihem_laundry_guest_links')
         .insert({
-          organisation_id: user.organisation_id,
+          organisation_id: organisationId,
           property_id: guestLinkForm.property_id,
           apartment_id: guestLinkForm.apartment_id || null,
           short_stay_unit_id: guestLinkForm.short_stay_unit_id || null,
@@ -719,7 +725,8 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
       setTimeout(() => setSuccess(''), 2500);
     } catch (e) {
       console.error('Error creating laundry guest link:', e);
-      setError('Kunde inte skapa gästlänken.');
+      const message = e && typeof e === 'object' && 'message' in e ? String((e as { message?: unknown }).message) : '';
+      setError(message ? `Kunde inte skapa gästlänken: ${message}` : 'Kunde inte skapa gästlänken.');
     } finally {
       setGuestLinkLoading(false);
     }
