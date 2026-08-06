@@ -170,7 +170,7 @@ const defaultBookingForm: BookingForm = {
 };
 
 const cleaningLabels: Record<ShortStayCleaningStatus, string> = {
-  not_needed: 'Ingen städning',
+  not_needed: 'Arkiverad',
   dirty: 'Behöver städas',
   in_progress: 'Städning pågår',
   clean: 'Klar',
@@ -418,12 +418,14 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
 
   const stats = useMemo(() => {
     const today = todayKey();
+    const cleaningArchiveCutoff = toDateKey(addDays(new Date(`${today}T12:00:00`), -3));
     const activeUnits = units.filter(unit => unit.is_active);
     const current = bookings.filter(booking => overlaps(booking, today) && booking.booking_type === 'booking');
     const checkIns = bookings.filter(booking => booking.start_date === today && booking.booking_type === 'booking');
     const checkOuts = bookings.filter(booking => booking.end_date === today && booking.booking_type === 'booking');
     const cleaning = bookings.filter(booking =>
       booking.end_date <= today &&
+      booking.end_date >= cleaningArchiveCutoff &&
       booking.cleaning_status !== 'clean' &&
       booking.cleaning_status !== 'not_needed'
     );

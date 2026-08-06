@@ -100,6 +100,8 @@ Deno.serve(async (req: Request) => {
       })
       .eq("id", connection.id);
 
+    await serviceClient.rpc("vihem_archive_stale_short_stay_cleaning_orders");
+
     await log(serviceClient, {
       organisation_id: connection.organisation_id,
       connection_id: connection.id,

@@ -429,6 +429,8 @@ export interface WorkOrder {
   started_at: string | null;
   completed_at: string | null;
   due_date: string | null;
+  scheduled_start_at: string | null;
+  scheduled_end_at: string | null;
   checklist: ChecklistItem[];
   materials: MaterialItem[];
   attachments: AttachmentItem[];

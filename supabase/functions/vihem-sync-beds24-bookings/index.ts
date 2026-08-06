@@ -187,6 +187,8 @@ async function syncOrganisation(serviceClient: any, organisationId: string, opti
     })
     .eq("id", connection.id);
 
+  await serviceClient.rpc("vihem_archive_stale_short_stay_cleaning_orders");
+
   return { ok: true, imported: importedTotal, results: allResults };
 }
 

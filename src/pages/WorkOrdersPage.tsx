@@ -115,6 +115,23 @@ const WO_STATUSES: WOStatus[] = [
 
 const ARCHIVED_WO_STATUSES: WOStatus[] = ['completed', 'cancelled'];
 
+function formatScheduleWindow(order: Pick<WorkOrder, 'scheduled_start_at' | 'scheduled_end_at'>) {
+  if (!order.scheduled_start_at || !order.scheduled_end_at) return '';
+  const start = new Date(order.scheduled_start_at);
+  const end = new Date(order.scheduled_end_at);
+  const sameDay = start.toDateString() === end.toDateString();
+  const date = start.toLocaleDateString('sv-SE');
+  const startTime = start.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+  const endTime = end.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+  return sameDay ? `${date} ${startTime}-${endTime}` : `${formatDateTime(start)} - ${formatDateTime(end)}`;
+}
+
+function isWorkOrderOverdue(order: Pick<WorkOrder, 'status' | 'due_date' | 'scheduled_end_at'>) {
+  if (ARCHIVED_WO_STATUSES.includes(order.status)) return false;
+  if (order.scheduled_end_at) return new Date(order.scheduled_end_at).getTime() < Date.now();
+  return Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
+}
+
 export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: { onNavigate: (page: string) => void; initialWorkOrderId?: string }) {
   const { user, loading: authLoading } = useAuth();
   const [workOrders, setWorkOrders] = useState<WOWithRelations[]>([]);
@@ -949,9 +966,18 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                   <Badge className={getWOPriorityColor(wo.priority)}>
                     {WO_PRIORITY_LABELS[wo.priority]}
                   </Badge>
+                  {isWorkOrderOverdue(wo) && (
+                    <Badge className="bg-red-100 text-red-700">Försenad</Badge>
+                  )}
                 </div>
 
                 <div className="mt-4 grid gap-2 text-sm text-slate-600">
+                  {formatScheduleWindow(wo) && (
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                      <span className="truncate">{formatScheduleWindow(wo)}</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 min-w-0">
                     <ClipboardList className="w-4 h-4 text-slate-400 shrink-0" />
                     <span className="truncate">{wo.category}</span>
@@ -1007,6 +1033,9 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                         <Badge className={getWOStatusColor(wo.status)}>
                           {WO_STATUS_LABELS[wo.status]}
                         </Badge>
+                        {isWorkOrderOverdue(wo) && (
+                          <Badge className="ml-1 bg-red-100 text-red-700">Försenad</Badge>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-600">
                         {wo.property?.name || '–'}
@@ -1015,7 +1044,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                         {assigneeNames(wo)}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-600">
-                        {wo.due_date ? formatDate(wo.due_date) : '–'}
+                        {formatScheduleWindow(wo) || (wo.due_date ? formatDate(wo.due_date) : '–')}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <ChevronRight className="w-4 h-4 text-slate-400 inline" />
@@ -1078,6 +1107,15 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                               <Calendar className="w-3 h-3" />
                               {formatDate(wo.due_date)}
                             </div>
+                          )}
+                          {formatScheduleWindow(wo) && (
+                            <div className="flex items-center gap-1 text-xs text-slate-600">
+                              <Clock className="w-3 h-3" />
+                              {formatScheduleWindow(wo)}
+                            </div>
+                          )}
+                          {isWorkOrderOverdue(wo) && (
+                            <Badge className="bg-red-100 text-red-700">Försenad</Badge>
                           )}
                         </div>
                       </Card>
@@ -1371,6 +1409,19 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                   {selectedWorkOrder.due_date ? formatDate(selectedWorkOrder.due_date) : '–'}
                 </div>
               </div>
+
+              {formatScheduleWindow(selectedWorkOrder) && (
+                <div>
+                  <p className="text-xs font-medium text-slate-500 uppercase">Planerad tid</p>
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-slate-800 mt-1">
+                    <Clock className="w-4 h-4" />
+                    {formatScheduleWindow(selectedWorkOrder)}
+                    {isWorkOrderOverdue(selectedWorkOrder) && (
+                      <Badge className="bg-red-100 text-red-700">Försenad</Badge>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <p className="text-xs font-medium text-slate-500 uppercase">Skapad av</p>

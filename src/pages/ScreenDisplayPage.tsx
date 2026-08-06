@@ -39,6 +39,18 @@ function guestCountLabel(count?: number | null) {
   return `${value} ${value === 1 ? 'person' : 'personer'}`;
 }
 
+function cleaningStatusLabel(booking: ShortStayBooking) {
+  if (booking.cleaning_status === 'clean') return 'Städat';
+  if (booking.cleaning_status === 'not_needed') return 'Arkiverad';
+  return 'Ej städad';
+}
+
+function cleaningStatusClass(booking: ShortStayBooking) {
+  if (booking.cleaning_status === 'clean') return 'bg-emerald-400/15 text-emerald-200';
+  if (booking.cleaning_status === 'not_needed') return 'bg-slate-400/15 text-slate-300';
+  return 'bg-rose-400/15 text-rose-200';
+}
+
 function screenBookingBandStyle(booking: ShortStayBooking, days: string[]) {
   if (days.length === 0) return null;
   const firstDay = days[0];
@@ -375,14 +387,8 @@ function TodayEventsPanel({ units, bookings }: { units: ShortStayUnit[]; booking
   const unitName = (unitId: string) => units.find(unit => unit.id === unitId)?.name || 'Okänd enhet';
   const checkIns = bookings.filter(booking => booking.booking_type === 'booking' && booking.start_date === todayValue);
   const checkOuts = bookings.filter(booking => booking.booking_type === 'booking' && booking.end_date === todayValue);
-  const cleaning = bookings.filter(booking =>
-    booking.booking_type === 'booking' &&
-    booking.end_date <= todayValue &&
-    booking.cleaning_status !== 'clean' &&
-    booking.cleaning_status !== 'not_needed'
-  );
 
-  const renderItems = (items: ShortStayBooking[], emptyText: string, showGuestCount = false) => (
+  const renderItems = (items: ShortStayBooking[], emptyText: string, options: { showGuestCount?: boolean; showCleaningStatus?: boolean } = {}) => (
     <div className="space-y-1.5">
       {items.length === 0 ? (
         <p className="rounded-lg bg-white/5 px-2 py-2 text-xs font-semibold text-slate-400">{emptyText}</p>
@@ -396,9 +402,14 @@ function TodayEventsPanel({ units, bookings }: { units: ShortStayUnit[]; booking
                 </span>
                 <div className="truncate text-xs font-black text-white">{guestLabel(booking)}</div>
               </div>
+              {options.showCleaningStatus && (
+                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-black ${cleaningStatusClass(booking)}`}>
+                  {cleaningStatusLabel(booking)}
+                </div>
+              )}
               <div className="mt-0.5 truncate text-[11px] font-semibold text-slate-300">{unitName(booking.unit_id)}</div>
             </div>
-            {showGuestCount && (
+            {options.showGuestCount && (
               <span className="shrink-0 rounded-full bg-emerald-400/15 px-2 py-0.5 text-[11px] font-black text-emerald-200">
                 {guestCountLabel(booking.guest_count)}
               </span>
@@ -424,21 +435,14 @@ function TodayEventsPanel({ units, bookings }: { units: ShortStayUnit[]; booking
             <h3 className="text-sm font-black text-emerald-300">Incheckning</h3>
             <span className="rounded-full bg-emerald-400/15 px-2 py-0.5 text-xs font-black text-emerald-200">{checkIns.length}</span>
           </div>
-          {renderItems(checkIns, 'Inga incheckningar', true)}
+          {renderItems(checkIns, 'Inga incheckningar', { showGuestCount: true })}
         </section>
         <section>
           <div className="mb-1.5 flex items-center justify-between">
             <h3 className="text-sm font-black text-amber-300">Utcheckning</h3>
             <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-xs font-black text-amber-200">{checkOuts.length}</span>
           </div>
-          {renderItems(checkOuts, 'Inga utcheckningar')}
-        </section>
-        <section>
-          <div className="mb-1.5 flex items-center justify-between">
-            <h3 className="text-sm font-black text-rose-300">Städ</h3>
-            <span className="rounded-full bg-rose-400/15 px-2 py-0.5 text-xs font-black text-rose-200">{cleaning.length}</span>
-          </div>
-          {renderItems(cleaning, 'Inget väntar på städ')}
+          {renderItems(checkOuts, 'Inga utcheckningar', { showCleaningStatus: true })}
         </section>
       </div>
     </aside>
