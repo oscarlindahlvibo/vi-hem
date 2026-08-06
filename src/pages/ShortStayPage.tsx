@@ -789,7 +789,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
           </div>
           <div className="overflow-x-auto">
             <div className="min-w-[1120px]">
-              <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `230px repeat(${days.length}, minmax(64px, 1fr))` }}>
+              <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `230px repeat(${days.length}, minmax(72px, 1fr))` }}>
                 <div className="sticky left-0 z-10 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Rum/lägenhet</div>
                 {days.map((day) => (
                   <div key={day} className={`px-2 py-3 text-center text-xs font-medium ${day === todayKey() ? 'bg-blue-50 text-blue-700' : 'text-slate-500'}`}>
@@ -814,25 +814,26 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                         <Users className="h-3 w-3" /> Max {unit.max_guests || 2}
                       </p>
                     </div>
-                    <div className="relative grid min-h-[94px]" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(64px, 1fr))` }}>
+                    <div className="relative grid min-h-[72px]" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(72px, 1fr))` }}>
                       {visibleBookings.map((booking, index) => {
                         const style = bookingBandStyle(booking, days);
                         if (!style) return null;
                         const isBlock = booking.booking_type === 'block';
+                        const isSingleNight = booking.end_date === toDateKey(addDays(new Date(`${booking.start_date}T12:00:00`), 1));
                         return (
                           <button
                             key={booking.id}
                             type="button"
                             onClick={() => openEditBooking(booking)}
                             title={`${booking.guest_name || booking.title || booking.channel_name} (${formatDateRange(booking.start_date, booking.end_date)})`}
-                            className={`absolute top-2 z-10 flex h-9 min-w-0 items-center gap-2 rounded-lg px-2 text-left text-[11px] font-semibold text-white shadow-sm transition hover:brightness-95 ${
+                            className={`absolute top-2 z-10 flex h-7 min-w-0 items-center gap-1 rounded-lg px-1.5 text-left text-[10px] font-semibold text-white shadow-sm transition hover:brightness-95 sm:h-8 sm:gap-2 sm:px-2 sm:text-[11px] ${
                               isBlock ? 'bg-slate-700' : 'bg-blue-600'
                             }`}
-                            style={{ ...style, top: `${8 + (index % 2) * 34}px` }}
+                            style={style}
                           >
-                            <span className="min-w-0 flex-1 truncate">{booking.guest_name || booking.title || booking.channel_name}</span>
+                            <span className="min-w-0 flex-1 truncate">{isSingleNight ? (booking.guest_name || booking.title || booking.channel_name).split(' ')[0] : (booking.guest_name || booking.title || booking.channel_name)}</span>
                             {booking.booking_type === 'booking' && (
-                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/20 px-1.5 py-0.5">
+                              <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-white/20 px-1 py-0.5">
                                 <Users className="h-3 w-3" />
                                 {booking.guest_count || 1}
                               </span>
@@ -851,29 +852,29 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                           <button
                             key={`${unit.id}-${day}`}
                             onClick={() => booking ? openEditBooking(booking) : openCreateBooking(unit.id, day)}
-                            className={`relative min-h-[94px] border-l border-slate-100 px-1.5 pb-2 pt-12 text-left transition hover:bg-slate-50 ${
+                            className={`relative min-h-[72px] border-l border-slate-100 px-1 pb-2 pt-11 text-left transition hover:bg-slate-50 ${
                               block ? 'bg-slate-100' : activeBooking ? 'bg-blue-50' : departure ? 'bg-amber-50' : ''
                             }`}
                             title={booking ? `${booking.guest_name || booking.title || booking.channel_name} (${formatDateRange(booking.start_date, booking.end_date)})` : 'Skapa bokning'}
                           >
-                            <div className="relative z-20 flex flex-col gap-1">
+                            <div className="relative z-20 flex flex-wrap items-center gap-1 overflow-hidden">
                               {arrival && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
-                                  <LogIn className="h-3 w-3" /> In
+                                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1 py-0.5 text-[9px] font-semibold text-emerald-700">
+                                  <LogIn className="h-2.5 w-2.5" /> In
                                 </span>
                               )}
                               {departure && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                                  <LogOut className="h-3 w-3" /> Ut
+                                <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1 py-0.5 text-[9px] font-semibold text-amber-700">
+                                  <LogOut className="h-2.5 w-2.5" /> Ut
                                 </span>
                               )}
                               {departure?.cleaning_status && departure.cleaning_status !== 'clean' && departure.cleaning_status !== 'not_needed' && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
-                                  <Wrench className="h-3 w-3" /> Städ
+                                <span className="inline-flex items-center gap-0.5 rounded-full bg-rose-100 px-1 py-0.5 text-[9px] font-semibold text-rose-700">
+                                  <Wrench className="h-2.5 w-2.5" /> Städ
                                 </span>
                               )}
                               {isTurnover && (
-                                <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">Byte</span>
+                                <span className="rounded-full bg-violet-100 px-1 py-0.5 text-[9px] font-semibold text-violet-700">Byte</span>
                               )}
                             </div>
                           </button>
