@@ -85,17 +85,24 @@ export function ScreenDisplayPage() {
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [screenHeight, setScreenHeight] = useState(() => window.innerHeight || 1080);
+  const [screenSize, setScreenSize] = useState(() => ({
+    width: window.innerWidth || 1920,
+    height: window.innerHeight || 1080,
+  }));
 
   const allowed = user && ['screen', 'admin', 'staff'].includes(user.role);
-  const days = useMemo(() => Array.from({ length: 14 }, (_, index) => dateKey(addDays(today(), index))), []);
+  const dayCount = screenSize.width < 1400 ? 12 : screenSize.width < 1700 ? 13 : 14;
+  const days = useMemo(() => Array.from({ length: dayCount }, (_, index) => dateKey(addDays(today(), index))), [dayCount]);
 
   useEffect(() => {
     localStorage.setItem('vihem.screen.view', view);
   }, [view]);
 
   useEffect(() => {
-    const updateScreenSize = () => setScreenHeight(window.innerHeight || 1080);
+    const updateScreenSize = () => setScreenSize({
+      width: window.innerWidth || 1920,
+      height: window.innerHeight || 1080,
+    });
     updateScreenSize();
     window.addEventListener('resize', updateScreenSize);
     return () => window.removeEventListener('resize', updateScreenSize);
@@ -106,7 +113,7 @@ export function ScreenDisplayPage() {
     fetchScreenData();
     const interval = window.setInterval(fetchScreenData, SCREEN_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, [allowed, user?.organisation_id]);
+  }, [allowed, user?.organisation_id, days]);
 
   async function handleLogin(event: React.FormEvent) {
     event.preventDefault();
@@ -251,47 +258,48 @@ export function ScreenDisplayPage() {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-slate-950 p-4 text-white">
-      <header className="mb-3 flex flex-col gap-3 rounded-2xl bg-white/10 px-4 py-3 ring-1 ring-white/10 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-4">
-          <div className="h-10 w-10 overflow-hidden rounded-xl">
+    <div className="h-screen overflow-hidden bg-slate-950 p-2 text-white">
+      <header className="mb-1 flex h-10 items-center justify-between gap-3 rounded-xl bg-white/10 px-3 ring-1 ring-white/10">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="h-7 w-7 shrink-0 overflow-hidden rounded-lg">
             <AppLogo className="h-full w-full" />
           </div>
-          <div>
-            <h1 className="text-xl font-black">VI-HEM Skärm</h1>
-            <p className="text-sm text-slate-300">
-              {view === 'short-stay' ? 'Korttidskalender' : 'Arbetsordrar'} · {lastUpdated ? `uppdaterad ${lastUpdated.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}` : 'laddar data'}
-            </p>
-          </div>
+          <h1 className="truncate text-sm font-black">VI-HEM Skärm</h1>
+          <span className="hidden truncate text-xs font-semibold text-slate-300 sm:inline">
+            {view === 'short-stay' ? 'Korttidskalender' : 'Arbetsordrar'}
+          </span>
         </div>
-        <div className="flex items-center gap-3 text-sm font-semibold text-slate-300">
-          <RefreshCw className={`h-4 w-4 ${dataLoading ? 'animate-spin' : ''}`} />
-          Automatisk uppdatering
+        <div className="flex shrink-0 items-center gap-2 text-xs font-semibold text-slate-300">
+          <RefreshCw className={`h-3.5 w-3.5 ${dataLoading ? 'animate-spin' : ''}`} />
+          <span>{lastUpdated ? lastUpdated.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : 'Laddar'}</span>
         </div>
       </header>
 
       {dataError && <div className="mb-4 rounded-2xl bg-red-500/20 px-5 py-4 text-red-100 ring-1 ring-red-400/30">{dataError}</div>}
 
       {view === 'short-stay' ? (
-        <ShortStayScreen units={units} bookings={bookings} days={days} screenHeight={screenHeight} />
+        <ShortStayScreen units={units} bookings={bookings} days={days} screenHeight={screenSize.height} />
       ) : (
-        <WorkOrderScreen workOrders={workOrders} screenHeight={screenHeight} />
+        <WorkOrderScreen workOrders={workOrders} screenHeight={screenSize.height} />
       )}
     </div>
   );
 }
 
 function ShortStayScreen({ units, bookings, days, screenHeight }: { units: ShortStayUnit[]; bookings: ShortStayBooking[]; days: string[]; screenHeight: number }) {
-  const availableHeight = Math.max(screenHeight - 124, 420);
-  const rowHeight = units.length > 0 ? Math.max(44, Math.min(76, Math.floor((availableHeight - 46) / units.length))) : 64;
-  const compact = rowHeight < 58;
+  const availableHeight = Math.max(screenHeight - 54, 420);
+  const rowHeight = units.length > 0 ? Math.max(36, Math.min(68, Math.floor((availableHeight - 34) / units.length))) : 56;
+  const compact = rowHeight < 52;
+  const ultraCompact = rowHeight < 42;
+  const unitColumnWidth = ultraCompact ? 190 : 210;
+  const calendarHeaderHeight = 34;
 
   return (
-    <div className="overflow-hidden rounded-2xl bg-white text-slate-950" style={{ height: availableHeight }}>
-      <div className="grid border-b border-slate-200 bg-slate-100" style={{ gridTemplateColumns: `220px repeat(${days.length}, minmax(58px, 1fr))`, height: 46 }}>
-        <div className="px-3 py-3 text-xs font-black uppercase tracking-wide text-slate-500">Rum/lägenhet</div>
+    <div className="overflow-hidden rounded-xl bg-white text-slate-950" style={{ height: availableHeight }}>
+      <div className="grid border-b border-slate-200 bg-slate-100" style={{ gridTemplateColumns: `${unitColumnWidth}px repeat(${days.length}, minmax(56px, 1fr))`, height: calendarHeaderHeight }}>
+        <div className="px-2 py-2 text-[11px] font-black uppercase tracking-wide text-slate-500">Rum/lägenhet</div>
         {days.map(day => (
-          <div key={day} className={`px-1 py-2 text-center text-xs font-bold ${day === dateKey(today()) ? 'bg-blue-100 text-blue-700' : 'text-slate-600'}`}>
+          <div key={day} className={`px-1 py-1.5 text-center text-[11px] font-bold leading-tight ${day === dateKey(today()) ? 'bg-blue-100 text-blue-700' : 'text-slate-600'}`}>
             <div>{new Date(`${day}T12:00:00`).toLocaleDateString('sv-SE', { weekday: 'short' })}</div>
             <div>{new Date(`${day}T12:00:00`).getDate()}</div>
           </div>
@@ -303,13 +311,15 @@ function ShortStayScreen({ units, bookings, days, screenHeight }: { units: Short
           const lastVisibleEnd = dateKey(addDays(new Date(`${days[days.length - 1]}T12:00:00`), 1));
           const visibleBookings = unitBookings.filter(booking => booking.start_date < lastVisibleEnd && booking.end_date > days[0]);
           return (
-            <div key={unit.id} className="grid border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: `220px 1fr`, height: rowHeight }}>
-              <div className="min-w-0 bg-white px-3 py-2">
-                <p className={`${compact ? 'text-sm' : 'text-base'} truncate font-black`}>{unit.name}</p>
-                <p className={`${compact ? 'mt-0 text-[11px]' : 'mt-1 text-xs'} truncate text-slate-500`}>{unit.apartment?.apartment_number || unit.property?.name || unit.description}</p>
-                {!compact && <p className="mt-1 inline-flex items-center gap-1 text-xs text-slate-400"><Users className="h-3 w-3" /> Max {unit.max_guests || 2}</p>}
+            <div key={unit.id} className="grid border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: `${unitColumnWidth}px 1fr`, height: rowHeight }}>
+              <div className="min-w-0 bg-white px-2 py-1.5">
+                <p className={`${compact ? 'text-xs' : 'text-sm'} truncate font-black`}>{unit.name}</p>
+                {!ultraCompact && (
+                  <p className={`${compact ? 'mt-0 text-[10px]' : 'mt-0.5 text-[11px]'} truncate text-slate-500`}>{unit.apartment?.apartment_number || unit.property?.name || unit.description}</p>
+                )}
+                {!compact && <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-slate-400"><Users className="h-3 w-3" /> Max {unit.max_guests || 2}</p>}
               </div>
-              <div className="relative grid overflow-hidden" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(58px, 1fr))` }}>
+              <div className="relative grid overflow-hidden" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(56px, 1fr))` }}>
                 {days.map(day => {
                   const activeBooking = unitBookings.find(item => overlaps(item, day));
                   const arrival = unitBookings.find(item => item.start_date === day);
@@ -365,28 +375,28 @@ function WorkOrderScreen({ workOrders, screenHeight }: { workOrders: WorkOrder[]
     return <div className="rounded-2xl bg-white p-12 text-center text-2xl font-black text-slate-700">Inga aktiva arbetsordrar.</div>;
   }
 
-  const availableHeight = Math.max(screenHeight - 124, 420);
-  const visibleCount = Math.max(4, Math.min(workOrders.length, Math.floor(availableHeight / 104)));
+  const availableHeight = Math.max(screenHeight - 54, 420);
+  const visibleCount = Math.max(4, Math.min(workOrders.length, Math.floor(availableHeight / 94)));
   const visibleOrders = workOrders.slice(0, visibleCount);
 
   return (
     <div className="grid gap-2 overflow-hidden" style={{ height: availableHeight }}>
       {visibleOrders.map(order => (
-        <div key={order.id} className="grid grid-cols-[1fr_auto] gap-4 rounded-2xl bg-white px-5 py-4 text-slate-950">
+        <div key={order.id} className="grid grid-cols-[1fr_auto] gap-4 rounded-xl bg-white px-4 py-3 text-slate-950">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="truncate text-xl font-black">{order.title}</h2>
+              <h2 className="truncate text-lg font-black">{order.title}</h2>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-bold text-slate-600">{WO_STATUS_LABELS[order.status] || order.status}</span>
               <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-bold text-amber-700">{WO_PRIORITY_LABELS[order.priority] || order.priority}</span>
             </div>
-            <p className="mt-1 line-clamp-1 text-base text-slate-600">{order.description || 'Ingen beskrivning'}</p>
+            <p className="mt-1 line-clamp-1 text-sm text-slate-600">{order.description || 'Ingen beskrivning'}</p>
             <p className="mt-2 text-sm font-semibold text-slate-500">
               {[order.property?.name, order.apartment?.apartment_number, order.assigned?.name].filter(Boolean).join(' · ') || 'Ingen plats/tilldelning'}
             </p>
           </div>
           <div className="text-right">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Förfallodatum</p>
-            <p className="mt-1 text-xl font-black text-slate-900">{order.due_date ? formatDate(order.due_date) : 'Ej satt'}</p>
+            <p className="mt-1 text-lg font-black text-slate-900">{order.due_date ? formatDate(order.due_date) : 'Ej satt'}</p>
           </div>
         </div>
       ))}
