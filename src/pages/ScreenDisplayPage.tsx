@@ -517,6 +517,8 @@ export function ScreenDisplayPage() {
           organisationName={organisationName}
           staffMembers={staffMembers}
           lastUpdated={lastUpdated}
+          screenWidth={screenSize.width}
+          screenHeight={screenSize.height}
         />
       )}
     </div>
@@ -533,6 +535,8 @@ function PresentationScreen({
   organisationName,
   staffMembers,
   lastUpdated,
+  screenWidth,
+  screenHeight,
 }: {
   settings: PresentationSettings;
   news: News[];
@@ -543,9 +547,13 @@ function PresentationScreen({
   organisationName: string;
   staffMembers: Pick<Profile, 'id' | 'name'>[];
   lastUpdated: Date | null;
+  screenWidth: number;
+  screenHeight: number;
 }) {
   const [now, setNow] = useState(new Date());
   const [weatherText, setWeatherText] = useState('Laddar väder...');
+  const compact = screenHeight < 760 || screenWidth < 1180;
+  const twoColumnLayout = screenWidth >= 760;
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 15_000);
@@ -593,7 +601,7 @@ function PresentationScreen({
   const todayValue = dateKey(today());
   const checkIns = bookings.filter(booking => booking.booking_type === 'booking' && booking.start_date === todayValue);
   const checkOuts = bookings.filter(booking => booking.booking_type === 'booking' && booking.end_date === todayValue);
-  const activeNews = news.slice(0, 4);
+  const activeNews = news.slice(0, compact ? 2 : 3);
   const priorityRank = { urgent: 0, high: 1, normal: 2, low: 3 };
   const activeWorkOrders = [...workOrders]
     .sort((a, b) => {
@@ -602,8 +610,8 @@ function PresentationScreen({
       if (aDue !== bDue) return aDue - bDue;
       return (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9);
     })
-    .slice(0, 9);
-  const activeMeetings = meetings.slice(0, 5);
+    .slice(0, compact ? 5 : 7);
+  const activeMeetings = meetings.slice(0, compact ? 3 : 4);
   const customTickerItems = [
     ...(settings.customTickerItems || []),
     ...(settings.customTickerItems?.length ? [] : settings.customTickerText ? [settings.customTickerText] : []),
@@ -623,49 +631,71 @@ function PresentationScreen({
   };
   const isOrderOverdue = (order: WorkOrder) => Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
   const assigneeLabel = (order: WorkOrder) => workOrderAssigneeLabel(order, staffMembers);
+  const panelPadding = compact ? 'p-3' : 'p-4';
+  const weatherCard = (
+    <div className={`${compact ? 'min-w-[15rem] p-2' : 'min-w-[22rem] p-3'} rounded-2xl bg-white/10 text-right ring-1 ring-white/10`}>
+      <div className="flex items-center justify-end gap-2">
+        <CloudSun className={`${compact ? 'h-5 w-5' : 'h-6 w-6'} text-amber-200`} />
+        <p className={`${compact ? 'text-xs' : 'text-sm'} font-bold text-slate-300`}>Dagens väder</p>
+      </div>
+      <p className={`${compact ? 'text-sm' : 'text-base'} mt-1 font-black leading-tight`}>{weatherText}</p>
+    </div>
+  );
 
   return (
     <div className="relative h-[calc(100vh-54px)] overflow-hidden rounded-xl bg-slate-950 text-white">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.28),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(20,184,166,0.18),transparent_32%)]" />
-      <div className="relative grid h-full grid-rows-[1fr_auto]">
-        <main className="grid min-h-0 gap-3 p-4 xl:grid-cols-[1.15fr_0.85fr]">
-          <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
-            <div className="self-start rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
-              <div className="flex items-center justify-between gap-5">
+      <div className="relative grid h-full min-h-0" style={{ gridTemplateRows: `${compact ? 36 : 44}px minmax(0, 1fr)` }}>
+        <footer className="order-2 overflow-hidden border-t border-white/10 bg-black/35">
+          <div className={`${compact ? 'text-lg leading-9' : 'text-xl leading-[44px]'} animate-[vihemTicker_38s_linear_infinite] whitespace-nowrap font-black text-white`}>
+            {[...tickerParts, ...tickerParts].map((part, index) => (
+              <span key={`${part}-${index}`} className={`${compact ? 'mx-5' : 'mx-8'} inline-flex items-center gap-3`}>
+                <span className="h-2 w-2 rounded-full bg-blue-300" />
+                {part}
+              </span>
+            ))}
+          </div>
+        </footer>
+
+        <main
+          className="order-1 grid min-h-0"
+          style={{
+            gap: compact ? '0.5rem' : '0.75rem',
+            padding: compact ? '0.75rem' : '1rem',
+            gridTemplateColumns: twoColumnLayout ? 'minmax(0, 1.22fr) minmax(260px, 0.78fr)' : '1fr',
+          }}
+        >
+          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: `${compact ? 118 : 148}px minmax(0, 1fr)` }}>
+            <div className={`self-start overflow-hidden rounded-3xl bg-white/10 ${panelPadding} ring-1 ring-white/10`}>
+              <div className="flex h-full items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm font-black uppercase tracking-[0.22em] text-blue-200">{organisationName}</p>
-                  <h2 className="mt-1 text-5xl font-black leading-none tracking-tight">
+                  <p className={`${compact ? 'text-xs' : 'text-sm'} font-black uppercase tracking-[0.22em] text-blue-200`}>{organisationName}</p>
+                  <h2 className={`${compact ? 'text-4xl' : 'text-5xl'} mt-1 font-black leading-none tracking-tight`}>
                     {now.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
                   </h2>
-                  <p className="mt-1 text-xl font-bold text-slate-200">
+                  <p className={`${compact ? 'text-base' : 'text-xl'} mt-1 font-bold text-slate-200`}>
                     {now.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}
                   </p>
                 </div>
-                <div className="min-w-[22rem] rounded-2xl bg-white/10 p-3 text-right ring-1 ring-white/10">
-                  <div className="flex items-center justify-end gap-2">
-                    <CloudSun className="h-6 w-6 text-amber-200" />
-                    <p className="text-sm font-bold text-slate-300">Dagens väder</p>
-                  </div>
-                  <p className="mt-1 text-base font-black leading-tight">{weatherText}</p>
-                </div>
+                {weatherCard}
               </div>
             </div>
 
             {settings.showWorkOrders && (
-              <div className="flex min-h-0 flex-col rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="flex items-center gap-2 text-2xl font-black"><ClipboardList className="h-6 w-6 text-amber-200" /> Arbetsordrar</h3>
+              <div className={`flex min-h-0 flex-col overflow-hidden rounded-3xl bg-white/10 ${panelPadding} ring-1 ring-white/10`}>
+                <div className={`${compact ? 'mb-2' : 'mb-3'} flex items-center justify-between`}>
+                  <h3 className={`flex items-center gap-2 ${compact ? 'text-xl' : 'text-2xl'} font-black`}><ClipboardList className={`${compact ? 'h-5 w-5' : 'h-6 w-6'} text-amber-200`} /> Arbetsordrar</h3>
                   <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-black">{workOrders.length}</span>
                 </div>
-                <div className="min-h-0 flex-1 space-y-2 overflow-hidden">
+                <div className={`${compact ? 'space-y-1.5' : 'space-y-2'} min-h-0 flex-1 overflow-hidden`}>
                   {activeWorkOrders.length === 0 ? (
                     <p className="rounded-2xl bg-white/5 px-4 py-5 text-lg font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
                   ) : activeWorkOrders.map(order => (
-                    <div key={order.id} className="rounded-2xl bg-white/10 px-4 py-2.5">
+                    <div key={order.id} className={`${compact ? 'rounded-xl px-3 py-2' : 'rounded-2xl px-4 py-2.5'} bg-white/10`}>
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate text-base font-black">{order.title}</p>
-                          <p className="mt-0.5 truncate text-sm font-semibold text-slate-300">
+                          <p className={`${compact ? 'text-sm' : 'text-base'} truncate font-black`}>{order.title}</p>
+                          <p className={`${compact ? 'text-xs' : 'text-sm'} mt-0.5 truncate font-semibold text-slate-300`}>
                             {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
                           </p>
                         </div>
@@ -691,22 +721,22 @@ function PresentationScreen({
             )}
           </section>
 
-          <section className="grid min-h-0 gap-3">
+          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: 'minmax(0, 1.05fr) minmax(0, 0.95fr) minmax(0, 0.85fr)' }}>
             {settings.showNews && (
-              <div className="rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
-                <div className="mb-3 flex items-center gap-2">
+              <div className={`min-h-0 overflow-hidden rounded-3xl bg-white/10 ${panelPadding} ring-1 ring-white/10`}>
+                <div className={`${compact ? 'mb-2' : 'mb-3'} flex items-center gap-2`}>
                   <Newspaper className="h-5 w-5 text-blue-200" />
-                  <h3 className="text-xl font-black">Aktuella nyheter</h3>
+                  <h3 className={`${compact ? 'text-lg' : 'text-xl'} font-black`}>Aktuella nyheter</h3>
                 </div>
-                <div className="grid gap-2">
+                <div className="grid min-h-0 gap-2 overflow-hidden">
                   {activeNews.length === 0 ? (
                     <p className="rounded-2xl bg-white/5 px-4 py-4 font-bold text-slate-300">Inga publicerade nyheter.</p>
                   ) : activeNews.map(item => (
-                    <div key={item.id} className="rounded-2xl bg-white/10 px-4 py-3">
+                    <div key={item.id} className={`${compact ? 'rounded-xl px-3 py-2' : 'rounded-2xl px-4 py-3'} bg-white/10`}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate text-base font-black">{item.title}</p>
-                          <p className="mt-1 line-clamp-2 text-sm font-semibold leading-5 text-slate-300">{item.content}</p>
+                          <p className={`${compact ? 'text-sm' : 'text-base'} truncate font-black`}>{item.title}</p>
+                          <p className={`${compact ? 'line-clamp-1 text-xs leading-4' : 'line-clamp-2 text-sm leading-5'} mt-1 font-semibold text-slate-300`}>{item.content}</p>
                         </div>
                         {item.priority === 'urgent' && <span className="rounded-full bg-rose-400 px-2.5 py-1 text-xs font-black text-white">Viktigt</span>}
                       </div>
@@ -717,18 +747,18 @@ function PresentationScreen({
             )}
 
             {settings.showClockedIn && (
-              <div className="rounded-3xl bg-emerald-400/10 p-4 ring-1 ring-emerald-300/20">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="flex items-center gap-2 text-xl font-black"><Timer className="h-5 w-5 text-emerald-200" /> Instämplade</h3>
+              <div className={`min-h-0 overflow-hidden rounded-3xl bg-emerald-400/10 ${panelPadding} ring-1 ring-emerald-300/20`}>
+                <div className={`${compact ? 'mb-2' : 'mb-3'} flex items-center justify-between`}>
+                  <h3 className={`flex items-center gap-2 ${compact ? 'text-lg' : 'text-xl'} font-black`}><Timer className="h-5 w-5 text-emerald-200" /> Instämplade</h3>
                   <span className="rounded-full bg-emerald-300/20 px-3 py-1 text-sm font-black text-emerald-100">{clockedInEntries.length}</span>
                 </div>
-                <div className="grid gap-2">
+                <div className="grid min-h-0 gap-2 overflow-hidden">
                   {clockedInEntries.length === 0 ? (
                     <p className="rounded-2xl bg-white/5 px-4 py-4 font-bold text-slate-300">Ingen är instämplad just nu.</p>
-                  ) : clockedInEntries.slice(0, 5).map(entry => (
-                    <div key={entry.id} className="rounded-2xl bg-white/10 px-4 py-3">
-                      <p className="truncate text-base font-black">{entry.user?.name || 'Personal'}</p>
-                      <p className="truncate text-sm font-semibold text-emerald-100">{timeEntryTitle(entry)}</p>
+                  ) : clockedInEntries.slice(0, compact ? 3 : 4).map(entry => (
+                    <div key={entry.id} className={`${compact ? 'rounded-xl px-3 py-2' : 'rounded-2xl px-4 py-3'} bg-white/10`}>
+                      <p className={`${compact ? 'text-sm' : 'text-base'} truncate font-black`}>{entry.user?.name || 'Personal'}</p>
+                      <p className={`${compact ? 'text-xs' : 'text-sm'} truncate font-semibold text-emerald-100`}>{timeEntryTitle(entry)}</p>
                       <p className="mt-1 text-xs font-bold text-slate-400">Sedan {formatDateTime(entry.start_time)}</p>
                     </div>
                   ))}
@@ -737,18 +767,18 @@ function PresentationScreen({
             )}
 
             {settings.showMeetings && (
-              <div className="rounded-3xl bg-white/10 p-4 ring-1 ring-white/10">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="flex items-center gap-2 text-xl font-black"><CalendarDays className="h-5 w-5 text-blue-200" /> Kalender</h3>
+              <div className={`min-h-0 overflow-hidden rounded-3xl bg-white/10 ${panelPadding} ring-1 ring-white/10`}>
+                <div className={`${compact ? 'mb-2' : 'mb-3'} flex items-center justify-between`}>
+                  <h3 className={`flex items-center gap-2 ${compact ? 'text-lg' : 'text-xl'} font-black`}><CalendarDays className="h-5 w-5 text-blue-200" /> Kalender</h3>
                   <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-black">{meetings.length}</span>
                 </div>
-                <div className="grid gap-2">
+                <div className="grid min-h-0 gap-2 overflow-hidden">
                   {activeMeetings.length === 0 ? (
                     <p className="rounded-2xl bg-white/5 px-4 py-4 font-bold text-slate-300">Inga kommande kalenderhändelser.</p>
                   ) : activeMeetings.map(meeting => (
-                    <div key={meeting.id} className="rounded-2xl bg-white/10 px-4 py-3">
-                      <p className="truncate text-base font-black">{meeting.title}</p>
-                      <p className="mt-1 truncate text-sm font-semibold text-slate-300">
+                    <div key={meeting.id} className={`${compact ? 'rounded-xl px-3 py-2' : 'rounded-2xl px-4 py-3'} bg-white/10`}>
+                      <p className={`${compact ? 'text-sm' : 'text-base'} truncate font-black`}>{meeting.title}</p>
+                      <p className={`${compact ? 'text-xs' : 'text-sm'} mt-1 truncate font-semibold text-slate-300`}>
                         {meeting.starts_at ? formatDateTime(meeting.starts_at) : 'Ingen tid'}{meeting.location ? ` · ${meeting.location}` : ''}
                       </p>
                     </div>
@@ -758,17 +788,6 @@ function PresentationScreen({
             )}
           </section>
         </main>
-
-        <footer className="overflow-hidden border-t border-white/10 bg-black/35 py-3">
-          <div className="animate-[vihemTicker_38s_linear_infinite] whitespace-nowrap text-2xl font-black text-white">
-            {[...tickerParts, ...tickerParts].map((part, index) => (
-              <span key={`${part}-${index}`} className="mx-8 inline-flex items-center gap-3">
-                <span className="h-2 w-2 rounded-full bg-blue-300" />
-                {part}
-              </span>
-            ))}
-          </div>
-        </footer>
       </div>
     </div>
   );
