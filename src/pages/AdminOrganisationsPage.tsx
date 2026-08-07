@@ -11,7 +11,7 @@ import {
   Card, Badge, Button, Modal, Input, PageHeader,
   EmptyState, LoadingPage, SearchInput,
 } from '../components/ui';
-import { formatDate } from '../lib/utils';
+import { createClientId, formatDate } from '../lib/utils';
 import type { ModuleKey, Organisation, Profile, Role } from '../types';
 import { createUserAccount, sendUserPasswordResetEmail, updateUserAccount } from '../lib/userAdmin';
 
@@ -321,7 +321,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
           ? { ...editingOrg, ...payload }
           : {
               ...payload,
-              id: crypto.randomUUID(),
+              id: createClientId(),
               plan: payload.plan,
               plan_expires_at: null,
               logo_url: '',
@@ -342,7 +342,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
           const password = createTempPassword();
           const now = new Date().toISOString();
           const nextAdmin: LocalTestUser = {
-            id: crypto.randomUUID(),
+            id: createClientId(),
             name: initialAdminForm.name.trim(),
             email: initialAdminForm.email.trim().toLowerCase(),
             phone: initialAdminForm.phone.trim(),
@@ -528,7 +528,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         const password = createTempPassword();
         const now = new Date().toISOString();
         const nextUser: LocalTestUser = {
-          id: crypto.randomUUID(),
+          id: createClientId(),
           name: userForm.name.trim(),
           email: userForm.email.trim().toLowerCase(),
           phone: userForm.phone.trim(),
@@ -610,7 +610,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
           const password = createTempPassword();
           const now = new Date().toISOString();
           writeLocalUsers([...users, {
-            id: crypto.randomUUID(),
+            id: createClientId(),
             name: superadminForm.name.trim(),
             email: superadminForm.email.trim().toLowerCase(),
             phone: superadminForm.phone.trim(),

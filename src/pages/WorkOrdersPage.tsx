@@ -23,6 +23,7 @@ import {
   WO_PRIORITY_LABELS,
   WO_CATEGORIES,
   formatMinutes,
+  createClientId,
 } from '../lib/utils';
 import type {
   WorkOrder,
@@ -348,12 +349,12 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     try {
       setSubmittingCreate(true);
       setCreateError('');
-      const workOrderId = crypto.randomUUID();
+      const workOrderId = createClientId();
       const attachments = await uploadWorkOrderFiles(workOrderId, createForm.files, user.id);
       const checklist = createForm.checklist
         .map((text) => text.trim())
         .filter(Boolean)
-        .map((text) => ({ id: crypto.randomUUID(), text, done: false }));
+        .map((text) => ({ id: createClientId(), text, done: false }));
       const assignedIds = createForm.assigned_to_ids;
       const { error } = await supabase.from('vihem_work_orders').insert([
         {
@@ -394,7 +395,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     const uploaded: AttachmentItem[] = [];
     for (const file of files) {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
-      const path = `work-orders/${workOrderId}/${crypto.randomUUID()}-${safeName}`;
+      const path = `work-orders/${workOrderId}/${createClientId()}-${safeName}`;
       const { error } = await supabase.storage
         .from('vihem-work-order-attachments')
         .upload(path, file, { upsert: false });
@@ -410,7 +411,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
 
       const { data } = supabase.storage.from('vihem-work-order-attachments').getPublicUrl(path);
       uploaded.push({
-        id: crypto.randomUUID(),
+        id: createClientId(),
         name: file.name,
         url: data.publicUrl,
         path,

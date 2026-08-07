@@ -1,5 +1,14 @@
 import type { MRCategory, MRPriority, MRStatus, WOPriority, WOStatus, TimeCategory, Role } from '../types';
 
+export function createClientId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  const randomPart = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).slice(1);
+  return `${randomPart()}${randomPart()}-${randomPart()}-${randomPart()}-${randomPart()}-${randomPart()}${randomPart()}${randomPart()}`;
+}
+
 export const MR_CATEGORY_LABELS: Record<MRCategory, string> = {
   water: 'Vatten',
   electricity: 'El',

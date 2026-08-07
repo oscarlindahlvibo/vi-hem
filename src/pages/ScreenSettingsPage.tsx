@@ -199,6 +199,7 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
     }));
 
     const now = new Date().toISOString();
+    const nextOrganisationSettings = buildOrganisationScreenSettings(organisationSettings, cleanedScreens);
     const saveResult = await supabase
       .from('vihem_screen_settings')
       .upsert(cleanedScreens.map(screen => ({
@@ -218,7 +219,6 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
       })), { onConflict: 'organisation_id,screen_key' });
 
     if (saveResult.error && isScreenSettingsTableUnsupported(saveResult.error)) {
-      const nextOrganisationSettings = buildOrganisationScreenSettings(organisationSettings, cleanedScreens);
       const organisationSaveResult = await supabase
         .from('vihem_organisations')
         .update({ settings: nextOrganisationSettings })
@@ -244,6 +244,16 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
       return;
     }
 
+    const organisationSaveResult = await supabase
+      .from('vihem_organisations')
+      .update({ settings: nextOrganisationSettings })
+      .eq('id', user.organisation_id);
+
+    if (organisationSaveResult.error) {
+      setError(organisationSaveResult.error.message);
+      return;
+    }
+
     const screenKeys = cleanedScreens.map(screen => screen.screenKey);
     const deleteResult = await supabase
       .from('vihem_screen_settings')
@@ -257,6 +267,7 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
     }
 
     setScreens(cleanedScreens);
+    setOrganisationSettings(nextOrganisationSettings);
     setSuccess('Skärminställningarna är sparade. TV-skärmen uppdaterar automatiskt inom ungefär en minut.');
   }
 
