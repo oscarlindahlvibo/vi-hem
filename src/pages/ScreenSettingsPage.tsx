@@ -3,7 +3,7 @@ import { Monitor, Plus, Save, Settings, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Button, Card, EmptyState, Input, LoadingPage, PageHeader, Select } from '../components/ui';
-import type { LaundryRoom } from '../types';
+import type { LaundryRoom, Meeting } from '../types';
 import {
   buildOrganisationScreenSettings,
   DEFAULT_SCREEN_KEY,
@@ -15,6 +15,7 @@ import {
   normalizeScreenConfig,
   readOrganisationScreenConfigs,
   screenViewLabel,
+  type MeetingScreenPart,
   type PresentationSettings,
   type ScreenConfig,
   type ScreenView,
@@ -49,6 +50,7 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
   const [selectedScreenKey, setSelectedScreenKey] = useState(DEFAULT_SCREEN_KEY);
   const [organisationSettings, setOrganisationSettings] = useState<Record<string, unknown>>({});
   const [laundryRooms, setLaundryRooms] = useState<LaundryRoom[]>([]);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
 
   const canManage = user?.role === 'admin' || user?.role === 'superadmin';
   const selectedScreen = screens.find(screen => screen.screenKey === selectedScreenKey) || screens[0] || defaultScreenConfig(1);
@@ -68,7 +70,7 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
     setLoading(true);
     setError('');
 
-    const [screenSettingsResult, organisationResult, laundryRoomsResult] = await Promise.all([
+    const [screenSettingsResult, organisationResult, laundryRoomsResult, meetingsResult] = await Promise.all([
       supabase
         .from('vihem_screen_settings')
         .select('screen_key, screen_view, presentation_settings')
@@ -85,6 +87,13 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
         .eq('organisation_id', user.organisation_id)
         .eq('active', true)
         .order('name'),
+      supabase
+        .from('vihem_meetings')
+        .select('id, title, meeting_type, status, starts_at, ends_at, location')
+        .eq('organisation_id', user.organisation_id)
+        .in('status', ['draft', 'planned', 'in_progress'])
+        .order('starts_at', { ascending: true, nullsFirst: false })
+        .limit(80),
     ]);
 
     const screenSettingsUnavailable = isMissingScreenSettingsTable(screenSettingsResult.error);
@@ -97,12 +106,18 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
       setLaundryRooms((laundryRoomsResult.data || []) as LaundryRoom[]);
     }
 
+    if (!meetingsResult.error) {
+      setMeetings((meetingsResult.data || []) as Meeting[]);
+    }
+
     if (screenSettingsResult.error && !screenSettingsUnavailable) {
       setError(screenSettingsResult.error.message);
     } else if (organisationResult.error) {
       setError(organisationResult.error.message);
     } else if (laundryRoomsResult.error) {
       setError(laundryRoomsResult.error.message);
+    } else if (meetingsResult.error) {
+      setError(meetingsResult.error.message);
     } else if (screenSettingsResult.data?.length) {
       const dbScreens = screenSettingsResult.data.map((row: any, index: number) => normalizeScreenConfig(row, index + 1));
       const fallbackScreens = readOrganisationScreenConfigs(organisationResult.data?.settings);
@@ -178,6 +193,9 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
         customTickerText: '',
         customTickerItems: screen.presentationSettings.customTickerItems.map(item => item.trim()).filter(Boolean),
       },
+      laundryRoomId: screen.laundryRoomId || '',
+      meetingId: screen.meetingId || '',
+      meetingPart: screen.meetingPart || 'full',
     }));
 
     const now = new Date().toISOString();
@@ -191,6 +209,8 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
           ...screen.presentationSettings,
           screen_name: screen.name,
           laundry_room_id: screen.laundryRoomId || '',
+          meeting_id: screen.meetingId || '',
+          meeting_part: screen.meetingPart || 'full',
         },
         created_by: user.id,
         updated_by: user.id,
@@ -329,6 +349,7 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
                 { value: 'presentation', label: screenViewLabel('presentation') },
                 { value: 'short-stay', label: screenViewLabel('short-stay') },
                 { value: 'work-orders', label: screenViewLabel('work-orders') },
+                { value: 'meeting', label: screenViewLabel('meeting') },
                 { value: 'laundry', label: screenViewLabel('laundry') },
               ]}
             />
@@ -346,6 +367,33 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
                       label: `${room.name}${room.property?.name ? ` · ${room.property.name}` : ''}`,
                     })),
                   ]}
+                />
+              </div>
+            )}
+            {screenView === 'meeting' && (
+              <div className="mt-4 grid gap-4">
+                <Select
+                  label="Möte"
+                  value={selectedScreen.meetingId || ''}
+                  onChange={(event) => updateSelectedScreen({ meetingId: event.target.value })}
+                  options={[
+                    { value: '', label: 'Välj automatiskt aktivt/kommande möte' },
+                    ...meetings.map(meeting => ({
+                      value: meeting.id,
+                      label: `${meeting.title}${meeting.starts_at ? ` · ${new Date(meeting.starts_at).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}` : ''}`,
+                    })),
+                  ]}
+                />
+                <Select
+                  label="Del som ska visas"
+                  value={selectedScreen.meetingPart || 'full'}
+                  onChange={(event) => updateSelectedScreen({ meetingPart: event.target.value as MeetingScreenPart })}
+                  options={[
+                    { value: 'full', label: 'Hela mötet på en skärm' },
+                    { value: 'part-1', label: 'Del 1/2: dagordning och arbetsordrar' },
+                    { value: 'part-2', label: 'Del 2/2: kundprojekt, frånvaro och kommande' },
+                  ]}
+                  hint="Använd två olika skärmprofiler om mötet ska delas över två TV-skärmar."
                 />
               </div>
             )}

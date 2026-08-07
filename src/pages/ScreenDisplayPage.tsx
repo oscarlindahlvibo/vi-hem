@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, ClipboardList, Monitor, Newspaper, RefreshCw, Timer, Users } from 'lucide-react';
+import { CalendarDays, ClipboardList, Monitor, Newspaper, RefreshCw, Timer, Users, Briefcase, CheckCircle2, UserRoundX } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
 import { Button, LoadingPage } from '../components/ui';
-import type { LaundryBooking, LaundryRoom, LaundrySlot, Meeting, News, Profile, ShortStayBooking, ShortStayUnit, TimeEntry, WorkOrder } from '../types';
+import type { CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, Meeting, MeetingAgendaItem, News, Profile, ShortStayBooking, ShortStayUnit, StaffAbsenceRequest, TimeEntry, WorkOrder } from '../types';
 import { formatDate, formatDateTime, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import {
@@ -112,6 +112,30 @@ function workOrderAssigneeLabel(order: WorkOrder, staffMembers: Pick<Profile, 'i
   return `${ids.length} tilldelade`;
 }
 
+const ABSENCE_TYPE_LABELS: Record<string, string> = {
+  sick: 'Sjuk',
+  vab: 'VAB',
+  vacation: 'Semester',
+  leave: 'Ledig',
+  unpaid_leave: 'Tjänstledig',
+};
+
+const PROJECT_STATUS_LABELS: Record<string, string> = {
+  draft: 'Utkast',
+  quote_created: 'Offert skapad',
+  quote_sent: 'Offert skickad',
+  quote_accepted: 'Offert accepterad',
+  planned: 'Planerad',
+  in_progress: 'Pågår',
+  paused: 'Pausad',
+  waiting_customer: 'Väntar kund',
+  waiting_material: 'Väntar material',
+  ready_for_inspection: 'Redo kontroll',
+  inspected_with_remarks: 'Anmärkningar',
+  approved: 'Godkänd',
+  invoiced: 'Fakturerad',
+};
+
 export function ScreenDisplayPage() {
   const { user, loading, signIn, signOut } = useAuth();
   const [email, setEmail] = useState('');
@@ -131,6 +155,9 @@ export function ScreenDisplayPage() {
   const [news, setNews] = useState<News[]>([]);
   const [clockedInEntries, setClockedInEntries] = useState<TimeEntry[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [meetingAgendaItems, setMeetingAgendaItems] = useState<MeetingAgendaItem[]>([]);
+  const [customerProjects, setCustomerProjects] = useState<CustomerProject[]>([]);
+  const [absenceRequests, setAbsenceRequests] = useState<StaffAbsenceRequest[]>([]);
   const [laundryRooms, setLaundryRooms] = useState<LaundryRoom[]>([]);
   const [laundrySlots, setLaundrySlots] = useState<LaundrySlot[]>([]);
   const [laundryBookings, setLaundryBookings] = useState<LaundryBooking[]>([]);
@@ -236,7 +263,7 @@ export function ScreenDisplayPage() {
     const todayStart = dateKey(today());
     const meetingEnd = dateKey(addDays(today(), 7));
 
-    const [organisationResult, screenSettingsResult, staffResult, unitsResult, bookingsResult, workOrdersResult, newsResult, clockedInResult, meetingsResult, laundryRoomsResult] = await Promise.all([
+    const [organisationResult, screenSettingsResult, staffResult, unitsResult, bookingsResult, workOrdersResult, newsResult, clockedInResult, meetingsResult, customerProjectsResult, absenceRequestsResult, laundryRoomsResult] = await Promise.all([
       supabase
         .from('vihem_organisations')
         .select('name, settings')
@@ -297,6 +324,22 @@ export function ScreenDisplayPage() {
         .lt('starts_at', `${meetingEnd}T23:59:59`)
         .order('starts_at', { ascending: true })
         .limit(8),
+      supabase
+        .from('vihem_customer_projects')
+        .select('id, organisation_id, customer_id, name, title, customer_name, description, status, priority, project_manager_id, start_date, planned_end_date, project_address, project_type, created_at, updated_at')
+        .eq('organisation_id', user.organisation_id)
+        .not('status', 'in', '(completed,archived,cancelled)')
+        .order('planned_end_date', { ascending: true, nullsFirst: false })
+        .order('updated_at', { ascending: false })
+        .limit(12),
+      supabase
+        .from('vihem_staff_absence_requests')
+        .select('*, user:vihem_profiles(id, name)')
+        .eq('organisation_id', user.organisation_id)
+        .in('status', ['submitted', 'approved'])
+        .lte('start_date', meetingEnd)
+        .gte('end_date', todayStart)
+        .order('start_date'),
       supabase
         .from('vihem_laundry_rooms')
         .select('*, property:vihem_properties(name)')
@@ -393,6 +436,8 @@ export function ScreenDisplayPage() {
       setBookings((bookingsResult.data || []) as ShortStayBooking[]);
       setWorkOrders((workOrdersResult.data || []) as WorkOrder[]);
       setNews((newsResult.data || []) as News[]);
+      setCustomerProjects(customerProjectsResult.error ? [] : (customerProjectsResult.data || []) as CustomerProject[]);
+      setAbsenceRequests(absenceRequestsResult.error ? [] : (absenceRequestsResult.data || []) as StaffAbsenceRequest[]);
       setLaundryRooms(loadedLaundryRooms);
       setLaundrySlots(loadedLaundrySlots);
       setLaundryBookings(loadedLaundryBookings);
@@ -401,7 +446,19 @@ export function ScreenDisplayPage() {
         if (!latestEntryByUser.has(entry.user_id)) latestEntryByUser.set(entry.user_id, entry);
       });
       setClockedInEntries(Array.from(latestEntryByUser.values()));
-      setMeetings((meetingsResult.data || []) as Meeting[]);
+      const loadedMeetings = (meetingsResult.data || []) as Meeting[];
+      setMeetings(loadedMeetings);
+      const meetingIds = loadedMeetings.map(meeting => meeting.id);
+      if (meetingIds.length > 0) {
+        const agendaResult = await supabase
+          .from('vihem_meeting_agenda_items')
+          .select('*')
+          .in('meeting_id', meetingIds)
+          .order('sort_order');
+        setMeetingAgendaItems(agendaResult.error ? [] : (agendaResult.data || []) as MeetingAgendaItem[]);
+      } else {
+        setMeetingAgendaItems([]);
+      }
       setLastUpdated(new Date());
     }
 
@@ -537,6 +594,19 @@ export function ScreenDisplayPage() {
         <ShortStayScreen units={units} bookings={bookings} days={days} screenHeight={screenSize.height} />
       ) : view === 'work-orders' ? (
         <WorkOrderScreen workOrders={workOrders} staffMembers={staffMembers} screenHeight={screenSize.height} />
+      ) : view === 'meeting' ? (
+        <MeetingScreen
+          screen={selectedScreenConfig}
+          organisationName={organisationName}
+          meetings={meetings}
+          agendaItems={meetingAgendaItems}
+          workOrders={workOrders}
+          customerProjects={customerProjects}
+          absenceRequests={absenceRequests}
+          staffMembers={staffMembers}
+          screenHeight={screenSize.height}
+          lastUpdated={lastUpdated}
+        />
       ) : view === 'laundry' ? (
         <LaundryScreen
           screen={selectedScreenConfig}
@@ -579,6 +649,248 @@ function ScreenHeaderClock() {
       <span className="text-slate-400">
         {now.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}
       </span>
+    </div>
+  );
+}
+
+function MeetingScreen({
+  screen,
+  organisationName,
+  meetings,
+  agendaItems,
+  workOrders,
+  customerProjects,
+  absenceRequests,
+  staffMembers,
+  screenHeight,
+  lastUpdated,
+}: {
+  screen: ScreenConfig;
+  organisationName: string;
+  meetings: Meeting[];
+  agendaItems: MeetingAgendaItem[];
+  workOrders: WorkOrder[];
+  customerProjects: CustomerProject[];
+  absenceRequests: StaffAbsenceRequest[];
+  staffMembers: Pick<Profile, 'id' | 'name'>[];
+  screenHeight: number;
+  lastUpdated: Date | null;
+}) {
+  const availableHeight = Math.max(screenHeight - 54, 520);
+  const configuredMeeting = screen.meetingId ? meetings.find(meeting => meeting.id === screen.meetingId) : null;
+  const currentMeeting = configuredMeeting || meetings.find(meeting => meeting.status === 'in_progress') || meetings[0];
+  const meetingPart = screen.meetingPart || 'full';
+  const partLabel = meetingPart === 'part-1' ? 'Del 1/2' : meetingPart === 'part-2' ? 'Del 2/2' : 'Hela mötet';
+  const selectedAgenda = currentMeeting
+    ? agendaItems.filter(item => item.meeting_id === currentMeeting.id).sort((a, b) => a.sort_order - b.sort_order)
+    : [];
+  const activeWorkOrders = workOrders.slice(0, meetingPart === 'part-1' ? 14 : 9);
+  const activeProjects = customerProjects.slice(0, meetingPart === 'part-2' ? 13 : 8);
+  const todayValue = dateKey(today());
+  const upcomingAbsences = absenceRequests
+    .filter(request => request.end_date >= todayValue)
+    .slice(0, meetingPart === 'part-2' ? 10 : 8);
+  const upcomingMeetings = meetings
+    .filter(meeting => meeting.id !== currentMeeting?.id)
+    .slice(0, meetingPart === 'part-2' ? 7 : 5);
+  const agendaLimit = meetingPart === 'part-1' ? 16 : 11;
+
+  const agendaPanel = (
+    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-lg font-black">
+          <CheckCircle2 className="h-5 w-5 text-emerald-200" />
+          Dagordning
+        </h3>
+        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-black">{selectedAgenda.length}</span>
+      </div>
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+        {selectedAgenda.length === 0 ? (
+          <p className="rounded-xl bg-white/5 px-4 py-5 text-sm font-bold text-slate-300">Ingen dagordning kopplad till valt möte.</p>
+        ) : selectedAgenda.slice(0, agendaLimit).map((item, index) => (
+          <div key={item.id} className="grid grid-cols-[30px_minmax(0,1fr)] gap-2 rounded-xl bg-white/10 px-3 py-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-500 text-xs font-black">{index + 1}</span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-black">{item.title}</p>
+              {item.notes && <p className="truncate text-[11px] font-semibold text-slate-300">{item.notes}</p>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
+  const workOrderPanel = (
+    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-lg font-black">
+          <ClipboardList className="h-5 w-5 text-amber-200" />
+          Arbetsordrar
+        </h3>
+        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-black">{workOrders.length}</span>
+      </div>
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+        {activeWorkOrders.length === 0 ? (
+          <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
+        ) : activeWorkOrders.map(order => (
+          <div key={order.id} className="grid grid-cols-[minmax(0,1fr)_94px] items-center gap-2 rounded-lg bg-white/10 px-3 py-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-black">{order.title}</p>
+              <p className="truncate text-[11px] font-bold text-slate-300">
+                {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
+              </p>
+            </div>
+            <div className="flex flex-col items-end gap-1">
+              <span className="max-w-full truncate rounded-full bg-blue-400/20 px-2 py-0.5 text-[10px] font-black text-blue-100">{workOrderAssigneeLabel(order, staffMembers, true)}</span>
+              <span className="rounded-full bg-amber-300/20 px-2 py-0.5 text-[10px] font-black text-amber-100">{WO_PRIORITY_LABELS[order.priority]}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
+  const projectPanel = (
+    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-lg font-black">
+          <Briefcase className="h-5 w-5 text-violet-200" />
+          Kundprojekt
+        </h3>
+        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-black">{customerProjects.length}</span>
+      </div>
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+        {activeProjects.length === 0 ? (
+          <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga pågående kundprojekt.</p>
+        ) : activeProjects.map(project => (
+          <div key={project.id} className="grid grid-cols-[minmax(0,1fr)_94px] items-center gap-2 rounded-lg bg-white/10 px-3 py-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-black">{project.title || project.name || project.customer_name || 'Kundprojekt'}</p>
+              <p className="truncate text-[11px] font-bold text-slate-300">
+                {project.customer_name || project.project_address || 'Ingen kund'}
+                {project.planned_end_date ? ` · ${formatDate(project.planned_end_date)}` : ''}
+              </p>
+            </div>
+            <span className="justify-self-end rounded-full bg-violet-400/20 px-2 py-1 text-[10px] font-black text-violet-100">
+              {PROJECT_STATUS_LABELS[project.status] || project.status}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
+  const meetingsPanel = (
+    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
+      <h3 className="mb-2 flex items-center gap-2 text-lg font-black">
+        <CalendarDays className="h-5 w-5 text-blue-200" />
+        Kommande möten
+      </h3>
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+        {upcomingMeetings.map(meeting => (
+          <div key={meeting.id} className="rounded-lg bg-white/10 px-3 py-2">
+            <p className="truncate text-sm font-black">{meeting.title}</p>
+            <p className="truncate text-[11px] font-bold text-slate-300">{meeting.starts_at ? formatDateTime(meeting.starts_at) : 'Ingen tid'}</p>
+          </div>
+        ))}
+        {meetings.length === 0 && <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga planerade möten.</p>}
+      </div>
+    </section>
+  );
+
+  const absencePanel = (
+    <section className="flex min-h-0 flex-col rounded-2xl bg-rose-500/10 p-3 ring-1 ring-rose-300/20">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-lg font-black">
+          <UserRoundX className="h-5 w-5 text-rose-200" />
+          Ledighet/frånvaro
+        </h3>
+        <span className="rounded-full bg-rose-300/20 px-3 py-1 text-xs font-black text-rose-100">{upcomingAbsences.length}</span>
+      </div>
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+        {upcomingAbsences.length === 0 ? (
+          <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Ingen planerad frånvaro i närtid.</p>
+        ) : upcomingAbsences.map(request => (
+          <div key={request.id} className="grid grid-cols-[minmax(0,1fr)_82px] items-center gap-2 rounded-lg bg-white/10 px-3 py-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-black">{request.user?.name || staffMembers.find(staff => staff.id === request.user_id)?.name || 'Personal'}</p>
+              <p className="truncate text-[11px] font-bold text-rose-100">
+                {ABSENCE_TYPE_LABELS[request.absence_type] || request.absence_type}
+                {request.start_time && request.end_time ? ` · ${request.start_time.slice(0, 5)}-${request.end_time.slice(0, 5)}` : ''}
+              </p>
+            </div>
+            <span className="justify-self-end rounded-full bg-white/10 px-2 py-1 text-[10px] font-black text-white">
+              {request.start_date === request.end_date ? formatDate(request.start_date) : `${formatDate(request.start_date)}-${formatDate(request.end_date)}`}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
+  return (
+    <div
+      className="grid gap-2 overflow-hidden rounded-xl bg-slate-950 text-white"
+      style={{
+        height: availableHeight,
+        gridTemplateRows: '58px minmax(0, 1fr) 34px',
+      }}
+    >
+      <div className="flex items-center justify-between rounded-xl bg-white/10 px-4 ring-1 ring-white/10">
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-blue-200">{organisationName}</p>
+          <h2 className="truncate text-xl font-black">{currentMeeting?.title || 'Mötesvy'}</h2>
+        </div>
+        <div className="flex shrink-0 items-center gap-3 text-right">
+          <span className="rounded-full bg-blue-500/20 px-3 py-1 text-xs font-black text-blue-100">{partLabel}</span>
+          <div>
+          <p className="text-xs font-black text-slate-200">
+            {currentMeeting?.starts_at ? formatDateTime(currentMeeting.starts_at) : 'Inget aktivt möte'}
+          </p>
+          <p className="text-[11px] font-bold text-slate-400">
+            {currentMeeting?.location || 'Följ dagordning och aktuella ärenden'}
+            {lastUpdated ? ` · uppdaterad ${lastUpdated.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}` : ''}
+          </p>
+          </div>
+        </div>
+      </div>
+
+      {meetingPart === 'part-1' ? (
+        <div className="grid min-h-0 gap-2 xl:grid-cols-[1.12fr_0.88fr]">
+          {agendaPanel}
+          {workOrderPanel}
+        </div>
+      ) : meetingPart === 'part-2' ? (
+        <div className="grid min-h-0 gap-2 xl:grid-cols-[1.08fr_0.92fr]">
+          {projectPanel}
+          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '1fr 0.82fr' }}>
+            {absencePanel}
+            {meetingsPanel}
+          </section>
+        </div>
+      ) : (
+        <div className="grid min-h-0 gap-2 xl:grid-cols-[1fr_1.08fr_0.92fr]">
+          {agendaPanel}
+          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '1fr 0.92fr' }}>
+            {workOrderPanel}
+            {projectPanel}
+          </section>
+          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '0.78fr 1fr' }}>
+            {meetingsPanel}
+            {absencePanel}
+          </section>
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-xl bg-white/10 px-4 py-1 text-sm font-black text-slate-200 ring-1 ring-white/10">
+        <div className="flex min-w-max gap-8">
+          <span>{partLabel}</span>
+          <span>{selectedAgenda.length} punkter på dagordningen</span>
+          <span>{workOrders.length} arbetsordrar</span>
+          <span>{customerProjects.length} kundprojekt</span>
+          <span>{upcomingAbsences.length} frånvaro/ledighet</span>
+        </div>
+      </div>
     </div>
   );
 }

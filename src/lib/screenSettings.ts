@@ -1,4 +1,5 @@
-export type ScreenView = 'short-stay' | 'work-orders' | 'presentation' | 'laundry';
+export type ScreenView = 'short-stay' | 'work-orders' | 'presentation' | 'laundry' | 'meeting';
+export type MeetingScreenPart = 'full' | 'part-1' | 'part-2';
 
 export type PresentationSettings = {
   weatherLocation: string;
@@ -21,6 +22,8 @@ export type ScreenConfig = {
   screenView: ScreenView;
   presentationSettings: PresentationSettings;
   laundryRoomId?: string;
+  meetingId?: string;
+  meetingPart?: MeetingScreenPart;
 };
 
 export const SCREEN_VIEW_STORAGE_KEY = 'vihem.screen.view';
@@ -45,7 +48,11 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
 };
 
 export function isScreenView(value: unknown): value is ScreenView {
-  return value === 'work-orders' || value === 'short-stay' || value === 'presentation' || value === 'laundry';
+  return value === 'work-orders' || value === 'short-stay' || value === 'presentation' || value === 'laundry' || value === 'meeting';
+}
+
+export function isMeetingScreenPart(value: unknown): value is MeetingScreenPart {
+  return value === 'full' || value === 'part-1' || value === 'part-2';
 }
 
 export function normalizePresentationSettings(input: unknown): PresentationSettings {
@@ -71,12 +78,16 @@ export function defaultScreenConfig(index = 1): ScreenConfig {
     screenView: index === 1 ? 'short-stay' : 'presentation',
     presentationSettings: DEFAULT_PRESENTATION_SETTINGS,
     laundryRoomId: '',
+    meetingId: '',
+    meetingPart: 'full',
   };
 }
 
 export function normalizeScreenConfig(input: unknown, fallbackIndex = 1): ScreenConfig {
   const stored = input && typeof input === 'object' ? input as Record<string, unknown> : {};
   const fallback = defaultScreenConfig(fallbackIndex);
+  const storedPresentationSettings = stored.presentation_settings as Record<string, unknown> | undefined;
+  const storedPresentationSettingsCamel = stored.presentationSettings as Record<string, unknown> | undefined;
   const key = typeof stored.screen_key === 'string'
     ? stored.screen_key
     : typeof stored.screenKey === 'string'
@@ -88,10 +99,10 @@ export function normalizeScreenConfig(input: unknown, fallbackIndex = 1): Screen
       ? stored.display_name
       : typeof stored.displayName === 'string'
         ? stored.displayName
-        : typeof (stored.presentation_settings as Record<string, unknown> | undefined)?.screen_name === 'string'
-          ? String((stored.presentation_settings as Record<string, unknown>).screen_name)
-          : typeof (stored.presentationSettings as Record<string, unknown> | undefined)?.screenName === 'string'
-            ? String((stored.presentationSettings as Record<string, unknown>).screenName)
+        : typeof storedPresentationSettings?.screen_name === 'string'
+          ? String(storedPresentationSettings.screen_name)
+          : typeof storedPresentationSettingsCamel?.screenName === 'string'
+            ? String(storedPresentationSettingsCamel.screenName)
             : fallback.name;
   const view = isScreenView(stored.screen_view)
     ? stored.screen_view
@@ -108,11 +119,29 @@ export function normalizeScreenConfig(input: unknown, fallbackIndex = 1): Screen
       ? stored.laundry_room_id
       : typeof stored.laundryRoomId === 'string'
         ? stored.laundryRoomId
-        : typeof (stored.presentation_settings as Record<string, unknown> | undefined)?.laundry_room_id === 'string'
-          ? String((stored.presentation_settings as Record<string, unknown>).laundry_room_id)
-          : typeof (stored.presentationSettings as Record<string, unknown> | undefined)?.laundryRoomId === 'string'
-            ? String((stored.presentationSettings as Record<string, unknown>).laundryRoomId)
+        : typeof storedPresentationSettings?.laundry_room_id === 'string'
+          ? String(storedPresentationSettings.laundry_room_id)
+          : typeof storedPresentationSettingsCamel?.laundryRoomId === 'string'
+            ? String(storedPresentationSettingsCamel.laundryRoomId)
             : '',
+    meetingId: typeof stored.meeting_id === 'string'
+      ? stored.meeting_id
+      : typeof stored.meetingId === 'string'
+        ? stored.meetingId
+        : typeof storedPresentationSettings?.meeting_id === 'string'
+          ? String(storedPresentationSettings.meeting_id)
+          : typeof storedPresentationSettingsCamel?.meetingId === 'string'
+            ? String(storedPresentationSettingsCamel.meetingId)
+            : '',
+    meetingPart: isMeetingScreenPart(stored.meeting_part)
+      ? stored.meeting_part
+      : isMeetingScreenPart(stored.meetingPart)
+        ? stored.meetingPart
+        : isMeetingScreenPart(storedPresentationSettings?.meeting_part)
+          ? storedPresentationSettings.meeting_part
+          : isMeetingScreenPart(storedPresentationSettingsCamel?.meetingPart)
+            ? storedPresentationSettingsCamel.meetingPart
+            : 'full',
   };
 }
 
@@ -203,7 +232,14 @@ export function buildOrganisationScreenSettings(
       name: screen.name,
       screen_view: screen.screenView,
       laundry_room_id: screen.laundryRoomId || '',
-      presentation_settings: screen.presentationSettings,
+      meeting_id: screen.meetingId || '',
+      meeting_part: screen.meetingPart || 'full',
+      presentation_settings: {
+        ...screen.presentationSettings,
+        laundry_room_id: screen.laundryRoomId || '',
+        meeting_id: screen.meetingId || '',
+        meeting_part: screen.meetingPart || 'full',
+      },
     })),
   };
 
@@ -233,5 +269,6 @@ export function screenViewLabel(view: ScreenView) {
   if (view === 'short-stay') return 'Korttidskalender';
   if (view === 'work-orders') return 'Arbetsordrar';
   if (view === 'laundry') return 'Tvättstuga';
+  if (view === 'meeting') return 'Mötesvy';
   return 'Presentation';
 }
