@@ -21,7 +21,7 @@ interface ShortStayPageProps {
   onNavigate: (page: string) => void;
 }
 
-type Tab = 'overview' | 'calendar' | 'bookings' | 'receipts' | 'settings';
+type Tab = 'overview' | 'calendar' | 'cleaning' | 'bookings' | 'receipts' | 'settings';
 
 interface UnitForm {
   name: string;
@@ -79,6 +79,32 @@ interface Beds24Log {
   external_id?: string | null;
   created_at: string;
 }
+
+interface CommonCleaning {
+  id: string;
+  organisation_id: string;
+  title: string;
+  description: string;
+  due_date: string;
+  required_unit_ids: string[];
+  cleaning_status: ShortStayCleaningStatus;
+  completed_by: string | null;
+  completed_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CommonCleaningForm {
+  title: string;
+  description: string;
+  due_date: string;
+  required_unit_ids: string[];
+}
+
+type CleaningItem =
+  | { kind: 'booking'; id: string; status: ShortStayCleaningStatus; date: string; title: string; subtitle: string; booking: ShortStayBooking }
+  | { kind: 'common'; id: string; status: ShortStayCleaningStatus; date: string; title: string; subtitle: string; cleaning: CommonCleaning };
 
 const todayKey = () => {
   const now = new Date();
@@ -169,6 +195,13 @@ const defaultBookingForm: BookingForm = {
   notes: '',
 };
 
+const defaultCommonCleaningForm: CommonCleaningForm = {
+  title: '',
+  description: '',
+  due_date: todayKey(),
+  required_unit_ids: [],
+};
+
 const cleaningLabels: Record<ShortStayCleaningStatus, string> = {
   not_needed: 'Arkiverad',
   dirty: 'Behöver städas',
@@ -177,17 +210,15 @@ const cleaningLabels: Record<ShortStayCleaningStatus, string> = {
 };
 
 function SwipeableCleaningCard({
-  booking,
-  unitName,
+  item,
   disabled,
   onOpen,
-  onComplete,
+  onToggle,
 }: {
-  booking: ShortStayBooking;
-  unitName: string;
+  item: CleaningItem;
   disabled: boolean;
   onOpen: () => void;
-  onComplete: () => void;
+  onToggle: () => void;
 }) {
   const [startX, setStartX] = useState<number | null>(null);
   const [offsetX, setOffsetX] = useState(0);
@@ -213,26 +244,28 @@ function SwipeableCleaningCard({
 
   function handlePointerUp() {
     if (disabled) return;
-    const shouldComplete = offsetX <= threshold;
+    const shouldToggle = offsetX <= threshold;
     const shouldOpen = Math.abs(offsetX) < 8;
     resetSwipe();
-    if (shouldComplete) {
-      onComplete();
+    if (shouldToggle) {
+      onToggle();
       return;
     }
     if (shouldOpen) onOpen();
   }
 
+  const isClean = item.status === 'clean';
+
   return (
-    <div className="relative overflow-hidden rounded-lg bg-emerald-600">
+    <div className={`relative overflow-hidden rounded-lg ${isClean ? 'bg-amber-600' : 'bg-emerald-600'}`}>
       <div className="absolute inset-y-0 right-0 flex w-32 items-center justify-center gap-1 px-3 text-sm font-bold text-white">
-        <CheckCircle2 className="h-4 w-4" />
-        Klar
+        {isClean ? <Wrench className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+        {isClean ? 'Ostädad' : 'Klar'}
       </div>
       <div
         role="button"
         tabIndex={0}
-        aria-label={`Öppna eller svep för att klarmarkera städning för ${unitName}`}
+        aria-label={`Öppna eller svep för att ändra städstatus för ${item.title}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -249,13 +282,15 @@ function SwipeableCleaningCard({
         }}
       >
         <div className="flex items-center justify-between gap-3">
-          <p className="font-medium text-slate-900">{unitName}</p>
-          <Badge className={disabled ? 'bg-slate-100 text-slate-600' : 'bg-rose-100 text-rose-700'}>
-            {disabled ? 'Klarmarkerar...' : cleaningLabels[booking.cleaning_status]}
+          <p className="font-medium text-slate-900">{item.title}</p>
+          <Badge className={disabled ? 'bg-slate-100 text-slate-600' : isClean ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}>
+            {disabled ? 'Sparar...' : cleaningLabels[item.status]}
           </Badge>
         </div>
-        <p className="text-sm text-slate-500">Efter {booking.guest_name || booking.title || 'bokning'} · ut {formatShortDate(booking.end_date)}</p>
-        <p className="mt-1 text-xs font-medium text-blue-700">Svep vänster när kontroll/städ är klar</p>
+        <p className="text-sm text-slate-500">{item.subtitle}</p>
+        <p className="mt-1 text-xs font-medium text-blue-700">
+          {isClean ? 'Svep vänster om den ska markeras som ostädad igen' : 'Svep vänster när kontroll/städ är klar'}
+        </p>
       </div>
     </div>
   );
@@ -378,6 +413,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   const [tab, setTab] = useState<Tab>('overview');
   const [units, setUnits] = useState<ShortStayUnit[]>([]);
   const [bookings, setBookings] = useState<ShortStayBooking[]>([]);
+  const [commonCleanings, setCommonCleanings] = useState<CommonCleaning[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [apartments, setApartments] = useState<Apartment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -385,10 +421,12 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [unitModalOpen, setUnitModalOpen] = useState(false);
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [commonCleaningModalOpen, setCommonCleaningModalOpen] = useState(false);
   const [editingUnit, setEditingUnit] = useState<ShortStayUnit | null>(null);
   const [editingBooking, setEditingBooking] = useState<ShortStayBooking | null>(null);
   const [unitForm, setUnitForm] = useState<UnitForm>(defaultUnitForm);
   const [bookingForm, setBookingForm] = useState<BookingForm>(defaultBookingForm);
+  const [commonCleaningForm, setCommonCleaningForm] = useState<CommonCleaningForm>(defaultCommonCleaningForm);
   const [saving, setSaving] = useState(false);
   const [syncingUnitId, setSyncingUnitId] = useState<string | null>(null);
   const [formError, setFormError] = useState('');
@@ -403,7 +441,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   const [savingBeds24, setSavingBeds24] = useState(false);
   const [syncingBeds24, setSyncingBeds24] = useState(false);
   const [beds24Message, setBeds24Message] = useState('');
-  const [completingCleaningId, setCompletingCleaningId] = useState<string | null>(null);
+  const [updatingCleaningId, setUpdatingCleaningId] = useState<string | null>(null);
   const [conflictsModalOpen, setConflictsModalOpen] = useState(false);
 
   const isAdmin = user?.role === 'admin';
@@ -427,14 +465,48 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     const current = bookings.filter(booking => overlaps(booking, today) && booking.booking_type === 'booking');
     const checkIns = bookings.filter(booking => booking.start_date === today && booking.booking_type === 'booking');
     const checkOuts = bookings.filter(booking => booking.end_date === today && booking.booking_type === 'booking');
-    const cleaning = bookings.filter(booking =>
+    const bookingCleaningItems = bookings.filter(booking =>
       booking.end_date <= today &&
-      booking.cleaning_status !== 'clean' &&
       booking.cleaning_status !== 'not_needed'
     );
+    const commonCleaningItems = commonCleanings.filter(cleaning => cleaning.cleaning_status !== 'not_needed' && cleaning.due_date <= today);
+    const cleaningItems: CleaningItem[] = [
+      ...bookingCleaningItems.map((booking) => {
+        const unit = units.find(unit => unit.id === booking.unit_id);
+        return {
+          kind: 'booking' as const,
+          id: booking.id,
+          status: booking.cleaning_status,
+          date: booking.end_date,
+          title: unit?.name || 'Okänd enhet',
+          subtitle: `Efter ${booking.guest_name || booking.title || 'bokning'} · ut ${formatShortDate(booking.end_date)}`,
+          booking,
+        };
+      }),
+      ...commonCleaningItems.map((cleaning) => {
+        const requiredUnits = cleaning.required_unit_ids
+          .map(unitId => units.find(unit => unit.id === unitId)?.name)
+          .filter(Boolean)
+          .join(', ');
+        return {
+          kind: 'common' as const,
+          id: cleaning.id,
+          status: cleaning.cleaning_status,
+          date: cleaning.due_date,
+          title: cleaning.title,
+          subtitle: `${formatShortDate(cleaning.due_date)}${requiredUnits ? ` · gäller ${requiredUnits}` : ''}`,
+          cleaning,
+        };
+      }),
+    ].sort((a, b) => {
+      if (a.status === 'clean' && b.status !== 'clean') return 1;
+      if (a.status !== 'clean' && b.status === 'clean') return -1;
+      return a.date.localeCompare(b.date);
+    });
+    const pendingCleaningCount = cleaningItems.filter(item => item.status !== 'clean').length;
     const currentGuests = current.reduce((sum, booking) => sum + (booking.guest_count || 1), 0);
-    return { activeUnits, current, currentGuests, checkIns, checkOuts, cleaning };
-  }, [bookings, units]);
+    return { activeUnits, current, currentGuests, checkIns, checkOuts, cleaningItems, pendingCleaningCount };
+  }, [bookings, commonCleanings, units]);
 
   const conflicts = useMemo(() => {
     const today = todayKey();
@@ -468,7 +540,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     setLoading(true);
     setError('');
 
-    const [unitsRes, bookingsRes, propertiesRes, apartmentsRes] = await Promise.all([
+    const [unitsRes, bookingsRes, commonCleaningsRes, propertiesRes, apartmentsRes] = await Promise.all([
       supabase
         .from('vihem_short_stay_units')
         .select('*, property:vihem_properties(*), apartment:vihem_apartments(*)')
@@ -482,6 +554,12 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
         .gte('end_date', toDateKey(addDays(new Date(), -30)))
         .order('start_date'),
       supabase
+        .from('vihem_short_stay_common_cleanings')
+        .select('*')
+        .eq('organisation_id', organisationId)
+        .gte('due_date', toDateKey(addDays(new Date(), -30)))
+        .order('due_date'),
+      supabase
         .from('vihem_properties')
         .select('*')
         .eq('organisation_id', organisationId)
@@ -493,11 +571,12 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
         .order('apartment_number'),
     ]);
 
-    if (unitsRes.error || bookingsRes.error) {
-      setError(unitsRes.error?.message || bookingsRes.error?.message || 'Kunde inte ladda korttidsuthyrning.');
+    if (unitsRes.error || bookingsRes.error || commonCleaningsRes.error) {
+      setError(unitsRes.error?.message || bookingsRes.error?.message || commonCleaningsRes.error?.message || 'Kunde inte ladda korttidsuthyrning.');
     } else {
       setUnits((unitsRes.data || []) as ShortStayUnit[]);
       setBookings((bookingsRes.data || []) as ShortStayBooking[]);
+      setCommonCleanings((commonCleaningsRes.data || []) as CommonCleaning[]);
       setProperties((propertiesRes.data || []) as Property[]);
       setApartments((apartmentsRes.data || []) as Apartment[]);
     }
@@ -612,6 +691,16 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     });
     setFormError('');
     setBookingModalOpen(true);
+  }
+
+  function openCreateCommonCleaning() {
+    setCommonCleaningForm({
+      ...defaultCommonCleaningForm,
+      due_date: todayKey(),
+      required_unit_ids: [],
+    });
+    setFormError('');
+    setCommonCleaningModalOpen(true);
   }
 
   function openEditBooking(booking: ShortStayBooking) {
@@ -756,15 +845,52 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     await fetchData();
   }
 
-  async function completeCleaningOrder(booking: ShortStayBooking) {
-    if (!user || completingCleaningId) return;
+  async function saveCommonCleaning() {
+    if (!organisationId || !user) return;
+    setFormError('');
+    if (!commonCleaningForm.title.trim()) {
+      setFormError('Ange namn på den gemensamma ytan.');
+      return;
+    }
+    if (commonCleaningForm.required_unit_ids.length === 0) {
+      setFormError('Välj minst ett rum/lägenhet som villkor.');
+      return;
+    }
+
+    setSaving(true);
+    const { error: insertError } = await supabase
+      .from('vihem_short_stay_common_cleanings')
+      .insert({
+        organisation_id: organisationId,
+        title: commonCleaningForm.title.trim(),
+        description: commonCleaningForm.description.trim(),
+        due_date: commonCleaningForm.due_date || todayKey(),
+        required_unit_ids: commonCleaningForm.required_unit_ids,
+        cleaning_status: 'dirty',
+        created_by: user.id,
+        updated_at: new Date().toISOString(),
+      });
+    setSaving(false);
+
+    if (insertError) {
+      setFormError(insertError.message);
+      return;
+    }
+
+    setCommonCleaningModalOpen(false);
+    await fetchData();
+  }
+
+  async function toggleBookingCleaning(booking: ShortStayBooking) {
+    if (!user || updatingCleaningId) return;
     setError('');
-    setCompletingCleaningId(booking.id);
+    setUpdatingCleaningId(`booking-${booking.id}`);
+    const nextStatus: ShortStayCleaningStatus = booking.cleaning_status === 'clean' ? 'dirty' : 'clean';
     try {
       const { error: updateError } = await supabase
         .from('vihem_short_stay_bookings')
         .update({
-          cleaning_status: 'clean',
+          cleaning_status: nextStatus,
           updated_at: new Date().toISOString(),
         })
         .eq('id', booking.id);
@@ -772,14 +898,46 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
       if (updateError) throw updateError;
 
       setBookings((current) => current.map((item) => (
-        item.id === booking.id ? { ...item, cleaning_status: 'clean' } : item
+        item.id === booking.id ? { ...item, cleaning_status: nextStatus } : item
       )));
       await fetchData();
     } catch (err: any) {
-      console.error('Error completing cleaning order:', err);
-      setError(err.message || 'Kunde inte klarmarkera städordern.');
+      console.error('Error updating cleaning order:', err);
+      setError(err.message || 'Kunde inte ändra städstatus.');
     } finally {
-      setCompletingCleaningId(null);
+      setUpdatingCleaningId(null);
+    }
+  }
+
+  async function toggleCommonCleaning(cleaning: CommonCleaning) {
+    if (!user || updatingCleaningId) return;
+    setError('');
+    setUpdatingCleaningId(`common-${cleaning.id}`);
+    const nextStatus: ShortStayCleaningStatus = cleaning.cleaning_status === 'clean' ? 'dirty' : 'clean';
+    try {
+      const { error: updateError } = await supabase
+        .from('vihem_short_stay_common_cleanings')
+        .update({
+          cleaning_status: nextStatus,
+          completed_by: nextStatus === 'clean' ? user.id : null,
+          completed_at: nextStatus === 'clean' ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', cleaning.id);
+
+      if (updateError) throw updateError;
+
+      setCommonCleanings((current) => current.map((item) => (
+        item.id === cleaning.id
+          ? { ...item, cleaning_status: nextStatus, completed_by: nextStatus === 'clean' ? user.id : null, completed_at: nextStatus === 'clean' ? new Date().toISOString() : null }
+          : item
+      )));
+      await fetchData();
+    } catch (err: any) {
+      console.error('Error updating common cleaning:', err);
+      setError(err.message || 'Kunde inte ändra städstatus.');
+    } finally {
+      setUpdatingCleaningId(null);
     }
   }
 
@@ -918,6 +1076,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
         {[
           ['overview', 'Översikt'],
           ['calendar', 'Kalender'],
+          ['cleaning', 'Städning'],
           ['bookings', 'Bokningar'],
           ['receipts', 'Kvitton'],
           ...(isAdmin ? [['settings', 'Inställningar']] : []),
@@ -969,7 +1128,7 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
             </Card>
             <Card className="p-4">
               <p className="text-xs text-slate-500">Att städa</p>
-              <p className="mt-1 text-2xl font-bold text-rose-700">{stats.cleaning.length}</p>
+              <p className="mt-1 text-2xl font-bold text-rose-700">{stats.pendingCleaningCount}</p>
             </Card>
           </div>
 
@@ -1030,27 +1189,63 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
             </Card>
 
             <Card className="p-5">
-              <h2 className="font-semibold text-slate-900 mb-4">Städstatus</h2>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="font-semibold text-slate-900">Städstatus</h2>
+                {isAdmin && (
+                  <Button size="sm" variant="secondary" onClick={openCreateCommonCleaning}>
+                    <Plus className="w-4 h-4" /> Gemensam yta
+                  </Button>
+                )}
+              </div>
               <div className="grid gap-3">
-                {stats.cleaning.length === 0 ? (
+                {stats.cleaningItems.length === 0 ? (
                   <p className="text-sm text-slate-500">Inget väntar på städning.</p>
                 ) : (
-                  stats.cleaning.slice(0, 8).map((booking) => {
-                    const unit = units.find(u => u.id === booking.unit_id);
-                    return (
-                      <SwipeableCleaningCard
-                        key={booking.id}
-                        booking={booking}
-                        unitName={unit?.name || 'Okänd enhet'}
-                        disabled={completingCleaningId === booking.id}
-                        onOpen={() => openEditBooking(booking)}
-                        onComplete={() => completeCleaningOrder(booking)}
-                      />
-                    );
-                  })
+                  stats.cleaningItems.slice(0, 8).map((item) => (
+                    <SwipeableCleaningCard
+                      key={`${item.kind}-${item.id}`}
+                      item={item}
+                      disabled={updatingCleaningId === `${item.kind}-${item.id}`}
+                      onOpen={() => item.kind === 'booking' ? openEditBooking(item.booking) : undefined}
+                      onToggle={() => item.kind === 'booking' ? toggleBookingCleaning(item.booking) : toggleCommonCleaning(item.cleaning)}
+                    />
+                  ))
                 )}
               </div>
             </Card>
+          </div>
+        </div>
+      ) : tab === 'cleaning' ? (
+        <div className="space-y-4">
+          <Card className="p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Städning</h2>
+                <p className="text-sm text-slate-500">Klara städningar ligger kvar och kan svepas tillbaka till ostädade.</p>
+              </div>
+              {isAdmin && (
+                <Button onClick={openCreateCommonCleaning}>
+                  <Plus className="w-4 h-4" /> Gemensam yta
+                </Button>
+              )}
+            </div>
+          </Card>
+          <div className="grid gap-3">
+            {stats.cleaningItems.length === 0 ? (
+              <Card className="p-8">
+                <EmptyState icon={<CheckCircle2 className="w-12 h-12" />} title="Ingen städning att visa" />
+              </Card>
+            ) : (
+              stats.cleaningItems.map((item) => (
+                <SwipeableCleaningCard
+                  key={`${item.kind}-${item.id}`}
+                  item={item}
+                  disabled={updatingCleaningId === `${item.kind}-${item.id}`}
+                  onOpen={() => item.kind === 'booking' ? openEditBooking(item.booking) : undefined}
+                  onToggle={() => item.kind === 'booking' ? toggleBookingCleaning(item.booking) : toggleCommonCleaning(item.cleaning)}
+                />
+              ))
+            )}
           </div>
         </div>
       ) : tab === 'calendar' ? (
@@ -1633,6 +1828,69 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setUnitModalOpen(false)}>Avbryt</Button>
             <Button onClick={saveUnit} loading={saving}>{editingUnit ? 'Spara' : 'Skapa'}</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={commonCleaningModalOpen} onClose={() => setCommonCleaningModalOpen(false)} title="Ny städning av gemensam yta" size="lg">
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Input
+              label="Gemensam yta"
+              value={commonCleaningForm.title}
+              onChange={e => setCommonCleaningForm({ ...commonCleaningForm, title: e.target.value })}
+              placeholder="T.ex. kök, korridor, badrum"
+            />
+            <Input
+              label="Datum"
+              type="date"
+              value={commonCleaningForm.due_date}
+              onChange={e => setCommonCleaningForm({ ...commonCleaningForm, due_date: e.target.value })}
+            />
+          </div>
+          <Textarea
+            label="Instruktion"
+            rows={3}
+            value={commonCleaningForm.description}
+            onChange={e => setCommonCleaningForm({ ...commonCleaningForm, description: e.target.value })}
+            placeholder="Vad ska kontrolleras eller städas?"
+          />
+          <div className="rounded-lg border border-slate-200 p-3">
+            <p className="text-sm font-semibold text-slate-900">Rum/lägenheter som ingår i villkoret</p>
+            <p className="mt-1 text-xs text-slate-500">Välj de rum eller lägenheter som ska omfattas för att städningen ska vara uppfylld.</p>
+            <div className="mt-3 grid max-h-64 gap-2 overflow-y-auto sm:grid-cols-2">
+              {units.map(unit => {
+                const checked = commonCleaningForm.required_unit_ids.includes(unit.id);
+                return (
+                  <label key={unit.id} className="flex items-start gap-2 rounded-lg border border-slate-200 p-2 text-sm hover:bg-slate-50">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) => {
+                        setCommonCleaningForm(current => ({
+                          ...current,
+                          required_unit_ids: event.target.checked
+                            ? [...current.required_unit_ids, unit.id]
+                            : current.required_unit_ids.filter(id => id !== unit.id),
+                        }));
+                      }}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                    />
+                    <span>
+                      <span className="block font-medium text-slate-900">{unit.name}</span>
+                      <span className="block text-xs text-slate-500">{unit.property?.name || 'Ingen fastighet'}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+          {formError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{formError}</div>}
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => setCommonCleaningModalOpen(false)}>Avbryt</Button>
+            <Button onClick={saveCommonCleaning} loading={saving}>
+              <ClipboardCheck className="w-4 h-4" /> Skapa städning
+            </Button>
           </div>
         </div>
       </Modal>

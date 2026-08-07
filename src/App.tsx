@@ -108,7 +108,23 @@ function AppInner() {
       });
     }
 
-    if (moduleResult.error || !moduleResult.data?.length || OPTIONAL_MODULE_KEYS.some(key => !loadedModuleKeys.has(key))) {
+    const missingModuleKeys = OPTIONAL_MODULE_KEYS.filter(key => !loadedModuleKeys.has(key));
+
+    if (moduleResult.error || missingModuleKeys.length > 0) {
+      await Promise.all(
+        missingModuleKeys.map(async (moduleKey) => {
+          const { data, error } = await supabase.rpc('vihem_module_enabled', { module_key: moduleKey });
+          if (!error && typeof data === 'boolean') {
+            nextModules[moduleKey] = data;
+            loadedModuleKeys.add(moduleKey);
+          }
+        })
+      );
+    }
+
+    const stillMissingModuleKeys = OPTIONAL_MODULE_KEYS.filter(key => !loadedModuleKeys.has(key));
+
+    if (moduleResult.error || stillMissingModuleKeys.length > 0) {
       const organisationResult = await supabase
         .from('vihem_organisations')
         .select('customer_projects_enabled, short_stay_enabled')
@@ -123,17 +139,6 @@ function AppInner() {
           nextModules.short_stay = Boolean(organisationResult.data?.short_stay_enabled);
         }
       }
-
-      await Promise.all(
-        OPTIONAL_MODULE_KEYS
-          .filter(key => !loadedModuleKeys.has(key))
-          .map(async (moduleKey) => {
-            const { data, error } = await supabase.rpc('vihem_module_enabled', { module_key: moduleKey });
-            if (!error && typeof data === 'boolean') {
-              nextModules[moduleKey] = data;
-            }
-          })
-      );
     }
 
     if (moduleResult.error) {
