@@ -29,7 +29,7 @@ import {
 } from '../lib/screenSettings';
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
-const SCREEN_APP_VERSION = '2026-08-07-tv-layout-8';
+const SCREEN_APP_VERSION = '2026-08-07-tv-layout-9';
 const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
 
 const addDays = (date: Date, days: number) => {
@@ -92,7 +92,14 @@ function screenBookingBandStyle(booking: ShortStayBooking, days: string[]) {
   };
 }
 
-function workOrderAssigneeLabel(order: WorkOrder, staffMembers: Pick<Profile, 'id' | 'name'>[]) {
+function nameInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}.${parts[parts.length - 1][0]}.`.toUpperCase();
+}
+
+function workOrderAssigneeLabel(order: WorkOrder, staffMembers: Pick<Profile, 'id' | 'name'>[], useInitials = false) {
   const ids = order.assigned_to_ids?.length ? order.assigned_to_ids : order.assigned_to ? [order.assigned_to] : [];
   if (ids.length === 0) return 'Ej tilldelad';
 
@@ -100,8 +107,9 @@ function workOrderAssigneeLabel(order: WorkOrder, staffMembers: Pick<Profile, 'i
     .map((id) => staffMembers.find((staff) => staff.id === id)?.name)
     .filter(Boolean);
 
-  if (names.length > 0) return names.join(', ');
-  return order.assigned?.name || `${ids.length} tilldelade`;
+  if (names.length > 0) return useInitials ? names.map(nameInitials).filter(Boolean).join(' ') : names.join(', ');
+  if (order.assigned?.name) return useInitials ? nameInitials(order.assigned.name) : order.assigned.name;
+  return `${ids.length} tilldelade`;
 }
 
 export function ScreenDisplayPage() {
@@ -674,7 +682,7 @@ function PresentationScreen({
     return entry.work_order?.title || entry.customer_project?.title || entry.customer_project?.name || entry.property?.name || TIME_CATEGORY_LABELS[entry.category] || 'Arbete';
   };
   const isOrderOverdue = (order: WorkOrder) => Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
-  const assigneeLabel = (order: WorkOrder) => workOrderAssigneeLabel(order, staffMembers);
+  const assigneeLabel = (order: WorkOrder) => workOrderAssigneeLabel(order, staffMembers, true);
   const rightPanelCount = [settings.showNews, settings.showClockedIn, settings.showMeetings].filter(Boolean).length;
   const rightPanelRows = rightPanelCount === 0 ? '1fr' : rightPanelCount === 1 ? '1fr' : rightPanelCount === 2 ? '0.62fr 1.38fr' : '0.66fr 1.15fr 0.35fr';
   const scrollingNews = activeNews.length > 1;
