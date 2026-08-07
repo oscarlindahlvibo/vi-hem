@@ -956,19 +956,19 @@ function MeetingScreen({
       </div>
 
       {meetingPart === 'part-1' ? (
-        <div className="grid min-h-0 gap-2 xl:grid-cols-[0.82fr_1fr_1fr]">
+        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '0.82fr 1fr 1fr' }}>
           {agendaPanel}
           {workOrderPanel}
           {projectPanel}
         </div>
       ) : meetingPart === 'part-2' ? (
-        <div className="grid min-h-0 gap-2 xl:grid-cols-[1fr_1fr_1fr]">
+        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
           {maintenancePanel}
           {absencePanel}
           {calendarPanel}
         </div>
       ) : (
-        <div className="grid min-h-0 gap-2 xl:grid-cols-[0.78fr_1fr_1fr_0.82fr]">
+        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '0.78fr 1fr 1fr 0.82fr' }}>
           {agendaPanel}
           {workOrderPanel}
           {projectPanel}
