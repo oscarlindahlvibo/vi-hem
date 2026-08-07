@@ -29,7 +29,7 @@ import {
 } from '../lib/screenSettings';
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
-const SCREEN_APP_VERSION = '2026-08-07-tv-layout-5';
+const SCREEN_APP_VERSION = '2026-08-07-tv-layout-6';
 const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
 
 const addDays = (date: Date, days: number) => {
@@ -584,7 +584,7 @@ function PresentationScreen({
   const [now, setNow] = useState(new Date());
   const [weatherText, setWeatherText] = useState('Laddar väder...');
   const availableHeight = Math.max(screenHeight - 54, 480);
-  const compact = screenWidth < 1300 || availableHeight < 680;
+  const compact = true;
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 15_000);
@@ -632,7 +632,7 @@ function PresentationScreen({
   const todayValue = dateKey(today());
   const checkIns = bookings.filter(booking => booking.booking_type === 'booking' && booking.start_date === todayValue);
   const checkOuts = bookings.filter(booking => booking.booking_type === 'booking' && booking.end_date === todayValue);
-  const activeNews = news.slice(0, compact ? 2 : 3);
+  const activeNews = news.slice(0, 4);
   const priorityRank = { urgent: 0, high: 1, normal: 2, low: 3 };
   const activeWorkOrders = [...workOrders]
     .sort((a, b) => {
@@ -641,8 +641,8 @@ function PresentationScreen({
       if (aDue !== bDue) return aDue - bDue;
       return (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9);
     })
-    .slice(0, compact ? 5 : 7);
-  const activeMeetings = meetings.slice(0, compact ? 3 : 4);
+    .slice(0, 8);
+  const activeMeetings = meetings.slice(0, 4);
   const customTickerItems = [
     ...(settings.customTickerItems || []),
     ...(settings.customTickerItems?.length ? [] : settings.customTickerText ? [settings.customTickerText] : []),
@@ -663,39 +663,39 @@ function PresentationScreen({
   const isOrderOverdue = (order: WorkOrder) => Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
   const assigneeLabel = (order: WorkOrder) => workOrderAssigneeLabel(order, staffMembers);
   const rightPanelCount = [settings.showNews, settings.showClockedIn, settings.showMeetings].filter(Boolean).length;
-  const rightPanelRows = rightPanelCount === 0 ? '1fr' : rightPanelCount === 1 ? '1fr' : rightPanelCount === 2 ? '1fr 1fr' : '1.25fr 0.8fr 0.7fr';
+  const rightPanelRows = rightPanelCount === 0 ? '1fr' : rightPanelCount === 1 ? '1fr' : rightPanelCount === 2 ? '1fr 1fr' : '1.05fr 0.7fr 0.6fr';
 
   return (
     <div
-      className="relative overflow-hidden rounded-xl bg-slate-950 p-3 text-white"
+      className="relative overflow-hidden rounded-xl bg-slate-950 p-2 text-white"
       style={{
         height: availableHeight,
         display: 'grid',
-        gridTemplateRows: compact ? '128px minmax(0, 1fr) 54px' : '154px minmax(0, 1fr) 62px',
-        gap: compact ? 10 : 12,
+        gridTemplateRows: '94px minmax(0, 1fr) 42px',
+        gap: 8,
       }}
     >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.3),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(20,184,166,0.2),transparent_32%)]" />
 
-      <section className="relative overflow-hidden rounded-3xl bg-white/10 px-6 py-5 ring-1 ring-white/10">
-        <div className="flex h-full items-center justify-between gap-8">
+      <section className="relative overflow-hidden rounded-2xl bg-white/10 px-4 py-3 ring-1 ring-white/10">
+        <div className="flex h-full items-center justify-between gap-5">
           <div className="min-w-0">
-            <p className="truncate font-black uppercase text-blue-200" style={{ fontSize: compact ? 15 : 18, letterSpacing: '0.24em' }}>
+            <p className="truncate font-black uppercase text-blue-200" style={{ fontSize: 12, letterSpacing: '0.22em' }}>
               {organisationName}
             </p>
-            <h2 className="mt-1 font-black leading-none" style={{ fontSize: compact ? 54 : 68 }}>
+            <h2 className="font-black leading-none" style={{ fontSize: 38 }}>
               {now.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
             </h2>
-            <p className="mt-1 truncate font-bold text-slate-200" style={{ fontSize: compact ? 22 : 28 }}>
+            <p className="truncate font-bold text-slate-200" style={{ fontSize: 16 }}>
               {now.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}
             </p>
           </div>
-          <div className="shrink-0 rounded-2xl bg-white/10 px-5 py-4 text-right ring-1 ring-white/10" style={{ width: compact ? 410 : 520 }}>
-            <div className="flex items-center justify-end gap-3">
-              <CloudSun className="h-7 w-7 text-amber-200" />
-              <p className="font-bold text-slate-300" style={{ fontSize: compact ? 16 : 20 }}>Dagens väder</p>
+          <div className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-right ring-1 ring-white/10" style={{ width: 330 }}>
+            <div className="flex items-center justify-end gap-2">
+              <CloudSun className="h-5 w-5 text-amber-200" />
+              <p className="font-bold text-slate-300" style={{ fontSize: 13 }}>Dagens väder</p>
             </div>
-            <p className="mt-1 font-black leading-tight" style={{ fontSize: compact ? 18 : 23 }}>{weatherText}</p>
+            <p className="mt-0.5 font-black leading-tight" style={{ fontSize: 14 }}>{weatherText}</p>
           </div>
         </div>
       </section>
@@ -704,43 +704,43 @@ function PresentationScreen({
         className="relative min-h-0"
         style={{
           display: 'grid',
-          gridTemplateColumns: rightPanelCount > 0 ? 'minmax(0, 1.35fr) minmax(360px, 1fr)' : '1fr',
-          gap: compact ? 10 : 12,
+          gridTemplateColumns: rightPanelCount > 0 ? 'minmax(0, 1.35fr) minmax(300px, 0.95fr)' : '1fr',
+          gap: 8,
         }}
       >
         {settings.showWorkOrders && (
-          <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl bg-white/10 p-5 ring-1 ring-white/10">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="flex items-center gap-3 font-black" style={{ fontSize: compact ? 28 : 34 }}>
-                <ClipboardList className="h-8 w-8 text-amber-200" />
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="flex items-center gap-2 font-black" style={{ fontSize: 22 }}>
+                <ClipboardList className="h-6 w-6 text-amber-200" />
                 Arbetsordrar
               </h3>
-              <span className="rounded-full bg-white/10 px-4 py-1.5 font-black" style={{ fontSize: compact ? 20 : 24 }}>{workOrders.length}</span>
+              <span className="rounded-full bg-white/10 px-3 py-1 font-black" style={{ fontSize: 16 }}>{workOrders.length}</span>
             </div>
-            <div className="min-h-0 flex-1 space-y-3 overflow-hidden">
+            <div className="min-h-0 flex-1 space-y-2 overflow-hidden">
               {activeWorkOrders.length === 0 ? (
-                <p className="rounded-2xl bg-white/5 px-6 py-8 font-bold text-slate-300" style={{ fontSize: compact ? 20 : 24 }}>Inga aktiva arbetsordrar.</p>
-              ) : activeWorkOrders.slice(0, compact ? 4 : 6).map(order => (
-                <div key={order.id} className="rounded-2xl bg-white/10 px-5 py-4">
-                  <div className="flex items-center justify-between gap-5">
+                <p className="rounded-xl bg-white/5 px-4 py-5 font-bold text-slate-300" style={{ fontSize: 16 }}>Inga aktiva arbetsordrar.</p>
+              ) : activeWorkOrders.slice(0, 7).map(order => (
+                <div key={order.id} className="rounded-xl bg-white/10 px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate font-black" style={{ fontSize: compact ? 23 : 28 }}>{order.title}</p>
-                      <p className="mt-1 truncate font-semibold text-slate-300" style={{ fontSize: compact ? 16 : 19 }}>
+                      <p className="truncate font-black" style={{ fontSize: 18 }}>{order.title}</p>
+                      <p className="truncate font-semibold text-slate-300" style={{ fontSize: 12 }}>
                         {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                      <span className="rounded-full bg-white/10 px-3 py-1.5 font-black" style={{ fontSize: compact ? 14 : 17 }}>{WO_STATUS_LABELS[order.status]}</span>
+                      <span className="rounded-full bg-white/10 px-2 py-1 font-black" style={{ fontSize: 11 }}>{WO_STATUS_LABELS[order.status]}</span>
                       {isOrderOverdue(order) && (
-                        <span className="rounded-full bg-rose-500 px-3 py-1.5 font-black text-white" style={{ fontSize: compact ? 14 : 17 }}>Försenad</span>
+                        <span className="rounded-full bg-rose-500 px-2 py-1 font-black text-white" style={{ fontSize: 11 }}>Försenad</span>
                       )}
                     </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <span className="rounded-full bg-blue-400/15 px-3 py-1 font-black text-blue-100" style={{ fontSize: compact ? 14 : 16 }}>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <span className="rounded-full bg-blue-400/15 px-2 py-0.5 font-black text-blue-100" style={{ fontSize: 11 }}>
                       {assigneeLabel(order)}
                     </span>
-                    <span className="rounded-full bg-amber-400/15 px-3 py-1 font-black text-amber-100" style={{ fontSize: compact ? 14 : 16 }}>
+                    <span className="rounded-full bg-amber-400/15 px-2 py-0.5 font-black text-amber-100" style={{ fontSize: 11 }}>
                       {WO_PRIORITY_LABELS[order.priority] || order.priority}
                     </span>
                   </div>
@@ -751,24 +751,24 @@ function PresentationScreen({
         )}
 
         {rightPanelCount > 0 && (
-          <div className="min-h-0 overflow-hidden" style={{ display: 'grid', gridTemplateRows: rightPanelRows, gap: compact ? 10 : 12 }}>
+          <div className="min-h-0 overflow-hidden" style={{ display: 'grid', gridTemplateRows: rightPanelRows, gap: 8 }}>
             {settings.showNews && (
-              <section className="min-h-0 overflow-hidden rounded-3xl bg-white/10 p-5 ring-1 ring-white/10">
-                <div className="mb-4 flex items-center gap-3">
-                  <Newspaper className="h-7 w-7 text-blue-200" />
-                  <h3 className="font-black" style={{ fontSize: compact ? 24 : 30 }}>Aktuella nyheter</h3>
+              <section className="min-h-0 overflow-hidden rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
+                <div className="mb-2 flex items-center gap-2">
+                  <Newspaper className="h-5 w-5 text-blue-200" />
+                  <h3 className="font-black" style={{ fontSize: 20 }}>Aktuella nyheter</h3>
                 </div>
-                <div className="space-y-3 overflow-hidden">
+                <div className="space-y-2 overflow-hidden">
                   {activeNews.length === 0 ? (
-                    <p className="rounded-2xl bg-white/5 px-5 py-5 font-bold text-slate-300" style={{ fontSize: compact ? 17 : 20 }}>Inga publicerade nyheter.</p>
-                  ) : activeNews.slice(0, compact ? 2 : 3).map(item => (
-                    <div key={item.id} className="rounded-2xl bg-white/10 px-5 py-4">
-                      <div className="flex items-start justify-between gap-4">
+                    <p className="rounded-xl bg-white/5 px-3 py-3 font-bold text-slate-300" style={{ fontSize: 14 }}>Inga publicerade nyheter.</p>
+                  ) : activeNews.slice(0, 3).map(item => (
+                    <div key={item.id} className="rounded-xl bg-white/10 px-3 py-2">
+                      <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate font-black" style={{ fontSize: compact ? 20 : 23 }}>{item.title}</p>
-                          <p className="mt-1 line-clamp-2 font-semibold leading-6 text-slate-300" style={{ fontSize: compact ? 16 : 18 }}>{item.content}</p>
+                          <p className="truncate font-black" style={{ fontSize: 16 }}>{item.title}</p>
+                          <p className="mt-0.5 line-clamp-2 font-semibold leading-5 text-slate-300" style={{ fontSize: 13 }}>{item.content}</p>
                         </div>
-                        {item.priority === 'urgent' && <span className="rounded-full bg-rose-400 px-3 py-1.5 text-sm font-black text-white">Viktigt</span>}
+                        {item.priority === 'urgent' && <span className="rounded-full bg-rose-400 px-2 py-1 text-xs font-black text-white">Viktigt</span>}
                       </div>
                     </div>
                   ))}
@@ -777,22 +777,22 @@ function PresentationScreen({
             )}
 
             {settings.showClockedIn && (
-              <section className="min-h-0 overflow-hidden rounded-3xl bg-emerald-400/10 p-5 ring-1 ring-emerald-300/20">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="flex items-center gap-3 font-black" style={{ fontSize: compact ? 24 : 30 }}>
-                    <Timer className="h-7 w-7 text-emerald-200" />
+              <section className="min-h-0 overflow-hidden rounded-2xl bg-emerald-400/10 p-3 ring-1 ring-emerald-300/20">
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 font-black" style={{ fontSize: 20 }}>
+                    <Timer className="h-5 w-5 text-emerald-200" />
                     Instämplade
                   </h3>
-                  <span className="rounded-full bg-emerald-300/20 px-4 py-1.5 font-black text-emerald-100" style={{ fontSize: compact ? 17 : 20 }}>{clockedInEntries.length}</span>
+                  <span className="rounded-full bg-emerald-300/20 px-3 py-1 font-black text-emerald-100" style={{ fontSize: 14 }}>{clockedInEntries.length}</span>
                 </div>
-                <div className="grid gap-3 overflow-hidden">
+                <div className="grid gap-2 overflow-hidden">
                   {clockedInEntries.length === 0 ? (
-                    <p className="rounded-2xl bg-white/5 px-5 py-5 font-bold text-slate-300" style={{ fontSize: compact ? 17 : 20 }}>Ingen är instämplad just nu.</p>
-                  ) : clockedInEntries.slice(0, compact ? 1 : 2).map(entry => (
-                    <div key={entry.id} className="rounded-2xl bg-white/10 px-5 py-4">
-                      <p className="truncate font-black" style={{ fontSize: compact ? 20 : 23 }}>{entry.user?.name || 'Personal'}</p>
-                      <p className="truncate font-semibold text-emerald-100" style={{ fontSize: compact ? 16 : 18 }}>{timeEntryTitle(entry)}</p>
-                      <p className="mt-1 font-bold text-slate-400" style={{ fontSize: compact ? 13 : 15 }}>Sedan {formatDateTime(entry.start_time)}</p>
+                    <p className="rounded-xl bg-white/5 px-3 py-3 font-bold text-slate-300" style={{ fontSize: 14 }}>Ingen är instämplad just nu.</p>
+                  ) : clockedInEntries.slice(0, 3).map(entry => (
+                    <div key={entry.id} className="rounded-xl bg-white/10 px-3 py-2">
+                      <p className="truncate font-black" style={{ fontSize: 16 }}>{entry.user?.name || 'Personal'}</p>
+                      <p className="truncate font-semibold text-emerald-100" style={{ fontSize: 13 }}>{timeEntryTitle(entry)}</p>
+                      <p className="font-bold text-slate-400" style={{ fontSize: 11 }}>Sedan {formatDateTime(entry.start_time)}</p>
                     </div>
                   ))}
                 </div>
@@ -800,21 +800,21 @@ function PresentationScreen({
             )}
 
             {settings.showMeetings && (
-              <section className="min-h-0 overflow-hidden rounded-3xl bg-white/10 p-5 ring-1 ring-white/10">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="flex items-center gap-3 font-black" style={{ fontSize: compact ? 24 : 30 }}>
-                    <CalendarDays className="h-7 w-7 text-blue-200" />
+              <section className="min-h-0 overflow-hidden rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 font-black" style={{ fontSize: 20 }}>
+                    <CalendarDays className="h-5 w-5 text-blue-200" />
                     Kalender
                   </h3>
-                  <span className="rounded-full bg-white/10 px-4 py-1.5 font-black" style={{ fontSize: compact ? 17 : 20 }}>{meetings.length}</span>
+                  <span className="rounded-full bg-white/10 px-3 py-1 font-black" style={{ fontSize: 14 }}>{meetings.length}</span>
                 </div>
-                <div className="space-y-3 overflow-hidden">
+                <div className="space-y-2 overflow-hidden">
                   {activeMeetings.length === 0 ? (
-                    <p className="rounded-2xl bg-white/5 px-5 py-4 font-bold text-slate-300" style={{ fontSize: compact ? 16 : 18 }}>Inga kommande kalenderhändelser.</p>
+                    <p className="rounded-xl bg-white/5 px-3 py-3 font-bold text-slate-300" style={{ fontSize: 14 }}>Inga kommande kalenderhändelser.</p>
                   ) : activeMeetings.slice(0, 2).map(meeting => (
-                    <div key={meeting.id} className="rounded-2xl bg-white/10 px-5 py-3">
-                      <p className="truncate font-black" style={{ fontSize: compact ? 18 : 21 }}>{meeting.title}</p>
-                      <p className="mt-1 truncate font-semibold text-slate-300" style={{ fontSize: compact ? 14 : 16 }}>
+                    <div key={meeting.id} className="rounded-xl bg-white/10 px-3 py-2">
+                      <p className="truncate font-black" style={{ fontSize: 15 }}>{meeting.title}</p>
+                      <p className="truncate font-semibold text-slate-300" style={{ fontSize: 12 }}>
                         {meeting.starts_at ? formatDateTime(meeting.starts_at) : 'Ingen tid'}{meeting.location ? ` · ${meeting.location}` : ''}
                       </p>
                     </div>
@@ -826,8 +826,8 @@ function PresentationScreen({
         )}
       </main>
 
-      <footer className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/35">
-        <div className="animate-[vihemTicker_38s_linear_infinite] whitespace-nowrap font-black text-white" style={{ fontSize: compact ? 23 : 30, lineHeight: compact ? '54px' : '62px' }}>
+      <footer className="relative overflow-hidden rounded-xl border border-white/10 bg-black/35">
+        <div className="animate-[vihemTicker_38s_linear_infinite] whitespace-nowrap font-black text-white" style={{ fontSize: 18, lineHeight: '42px' }}>
           {[...tickerParts, ...tickerParts].map((part, index) => (
             <span key={`${part}-${index}`} className="mx-10 inline-flex items-center gap-4">
               <span className="h-2 w-2 rounded-full bg-blue-300" />
