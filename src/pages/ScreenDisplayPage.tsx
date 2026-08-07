@@ -29,7 +29,7 @@ import {
 } from '../lib/screenSettings';
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
-const SCREEN_APP_VERSION = '2026-08-07-tv-layout-7';
+const SCREEN_APP_VERSION = '2026-08-07-tv-layout-8';
 const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
 
 const addDays = (date: Date, days: number) => {
@@ -645,7 +645,7 @@ function PresentationScreen({
   const todayValue = dateKey(today());
   const checkIns = bookings.filter(booking => booking.booking_type === 'booking' && booking.start_date === todayValue);
   const checkOuts = bookings.filter(booking => booking.booking_type === 'booking' && booking.end_date === todayValue);
-  const activeNews = news.slice(0, 4);
+  const activeNews = news.slice(0, 8);
   const priorityRank = { urgent: 0, high: 1, normal: 2, low: 3 };
   const activeWorkOrders = [...workOrders]
     .sort((a, b) => {
@@ -654,7 +654,7 @@ function PresentationScreen({
       if (aDue !== bDue) return aDue - bDue;
       return (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9);
     })
-    .slice(0, 8);
+    .slice(0, 12);
   const activeMeetings = meetings.slice(0, 4);
   const customTickerItems = [
     ...(settings.customTickerItems || []),
@@ -676,8 +676,8 @@ function PresentationScreen({
   const isOrderOverdue = (order: WorkOrder) => Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
   const assigneeLabel = (order: WorkOrder) => workOrderAssigneeLabel(order, staffMembers);
   const rightPanelCount = [settings.showNews, settings.showClockedIn, settings.showMeetings].filter(Boolean).length;
-  const rightPanelRows = rightPanelCount === 0 ? '1fr' : rightPanelCount === 1 ? '1fr' : rightPanelCount === 2 ? '0.78fr 1.22fr' : '0.78fr 1.22fr 0.46fr';
-  const scrollingNews = activeNews.length > 2;
+  const rightPanelRows = rightPanelCount === 0 ? '1fr' : rightPanelCount === 1 ? '1fr' : rightPanelCount === 2 ? '0.62fr 1.38fr' : '0.66fr 1.15fr 0.35fr';
+  const scrollingNews = activeNews.length > 1;
   const visibleNews = scrollingNews ? [...activeNews, ...activeNews] : activeNews;
 
   return (
@@ -701,41 +701,33 @@ function PresentationScreen({
         }}
       >
         {settings.showWorkOrders && (
-          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="flex items-center gap-2 font-black" style={{ fontSize: 22 }}>
-                <ClipboardList className="h-6 w-6 text-amber-200" />
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white/10 p-2.5 ring-1 ring-white/10">
+            <div className="mb-1.5 flex items-center justify-between">
+              <h3 className="flex items-center gap-2 font-black" style={{ fontSize: 20 }}>
+                <ClipboardList className="h-5 w-5 text-amber-200" />
                 Arbetsordrar
               </h3>
-              <span className="rounded-full bg-white/10 px-3 py-1 font-black" style={{ fontSize: 16 }}>{workOrders.length}</span>
+              <span className="rounded-full bg-white/10 px-2.5 py-0.5 font-black" style={{ fontSize: 14 }}>{workOrders.length}</span>
             </div>
-            <div className="min-h-0 flex-1 space-y-2 overflow-hidden">
+            <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
               {activeWorkOrders.length === 0 ? (
                 <p className="rounded-xl bg-white/5 px-4 py-5 font-bold text-slate-300" style={{ fontSize: 16 }}>Inga aktiva arbetsordrar.</p>
-              ) : activeWorkOrders.slice(0, 7).map(order => (
-                <div key={order.id} className="rounded-xl bg-white/10 px-3 py-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate font-black" style={{ fontSize: 18 }}>{order.title}</p>
-                      <p className="truncate font-semibold text-slate-300" style={{ fontSize: 12 }}>
-                        {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                      <span className="rounded-full bg-white/10 px-2 py-1 font-black" style={{ fontSize: 11 }}>{WO_STATUS_LABELS[order.status]}</span>
-                      {isOrderOverdue(order) && (
-                        <span className="rounded-full bg-rose-500 px-2 py-1 font-black text-white" style={{ fontSize: 11 }}>Försenad</span>
-                      )}
-                    </div>
+              ) : activeWorkOrders.slice(0, 10).map(order => (
+                <div key={order.id} className="grid grid-cols-[minmax(0,1.15fr)_minmax(96px,0.45fr)_minmax(120px,0.55fr)] items-center gap-2 rounded-lg bg-white/10 px-2.5 py-1.5">
+                  <div className="min-w-0">
+                    <p className="truncate font-black" style={{ fontSize: 14 }}>{order.title}</p>
+                    <p className="truncate font-semibold text-slate-300" style={{ fontSize: 10.5 }}>
+                      {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
+                    </p>
                   </div>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    <span className="rounded-full bg-blue-400/15 px-2 py-0.5 font-black text-blue-100" style={{ fontSize: 11 }}>
-                      {assigneeLabel(order)}
-                    </span>
-                    <span className="rounded-full bg-amber-400/15 px-2 py-0.5 font-black text-amber-100" style={{ fontSize: 11 }}>
-                      {WO_PRIORITY_LABELS[order.priority] || order.priority}
+                  <div className="flex min-w-0 justify-start gap-1">
+                    <span className="truncate rounded-full bg-amber-400/15 px-2 py-0.5 font-black text-amber-100" style={{ fontSize: 10 }}>
+                      {isOrderOverdue(order) ? 'Försenad' : WO_STATUS_LABELS[order.status]}
                     </span>
                   </div>
+                  <span className="truncate rounded-full bg-blue-400/15 px-2 py-0.5 text-center font-black text-blue-100" style={{ fontSize: 10 }}>
+                    {assigneeLabel(order)}
+                  </span>
                 </div>
               ))}
             </div>
@@ -745,24 +737,24 @@ function PresentationScreen({
         {rightPanelCount > 0 && (
           <div className="min-h-0 overflow-hidden" style={{ display: 'grid', gridTemplateRows: rightPanelRows, gap: 8 }}>
             {settings.showNews && (
-              <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
-                <div className="mb-2 flex items-center gap-2">
+              <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white/10 p-2.5 ring-1 ring-white/10">
+                <div className="mb-1.5 flex items-center gap-2">
                   <Newspaper className="h-5 w-5 text-blue-200" />
-                  <h3 className="font-black" style={{ fontSize: 20 }}>Aktuella nyheter</h3>
+                  <h3 className="font-black" style={{ fontSize: 18 }}>Aktuella nyheter</h3>
                 </div>
                 <div className="min-h-0 flex-1 overflow-hidden">
                   {activeNews.length === 0 ? (
                     <p className="rounded-xl bg-white/5 px-3 py-3 font-bold text-slate-300" style={{ fontSize: 14 }}>Inga publicerade nyheter.</p>
                   ) : (
-                    <div className={`space-y-2 ${scrollingNews ? 'animate-[vihemNewsScroll_34s_linear_infinite]' : ''}`}>
+                    <div className={`space-y-1.5 ${scrollingNews ? 'animate-[vihemNewsScroll_28s_linear_infinite]' : ''}`}>
                       {visibleNews.map((item, index) => (
-                        <div key={`${item.id}-${index}`} className="rounded-xl bg-white/10 px-3 py-2">
-                          <div className="flex items-start justify-between gap-3">
+                        <div key={`${item.id}-${index}`} className="rounded-lg bg-white/10 px-2.5 py-1.5">
+                          <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <p className="truncate font-black" style={{ fontSize: 15 }}>{item.title}</p>
-                              <p className="mt-0.5 line-clamp-2 font-semibold leading-5 text-slate-300" style={{ fontSize: 12 }}>{item.content}</p>
+                              <p className="truncate font-black" style={{ fontSize: 13 }}>{item.title}</p>
+                              <p className="line-clamp-1 font-semibold leading-4 text-slate-300" style={{ fontSize: 11 }}>{item.content}</p>
                             </div>
-                            {item.priority === 'urgent' && <span className="rounded-full bg-rose-400 px-2 py-1 text-xs font-black text-white">Viktigt</span>}
+                            {item.priority === 'urgent' && <span className="rounded-full bg-rose-400 px-2 py-0.5 text-[10px] font-black text-white">Viktigt</span>}
                           </div>
                         </div>
                       ))}
@@ -773,22 +765,22 @@ function PresentationScreen({
             )}
 
             {settings.showClockedIn && (
-              <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-emerald-400/10 p-3 ring-1 ring-emerald-300/20">
-                <div className="mb-2 flex items-center justify-between">
-                  <h3 className="flex items-center gap-2 font-black" style={{ fontSize: 20 }}>
+              <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-emerald-400/10 p-2.5 ring-1 ring-emerald-300/20">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 font-black" style={{ fontSize: 18 }}>
                     <Timer className="h-5 w-5 text-emerald-200" />
                     Instämplade
                   </h3>
-                  <span className="rounded-full bg-emerald-300/20 px-3 py-1 font-black text-emerald-100" style={{ fontSize: 14 }}>{clockedInEntries.length}</span>
+                  <span className="rounded-full bg-emerald-300/20 px-2.5 py-0.5 font-black text-emerald-100" style={{ fontSize: 13 }}>{clockedInEntries.length}</span>
                 </div>
-                <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+                <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
                   {clockedInEntries.length === 0 ? (
                     <p className="rounded-xl bg-white/5 px-3 py-3 font-bold text-slate-300" style={{ fontSize: 14 }}>Ingen är instämplad just nu.</p>
                   ) : clockedInEntries.slice(0, 9).map(entry => (
-                    <div key={entry.id} className="grid grid-cols-[minmax(90px,0.9fr)_minmax(110px,1.1fr)_auto] items-center gap-2 rounded-lg bg-white/10 px-2.5 py-1.5">
-                      <p className="truncate font-black" style={{ fontSize: 13 }}>{entry.user?.name || 'Personal'}</p>
-                      <p className="truncate font-semibold text-emerald-100" style={{ fontSize: 12 }}>{timeEntryTitle(entry)}</p>
-                      <p className="whitespace-nowrap font-bold text-slate-400" style={{ fontSize: 10 }}>
+                    <div key={entry.id} className="grid grid-cols-[minmax(76px,0.85fr)_minmax(92px,1.15fr)_auto] items-center gap-1.5 rounded-md bg-white/10 px-2 py-1">
+                      <p className="truncate font-black" style={{ fontSize: 11.5 }}>{entry.user?.name || 'Personal'}</p>
+                      <p className="truncate font-semibold text-emerald-100" style={{ fontSize: 10.5 }}>{timeEntryTitle(entry)}</p>
+                      <p className="whitespace-nowrap font-bold text-slate-400" style={{ fontSize: 9.5 }}>
                         {new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
                       </p>
                     </div>
