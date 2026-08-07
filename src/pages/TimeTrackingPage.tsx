@@ -257,8 +257,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       if (currentEntry.entry_type !== 'break') {
         handleStartBreak();
       } else {
-        setStampMode('switch');
-        setShowStampModal(true);
+        handleReturnFromBreak();
       }
     }
   }, [initialAction, currentEntry, loading]);
@@ -420,6 +419,46 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       break_minutes: 0,
       total_minutes: 0,
       comment: 'Rast',
+      status: 'draft',
+    });
+    fetchData();
+  }
+
+  async function handleReturnFromBreak() {
+    if (!currentEntry || currentEntry.entry_type !== 'break') return;
+
+    const { data: previousEntries, error } = await supabase
+      .from('vihem_time_entries')
+      .select('category, work_order_id, customer_project_id, customer_name, comment')
+      .eq('user_id', user.id)
+      .eq('entry_type', 'work')
+      .lte('end_time', currentEntry.start_time)
+      .order('end_time', { ascending: false })
+      .limit(1);
+
+    if (error) throw error;
+
+    const previous = previousEntries?.[0];
+    if (!previous) {
+      setStampMode('switch');
+      setShowStampModal(true);
+      return;
+    }
+
+    await finishOpenEntries();
+    await supabase.from('vihem_time_entries').insert({
+      user_id: user.id,
+      organisation_id: user.organisation_id || null,
+      work_order_id: previous.work_order_id || null,
+      category: previous.category || 'general',
+      entry_type: 'work',
+      customer_project_id: previous.category === 'customer_project' ? previous.customer_project_id || null : null,
+      customer_name: previous.customer_name || null,
+      start_time: new Date().toISOString(),
+      end_time: null,
+      break_minutes: 0,
+      total_minutes: 0,
+      comment: previous.comment || '',
       status: 'draft',
     });
     fetchData();
@@ -595,7 +634,11 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
               <Button onClick={() => { setStampMode('switch'); setShowStampModal(true); }} variant="secondary" className="gap-2">
                 <Repeat2 className="w-4 h-4" /> Byt jobb
               </Button>
-              {currentEntry.entry_type !== 'break' && (
+              {currentEntry.entry_type === 'break' ? (
+                <Button onClick={handleReturnFromBreak} variant="secondary" className="gap-2">
+                  <Timer className="w-4 h-4" /> Återgå till jobb
+                </Button>
+              ) : (
                 <Button onClick={handleStartBreak} variant="secondary" className="gap-2">
                   <Coffee className="w-4 h-4" /> Byt till rast
                 </Button>

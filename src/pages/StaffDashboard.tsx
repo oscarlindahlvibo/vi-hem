@@ -440,11 +440,11 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
               </button>
               {activeTimeEntry.entry_type === 'break' ? (
                 <button
-                  onClick={() => onNavigate('timetracking/switch')}
+                  onClick={() => onNavigate('timetracking/break')}
                   className="inline-flex min-w-0 items-center justify-center gap-2 rounded-full bg-emerald-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition-transform hover:bg-emerald-600 active:scale-[0.99]"
                 >
                   <Timer className="h-4 w-4 shrink-0" />
-                  <span className="truncate">Börja jobba</span>
+                  <span className="truncate">Återgå till jobb</span>
                 </button>
               ) : (
                 <button
