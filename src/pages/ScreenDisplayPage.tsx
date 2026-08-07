@@ -29,6 +29,8 @@ import {
 } from '../lib/screenSettings';
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
+const SCREEN_APP_VERSION = '2026-08-07-tv-layout-4';
+const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
 
 const addDays = (date: Date, days: number) => {
   const next = new Date(date);
@@ -148,6 +150,35 @@ export function ScreenDisplayPage() {
   useEffect(() => {
     localStorage.setItem(PRESENTATION_SETTINGS_STORAGE_KEY, JSON.stringify(presentationSettings));
   }, [presentationSettings]);
+
+  useEffect(() => {
+    const currentUrl = new URL(window.location.href);
+    if (currentUrl.searchParams.get(SCREEN_BUILD_QUERY_KEY) === SCREEN_APP_VERSION) return;
+
+    currentUrl.searchParams.set(SCREEN_BUILD_QUERY_KEY, SCREEN_APP_VERSION);
+    window.location.replace(currentUrl.toString());
+  }, []);
+
+  useEffect(() => {
+    if (!allowed) return;
+
+    async function checkScreenVersion() {
+      try {
+        const response = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (payload?.version && payload.version !== SCREEN_APP_VERSION) {
+          window.location.reload();
+        }
+      } catch {
+        // The screen must keep running even if the version check is unavailable.
+      }
+    }
+
+    const interval = window.setInterval(checkScreenVersion, SCREEN_REFRESH_INTERVAL_MS);
+    checkScreenVersion();
+    return () => window.clearInterval(interval);
+  }, [allowed]);
 
   const chooseScreenConfig = (screen: ScreenConfig) => {
     setSelectedScreenKey(screen.screenKey);
@@ -805,6 +836,9 @@ function PresentationScreen({
             ))}
           </div>
         </footer>
+        <span className="absolute bottom-2 right-3 text-[10px] font-black text-white/20">
+          {SCREEN_APP_VERSION}
+        </span>
       </div>
       {(scaledWidth < screenWidth - 2 || scaledHeight < availableHeight - 2) && (
         <div className="pointer-events-none absolute inset-0 rounded-xl ring-1 ring-white/5" />
