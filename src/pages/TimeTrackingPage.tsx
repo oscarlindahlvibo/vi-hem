@@ -93,6 +93,7 @@ const ABSENCE_TYPE_LABEL: Record<StaffAbsenceType, string> = {
   vacation: 'Semester',
   leave: 'Ledighet',
   unpaid_leave: 'Tjänstledig',
+  parental_leave: 'Föräldraledig',
 };
 
 const ABSENCE_STATUS_LABEL: Record<StaffAbsenceStatus, string> = {
@@ -1873,7 +1874,7 @@ function AdminTimeView({ user }: { user: Profile }) {
       }
     });
     return acc;
-  }, { total: 0, sick: 0, vab: 0, vacation: 0, leave: 0, unpaid_leave: 0 } as Record<StaffAbsenceType | 'total', number>);
+  }, { total: 0, sick: 0, vab: 0, vacation: 0, leave: 0, unpaid_leave: 0, parental_leave: 0 } as Record<StaffAbsenceType | 'total', number>);
   const filteredStaffMembers = staffMembers.filter(staff => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return true;

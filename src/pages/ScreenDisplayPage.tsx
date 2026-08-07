@@ -118,6 +118,7 @@ const ABSENCE_TYPE_LABELS: Record<string, string> = {
   vacation: 'Semester',
   leave: 'Ledig',
   unpaid_leave: 'Tjänstledig',
+  parental_leave: 'Föräldraledig',
 };
 
 const PROJECT_STATUS_LABELS: Record<string, string> = {
@@ -264,6 +265,7 @@ export function ScreenDisplayPage() {
 
     const todayStart = dateKey(today());
     const meetingEnd = dateKey(addDays(today(), 7));
+    const absenceEnd = dateKey(addDays(today(), 60));
 
     const calendarEnd = dateKey(addDays(today(), 14));
 
@@ -341,7 +343,7 @@ export function ScreenDisplayPage() {
         .select('*, user:vihem_profiles(id, name)')
         .eq('organisation_id', user.organisation_id)
         .in('status', ['submitted', 'approved'])
-        .lte('start_date', meetingEnd)
+        .lte('start_date', absenceEnd)
         .gte('end_date', todayStart)
         .order('start_date'),
       supabase

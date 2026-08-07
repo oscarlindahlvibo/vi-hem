@@ -16,6 +16,7 @@ const ABSENCE_TYPE_LABEL: Record<StaffAbsenceType, string> = {
   vacation: 'Semester',
   leave: 'Ledig',
   unpaid_leave: 'Tjänstledig',
+  parental_leave: 'Föräldraledig',
 };
 
 const ABSENCE_STATUS_LABEL: Record<StaffAbsenceStatus, string> = {

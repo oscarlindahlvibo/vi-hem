@@ -887,7 +887,7 @@ export interface ShortStayBooking {
 export type TimeCategory = 'general' | 'work_order' | 'maintenance' | 'customer_project' | 'admin' | 'travel' | 'shopping' | 'standby' | 'other';
 export type TimeStatus = 'draft' | 'submitted' | 'change_requested' | 'approved' | 'rejected';
 export type TimeEntryType = 'work' | 'break';
-export type StaffAbsenceType = 'sick' | 'vab' | 'vacation' | 'leave' | 'unpaid_leave';
+export type StaffAbsenceType = 'sick' | 'vab' | 'vacation' | 'leave' | 'unpaid_leave' | 'parental_leave';
 export type StaffAbsenceStatus = 'submitted' | 'approved' | 'rejected' | 'cancelled';
 
 export interface TimeEntry {
