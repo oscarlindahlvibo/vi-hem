@@ -835,9 +835,6 @@ function PresentationScreen({
         </div>
       </footer>
 
-      <span className="absolute bottom-2 right-4 text-[10px] font-black text-white/20">
-        {SCREEN_APP_VERSION}
-      </span>
     </div>
   );
 }
