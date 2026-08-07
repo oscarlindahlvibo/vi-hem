@@ -552,8 +552,14 @@ function PresentationScreen({
 }) {
   const [now, setNow] = useState(new Date());
   const [weatherText, setWeatherText] = useState('Laddar väder...');
-  const compact = screenHeight < 760 || screenWidth < 1180;
-  const twoColumnLayout = screenWidth >= 760;
+  const designWidth = 1920;
+  const designHeight = 1026;
+  const availableHeight = Math.max(screenHeight - 54, 480);
+  const scale = Math.min(screenWidth / designWidth, availableHeight / designHeight);
+  const scaledWidth = designWidth * scale;
+  const scaledHeight = designHeight * scale;
+  const compact = false;
+  const twoColumnLayout = true;
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 15_000);
@@ -644,8 +650,17 @@ function PresentationScreen({
 
   return (
     <div className="relative h-[calc(100vh-54px)] overflow-hidden rounded-xl bg-slate-950 text-white">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.28),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(20,184,166,0.18),transparent_32%)]" />
-      <div className="relative grid h-full min-h-0" style={{ gridTemplateRows: `${compact ? 36 : 44}px minmax(0, 1fr)` }}>
+      <div
+        className="absolute left-1/2 top-1/2 overflow-hidden rounded-xl bg-slate-950"
+        style={{
+          width: designWidth,
+          height: designHeight,
+          transform: `translate(-50%, -50%) scale(${scale})`,
+          transformOrigin: 'center',
+        }}
+      >
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.28),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(20,184,166,0.18),transparent_32%)]" />
+        <div className="relative grid h-full min-h-0" style={{ gridTemplateRows: '44px minmax(0, 1fr)' }}>
         <footer className="order-2 overflow-hidden border-t border-white/10 bg-black/35">
           <div className={`${compact ? 'text-lg leading-9' : 'text-xl leading-[44px]'} animate-[vihemTicker_38s_linear_infinite] whitespace-nowrap font-black text-white`}>
             {[...tickerParts, ...tickerParts].map((part, index) => (
@@ -788,8 +803,12 @@ function PresentationScreen({
             )}
           </section>
         </main>
+        </div>
       </div>
-    </div>
+      {(scaledWidth < screenWidth - 2 || scaledHeight < availableHeight - 2) && (
+        <div className="pointer-events-none absolute inset-0 rounded-xl ring-1 ring-white/5" />
+      )}
+      </div>
   );
 }
 
