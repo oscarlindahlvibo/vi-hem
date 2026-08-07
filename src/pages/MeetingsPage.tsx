@@ -330,11 +330,16 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
       supabase.from('vihem_meeting_decisions').select('*').eq('meeting_id', meetingId).order('created_at'),
       supabase.from('vihem_meeting_action_items').select('*').eq('meeting_id', meetingId).order('due_date', { ascending: true, nullsFirst: false }),
     ]);
-    setAgendaItems((agendaRes.data || []) as MeetingAgendaItem[]);
+    const loadedAgenda = (agendaRes.data || []) as MeetingAgendaItemMvp[];
+    setAgendaItems(loadedAgenda as MeetingAgendaItem[]);
     setProtocolRows((protocolRes.data || []) as ProtocolRow[]);
     setDecisions((decisionsRes.data || []) as MeetingDecision[]);
     setActionItems((actionsRes.data || []) as MeetingActionItem[]);
-    if (!selectedAgendaId && agendaRes.data?.[0]) setSelectedAgendaId(agendaRes.data[0].id);
+    const selectedLoadedAgenda = selectedAgendaId ? loadedAgenda.find(item => item.id === selectedAgendaId) : null;
+    if (!selectedLoadedAgenda || selectedLoadedAgenda.status === 'done') {
+      const nextAgenda = loadedAgenda.find(item => item.status !== 'done') || loadedAgenda[0] || null;
+      setSelectedAgendaId(nextAgenda?.id || null);
+    }
   }
 
   function openMeetingModal() {
@@ -624,6 +629,27 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
     await loadMeetingDetails(selectedMeeting.id);
   }
 
+  async function updateAgendaStatus(item: MeetingAgendaItemMvp, status: 'open' | 'done') {
+    if (!selectedMeeting) return;
+    const { error } = await supabase
+      .from('vihem_meeting_agenda_items')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', item.id);
+
+    if (error) {
+      alert(error.message || 'Kunde inte uppdatera dagordningspunkten.');
+      return;
+    }
+
+    if (status === 'done' && selectedAgendaId === item.id) {
+      const nextAgenda = agendaItems
+        .filter(row => row.id !== item.id)
+        .find(row => (row as MeetingAgendaItemMvp).status !== 'done') || null;
+      setSelectedAgendaId(nextAgenda?.id || null);
+    }
+    await loadMeetingDetails(selectedMeeting.id);
+  }
+
   async function createAiAnalysisPlaceholder() {
     if (!selectedMeeting || !user?.organisation_id) return;
     const { error } = await supabase.from('vihem_ai_suggestions').insert({
@@ -825,6 +851,7 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
               onLock={lockMeeting}
               onAi={createAiAnalysisPlaceholder}
               onActionDone={markActionDone}
+              onAgendaStatus={updateAgendaStatus}
             />
           ) : (
             <Card>
@@ -964,6 +991,7 @@ function MeetingDetail(props: {
   onLock: () => void;
   onAi: () => void;
   onActionDone: (action: MeetingActionItem) => void;
+  onAgendaStatus: (item: MeetingAgendaItemMvp, status: 'open' | 'done') => void;
 }) {
   const { meeting, selectedAgenda } = props;
   const participantCount = ((meeting as any).participant_ids || []).length;
@@ -1015,14 +1043,36 @@ function MeetingDetail(props: {
             <h3 className="font-bold text-slate-800">Dagordning</h3>
           </div>
           <div className="divide-y divide-slate-100 max-h-[44rem] overflow-y-auto">
-            {props.agendaItems.map((item, index) => (
-              <button key={item.id} onClick={() => props.setSelectedAgendaId(item.id)} className={`w-full text-left p-3 hover:bg-slate-50 ${selectedAgenda?.id === item.id ? 'bg-blue-50' : ''}`}>
-                <p className="text-xs text-slate-400">{index + 1}</p>
-                <p className="text-sm font-semibold text-slate-800">{item.title}</p>
-                {item.notes && <p className="mt-1 text-xs text-slate-500">{item.notes}</p>}
-                {item.linked_entity_type && <Badge className="mt-2 bg-slate-100 text-slate-600"><LinkIcon className="w-3 h-3" /> Kopplad</Badge>}
-              </button>
-            ))}
+            {props.agendaItems.map((item, index) => {
+              const isDone = item.status === 'done';
+              return (
+                <div key={item.id} className={`grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 p-2 ${selectedAgenda?.id === item.id ? 'bg-blue-50' : ''} ${isDone ? 'opacity-60' : ''}`}>
+                  {props.canManage ? (
+                    <button
+                      type="button"
+                      onClick={() => props.onAgendaStatus(item, isDone ? 'open' : 'done')}
+                      className={`mt-1 flex h-7 w-7 items-center justify-center rounded-full border ${isDone ? 'border-emerald-200 bg-emerald-100 text-emerald-700' : 'border-slate-200 bg-white text-slate-400 hover:text-emerald-600'}`}
+                      aria-label={isDone ? 'Markera punkten som öppen' : 'Markera punkten som klar'}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <span className="mt-1 flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-400">{index + 1}</span>
+                  )}
+                  <button type="button" onClick={() => props.setSelectedAgendaId(item.id)} className="min-w-0 rounded-lg px-2 py-1 text-left hover:bg-slate-50">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-400">{index + 1}</p>
+                        <p className={`text-sm font-semibold ${isDone ? 'text-slate-500 line-through' : 'text-slate-800'}`}>{item.title}</p>
+                      </div>
+                      {isDone && <Badge className="bg-emerald-100 text-emerald-700">Klar</Badge>}
+                    </div>
+                    {item.notes && <p className="mt-1 text-xs text-slate-500">{item.notes}</p>}
+                    {item.linked_entity_type && <Badge className="mt-2 bg-slate-100 text-slate-600"><LinkIcon className="w-3 h-3" /> Kopplad</Badge>}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </Card>
 

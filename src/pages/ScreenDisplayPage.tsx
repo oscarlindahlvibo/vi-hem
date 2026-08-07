@@ -684,35 +684,37 @@ function MeetingScreen({
   const selectedAgenda = currentMeeting
     ? agendaItems.filter(item => item.meeting_id === currentMeeting.id).sort((a, b) => a.sort_order - b.sort_order)
     : [];
-  const activeWorkOrders = workOrders.slice(0, meetingPart === 'part-1' ? 14 : 9);
-  const activeProjects = customerProjects.slice(0, meetingPart === 'part-2' ? 13 : 8);
+  const visibleAgenda = selectedAgenda.filter(item => item.status !== 'done');
+  const doneAgendaCount = selectedAgenda.length - visibleAgenda.length;
+  const activeWorkOrders = workOrders.slice(0, meetingPart === 'part-1' ? 24 : 18);
+  const activeProjects = customerProjects.slice(0, meetingPart === 'part-2' ? 24 : 16);
   const todayValue = dateKey(today());
   const upcomingAbsences = absenceRequests
     .filter(request => request.end_date >= todayValue)
-    .slice(0, meetingPart === 'part-2' ? 10 : 8);
+    .slice(0, meetingPart === 'part-2' ? 12 : 8);
   const upcomingMeetings = meetings
     .filter(meeting => meeting.id !== currentMeeting?.id)
-    .slice(0, meetingPart === 'part-2' ? 7 : 5);
-  const agendaLimit = meetingPart === 'part-1' ? 16 : 11;
+    .slice(0, meetingPart === 'part-2' ? 8 : 5);
+  const agendaLimit = meetingPart === 'part-1' ? 26 : meetingPart === 'full' ? 22 : 14;
 
   const agendaPanel = (
-    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="flex items-center gap-2 text-lg font-black">
-          <CheckCircle2 className="h-5 w-5 text-emerald-200" />
+    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-2.5 ring-1 ring-white/10">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex min-w-0 items-center gap-2 text-base font-black">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-200" />
           Dagordning
         </h3>
-        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-black">{selectedAgenda.length}</span>
+        <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-black">{visibleAgenda.length}/{selectedAgenda.length}</span>
       </div>
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
-        {selectedAgenda.length === 0 ? (
+      <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
+        {visibleAgenda.length === 0 ? (
           <p className="rounded-xl bg-white/5 px-4 py-5 text-sm font-bold text-slate-300">Ingen dagordning kopplad till valt möte.</p>
-        ) : selectedAgenda.slice(0, agendaLimit).map((item, index) => (
-          <div key={item.id} className="grid grid-cols-[30px_minmax(0,1fr)] gap-2 rounded-xl bg-white/10 px-3 py-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-500 text-xs font-black">{index + 1}</span>
+        ) : visibleAgenda.slice(0, agendaLimit).map((item, index) => (
+          <div key={item.id} className="grid grid-cols-[24px_minmax(0,1fr)] gap-2 rounded-lg bg-white/10 px-2 py-1.5">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-500 text-[10px] font-black">{index + 1}</span>
             <div className="min-w-0">
-              <p className="truncate text-sm font-black">{item.title}</p>
-              {item.notes && <p className="truncate text-[11px] font-semibold text-slate-300">{item.notes}</p>}
+              <p className="truncate text-xs font-black">{item.title}</p>
+              {item.notes && <p className="truncate text-[10px] font-semibold text-slate-300">{item.notes}</p>}
             </div>
           </div>
         ))}
@@ -721,28 +723,30 @@ function MeetingScreen({
   );
 
   const workOrderPanel = (
-    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="flex items-center gap-2 text-lg font-black">
-          <ClipboardList className="h-5 w-5 text-amber-200" />
+    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-2.5 ring-1 ring-white/10">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex min-w-0 items-center gap-2 text-base font-black">
+          <ClipboardList className="h-4 w-4 shrink-0 text-amber-200" />
           Arbetsordrar
         </h3>
-        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-black">{workOrders.length}</span>
+        <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-black">{workOrders.length}</span>
       </div>
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-1.5 overflow-hidden">
         {activeWorkOrders.length === 0 ? (
-          <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
+          <p className="col-span-2 rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
         ) : activeWorkOrders.map(order => (
-          <div key={order.id} className="grid grid-cols-[minmax(0,1fr)_94px] items-center gap-2 rounded-lg bg-white/10 px-3 py-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-black">{order.title}</p>
-              <p className="truncate text-[11px] font-bold text-slate-300">
-                {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
-              </p>
+          <div key={order.id} className="min-w-0 rounded-lg bg-white/10 px-2 py-1.5">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <p className="truncate text-[12px] font-black">{order.title}</p>
+              <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-black text-slate-100">{order.status === 'new' ? 'Ny' : order.status}</span>
             </div>
-            <div className="flex flex-col items-end gap-1">
-              <span className="max-w-full truncate rounded-full bg-blue-400/20 px-2 py-0.5 text-[10px] font-black text-blue-100">{workOrderAssigneeLabel(order, staffMembers, true)}</span>
-              <span className="rounded-full bg-amber-300/20 px-2 py-0.5 text-[10px] font-black text-amber-100">{WO_PRIORITY_LABELS[order.priority]}</span>
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] font-bold text-slate-300">
+              <span className="truncate">{order.property?.name || 'Ingen fastighet'}</span>
+              {order.due_date && <span className="shrink-0">{formatDate(order.due_date)}</span>}
+            </div>
+            <div className="mt-1 flex min-w-0 items-center gap-1">
+              <span className="truncate rounded-full bg-blue-400/20 px-1.5 py-0.5 text-[9px] font-black text-blue-100">{workOrderAssigneeLabel(order, staffMembers, true)}</span>
+              <span className="shrink-0 rounded-full bg-amber-300/20 px-1.5 py-0.5 text-[9px] font-black text-amber-100">{WO_PRIORITY_LABELS[order.priority]}</span>
             </div>
           </div>
         ))}
@@ -751,29 +755,29 @@ function MeetingScreen({
   );
 
   const projectPanel = (
-    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="flex items-center gap-2 text-lg font-black">
-          <Briefcase className="h-5 w-5 text-violet-200" />
+    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-2.5 ring-1 ring-white/10">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex min-w-0 items-center gap-2 text-base font-black">
+          <Briefcase className="h-4 w-4 shrink-0 text-violet-200" />
           Kundprojekt
         </h3>
-        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-black">{customerProjects.length}</span>
+        <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-black">{customerProjects.length}</span>
       </div>
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-1.5 overflow-hidden">
         {activeProjects.length === 0 ? (
-          <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga pågående kundprojekt.</p>
+          <p className="col-span-2 rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga pågående kundprojekt.</p>
         ) : activeProjects.map(project => (
-          <div key={project.id} className="grid grid-cols-[minmax(0,1fr)_94px] items-center gap-2 rounded-lg bg-white/10 px-3 py-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-black">{project.title || project.name || project.customer_name || 'Kundprojekt'}</p>
-              <p className="truncate text-[11px] font-bold text-slate-300">
-                {project.customer_name || project.project_address || 'Ingen kund'}
-                {project.planned_end_date ? ` · ${formatDate(project.planned_end_date)}` : ''}
-              </p>
+          <div key={project.id} className="min-w-0 rounded-lg bg-white/10 px-2 py-1.5">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <p className="truncate text-[12px] font-black">{project.title || project.name || project.customer_name || 'Kundprojekt'}</p>
+              <span className="shrink-0 rounded-full bg-violet-400/20 px-1.5 py-0.5 text-[9px] font-black text-violet-100">
+                {PROJECT_STATUS_LABELS[project.status] || project.status}
+              </span>
             </div>
-            <span className="justify-self-end rounded-full bg-violet-400/20 px-2 py-1 text-[10px] font-black text-violet-100">
-              {PROJECT_STATUS_LABELS[project.status] || project.status}
-            </span>
+            <p className="mt-1 truncate text-[10px] font-bold text-slate-300">
+              {project.customer_name || project.project_address || 'Ingen kund'}
+              {project.planned_end_date ? ` · ${formatDate(project.planned_end_date)}` : ''}
+            </p>
           </div>
         ))}
       </div>
@@ -781,16 +785,16 @@ function MeetingScreen({
   );
 
   const meetingsPanel = (
-    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
-      <h3 className="mb-2 flex items-center gap-2 text-lg font-black">
-        <CalendarDays className="h-5 w-5 text-blue-200" />
+    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-2.5 ring-1 ring-white/10">
+      <h3 className="mb-2 flex items-center gap-2 text-base font-black">
+        <CalendarDays className="h-4 w-4 text-blue-200" />
         Kommande möten
       </h3>
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+      <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
         {upcomingMeetings.map(meeting => (
-          <div key={meeting.id} className="rounded-lg bg-white/10 px-3 py-2">
-            <p className="truncate text-sm font-black">{meeting.title}</p>
-            <p className="truncate text-[11px] font-bold text-slate-300">{meeting.starts_at ? formatDateTime(meeting.starts_at) : 'Ingen tid'}</p>
+          <div key={meeting.id} className="rounded-lg bg-white/10 px-2 py-1.5">
+            <p className="truncate text-xs font-black">{meeting.title}</p>
+            <p className="truncate text-[10px] font-bold text-slate-300">{meeting.starts_at ? formatDateTime(meeting.starts_at) : 'Ingen tid'}</p>
           </div>
         ))}
         {meetings.length === 0 && <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga planerade möten.</p>}
@@ -799,27 +803,27 @@ function MeetingScreen({
   );
 
   const absencePanel = (
-    <section className="flex min-h-0 flex-col rounded-2xl bg-rose-500/10 p-3 ring-1 ring-rose-300/20">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="flex items-center gap-2 text-lg font-black">
-          <UserRoundX className="h-5 w-5 text-rose-200" />
+    <section className="flex min-h-0 flex-col rounded-2xl bg-rose-500/10 p-2.5 ring-1 ring-rose-300/20">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex min-w-0 items-center gap-2 text-base font-black">
+          <UserRoundX className="h-4 w-4 shrink-0 text-rose-200" />
           Ledighet/frånvaro
         </h3>
-        <span className="rounded-full bg-rose-300/20 px-3 py-1 text-xs font-black text-rose-100">{upcomingAbsences.length}</span>
+        <span className="rounded-full bg-rose-300/20 px-2.5 py-1 text-[11px] font-black text-rose-100">{upcomingAbsences.length}</span>
       </div>
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+      <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
         {upcomingAbsences.length === 0 ? (
           <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Ingen planerad frånvaro i närtid.</p>
         ) : upcomingAbsences.map(request => (
-          <div key={request.id} className="grid grid-cols-[minmax(0,1fr)_82px] items-center gap-2 rounded-lg bg-white/10 px-3 py-2">
+          <div key={request.id} className="grid grid-cols-[minmax(0,1fr)_72px] items-center gap-2 rounded-lg bg-white/10 px-2 py-1.5">
             <div className="min-w-0">
-              <p className="truncate text-sm font-black">{request.user?.name || staffMembers.find(staff => staff.id === request.user_id)?.name || 'Personal'}</p>
-              <p className="truncate text-[11px] font-bold text-rose-100">
+              <p className="truncate text-xs font-black">{request.user?.name || staffMembers.find(staff => staff.id === request.user_id)?.name || 'Personal'}</p>
+              <p className="truncate text-[10px] font-bold text-rose-100">
                 {ABSENCE_TYPE_LABELS[request.absence_type] || request.absence_type}
                 {request.start_time && request.end_time ? ` · ${request.start_time.slice(0, 5)}-${request.end_time.slice(0, 5)}` : ''}
               </p>
             </div>
-            <span className="justify-self-end rounded-full bg-white/10 px-2 py-1 text-[10px] font-black text-white">
+            <span className="justify-self-end truncate rounded-full bg-white/10 px-2 py-1 text-[9px] font-black text-white">
               {request.start_date === request.end_date ? formatDate(request.start_date) : `${formatDate(request.start_date)}-${formatDate(request.end_date)}`}
             </span>
           </div>
@@ -856,12 +860,16 @@ function MeetingScreen({
       </div>
 
       {meetingPart === 'part-1' ? (
-        <div className="grid min-h-0 gap-2 xl:grid-cols-[1.12fr_0.88fr]">
+        <div className="grid min-h-0 gap-2 xl:grid-cols-[0.82fr_1.18fr]">
           {agendaPanel}
-          {workOrderPanel}
+          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '1.08fr 0.92fr' }}>
+            {workOrderPanel}
+            {projectPanel}
+          </section>
         </div>
       ) : meetingPart === 'part-2' ? (
-        <div className="grid min-h-0 gap-2 xl:grid-cols-[1.08fr_0.92fr]">
+        <div className="grid min-h-0 gap-2 xl:grid-cols-[1fr_1fr_0.82fr]">
+          {workOrderPanel}
           {projectPanel}
           <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '1fr 0.82fr' }}>
             {absencePanel}
@@ -869,12 +877,10 @@ function MeetingScreen({
           </section>
         </div>
       ) : (
-        <div className="grid min-h-0 gap-2 xl:grid-cols-[1fr_1.08fr_0.92fr]">
+        <div className="grid min-h-0 gap-2 xl:grid-cols-[0.78fr_1fr_1fr_0.72fr]">
           {agendaPanel}
-          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '1fr 0.92fr' }}>
-            {workOrderPanel}
-            {projectPanel}
-          </section>
+          {workOrderPanel}
+          {projectPanel}
           <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '0.78fr 1fr' }}>
             {meetingsPanel}
             {absencePanel}
@@ -885,7 +891,8 @@ function MeetingScreen({
       <div className="overflow-hidden rounded-xl bg-white/10 px-4 py-1 text-sm font-black text-slate-200 ring-1 ring-white/10">
         <div className="flex min-w-max gap-8">
           <span>{partLabel}</span>
-          <span>{selectedAgenda.length} punkter på dagordningen</span>
+          <span>{visibleAgenda.length} kvar på dagordningen</span>
+          {doneAgendaCount > 0 && <span>{doneAgendaCount} avbockade</span>}
           <span>{workOrders.length} arbetsordrar</span>
           <span>{customerProjects.length} kundprojekt</span>
           <span>{upcomingAbsences.length} frånvaro/ledighet</span>

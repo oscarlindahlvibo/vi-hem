@@ -281,6 +281,13 @@ export interface MeetingAgendaItem {
   meeting_id: string;
   title: string;
   notes: string;
+  item_type?: string;
+  status?: string;
+  source_type?: string;
+  source_id?: string | null;
+  linked_entity_type?: string;
+  linked_entity_id?: string | null;
+  metadata?: Record<string, unknown>;
   sort_order: number;
   responsible_user_id: string | null;
   created_at: string;
