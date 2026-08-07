@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, ClipboardList, CloudSun, Monitor, Newspaper, RefreshCw, Timer, Users } from 'lucide-react';
+import { CalendarDays, ClipboardList, Monitor, Newspaper, RefreshCw, Timer, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
@@ -29,7 +29,7 @@ import {
 } from '../lib/screenSettings';
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
-const SCREEN_APP_VERSION = '2026-08-07-tv-layout-6';
+const SCREEN_APP_VERSION = '2026-08-07-tv-layout-7';
 const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
 
 const addDays = (date: Date, days: number) => {
@@ -515,6 +515,7 @@ export function ScreenDisplayPage() {
             <AppLogo className="h-full w-full" />
           </button>
           <h1 className="truncate text-sm font-black">VI-HEM</h1>
+          <ScreenHeaderClock />
         </div>
         <div className="flex shrink-0 items-center gap-2 text-xs font-semibold text-slate-300">
           <RefreshCw className={`h-3.5 w-3.5 ${dataLoading ? 'animate-spin' : ''}`} />
@@ -556,6 +557,24 @@ export function ScreenDisplayPage() {
   );
 }
 
+function ScreenHeaderClock() {
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(new Date()), 15_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="hidden items-baseline gap-2 text-xs font-black text-slate-200 sm:flex">
+      <span>{now.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}</span>
+      <span className="text-slate-400">
+        {now.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}
+      </span>
+    </div>
+  );
+}
+
 function PresentationScreen({
   settings,
   news,
@@ -581,15 +600,9 @@ function PresentationScreen({
   screenWidth: number;
   screenHeight: number;
 }) {
-  const [now, setNow] = useState(new Date());
   const [weatherText, setWeatherText] = useState('Laddar väder...');
   const availableHeight = Math.max(screenHeight - 54, 480);
   const compact = true;
-
-  useEffect(() => {
-    const interval = window.setInterval(() => setNow(new Date()), 15_000);
-    return () => window.clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -663,7 +676,9 @@ function PresentationScreen({
   const isOrderOverdue = (order: WorkOrder) => Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
   const assigneeLabel = (order: WorkOrder) => workOrderAssigneeLabel(order, staffMembers);
   const rightPanelCount = [settings.showNews, settings.showClockedIn, settings.showMeetings].filter(Boolean).length;
-  const rightPanelRows = rightPanelCount === 0 ? '1fr' : rightPanelCount === 1 ? '1fr' : rightPanelCount === 2 ? '1fr 1fr' : '1.05fr 0.7fr 0.6fr';
+  const rightPanelRows = rightPanelCount === 0 ? '1fr' : rightPanelCount === 1 ? '1fr' : rightPanelCount === 2 ? '0.78fr 1.22fr' : '0.78fr 1.22fr 0.46fr';
+  const scrollingNews = activeNews.length > 2;
+  const visibleNews = scrollingNews ? [...activeNews, ...activeNews] : activeNews;
 
   return (
     <div
@@ -671,34 +686,11 @@ function PresentationScreen({
       style={{
         height: availableHeight,
         display: 'grid',
-        gridTemplateRows: '94px minmax(0, 1fr) 42px',
+        gridTemplateRows: 'minmax(0, 1fr) 42px',
         gap: 8,
       }}
     >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.3),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(20,184,166,0.2),transparent_32%)]" />
-
-      <section className="relative overflow-hidden rounded-2xl bg-white/10 px-4 py-3 ring-1 ring-white/10">
-        <div className="flex h-full items-center justify-between gap-5">
-          <div className="min-w-0">
-            <p className="truncate font-black uppercase text-blue-200" style={{ fontSize: 12, letterSpacing: '0.22em' }}>
-              {organisationName}
-            </p>
-            <h2 className="font-black leading-none" style={{ fontSize: 38 }}>
-              {now.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
-            </h2>
-            <p className="truncate font-bold text-slate-200" style={{ fontSize: 16 }}>
-              {now.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}
-            </p>
-          </div>
-          <div className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-right ring-1 ring-white/10" style={{ width: 330 }}>
-            <div className="flex items-center justify-end gap-2">
-              <CloudSun className="h-5 w-5 text-amber-200" />
-              <p className="font-bold text-slate-300" style={{ fontSize: 13 }}>Dagens väder</p>
-            </div>
-            <p className="mt-0.5 font-black leading-tight" style={{ fontSize: 14 }}>{weatherText}</p>
-          </div>
-        </div>
-      </section>
 
       <main
         className="relative min-h-0"
@@ -753,31 +745,35 @@ function PresentationScreen({
         {rightPanelCount > 0 && (
           <div className="min-h-0 overflow-hidden" style={{ display: 'grid', gridTemplateRows: rightPanelRows, gap: 8 }}>
             {settings.showNews && (
-              <section className="min-h-0 overflow-hidden rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
+              <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
                 <div className="mb-2 flex items-center gap-2">
                   <Newspaper className="h-5 w-5 text-blue-200" />
                   <h3 className="font-black" style={{ fontSize: 20 }}>Aktuella nyheter</h3>
                 </div>
-                <div className="space-y-2 overflow-hidden">
+                <div className="min-h-0 flex-1 overflow-hidden">
                   {activeNews.length === 0 ? (
                     <p className="rounded-xl bg-white/5 px-3 py-3 font-bold text-slate-300" style={{ fontSize: 14 }}>Inga publicerade nyheter.</p>
-                  ) : activeNews.slice(0, 3).map(item => (
-                    <div key={item.id} className="rounded-xl bg-white/10 px-3 py-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate font-black" style={{ fontSize: 16 }}>{item.title}</p>
-                          <p className="mt-0.5 line-clamp-2 font-semibold leading-5 text-slate-300" style={{ fontSize: 13 }}>{item.content}</p>
+                  ) : (
+                    <div className={`space-y-2 ${scrollingNews ? 'animate-[vihemNewsScroll_34s_linear_infinite]' : ''}`}>
+                      {visibleNews.map((item, index) => (
+                        <div key={`${item.id}-${index}`} className="rounded-xl bg-white/10 px-3 py-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate font-black" style={{ fontSize: 15 }}>{item.title}</p>
+                              <p className="mt-0.5 line-clamp-2 font-semibold leading-5 text-slate-300" style={{ fontSize: 12 }}>{item.content}</p>
+                            </div>
+                            {item.priority === 'urgent' && <span className="rounded-full bg-rose-400 px-2 py-1 text-xs font-black text-white">Viktigt</span>}
+                          </div>
                         </div>
-                        {item.priority === 'urgent' && <span className="rounded-full bg-rose-400 px-2 py-1 text-xs font-black text-white">Viktigt</span>}
-                      </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               </section>
             )}
 
             {settings.showClockedIn && (
-              <section className="min-h-0 overflow-hidden rounded-2xl bg-emerald-400/10 p-3 ring-1 ring-emerald-300/20">
+              <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-emerald-400/10 p-3 ring-1 ring-emerald-300/20">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="flex items-center gap-2 font-black" style={{ fontSize: 20 }}>
                     <Timer className="h-5 w-5 text-emerald-200" />
@@ -785,14 +781,16 @@ function PresentationScreen({
                   </h3>
                   <span className="rounded-full bg-emerald-300/20 px-3 py-1 font-black text-emerald-100" style={{ fontSize: 14 }}>{clockedInEntries.length}</span>
                 </div>
-                <div className="grid gap-2 overflow-hidden">
+                <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
                   {clockedInEntries.length === 0 ? (
                     <p className="rounded-xl bg-white/5 px-3 py-3 font-bold text-slate-300" style={{ fontSize: 14 }}>Ingen är instämplad just nu.</p>
-                  ) : clockedInEntries.slice(0, 3).map(entry => (
-                    <div key={entry.id} className="rounded-xl bg-white/10 px-3 py-2">
-                      <p className="truncate font-black" style={{ fontSize: 16 }}>{entry.user?.name || 'Personal'}</p>
-                      <p className="truncate font-semibold text-emerald-100" style={{ fontSize: 13 }}>{timeEntryTitle(entry)}</p>
-                      <p className="font-bold text-slate-400" style={{ fontSize: 11 }}>Sedan {formatDateTime(entry.start_time)}</p>
+                  ) : clockedInEntries.slice(0, 9).map(entry => (
+                    <div key={entry.id} className="grid grid-cols-[minmax(90px,0.9fr)_minmax(110px,1.1fr)_auto] items-center gap-2 rounded-lg bg-white/10 px-2.5 py-1.5">
+                      <p className="truncate font-black" style={{ fontSize: 13 }}>{entry.user?.name || 'Personal'}</p>
+                      <p className="truncate font-semibold text-emerald-100" style={{ fontSize: 12 }}>{timeEntryTitle(entry)}</p>
+                      <p className="whitespace-nowrap font-bold text-slate-400" style={{ fontSize: 10 }}>
+                        {new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
                     </div>
                   ))}
                 </div>
