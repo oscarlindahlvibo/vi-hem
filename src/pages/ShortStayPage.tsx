@@ -466,15 +466,24 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
 
   const stats = useMemo(() => {
     const today = todayKey();
+    const cleaningHistoryStart = toDateKey(addDays(new Date(`${today}T12:00:00`), -3));
     const activeUnits = units.filter(unit => unit.is_active);
     const current = bookings.filter(booking => overlaps(booking, today) && booking.booking_type === 'booking');
     const checkIns = bookings.filter(booking => booking.start_date === today && booking.booking_type === 'booking');
     const checkOuts = bookings.filter(booking => booking.end_date === today && booking.booking_type === 'booking');
     const bookingCleaningItems = bookings.filter(booking =>
+      booking.booking_type === 'booking' &&
+      booking.cleaning_status !== 'not_needed' &&
       booking.end_date <= today &&
-      booking.cleaning_status !== 'not_needed'
+      booking.end_date >= cleaningHistoryStart &&
+      (booking.cleaning_status === 'clean' ? booking.end_date === today : true)
     );
-    const commonCleaningItems = commonCleanings.filter(cleaning => cleaning.cleaning_status !== 'not_needed' && cleaning.due_date <= today);
+    const commonCleaningItems = commonCleanings.filter(cleaning =>
+      cleaning.cleaning_status !== 'not_needed' &&
+      cleaning.due_date <= today &&
+      cleaning.due_date >= cleaningHistoryStart &&
+      (cleaning.cleaning_status === 'clean' ? cleaning.due_date === today : true)
+    );
     const cleaningItems: CleaningItem[] = [
       ...bookingCleaningItems.map((booking) => {
         const unit = units.find(unit => unit.id === booking.unit_id);
