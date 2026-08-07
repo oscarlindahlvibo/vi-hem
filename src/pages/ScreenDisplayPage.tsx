@@ -29,7 +29,7 @@ import {
 } from '../lib/screenSettings';
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
-const SCREEN_APP_VERSION = '2026-08-07-tv-layout-4';
+const SCREEN_APP_VERSION = '2026-08-07-tv-layout-5';
 const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
 
 const addDays = (date: Date, days: number) => {
@@ -583,14 +583,8 @@ function PresentationScreen({
 }) {
   const [now, setNow] = useState(new Date());
   const [weatherText, setWeatherText] = useState('Laddar väder...');
-  const designWidth = 1920;
-  const designHeight = 1026;
   const availableHeight = Math.max(screenHeight - 54, 480);
-  const scale = Math.min(screenWidth / designWidth, availableHeight / designHeight);
-  const scaledWidth = designWidth * scale;
-  const scaledHeight = designHeight * scale;
-  const compact = false;
-  const twoColumnLayout = true;
+  const compact = screenWidth < 1300 || availableHeight < 680;
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 15_000);
@@ -668,84 +662,85 @@ function PresentationScreen({
   };
   const isOrderOverdue = (order: WorkOrder) => Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
   const assigneeLabel = (order: WorkOrder) => workOrderAssigneeLabel(order, staffMembers);
-  const panelPadding = compact ? 'p-3' : 'p-4';
-  const weatherCard = (
-    <div className={`${compact ? 'min-w-[15rem] p-2' : 'min-w-[22rem] p-3'} rounded-2xl bg-white/10 text-right ring-1 ring-white/10`}>
-      <div className="flex items-center justify-end gap-2">
-        <CloudSun className={`${compact ? 'h-5 w-5' : 'h-6 w-6'} text-amber-200`} />
-        <p className={`${compact ? 'text-xs' : 'text-sm'} font-bold text-slate-300`}>Dagens väder</p>
-      </div>
-      <p className={`${compact ? 'text-sm' : 'text-base'} mt-1 font-black leading-tight`}>{weatherText}</p>
-    </div>
-  );
+  const rightPanelCount = [settings.showNews, settings.showClockedIn, settings.showMeetings].filter(Boolean).length;
+  const rightPanelRows = rightPanelCount === 0 ? '1fr' : rightPanelCount === 1 ? '1fr' : rightPanelCount === 2 ? '1fr 1fr' : '1.25fr 0.8fr 0.7fr';
 
   return (
-    <div className="relative h-[calc(100vh-54px)] overflow-hidden rounded-xl bg-slate-950 text-white">
-      <div
-        className="absolute left-1/2 top-1/2 overflow-hidden rounded-xl bg-slate-950"
+    <div
+      className="relative overflow-hidden rounded-xl bg-slate-950 p-3 text-white"
+      style={{
+        height: availableHeight,
+        display: 'grid',
+        gridTemplateRows: compact ? '128px minmax(0, 1fr) 54px' : '154px minmax(0, 1fr) 62px',
+        gap: compact ? 10 : 12,
+      }}
+    >
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.3),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(20,184,166,0.2),transparent_32%)]" />
+
+      <section className="relative overflow-hidden rounded-3xl bg-white/10 px-6 py-5 ring-1 ring-white/10">
+        <div className="flex h-full items-center justify-between gap-8">
+          <div className="min-w-0">
+            <p className="truncate font-black uppercase text-blue-200" style={{ fontSize: compact ? 15 : 18, letterSpacing: '0.24em' }}>
+              {organisationName}
+            </p>
+            <h2 className="mt-1 font-black leading-none" style={{ fontSize: compact ? 54 : 68 }}>
+              {now.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+            </h2>
+            <p className="mt-1 truncate font-bold text-slate-200" style={{ fontSize: compact ? 22 : 28 }}>
+              {now.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </p>
+          </div>
+          <div className="shrink-0 rounded-2xl bg-white/10 px-5 py-4 text-right ring-1 ring-white/10" style={{ width: compact ? 410 : 520 }}>
+            <div className="flex items-center justify-end gap-3">
+              <CloudSun className="h-7 w-7 text-amber-200" />
+              <p className="font-bold text-slate-300" style={{ fontSize: compact ? 16 : 20 }}>Dagens väder</p>
+            </div>
+            <p className="mt-1 font-black leading-tight" style={{ fontSize: compact ? 18 : 23 }}>{weatherText}</p>
+          </div>
+        </div>
+      </section>
+
+      <main
+        className="relative min-h-0"
         style={{
-          width: designWidth,
-          height: designHeight,
-          transform: `translate(-50%, -50%) scale(${scale})`,
-          transformOrigin: 'center',
+          display: 'grid',
+          gridTemplateColumns: rightPanelCount > 0 ? 'minmax(0, 1.35fr) minmax(360px, 1fr)' : '1fr',
+          gap: compact ? 10 : 12,
         }}
       >
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.28),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(20,184,166,0.18),transparent_32%)]" />
-
-        <section className="absolute left-6 top-6 h-40 w-[1080px] overflow-hidden rounded-[28px] bg-white/10 p-7 ring-1 ring-white/10">
-          <div className="flex h-full items-center justify-between gap-8">
-            <div>
-              <p className="text-lg font-black uppercase tracking-[0.24em] text-blue-200">{organisationName}</p>
-              <h2 className="mt-2 text-7xl font-black leading-none tracking-tight">
-                {now.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
-              </h2>
-              <p className="mt-2 text-3xl font-bold text-slate-200">
-                {now.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}
-              </p>
-            </div>
-            <div className="min-w-[430px] rounded-2xl bg-white/10 p-5 text-right ring-1 ring-white/10">
-              <div className="flex items-center justify-end gap-3">
-                <CloudSun className="h-8 w-8 text-amber-200" />
-                <p className="text-xl font-bold text-slate-300">Dagens väder</p>
-              </div>
-              <p className="mt-2 text-2xl font-black leading-tight">{weatherText}</p>
-            </div>
-          </div>
-        </section>
-
         {settings.showWorkOrders && (
-          <section className="absolute left-6 top-[204px] h-[734px] w-[1080px] overflow-hidden rounded-[28px] bg-white/10 p-7 ring-1 ring-white/10">
-            <div className="mb-5 flex items-center justify-between">
-              <h3 className="flex items-center gap-3 text-4xl font-black">
-                <ClipboardList className="h-9 w-9 text-amber-200" />
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl bg-white/10 p-5 ring-1 ring-white/10">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="flex items-center gap-3 font-black" style={{ fontSize: compact ? 28 : 34 }}>
+                <ClipboardList className="h-8 w-8 text-amber-200" />
                 Arbetsordrar
               </h3>
-              <span className="rounded-full bg-white/10 px-5 py-2 text-2xl font-black">{workOrders.length}</span>
+              <span className="rounded-full bg-white/10 px-4 py-1.5 font-black" style={{ fontSize: compact ? 20 : 24 }}>{workOrders.length}</span>
             </div>
-            <div className="space-y-4 overflow-hidden">
+            <div className="min-h-0 flex-1 space-y-3 overflow-hidden">
               {activeWorkOrders.length === 0 ? (
-                <p className="rounded-2xl bg-white/5 px-6 py-8 text-2xl font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
-              ) : activeWorkOrders.slice(0, 5).map(order => (
-                <div key={order.id} className="rounded-2xl bg-white/10 px-6 py-5">
+                <p className="rounded-2xl bg-white/5 px-6 py-8 font-bold text-slate-300" style={{ fontSize: compact ? 20 : 24 }}>Inga aktiva arbetsordrar.</p>
+              ) : activeWorkOrders.slice(0, compact ? 4 : 6).map(order => (
+                <div key={order.id} className="rounded-2xl bg-white/10 px-5 py-4">
                   <div className="flex items-center justify-between gap-5">
                     <div className="min-w-0">
-                      <p className="truncate text-3xl font-black">{order.title}</p>
-                      <p className="mt-1 truncate text-xl font-semibold text-slate-300">
+                      <p className="truncate font-black" style={{ fontSize: compact ? 23 : 28 }}>{order.title}</p>
+                      <p className="mt-1 truncate font-semibold text-slate-300" style={{ fontSize: compact ? 16 : 19 }}>
                         {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                      <span className="rounded-full bg-white/10 px-4 py-2 text-lg font-black">{WO_STATUS_LABELS[order.status]}</span>
+                      <span className="rounded-full bg-white/10 px-3 py-1.5 font-black" style={{ fontSize: compact ? 14 : 17 }}>{WO_STATUS_LABELS[order.status]}</span>
                       {isOrderOverdue(order) && (
-                        <span className="rounded-full bg-rose-500 px-4 py-2 text-lg font-black text-white">Försenad</span>
+                        <span className="rounded-full bg-rose-500 px-3 py-1.5 font-black text-white" style={{ fontSize: compact ? 14 : 17 }}>Försenad</span>
                       )}
                     </div>
                   </div>
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <span className="rounded-full bg-blue-400/15 px-4 py-1.5 text-lg font-black text-blue-100">
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <span className="rounded-full bg-blue-400/15 px-3 py-1 font-black text-blue-100" style={{ fontSize: compact ? 14 : 16 }}>
                       {assigneeLabel(order)}
                     </span>
-                    <span className="rounded-full bg-amber-400/15 px-4 py-1.5 text-lg font-black text-amber-100">
+                    <span className="rounded-full bg-amber-400/15 px-3 py-1 font-black text-amber-100" style={{ fontSize: compact ? 14 : 16 }}>
                       {WO_PRIORITY_LABELS[order.priority] || order.priority}
                     </span>
                   </div>
@@ -755,94 +750,96 @@ function PresentationScreen({
           </section>
         )}
 
-        {settings.showNews && (
-          <section className="absolute left-[1128px] top-6 h-[420px] w-[768px] overflow-hidden rounded-[28px] bg-white/10 p-7 ring-1 ring-white/10">
-            <div className="mb-5 flex items-center gap-3">
-              <Newspaper className="h-8 w-8 text-blue-200" />
-              <h3 className="text-3xl font-black">Aktuella nyheter</h3>
-            </div>
-            <div className="space-y-4 overflow-hidden">
-              {activeNews.length === 0 ? (
-                <p className="rounded-2xl bg-white/5 px-6 py-6 text-xl font-bold text-slate-300">Inga publicerade nyheter.</p>
-              ) : activeNews.slice(0, 3).map(item => (
-                <div key={item.id} className="rounded-2xl bg-white/10 px-6 py-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="truncate text-2xl font-black">{item.title}</p>
-                      <p className="mt-2 line-clamp-2 text-xl font-semibold leading-7 text-slate-300">{item.content}</p>
+        {rightPanelCount > 0 && (
+          <div className="min-h-0 overflow-hidden" style={{ display: 'grid', gridTemplateRows: rightPanelRows, gap: compact ? 10 : 12 }}>
+            {settings.showNews && (
+              <section className="min-h-0 overflow-hidden rounded-3xl bg-white/10 p-5 ring-1 ring-white/10">
+                <div className="mb-4 flex items-center gap-3">
+                  <Newspaper className="h-7 w-7 text-blue-200" />
+                  <h3 className="font-black" style={{ fontSize: compact ? 24 : 30 }}>Aktuella nyheter</h3>
+                </div>
+                <div className="space-y-3 overflow-hidden">
+                  {activeNews.length === 0 ? (
+                    <p className="rounded-2xl bg-white/5 px-5 py-5 font-bold text-slate-300" style={{ fontSize: compact ? 17 : 20 }}>Inga publicerade nyheter.</p>
+                  ) : activeNews.slice(0, compact ? 2 : 3).map(item => (
+                    <div key={item.id} className="rounded-2xl bg-white/10 px-5 py-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="truncate font-black" style={{ fontSize: compact ? 20 : 23 }}>{item.title}</p>
+                          <p className="mt-1 line-clamp-2 font-semibold leading-6 text-slate-300" style={{ fontSize: compact ? 16 : 18 }}>{item.content}</p>
+                        </div>
+                        {item.priority === 'urgent' && <span className="rounded-full bg-rose-400 px-3 py-1.5 text-sm font-black text-white">Viktigt</span>}
+                      </div>
                     </div>
-                    {item.priority === 'urgent' && <span className="rounded-full bg-rose-400 px-4 py-2 text-lg font-black text-white">Viktigt</span>}
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
+              </section>
+            )}
 
-        {settings.showClockedIn && (
-          <section className="absolute left-[1128px] top-[464px] h-[250px] w-[768px] overflow-hidden rounded-[28px] bg-emerald-400/10 p-7 ring-1 ring-emerald-300/20">
-            <div className="mb-5 flex items-center justify-between">
-              <h3 className="flex items-center gap-3 text-3xl font-black">
-                <Timer className="h-8 w-8 text-emerald-200" />
-                Instämplade
-              </h3>
-              <span className="rounded-full bg-emerald-300/20 px-5 py-2 text-xl font-black text-emerald-100">{clockedInEntries.length}</span>
-            </div>
-            <div className="grid gap-3 overflow-hidden">
-              {clockedInEntries.length === 0 ? (
-                <p className="rounded-2xl bg-white/5 px-6 py-6 text-xl font-bold text-slate-300">Ingen är instämplad just nu.</p>
-              ) : clockedInEntries.slice(0, 2).map(entry => (
-                <div key={entry.id} className="rounded-2xl bg-white/10 px-6 py-4">
-                  <p className="truncate text-2xl font-black">{entry.user?.name || 'Personal'}</p>
-                  <p className="truncate text-xl font-semibold text-emerald-100">{timeEntryTitle(entry)}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-400">Sedan {formatDateTime(entry.start_time)}</p>
+            {settings.showClockedIn && (
+              <section className="min-h-0 overflow-hidden rounded-3xl bg-emerald-400/10 p-5 ring-1 ring-emerald-300/20">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="flex items-center gap-3 font-black" style={{ fontSize: compact ? 24 : 30 }}>
+                    <Timer className="h-7 w-7 text-emerald-200" />
+                    Instämplade
+                  </h3>
+                  <span className="rounded-full bg-emerald-300/20 px-4 py-1.5 font-black text-emerald-100" style={{ fontSize: compact ? 17 : 20 }}>{clockedInEntries.length}</span>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {settings.showMeetings && (
-          <section className="absolute left-[1128px] top-[734px] h-[204px] w-[768px] overflow-hidden rounded-[28px] bg-white/10 p-7 ring-1 ring-white/10">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="flex items-center gap-3 text-3xl font-black">
-                <CalendarDays className="h-8 w-8 text-blue-200" />
-                Kalender
-              </h3>
-              <span className="rounded-full bg-white/10 px-5 py-2 text-xl font-black">{meetings.length}</span>
-            </div>
-            <div className="space-y-3 overflow-hidden">
-              {activeMeetings.length === 0 ? (
-                <p className="rounded-2xl bg-white/5 px-6 py-5 text-xl font-bold text-slate-300">Inga kommande kalenderhändelser.</p>
-              ) : activeMeetings.slice(0, 2).map(meeting => (
-                <div key={meeting.id} className="rounded-2xl bg-white/10 px-6 py-4">
-                  <p className="truncate text-2xl font-black">{meeting.title}</p>
-                  <p className="mt-1 truncate text-xl font-semibold text-slate-300">
-                    {meeting.starts_at ? formatDateTime(meeting.starts_at) : 'Ingen tid'}{meeting.location ? ` · ${meeting.location}` : ''}
-                  </p>
+                <div className="grid gap-3 overflow-hidden">
+                  {clockedInEntries.length === 0 ? (
+                    <p className="rounded-2xl bg-white/5 px-5 py-5 font-bold text-slate-300" style={{ fontSize: compact ? 17 : 20 }}>Ingen är instämplad just nu.</p>
+                  ) : clockedInEntries.slice(0, compact ? 1 : 2).map(entry => (
+                    <div key={entry.id} className="rounded-2xl bg-white/10 px-5 py-4">
+                      <p className="truncate font-black" style={{ fontSize: compact ? 20 : 23 }}>{entry.user?.name || 'Personal'}</p>
+                      <p className="truncate font-semibold text-emerald-100" style={{ fontSize: compact ? 16 : 18 }}>{timeEntryTitle(entry)}</p>
+                      <p className="mt-1 font-bold text-slate-400" style={{ fontSize: compact ? 13 : 15 }}>Sedan {formatDateTime(entry.start_time)}</p>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
+              </section>
+            )}
 
-        <footer className="absolute bottom-0 left-0 right-0 h-16 overflow-hidden border-t border-white/10 bg-black/35">
-          <div className="animate-[vihemTicker_38s_linear_infinite] whitespace-nowrap text-3xl font-black leading-[64px] text-white">
-            {[...tickerParts, ...tickerParts].map((part, index) => (
-              <span key={`${part}-${index}`} className="mx-10 inline-flex items-center gap-4">
-                <span className="h-2 w-2 rounded-full bg-blue-300" />
-                {part}
-              </span>
-            ))}
+            {settings.showMeetings && (
+              <section className="min-h-0 overflow-hidden rounded-3xl bg-white/10 p-5 ring-1 ring-white/10">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="flex items-center gap-3 font-black" style={{ fontSize: compact ? 24 : 30 }}>
+                    <CalendarDays className="h-7 w-7 text-blue-200" />
+                    Kalender
+                  </h3>
+                  <span className="rounded-full bg-white/10 px-4 py-1.5 font-black" style={{ fontSize: compact ? 17 : 20 }}>{meetings.length}</span>
+                </div>
+                <div className="space-y-3 overflow-hidden">
+                  {activeMeetings.length === 0 ? (
+                    <p className="rounded-2xl bg-white/5 px-5 py-4 font-bold text-slate-300" style={{ fontSize: compact ? 16 : 18 }}>Inga kommande kalenderhändelser.</p>
+                  ) : activeMeetings.slice(0, 2).map(meeting => (
+                    <div key={meeting.id} className="rounded-2xl bg-white/10 px-5 py-3">
+                      <p className="truncate font-black" style={{ fontSize: compact ? 18 : 21 }}>{meeting.title}</p>
+                      <p className="mt-1 truncate font-semibold text-slate-300" style={{ fontSize: compact ? 14 : 16 }}>
+                        {meeting.starts_at ? formatDateTime(meeting.starts_at) : 'Ingen tid'}{meeting.location ? ` · ${meeting.location}` : ''}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
-        </footer>
-        <span className="absolute bottom-2 right-3 text-[10px] font-black text-white/20">
-          {SCREEN_APP_VERSION}
-        </span>
-      </div>
-      {(scaledWidth < screenWidth - 2 || scaledHeight < availableHeight - 2) && (
-        <div className="pointer-events-none absolute inset-0 rounded-xl ring-1 ring-white/5" />
-      )}
+        )}
+      </main>
+
+      <footer className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/35">
+        <div className="animate-[vihemTicker_38s_linear_infinite] whitespace-nowrap font-black text-white" style={{ fontSize: compact ? 23 : 30, lineHeight: compact ? '54px' : '62px' }}>
+          {[...tickerParts, ...tickerParts].map((part, index) => (
+            <span key={`${part}-${index}`} className="mx-10 inline-flex items-center gap-4">
+              <span className="h-2 w-2 rounded-full bg-blue-300" />
+              {part}
+            </span>
+          ))}
+        </div>
+      </footer>
+
+      <span className="absolute bottom-2 right-4 text-[10px] font-black text-white/20">
+        {SCREEN_APP_VERSION}
+      </span>
     </div>
   );
 }
