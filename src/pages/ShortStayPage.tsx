@@ -394,6 +394,11 @@ function getBeds24WebhookUrl(connection: Beds24Connection | null) {
   return `${base}/functions/v1/vihem-beds24-webhook?secret=${connection.webhook_secret}`;
 }
 
+function isMissingSchemaError(error: any) {
+  const message = String(error?.message || error?.details || '');
+  return message.includes('schema cache') || message.includes('does not exist') || error?.code === 'PGRST205';
+}
+
 async function edgeFunctionErrorMessage(error: any, fallback: string) {
   const context = error?.context;
   if (context && typeof context.json === 'function') {
@@ -571,14 +576,19 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
         .order('apartment_number'),
     ]);
 
-    if (unitsRes.error || bookingsRes.error || commonCleaningsRes.error) {
-      setError(unitsRes.error?.message || bookingsRes.error?.message || commonCleaningsRes.error?.message || 'Kunde inte ladda korttidsuthyrning.');
+    if (unitsRes.error || bookingsRes.error) {
+      setError(unitsRes.error?.message || bookingsRes.error?.message || 'Kunde inte ladda korttidsuthyrning.');
     } else {
       setUnits((unitsRes.data || []) as ShortStayUnit[]);
       setBookings((bookingsRes.data || []) as ShortStayBooking[]);
-      setCommonCleanings((commonCleaningsRes.data || []) as CommonCleaning[]);
+      setCommonCleanings(commonCleaningsRes.error && isMissingSchemaError(commonCleaningsRes.error)
+        ? []
+        : (commonCleaningsRes.data || []) as CommonCleaning[]);
       setProperties((propertiesRes.data || []) as Property[]);
       setApartments((apartmentsRes.data || []) as Apartment[]);
+      if (commonCleaningsRes.error && !isMissingSchemaError(commonCleaningsRes.error)) {
+        setError(commonCleaningsRes.error.message || 'Kunde inte ladda gemensamma städytor.');
+      }
     }
     setLoading(false);
   }
@@ -873,7 +883,9 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     setSaving(false);
 
     if (insertError) {
-      setFormError(insertError.message);
+      setFormError(isMissingSchemaError(insertError)
+        ? 'Databasen behöver uppdateras med senaste migrationen innan gemensamma städytor kan skapas.'
+        : insertError.message);
       return;
     }
 
@@ -935,7 +947,9 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
       await fetchData();
     } catch (err: any) {
       console.error('Error updating common cleaning:', err);
-      setError(err.message || 'Kunde inte ändra städstatus.');
+      setError(isMissingSchemaError(err)
+        ? 'Databasen behöver uppdateras med senaste migrationen innan gemensamma städytor kan användas.'
+        : err.message || 'Kunde inte ändra städstatus.');
     } finally {
       setUpdatingCleaningId(null);
     }
