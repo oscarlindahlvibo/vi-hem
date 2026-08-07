@@ -346,7 +346,7 @@ export function ScreenDisplayPage() {
         .order('start_date'),
       supabase
         .from('vihem_maintenance_requests')
-        .select('*, property:vihem_properties(name), apartment:vihem_apartments(apartment_number), assigned:vihem_profiles(name)')
+        .select('*, property:vihem_properties(name), apartment:vihem_apartments(apartment_number), assigned:vihem_profiles!assigned_to(name)')
         .eq('organisation_id', user.organisation_id)
         .not('status', 'in', '(done,closed)')
         .order('priority', { ascending: false })
