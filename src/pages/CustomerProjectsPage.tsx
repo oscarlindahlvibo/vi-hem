@@ -161,6 +161,17 @@ const PROJECT_TABS: { key: ProjectTabId; label: string; Icon: React.ComponentTyp
   { key: 'activity', label: 'Aktivitet', Icon: History },
 ];
 
+const STAFF_PROJECT_TABS: ProjectTabId[] = [
+  'overview',
+  'time',
+  'materials',
+  'change-orders',
+  'self-checks',
+  'inspections',
+  'deviations',
+  'documents',
+];
+
 export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjectsPageProps) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -363,14 +374,29 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
   });
   const quoteProjectCount = projects.filter(project => ['draft', 'quote_created', 'quote_sent'].includes(project.status)).length;
   const activeProjectCount = projects.filter(project => !['draft', 'quote_created', 'quote_sent', 'completed', 'archived', 'cancelled'].includes(project.status)).length;
+  const visibleProjectTabs = isAdmin ? PROJECT_TABS : PROJECT_TABS.filter(item => STAFF_PROJECT_TABS.includes(item.key));
+
+  useEffect(() => {
+    if (!isAdmin && (tab === 'quotes' || tab === 'invoice')) setTab('overview');
+  }, [isAdmin, tab]);
+
+  useEffect(() => {
+    if (!isAdmin && projectListView === 'quotes') setProjectListView('active');
+  }, [isAdmin, projectListView]);
 
   async function fetchAll() {
     if (!user?.organisation_id) return;
     setLoading(true);
     try {
+      const projectSelect = isAdmin
+        ? '*'
+        : 'id, organisation_id, customer_id, customer_name, name, title, project_address, description, project_type, status, priority, project_manager_id, start_date, planned_end_date, actual_end_date, internal_reference, external_reference, created_at, updated_at';
+      const customerSelect = isAdmin
+        ? '*'
+        : 'id, organisation_id, customer_type, name, contact_person, phone, email, project_address, reference';
       const [projectRes, customerRes, staffRes] = await Promise.all([
-        supabase.from('vihem_customer_projects').select('*').eq('organisation_id', user.organisation_id).order('updated_at', { ascending: false }),
-        supabase.from('vihem_project_customers').select('*').eq('organisation_id', user.organisation_id).order('name'),
+        supabase.from('vihem_customer_projects').select(projectSelect).eq('organisation_id', user.organisation_id).order('updated_at', { ascending: false }),
+        supabase.from('vihem_project_customers').select(customerSelect).eq('organisation_id', user.organisation_id).order('name'),
         supabase.from('vihem_profiles').select('*').eq('organisation_id', user.organisation_id).in('role', ['admin', 'staff']).eq('active', true).order('name'),
       ]);
 
@@ -395,18 +421,27 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         return;
       }
 
+      const materialSelect = isAdmin
+        ? '*'
+        : 'id, project_id, organisation_id, name, description, quantity, unit, supplier, status, registered_by, created_at, updated_at';
+      const changeOrderSelect = isAdmin
+        ? '*'
+        : 'id, project_id, organisation_id, change_order_number, title, description, reason, requested_by, status, created_by, created_at, updated_at';
+      const timeSelect = isAdmin
+        ? '*'
+        : 'id, user_id, organisation_id, customer_project_id, start_time, end_time, total_minutes, comment, work_type, entry_type, category, created_at, updated_at';
       const [assignmentRes, timeRes, materialRes, changeRes, quoteRes, templateRes, selfCheckRes, inspectionRes, deviationRes, invoiceRes, activityRes] = await Promise.all([
         supabase.from('vihem_project_assignments').select('*').in('project_id', projectIds),
-        supabase.from('vihem_time_entries').select('*').in('customer_project_id', projectIds).order('start_time', { ascending: false }),
-        supabase.from('vihem_project_material_entries').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
-        supabase.from('vihem_project_change_orders').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
-        supabase.from('vihem_project_quote_versions').select('*, lines:vihem_project_quote_lines(*)').in('project_id', projectIds).order('created_at', { ascending: false }),
+        supabase.from('vihem_time_entries').select(timeSelect).in('customer_project_id', projectIds).order('start_time', { ascending: false }),
+        supabase.from('vihem_project_material_entries').select(materialSelect).in('project_id', projectIds).order('created_at', { ascending: false }),
+        supabase.from('vihem_project_change_orders').select(changeOrderSelect).in('project_id', projectIds).order('created_at', { ascending: false }),
+        isAdmin ? supabase.from('vihem_project_quote_versions').select('*, lines:vihem_project_quote_lines(*)').in('project_id', projectIds).order('created_at', { ascending: false }) : Promise.resolve({ data: [] }),
         supabase.from('vihem_project_self_check_templates').select('*').eq('organisation_id', user.organisation_id).eq('active', true).order('name'),
         supabase.from('vihem_project_self_checks').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
         supabase.from('vihem_project_inspections').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
         supabase.from('vihem_project_deviations').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
-        supabase.from('vihem_project_invoice_basis').select('*, lines:vihem_project_invoice_basis_lines(*)').in('project_id', projectIds).order('created_at', { ascending: false }),
-        supabase.from('vihem_project_activity_log').select('*').in('project_id', projectIds).order('created_at', { ascending: false }),
+        isAdmin ? supabase.from('vihem_project_invoice_basis').select('*, lines:vihem_project_invoice_basis_lines(*)').in('project_id', projectIds).order('created_at', { ascending: false }) : Promise.resolve({ data: [] }),
+        isAdmin ? supabase.from('vihem_project_activity_log').select('*').in('project_id', projectIds).order('created_at', { ascending: false }) : Promise.resolve({ data: [] }),
       ]);
 
       setAssignments((assignmentRes.data || []) as ProjectAssignment[]);
@@ -634,12 +669,12 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         description: materialForm.description,
         quantity: Number(materialForm.quantity) || 1,
         unit: materialForm.unit,
-        purchase_price: purchasePrice,
-        markup_percent: markup,
-        sale_price: salePrice,
+        purchase_price: isAdmin ? purchasePrice : 0,
+        markup_percent: isAdmin ? markup : 0,
+        sale_price: isAdmin ? salePrice : 0,
         supplier: materialForm.supplier,
-        included_in_quote: materialForm.included_in_quote,
-        invoice_separately: materialForm.invoice_separately,
+        included_in_quote: isAdmin ? materialForm.included_in_quote : false,
+        invoice_separately: isAdmin ? materialForm.invoice_separately : false,
       };
       const { error: insertError } = editingMaterial
         ? await supabase.from('vihem_project_material_entries').update(payload).eq('id', editingMaterial.id)
@@ -676,11 +711,11 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         description: changeForm.description,
         reason: changeForm.reason,
         requested_by: changeForm.requested_by,
-        status: changeForm.status,
-        billing_mode: changeForm.billing_mode,
-        estimated_amount: Number(changeForm.estimated_amount) || 0,
-        actual_amount: Number(changeForm.actual_amount) || 0,
-        customer_approved_at: changeForm.status === 'approved_by_customer' ? new Date().toISOString() : null,
+        status: isAdmin ? changeForm.status : 'draft',
+        billing_mode: isAdmin ? changeForm.billing_mode : 'internal_note',
+        estimated_amount: isAdmin ? Number(changeForm.estimated_amount) || 0 : 0,
+        actual_amount: isAdmin ? Number(changeForm.actual_amount) || 0 : 0,
+        customer_approved_at: isAdmin && changeForm.status === 'approved_by_customer' ? new Date().toISOString() : null,
         created_by: user?.id,
       });
       if (insertError) throw insertError;
@@ -696,7 +731,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
   }
 
   async function handleSaveQuote() {
-    if (!selectedProject) return;
+    if (!selectedProject || !isAdmin) return;
     setSaving(true);
     setError('');
     try {
@@ -911,7 +946,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
   }
 
   async function handleSaveInvoiceBasis() {
-    if (!selectedProject) return;
+    if (!selectedProject || !isAdmin) return;
     setSaving(true);
     setError('');
     try {
@@ -1029,9 +1064,9 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[320px_minmax(0,1fr)]">
         <div className="space-y-4">
           <SearchInput placeholder="Sök projekt, kund, adress..." value={searchQuery} onChange={setSearchQuery} />
-          <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1">
+          <div className={`grid gap-1 rounded-lg bg-slate-100 p-1 ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {[
-              { key: 'quotes' as ProjectListView, label: 'Offerter', count: quoteProjectCount },
+              ...(isAdmin ? [{ key: 'quotes' as ProjectListView, label: 'Offerter', count: quoteProjectCount }] : []),
               { key: 'active' as ProjectListView, label: 'Pågående', count: activeProjectCount },
               { key: 'all' as ProjectListView, label: 'Alla', count: projects.length },
             ].map((item) => (
@@ -1121,15 +1156,23 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
               </div>
             </Card>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
-              <Stat label="Totala timmar" value={hours(totalMinutes)} icon={<Timer className="w-5 h-5" />} />
-              <Stat label="Fakturerbar tid" value={money(timeValue)} icon={<Coins className="w-5 h-5" />} />
-              <Stat label="Materialvärde" value={money(materialSale)} icon={<Package className="w-5 h-5" />} />
-              <Stat label="ÄTA-belopp" value={money(changeOrderAmount)} icon={<Receipt className="w-5 h-5" />} />
-              <Stat label="Fakturerbart" value={money(invoiceable)} icon={<FileText className="w-5 h-5" />} />
-            </div>
+            {isAdmin ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+                <Stat label="Totala timmar" value={hours(totalMinutes)} icon={<Timer className="w-5 h-5" />} />
+                <Stat label="Fakturerbar tid" value={money(timeValue)} icon={<Coins className="w-5 h-5" />} />
+                <Stat label="Materialvärde" value={money(materialSale)} icon={<Package className="w-5 h-5" />} />
+                <Stat label="ÄTA-belopp" value={money(changeOrderAmount)} icon={<Receipt className="w-5 h-5" />} />
+                <Stat label="Fakturerbart" value={money(invoiceable)} icon={<FileText className="w-5 h-5" />} />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Stat label="Rapporterad tid" value={hours(totalMinutes)} icon={<Timer className="w-5 h-5" />} />
+                <Stat label="Materialrader" value={`${projectMaterials.length}`} icon={<Package className="w-5 h-5" />} />
+                <Stat label="ÄTA" value={`${projectChangeOrders.length}`} icon={<Receipt className="w-5 h-5" />} />
+              </div>
+            )}
 
-            {selectedProject.budget_amount > 0 && budgetDeviation > 0 && (
+            {isAdmin && selectedProject.budget_amount > 0 && budgetDeviation > 0 && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
                 Projektet ligger {money(budgetDeviation)} över budget baserat på registrerat fakturerbart värde.
@@ -1142,11 +1185,11 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                   label="Projektvy"
                   value={tab}
                   onChange={(event) => setTab(event.target.value as ProjectTabId)}
-                  options={PROJECT_TABS.map(({ key, label }) => ({ value: key, label }))}
+                  options={visibleProjectTabs.map(({ key, label }) => ({ value: key, label }))}
                 />
               </div>
               <div className="hidden flex-wrap gap-1 border-b border-slate-200 p-2 xl:flex">
-                {PROJECT_TABS.map(({ key, label, Icon }) => (
+                {visibleProjectTabs.map(({ key, label, Icon }) => (
                   <button
                     key={key}
                     onClick={() => setTab(key)}
@@ -1162,10 +1205,12 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                 {tab === 'overview' && (
                   <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                     <InfoPanel title="Projektdata" rows={[
-                      ['Debitering', selectedProject.billing_type === 'fixed_price' ? 'Fast pris' : selectedProject.billing_type === 'mixed' ? 'Blandat' : 'Löpande'],
-                      ['Timpris', money(selectedProject.hourly_rate)],
-                      ['Budget', money(selectedProject.budget_amount)],
-                      ['Offertbelopp', money(selectedProject.quoted_amount)],
+                      ...(isAdmin ? [
+                        ['Debitering', selectedProject.billing_type === 'fixed_price' ? 'Fast pris' : selectedProject.billing_type === 'mixed' ? 'Blandat' : 'Löpande'],
+                        ['Timpris', money(selectedProject.hourly_rate)],
+                        ['Budget', money(selectedProject.budget_amount)],
+                        ['Offertbelopp', money(selectedProject.quoted_amount)],
+                      ] : []),
                       ['Intern referens', selectedProject.internal_reference || '—'],
                       ['Extern referens', selectedProject.external_reference || '—'],
                     ]} />
@@ -1191,7 +1236,12 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                     empty="Ingen tid rapporterad."
                   >
                     {projectTimeEntries.map(entry => (
-                      <ListRow key={entry.id} title={staff.find(s => s.id === entry.user_id)?.name || 'Användare'} meta={`${formatDate(entry.start_time)} · ${hours(entry.total_minutes || 0)} · ${entry.project_billable === false ? 'Ej fakturerbar' : 'Fakturerbar'}`} value={entry.comment || ''} />
+                      <ListRow
+                        key={entry.id}
+                        title={staff.find(s => s.id === entry.user_id)?.name || 'Användare'}
+                        meta={`${formatDate(entry.start_time)} · ${hours(entry.total_minutes || 0)}${isAdmin ? ` · ${entry.project_billable === false ? 'Ej fakturerbar' : 'Fakturerbar'}` : ''}`}
+                        value={entry.comment || ''}
+                      />
                     ))}
                   </SectionList>
                 )}
@@ -1206,8 +1256,10 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                       <ListRow
                         key={item.id}
                         title={item.name}
-                        meta={`${item.quantity} ${item.unit} · ${item.supplier || 'Ingen leverantör'} · inköp ${money(Number(item.purchase_price || 0))} · påslag ${Number(item.markup_percent || 0).toLocaleString('sv-SE')}% · ${item.status}`}
-                        value={money(Number(item.sale_price || 0) * Number(item.quantity || 0))}
+                        meta={isAdmin
+                          ? `${item.quantity} ${item.unit} · ${item.supplier || 'Ingen leverantör'} · inköp ${money(Number(item.purchase_price || 0))} · påslag ${Number(item.markup_percent || 0).toLocaleString('sv-SE')}% · ${item.status}`
+                          : `${item.quantity} ${item.unit} · ${item.supplier || 'Ingen leverantör'} · ${item.status}`}
+                        value={isAdmin ? money(Number(item.sale_price || 0) * Number(item.quantity || 0)) : ''}
                         action={
                           <Button size="sm" variant="ghost" onClick={() => openEditMaterial(item)} className="gap-1">
                             <Edit2 className="w-3.5 h-3.5" /> Redigera
@@ -1225,12 +1277,17 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                     empty="Ingen ÄTA skapad."
                   >
                     {projectChangeOrders.map(item => (
-                      <ListRow key={item.id} title={`${item.change_order_number} · ${item.title}`} meta={`${item.status} · ${item.billing_mode}`} value={money(item.actual_amount || item.estimated_amount)} />
+                      <ListRow
+                        key={item.id}
+                        title={`${item.change_order_number} · ${item.title}`}
+                        meta={isAdmin ? `${item.status} · ${item.billing_mode}` : `${item.status} · ${item.reason || 'Ingen orsak angiven'}`}
+                        value={isAdmin ? money(item.actual_amount || item.estimated_amount) : ''}
+                      />
                     ))}
                   </SectionList>
                 )}
 
-                {tab === 'quotes' && (
+                {isAdmin && tab === 'quotes' && (
                   <SectionList
                     title="Offerter"
                     action={<Button size="sm" onClick={() => setShowQuoteModal(true)}><Plus className="w-4 h-4" /> Ny offert</Button>}
@@ -1283,7 +1340,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                   </SectionList>
                 )}
 
-                {tab === 'invoice' && (
+                {isAdmin && tab === 'invoice' && (
                   <SectionList
                     title="Faktureringsunderlag"
                     action={isAdmin && <Button size="sm" onClick={() => setShowInvoiceModal(true)}><Plus className="w-4 h-4" /> Skapa underlag</Button>}
@@ -1327,15 +1384,15 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       <CustomerModal open={showCustomerModal} onClose={() => setShowCustomerModal(false)} form={customerForm} setForm={setCustomerForm} onSave={handleSaveCustomer} saving={saving} error={error} />
       <ProjectModal open={showProjectModal} onClose={() => setShowProjectModal(false)} form={projectForm} setForm={setProjectForm} customers={customers} staff={staff} onSave={handleSaveProject} saving={saving} error={error} />
       <TimeModal open={showTimeModal} onClose={() => setShowTimeModal(false)} form={timeForm} setForm={setTimeForm} staff={staff} isAdmin={isAdmin} onSave={handleSaveTime} saving={saving} error={error} />
-      <MaterialModal open={showMaterialModal} onClose={() => { setShowMaterialModal(false); setEditingMaterial(null); resetMaterialForm(); }} form={materialForm} setForm={setMaterialForm} onSave={handleSaveMaterial} saving={saving} error={error} editing={Boolean(editingMaterial)} />
-      <ChangeOrderModal open={showChangeModal} onClose={() => setShowChangeModal(false)} form={changeForm} setForm={setChangeForm} onSave={handleSaveChangeOrder} saving={saving} error={error} />
-      <QuoteModal open={showQuoteModal} onClose={() => setShowQuoteModal(false)} form={quoteForm} setForm={setQuoteForm} onSave={handleSaveQuote} saving={saving} error={error} />
+      <MaterialModal open={showMaterialModal} onClose={() => { setShowMaterialModal(false); setEditingMaterial(null); resetMaterialForm(); }} form={materialForm} setForm={setMaterialForm} onSave={handleSaveMaterial} saving={saving} error={error} editing={Boolean(editingMaterial)} isAdmin={isAdmin} />
+      <ChangeOrderModal open={showChangeModal} onClose={() => setShowChangeModal(false)} form={changeForm} setForm={setChangeForm} onSave={handleSaveChangeOrder} saving={saving} error={error} isAdmin={isAdmin} />
+      {isAdmin && <QuoteModal open={showQuoteModal} onClose={() => setShowQuoteModal(false)} form={quoteForm} setForm={setQuoteForm} onSave={handleSaveQuote} saving={saving} error={error} />}
       <DocumentModal open={showDocumentModal} onClose={() => setShowDocumentModal(false)} form={documentForm} setForm={setDocumentForm} onSave={handleSaveDocument} saving={saving} error={error} />
       <SelfCheckTemplateModal open={showSelfCheckTemplateModal} onClose={() => setShowSelfCheckTemplateModal(false)} form={selfCheckTemplateForm} setForm={setSelfCheckTemplateForm} onSave={handleSaveSelfCheckTemplate} saving={saving} error={error} />
       <SelfCheckModal open={showSelfCheckModal} onClose={() => setShowSelfCheckModal(false)} form={selfCheckForm} setForm={setSelfCheckForm} templates={selfCheckTemplates} onSave={handleSaveSelfCheck} saving={saving} error={error} />
       <InspectionModal open={showInspectionModal} onClose={() => setShowInspectionModal(false)} form={inspectionForm} setForm={setInspectionForm} staff={staff} onSave={handleSaveInspection} saving={saving} error={error} />
       <DeviationModal open={showDeviationModal} onClose={() => setShowDeviationModal(false)} form={deviationForm} setForm={setDeviationForm} staff={staff} onSave={handleSaveDeviation} saving={saving} error={error} />
-      <InvoiceBasisModal open={showInvoiceModal} onClose={() => setShowInvoiceModal(false)} form={invoiceForm} setForm={setInvoiceForm} onSave={handleSaveInvoiceBasis} saving={saving} error={error} totals={{ timeValue, materialSale, changeOrderAmount }} />
+      {isAdmin && <InvoiceBasisModal open={showInvoiceModal} onClose={() => setShowInvoiceModal(false)} form={invoiceForm} setForm={setInvoiceForm} onSave={handleSaveInvoiceBasis} saving={saving} error={error} totals={{ timeValue, materialSale, changeOrderAmount }} />}
     </div>
   );
 }
@@ -1489,14 +1546,16 @@ function TimeModal({ open, onClose, form, setForm, staff, isAdmin, onSave, savin
           <Input label="Rast minuter" type="number" value={form.break_minutes} onChange={(e) => setForm({ ...form, break_minutes: e.target.value })} />
           <Input label="Typ av arbete" value={form.work_type} onChange={(e) => setForm({ ...form, work_type: e.target.value })} />
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.project_billable} onChange={(e) => setForm({ ...form, project_billable: e.target.checked })} /> Fakturerbar tid</label>
-          <Select label="Debiteringsläge" value={form.project_billing_scope} onChange={(e) => setForm({ ...form, project_billing_scope: e.target.value })} options={[
-            { value: 'included_in_quote', label: 'Ingår i offert' },
-            { value: 'outside_quote', label: 'Utanför offert' },
-            { value: 'internal', label: 'Intern tid' },
-          ]} />
-        </div>
+        {isAdmin && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.project_billable} onChange={(e) => setForm({ ...form, project_billable: e.target.checked })} /> Fakturerbar tid</label>
+            <Select label="Debiteringsläge" value={form.project_billing_scope} onChange={(e) => setForm({ ...form, project_billing_scope: e.target.value })} options={[
+              { value: 'included_in_quote', label: 'Ingår i offert' },
+              { value: 'outside_quote', label: 'Utanför offert' },
+              { value: 'internal', label: 'Intern tid' },
+            ]} />
+          </div>
+        )}
         <Textarea label="Kommentar" value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} rows={2} />
         {error && <ErrorBox message={error} />}
         <ModalActions onClose={onClose} onSave={onSave} saving={saving} saveLabel="Spara tid" />
@@ -1505,7 +1564,7 @@ function TimeModal({ open, onClose, form, setForm, staff, isAdmin, onSave, savin
   );
 }
 
-function MaterialModal({ open, onClose, form, setForm, onSave, saving, error, editing }: any) {
+function MaterialModal({ open, onClose, form, setForm, onSave, saving, error, editing, isAdmin }: any) {
   const purchasePrice = Number(form.purchase_price) || 0;
   const markup = Number(form.markup_percent) || 0;
   const quantity = Number(form.quantity) || 1;
@@ -1523,29 +1582,37 @@ function MaterialModal({ open, onClose, form, setForm, onSave, saving, error, ed
           <Input label="Leverantör" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
           <Input label="Antal" type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
           <Input label="Enhet" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} />
-          <Input label="Inköpspris/st" type="number" value={form.purchase_price} onChange={(e) => setPurchase(e.target.value)} />
-          <Input label="Påslag %" type="number" value={form.markup_percent} onChange={(e) => setMarkup(e.target.value)} />
-          <Input label="Fakturerbart pris/st" type="number" value={String(calculatedSalePrice)} onChange={(e) => setForm({ ...form, sale_price: e.target.value })} disabled />
+          {isAdmin && (
+            <>
+              <Input label="Inköpspris/st" type="number" value={form.purchase_price} onChange={(e) => setPurchase(e.target.value)} />
+              <Input label="Påslag %" type="number" value={form.markup_percent} onChange={(e) => setMarkup(e.target.value)} />
+              <Input label="Fakturerbart pris/st" type="number" value={String(calculatedSalePrice)} onChange={(e) => setForm({ ...form, sale_price: e.target.value })} disabled />
+            </>
+          )}
         </div>
-        <div className="grid grid-cols-1 gap-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm sm:grid-cols-3">
-          <div>
-            <p className="text-xs text-blue-700">Inköpsvärde</p>
-            <p className="font-bold text-blue-950">{money(totalPurchase)}</p>
+        {isAdmin && (
+          <div className="grid grid-cols-1 gap-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm sm:grid-cols-3">
+            <div>
+              <p className="text-xs text-blue-700">Inköpsvärde</p>
+              <p className="font-bold text-blue-950">{money(totalPurchase)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-blue-700">Fakturerbart</p>
+              <p className="font-bold text-blue-950">{money(totalSale)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-blue-700">Påslag</p>
+              <p className="font-bold text-blue-950">{markup.toLocaleString('sv-SE')}%</p>
+            </div>
           </div>
-          <div>
-            <p className="text-xs text-blue-700">Fakturerbart</p>
-            <p className="font-bold text-blue-950">{money(totalSale)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-blue-700">Påslag</p>
-            <p className="font-bold text-blue-950">{markup.toLocaleString('sv-SE')}%</p>
-          </div>
-        </div>
+        )}
         <Textarea label="Beskrivning" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.included_in_quote} onChange={(e) => setForm({ ...form, included_in_quote: e.target.checked })} /> Ingår i offert</label>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.invoice_separately} onChange={(e) => setForm({ ...form, invoice_separately: e.target.checked })} /> Faktureras separat</label>
-        </div>
+        {isAdmin && (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.included_in_quote} onChange={(e) => setForm({ ...form, included_in_quote: e.target.checked })} /> Ingår i offert</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.invoice_separately} onChange={(e) => setForm({ ...form, invoice_separately: e.target.checked })} /> Faktureras separat</label>
+          </div>
+        )}
         {error && <ErrorBox message={error} />}
         <ModalActions onClose={onClose} onSave={onSave} saving={saving} saveLabel={editing ? 'Spara ändringar' : 'Spara material'} />
       </div>
@@ -1553,7 +1620,7 @@ function MaterialModal({ open, onClose, form, setForm, onSave, saving, error, ed
   );
 }
 
-function ChangeOrderModal({ open, onClose, form, setForm, onSave, saving, error }: any) {
+function ChangeOrderModal({ open, onClose, form, setForm, onSave, saving, error, isAdmin }: any) {
   return (
     <Modal open={open} onClose={onClose} title="Ny ÄTA" size="lg">
       <div className="space-y-4">
@@ -1562,23 +1629,27 @@ function ChangeOrderModal({ open, onClose, form, setForm, onSave, saving, error 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input label="Orsak" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
           <Input label="Beställare" value={form.requested_by} onChange={(e) => setForm({ ...form, requested_by: e.target.value })} />
-          <Select label="Status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} options={[
-            { value: 'draft', label: 'Utkast' },
-            { value: 'sent_to_customer', label: 'Skickad till kund' },
-            { value: 'approved_by_customer', label: 'Godkänd av kund' },
-            { value: 'declined_by_customer', label: 'Nekad av kund' },
-            { value: 'completed', label: 'Utförd' },
-            { value: 'invoiced', label: 'Fakturerad' },
-            { value: 'written_off', label: 'Avskriven' },
-          ]} />
-          <Select label="Debitering" value={form.billing_mode} onChange={(e) => setForm({ ...form, billing_mode: e.target.value })} options={[
-            { value: 'separate', label: 'Faktureras separat' },
-            { value: 'included', label: 'Ingår i projektet' },
-            { value: 'internal_note', label: 'Endast intern notering' },
-            { value: 'deduction', label: 'Avgående kostnad' },
-          ]} />
-          <Input label="Beräknad kostnad" type="number" value={form.estimated_amount} onChange={(e) => setForm({ ...form, estimated_amount: e.target.value })} />
-          <Input label="Faktiskt utfall" type="number" value={form.actual_amount} onChange={(e) => setForm({ ...form, actual_amount: e.target.value })} />
+          {isAdmin && (
+            <>
+              <Select label="Status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} options={[
+                { value: 'draft', label: 'Utkast' },
+                { value: 'sent_to_customer', label: 'Skickad till kund' },
+                { value: 'approved_by_customer', label: 'Godkänd av kund' },
+                { value: 'declined_by_customer', label: 'Nekad av kund' },
+                { value: 'completed', label: 'Utförd' },
+                { value: 'invoiced', label: 'Fakturerad' },
+                { value: 'written_off', label: 'Avskriven' },
+              ]} />
+              <Select label="Debitering" value={form.billing_mode} onChange={(e) => setForm({ ...form, billing_mode: e.target.value })} options={[
+                { value: 'separate', label: 'Faktureras separat' },
+                { value: 'included', label: 'Ingår i projektet' },
+                { value: 'internal_note', label: 'Endast intern notering' },
+                { value: 'deduction', label: 'Avgående kostnad' },
+              ]} />
+              <Input label="Beräknad kostnad" type="number" value={form.estimated_amount} onChange={(e) => setForm({ ...form, estimated_amount: e.target.value })} />
+              <Input label="Faktiskt utfall" type="number" value={form.actual_amount} onChange={(e) => setForm({ ...form, actual_amount: e.target.value })} />
+            </>
+          )}
         </div>
         {error && <ErrorBox message={error} />}
         <ModalActions onClose={onClose} onSave={onSave} saving={saving} saveLabel="Spara ÄTA" />
