@@ -29,7 +29,7 @@ import {
 } from '../lib/screenSettings';
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
-const SCREEN_APP_VERSION = '2026-08-07-tv-layout-10';
+const SCREEN_APP_VERSION = '2026-08-07-tv-layout-11';
 const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
 
 const addDays = (date: Date, days: number) => {
@@ -340,7 +340,7 @@ export function ScreenDisplayPage() {
         .limit(12),
       supabase
         .from('vihem_staff_absence_requests')
-        .select('*, user:vihem_profiles(id, name)')
+        .select('*, user:user_id(id, name)')
         .eq('organisation_id', user.organisation_id)
         .in('status', ['submitted', 'approved'])
         .lte('start_date', absenceEnd)
