@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, ClipboardList, Monitor, Newspaper, RefreshCw, Timer, Users, Briefcase, CheckCircle2, UserRoundX } from 'lucide-react';
+import { AlertCircle, CalendarDays, ClipboardList, Monitor, Newspaper, RefreshCw, Timer, Users, Briefcase, CheckCircle2, UserRoundX } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
 import { Button, LoadingPage } from '../components/ui';
-import type { CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, Meeting, MeetingAgendaItem, News, Profile, ShortStayBooking, ShortStayUnit, StaffAbsenceRequest, TimeEntry, WorkOrder } from '../types';
-import { formatDate, formatDateTime, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
+import type { CalendarEvent, CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, MaintenanceRequest, Meeting, MeetingAgendaItem, News, Profile, ShortStayBooking, ShortStayUnit, StaffAbsenceRequest, TimeEntry, WorkOrder } from '../types';
+import { formatDate, formatDateTime, MR_PRIORITY_LABELS, MR_STATUS_LABELS, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import {
   DEFAULT_SCREEN_KEY,
@@ -158,6 +158,8 @@ export function ScreenDisplayPage() {
   const [meetingAgendaItems, setMeetingAgendaItems] = useState<MeetingAgendaItem[]>([]);
   const [customerProjects, setCustomerProjects] = useState<CustomerProject[]>([]);
   const [absenceRequests, setAbsenceRequests] = useState<StaffAbsenceRequest[]>([]);
+  const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [laundryRooms, setLaundryRooms] = useState<LaundryRoom[]>([]);
   const [laundrySlots, setLaundrySlots] = useState<LaundrySlot[]>([]);
   const [laundryBookings, setLaundryBookings] = useState<LaundryBooking[]>([]);
@@ -263,7 +265,9 @@ export function ScreenDisplayPage() {
     const todayStart = dateKey(today());
     const meetingEnd = dateKey(addDays(today(), 7));
 
-    const [organisationResult, screenSettingsResult, staffResult, unitsResult, bookingsResult, workOrdersResult, newsResult, clockedInResult, meetingsResult, customerProjectsResult, absenceRequestsResult, laundryRoomsResult] = await Promise.all([
+    const calendarEnd = dateKey(addDays(today(), 14));
+
+    const [organisationResult, screenSettingsResult, staffResult, unitsResult, bookingsResult, workOrdersResult, newsResult, clockedInResult, meetingsResult, customerProjectsResult, absenceRequestsResult, maintenanceRequestsResult, calendarEventsResult, laundryRoomsResult] = await Promise.all([
       supabase
         .from('vihem_organisations')
         .select('name, settings')
@@ -341,6 +345,23 @@ export function ScreenDisplayPage() {
         .gte('end_date', todayStart)
         .order('start_date'),
       supabase
+        .from('vihem_maintenance_requests')
+        .select('*, property:vihem_properties(name), apartment:vihem_apartments(apartment_number), assigned:vihem_profiles(name)')
+        .eq('organisation_id', user.organisation_id)
+        .not('status', 'in', '(done,closed)')
+        .order('priority', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(30),
+      supabase
+        .from('vihem_calendar_events')
+        .select('*')
+        .eq('organisation_id', user.organisation_id)
+        .eq('visibility', 'organisation')
+        .lt('starts_at', `${calendarEnd}T23:59:59`)
+        .gt('ends_at', `${todayStart}T00:00:00`)
+        .order('starts_at', { ascending: true })
+        .limit(30),
+      supabase
         .from('vihem_laundry_rooms')
         .select('*, property:vihem_properties(name)')
         .eq('organisation_id', user.organisation_id)
@@ -350,7 +371,7 @@ export function ScreenDisplayPage() {
 
     const screenSettingsUnavailable = isMissingScreenSettingsTable(screenSettingsResult.error);
 
-    if (organisationResult.error || (screenSettingsResult.error && !screenSettingsUnavailable) || staffResult.error || unitsResult.error || bookingsResult.error || workOrdersResult.error || newsResult.error || clockedInResult.error || meetingsResult.error || laundryRoomsResult.error) {
+    if (organisationResult.error || (screenSettingsResult.error && !screenSettingsUnavailable) || staffResult.error || unitsResult.error || bookingsResult.error || workOrdersResult.error || newsResult.error || clockedInResult.error || meetingsResult.error || maintenanceRequestsResult.error || calendarEventsResult.error || laundryRoomsResult.error) {
       setDataError(
         organisationResult.error?.message ||
         screenSettingsResult.error?.message ||
@@ -361,6 +382,8 @@ export function ScreenDisplayPage() {
         newsResult.error?.message ||
         clockedInResult.error?.message ||
         meetingsResult.error?.message ||
+        maintenanceRequestsResult.error?.message ||
+        calendarEventsResult.error?.message ||
         laundryRoomsResult.error?.message ||
         'Kunde inte ladda skärmdata.'
       );
@@ -438,6 +461,8 @@ export function ScreenDisplayPage() {
       setNews((newsResult.data || []) as News[]);
       setCustomerProjects(customerProjectsResult.error ? [] : (customerProjectsResult.data || []) as CustomerProject[]);
       setAbsenceRequests(absenceRequestsResult.error ? [] : (absenceRequestsResult.data || []) as StaffAbsenceRequest[]);
+      setMaintenanceRequests((maintenanceRequestsResult.data || []) as MaintenanceRequest[]);
+      setCalendarEvents((calendarEventsResult.data || []) as CalendarEvent[]);
       setLaundryRooms(loadedLaundryRooms);
       setLaundrySlots(loadedLaundrySlots);
       setLaundryBookings(loadedLaundryBookings);
@@ -603,6 +628,8 @@ export function ScreenDisplayPage() {
           workOrders={workOrders}
           customerProjects={customerProjects}
           absenceRequests={absenceRequests}
+          maintenanceRequests={maintenanceRequests}
+          calendarEvents={calendarEvents}
           staffMembers={staffMembers}
           screenHeight={screenSize.height}
           lastUpdated={lastUpdated}
@@ -661,6 +688,8 @@ function MeetingScreen({
   workOrders,
   customerProjects,
   absenceRequests,
+  maintenanceRequests,
+  calendarEvents,
   staffMembers,
   screenHeight,
   lastUpdated,
@@ -672,6 +701,8 @@ function MeetingScreen({
   workOrders: WorkOrder[];
   customerProjects: CustomerProject[];
   absenceRequests: StaffAbsenceRequest[];
+  maintenanceRequests: MaintenanceRequest[];
+  calendarEvents: CalendarEvent[];
   staffMembers: Pick<Profile, 'id' | 'name'>[];
   screenHeight: number;
   lastUpdated: Date | null;
@@ -688,10 +719,12 @@ function MeetingScreen({
   const doneAgendaCount = selectedAgenda.length - visibleAgenda.length;
   const activeWorkOrders = workOrders.slice(0, meetingPart === 'part-1' ? 24 : 18);
   const activeProjects = customerProjects.slice(0, meetingPart === 'part-2' ? 24 : 16);
+  const activeMaintenanceRequests = maintenanceRequests.slice(0, meetingPart === 'part-2' ? 24 : 14);
   const todayValue = dateKey(today());
   const upcomingAbsences = absenceRequests
     .filter(request => request.end_date >= todayValue)
-    .slice(0, meetingPart === 'part-2' ? 12 : 8);
+    .slice(0, meetingPart === 'part-2' ? 24 : 8);
+  const upcomingCalendarEvents = calendarEvents.slice(0, meetingPart === 'part-2' ? 24 : 10);
   const upcomingMeetings = meetings
     .filter(meeting => meeting.id !== currentMeeting?.id)
     .slice(0, meetingPart === 'part-2' ? 8 : 5);
@@ -802,6 +835,39 @@ function MeetingScreen({
     </section>
   );
 
+  const maintenancePanel = (
+    <section className="flex min-h-0 flex-col rounded-2xl bg-orange-500/10 p-2.5 ring-1 ring-orange-300/20">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex min-w-0 items-center gap-2 text-base font-black">
+          <AlertCircle className="h-4 w-4 shrink-0 text-orange-200" />
+          Felanmälan
+        </h3>
+        <span className="rounded-full bg-orange-300/20 px-2.5 py-1 text-[11px] font-black text-orange-100">{maintenanceRequests.length}</span>
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-1.5 overflow-hidden">
+        {activeMaintenanceRequests.length === 0 ? (
+          <p className="col-span-2 rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga aktiva felanmälningar.</p>
+        ) : activeMaintenanceRequests.map(request => (
+          <div key={request.id} className="min-w-0 rounded-lg bg-white/10 px-2 py-1.5">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <p className="truncate text-[12px] font-black">{request.title}</p>
+              <span className="shrink-0 rounded-full bg-white/10 px-1.5 py-0.5 text-[9px] font-black text-orange-100">
+                {MR_STATUS_LABELS[request.status] || request.status}
+              </span>
+            </div>
+            <p className="mt-1 truncate text-[10px] font-bold text-slate-300">
+              {[request.property?.name, request.apartment?.apartment_number].filter(Boolean).join(' · ') || 'Ingen plats'}
+            </p>
+            <div className="mt-1 flex min-w-0 items-center gap-1">
+              <span className="truncate rounded-full bg-orange-300/20 px-1.5 py-0.5 text-[9px] font-black text-orange-100">{request.assigned?.name ? nameInitials(request.assigned.name) : 'Ej tilldelad'}</span>
+              <span className="shrink-0 rounded-full bg-amber-300/20 px-1.5 py-0.5 text-[9px] font-black text-amber-100">{MR_PRIORITY_LABELS[request.priority] || request.priority}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
   const absencePanel = (
     <section className="flex min-h-0 flex-col rounded-2xl bg-rose-500/10 p-2.5 ring-1 ring-rose-300/20">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -826,6 +892,36 @@ function MeetingScreen({
             <span className="justify-self-end truncate rounded-full bg-white/10 px-2 py-1 text-[9px] font-black text-white">
               {request.start_date === request.end_date ? formatDate(request.start_date) : `${formatDate(request.start_date)}-${formatDate(request.end_date)}`}
             </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
+  const calendarPanel = (
+    <section className="flex min-h-0 flex-col rounded-2xl bg-blue-500/10 p-2.5 ring-1 ring-blue-300/20">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex min-w-0 items-center gap-2 text-base font-black">
+          <CalendarDays className="h-4 w-4 shrink-0 text-blue-200" />
+          Kalender
+        </h3>
+        <span className="rounded-full bg-blue-300/20 px-2.5 py-1 text-[11px] font-black text-blue-100">{calendarEvents.length}</span>
+      </div>
+      <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
+        {upcomingCalendarEvents.length === 0 ? (
+          <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga organisationshändelser i närtid.</p>
+        ) : upcomingCalendarEvents.map(event => (
+          <div key={event.id} className="rounded-lg bg-white/10 px-2 py-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="truncate text-xs font-black">{event.title}</p>
+              <span className="shrink-0 rounded-full bg-blue-300/20 px-1.5 py-0.5 text-[9px] font-black text-blue-100">
+                {event.all_day ? 'Heldag' : new Date(event.starts_at).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+            <p className="mt-0.5 truncate text-[10px] font-bold text-slate-300">
+              {formatDate(event.starts_at)}
+              {event.location ? ` · ${event.location}` : ''}
+            </p>
           </div>
         ))}
       </div>
@@ -860,30 +956,25 @@ function MeetingScreen({
       </div>
 
       {meetingPart === 'part-1' ? (
-        <div className="grid min-h-0 gap-2 xl:grid-cols-[0.82fr_1.18fr]">
+        <div className="grid min-h-0 gap-2 xl:grid-cols-[0.82fr_1fr_1fr]">
           {agendaPanel}
-          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '1.08fr 0.92fr' }}>
-            {workOrderPanel}
-            {projectPanel}
-          </section>
-        </div>
-      ) : meetingPart === 'part-2' ? (
-        <div className="grid min-h-0 gap-2 xl:grid-cols-[1fr_1fr_0.82fr]">
           {workOrderPanel}
           {projectPanel}
-          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '1fr 0.82fr' }}>
-            {absencePanel}
-            {meetingsPanel}
-          </section>
+        </div>
+      ) : meetingPart === 'part-2' ? (
+        <div className="grid min-h-0 gap-2 xl:grid-cols-[1fr_1fr_1fr]">
+          {maintenancePanel}
+          {absencePanel}
+          {calendarPanel}
         </div>
       ) : (
-        <div className="grid min-h-0 gap-2 xl:grid-cols-[0.78fr_1fr_1fr_0.72fr]">
+        <div className="grid min-h-0 gap-2 xl:grid-cols-[0.78fr_1fr_1fr_0.82fr]">
           {agendaPanel}
           {workOrderPanel}
           {projectPanel}
           <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '0.78fr 1fr' }}>
-            {meetingsPanel}
-            {absencePanel}
+            {maintenancePanel}
+            {calendarPanel}
           </section>
         </div>
       )}
@@ -895,7 +986,9 @@ function MeetingScreen({
           {doneAgendaCount > 0 && <span>{doneAgendaCount} avbockade</span>}
           <span>{workOrders.length} arbetsordrar</span>
           <span>{customerProjects.length} kundprojekt</span>
+          <span>{maintenanceRequests.length} felanmälningar</span>
           <span>{upcomingAbsences.length} frånvaro/ledighet</span>
+          <span>{calendarEvents.length} kalenderhändelser</span>
         </div>
       </div>
     </div>
