@@ -402,6 +402,8 @@ export interface Apartment {
 
 export interface Tenancy {
   id: string;
+  organisation_id?: string | null;
+  company_id?: string | null;
   tenant_id: string;
   apartment_id: string;
   property_id: string;
@@ -1413,6 +1415,9 @@ export interface Invoice {
   project_id: string | null;
   work_order_id: string | null;
   tenancy_id: string | null;
+  original_invoice_id?: string | null;
+  credited_by_invoice_id?: string | null;
+  credit_reason?: string;
   subtotal_amount: number;
   vat_amount: number;
   total_amount: number;
@@ -1451,6 +1456,7 @@ export interface InvoiceLine {
   line_type: InvoiceLineType;
   project_id: string | null;
   work_order_id: string | null;
+  tenancy_id?: string | null;
   time_entry_id: string | null;
   line_total_excl_vat: number;
   vat_amount: number;
@@ -1474,6 +1480,35 @@ export interface Payment {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  company?: FinanceCompany | null;
+  invoice?: Invoice | null;
+}
+
+export type InvoiceEmailStatus = 'draft' | 'queued' | 'sent' | 'failed' | 'cancelled';
+
+export interface InvoiceEmailOutbox {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  invoice_id: string;
+  document_id: string | null;
+  recipient_email: string;
+  recipient_name: string;
+  subject: string;
+  message: string;
+  status: InvoiceEmailStatus;
+  queued_at: string | null;
+  sent_at: string | null;
+  error_message: string;
+  email_kind?: 'invoice' | 'payment_reminder';
+  reminder_level?: number;
+  reminder_due_date?: string | null;
+  reminder_fee_amount?: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  company?: FinanceCompany | null;
+  invoice?: Invoice | null;
 }
 
 export interface AccountingIntegration {
@@ -1486,6 +1521,47 @@ export interface AccountingIntegration {
   last_sync_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface FinanceReminderSettings {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  enabled: boolean;
+  first_after_days: number;
+  interval_days: number;
+  max_reminders: number;
+  reminder_fee: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  company?: FinanceCompany | null;
+}
+
+export type AccountingSyncQueueStatus = 'queued' | 'processing' | 'synced' | 'failed' | 'cancelled';
+export type AccountingSyncQueueEntityType = 'invoice' | 'payment' | 'customer' | 'supplier' | 'supplier_invoice';
+export type AccountingSyncQueueAction = 'upsert' | 'delete' | 'void' | 'payment';
+
+export interface AccountingSyncQueueItem {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  integration_id: string | null;
+  entity_type: AccountingSyncQueueEntityType;
+  entity_id: string;
+  action: AccountingSyncQueueAction;
+  status: AccountingSyncQueueStatus;
+  payload: Record<string, unknown>;
+  external_id: string;
+  attempts: number;
+  last_attempt_at: string | null;
+  synced_at: string | null;
+  error_message: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  company?: FinanceCompany | null;
+  integration?: AccountingIntegration | null;
 }
 
 export type SupplierInvoiceStatus = 'draft' | 'needs_review' | 'approved' | 'scheduled_for_payment' | 'paid' | 'rejected' | 'archived';
@@ -1548,4 +1624,52 @@ export interface SupplierInvoiceLine {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+}
+
+export type RentBillingRunStatus = 'draft' | 'generated' | 'approved' | 'sent' | 'cancelled';
+export type RentBillingItemStatus = 'draft' | 'invoiced' | 'skipped' | 'cancelled';
+
+export interface RentBillingRun {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  rent_period: string;
+  due_date: string;
+  status: RentBillingRunStatus;
+  invoice_count: number;
+  total_amount: number;
+  notes: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  company?: FinanceCompany | null;
+}
+
+export interface RentBillingItem {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  run_id: string;
+  tenancy_id: string;
+  tenant_id: string;
+  property_id: string | null;
+  apartment_id: string | null;
+  finance_customer_id: string | null;
+  invoice_id: string | null;
+  rent_period: string;
+  due_date: string;
+  description: string;
+  amount: number;
+  vat_rate: number;
+  vat_amount: number;
+  total_amount: number;
+  status: RentBillingItemStatus;
+  skip_reason: string;
+  created_at: string;
+  updated_at: string;
+  company?: FinanceCompany | null;
+  tenant?: Profile | null;
+  property?: Property | null;
+  apartment?: Apartment | null;
+  invoice?: Invoice | null;
 }
