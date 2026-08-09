@@ -35,6 +35,7 @@ import { MeetingsPage } from './pages/MeetingsPage';
 import { ScreenDisplayPage } from './pages/ScreenDisplayPage';
 import { ScreenSettingsPage } from './pages/ScreenSettingsPage';
 import { GuestLaundryPage } from './pages/GuestLaundryPage';
+import { FinancePage } from './pages/FinancePage';
 import type { ModuleKey } from './types';
 
 type ModuleState = Partial<Record<ModuleKey, boolean>>;
@@ -44,6 +45,7 @@ const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
   'short_stay',
   'year_planning',
   'meetings',
+  'finance',
 ];
 
 const DEFAULT_MODULE_STATE: ModuleState = {
@@ -57,6 +59,7 @@ const DEFAULT_MODULE_STATE: ModuleState = {
   news: true,
   purchasing: true,
   inspections: true,
+  finance: false,
 };
 
 function normalizeAppPath(path: string) {
@@ -469,6 +472,10 @@ function AppInner() {
       case 'screen-settings':
         if (!isAdmin) return renderDashboard();
         return <ScreenSettingsPage onNavigate={navigate} />;
+
+      case 'finance':
+        if (!isAdmin || !enabledModules.finance) return renderDashboard();
+        return <FinancePage onNavigate={navigate} />;
 
       case 'admin-payroll':
         if (!isAdmin) return renderDashboard();

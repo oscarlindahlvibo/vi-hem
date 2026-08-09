@@ -16,6 +16,7 @@ export type ModuleKey =
   | 'year_planning'
   | 'meetings'
   | 'inspections'
+  | 'finance'
   | 'inventory'
   | 'crm'
   | 'ai';
@@ -557,6 +558,7 @@ export interface ProjectCustomer {
 export interface CustomerProject {
   id: string;
   organisation_id: string;
+  company_id?: string | null;
   customer_id: string | null;
   name: string;
   customer_name: string;
@@ -1270,4 +1272,280 @@ export interface CrmActivity {
   contact?: CrmContact | null;
   assignee?: Profile | null;
   creator?: Profile | null;
+}
+
+export type CompanyPermissionRole = 'viewer' | 'seller' | 'bookkeeper' | 'approver' | 'admin';
+export type FinanceCustomerType = 'private' | 'company' | 'brf' | 'property_owner' | 'internal';
+export type InvoiceStatus = 'draft' | 'approved' | 'sent' | 'partially_paid' | 'paid' | 'overdue' | 'credited' | 'cancelled';
+export type InvoicePaymentStatus = 'unpaid' | 'partially_paid' | 'paid' | 'overpaid';
+export type InvoiceAccountingStatus = 'not_synced' | 'pending' | 'synced' | 'failed';
+export type InvoiceLineType = 'manual' | 'rent' | 'time' | 'material' | 'fee' | 'discount' | 'short_stay' | 'work_order';
+
+export interface FinanceCompany {
+  id: string;
+  organisation_id: string;
+  name: string;
+  legal_name: string;
+  organisation_number: string;
+  vat_number: string;
+  email: string;
+  phone: string;
+  address_line1: string;
+  address_line2: string;
+  postal_code: string;
+  city: string;
+  country_code: string;
+  logo_url: string;
+  bankgiro: string;
+  plusgiro: string;
+  iban: string;
+  bic: string;
+  swish_number: string;
+  default_payment_terms_days: number;
+  default_currency: string;
+  default_vat_rate: number;
+  invoice_prefix: string;
+  active: boolean;
+  accounting_provider: string;
+  accounting_settings: Record<string, unknown>;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompanyUserPermission {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  user_id: string;
+  role: CompanyPermissionRole;
+  permissions: Record<string, unknown>;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  user?: Profile | null;
+  company?: FinanceCompany | null;
+}
+
+export interface FinanceCustomer {
+  id: string;
+  organisation_id: string;
+  company_id: string | null;
+  customer_type: FinanceCustomerType;
+  name: string;
+  organisation_number: string;
+  vat_number: string;
+  email: string;
+  phone: string;
+  address_line1: string;
+  address_line2: string;
+  postal_code: string;
+  city: string;
+  country_code: string;
+  invoice_email: string;
+  payment_terms_days: number;
+  notes: string;
+  active: boolean;
+  external_accounting_id: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  company?: FinanceCompany | null;
+}
+
+export interface FinanceSupplier {
+  id: string;
+  organisation_id: string;
+  company_id: string | null;
+  name: string;
+  organisation_number: string;
+  vat_number: string;
+  email: string;
+  phone: string;
+  address_line1: string;
+  address_line2: string;
+  postal_code: string;
+  city: string;
+  country_code: string;
+  payment_terms_days: number;
+  default_account_code: string;
+  notes: string;
+  active: boolean;
+  external_accounting_id: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  company?: FinanceCompany | null;
+}
+
+export interface InvoiceNumberSeries {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  name: string;
+  prefix: string;
+  next_number: number;
+  padding: number;
+  fiscal_year: number | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  company?: FinanceCompany | null;
+}
+
+export interface Invoice {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  customer_id: string | null;
+  invoice_number: string | null;
+  invoice_date: string;
+  due_date: string;
+  payment_terms_days: number;
+  currency: string;
+  status: InvoiceStatus;
+  accounting_status: InvoiceAccountingStatus;
+  payment_status: InvoicePaymentStatus;
+  source_type: string;
+  source_id: string | null;
+  project_id: string | null;
+  work_order_id: string | null;
+  tenancy_id: string | null;
+  subtotal_amount: number;
+  vat_amount: number;
+  total_amount: number;
+  paid_amount: number;
+  sent_at: string | null;
+  paid_at: string | null;
+  external_accounting_id: string;
+  notes: string;
+  document_id?: string | null;
+  locked_at?: string | null;
+  cancelled_by?: string | null;
+  cancelled_reason?: string;
+  created_by: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+  voided_at: string | null;
+  company?: FinanceCompany | null;
+  customer?: FinanceCustomer | null;
+  lines?: InvoiceLine[];
+}
+
+export interface InvoiceLine {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  invoice_id: string;
+  line_no: number;
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  vat_rate: number;
+  account_code: string;
+  line_type: InvoiceLineType;
+  project_id: string | null;
+  work_order_id: string | null;
+  time_entry_id: string | null;
+  line_total_excl_vat: number;
+  vat_amount: number;
+  line_total_incl_vat: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Payment {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  invoice_id: string | null;
+  payment_date: string;
+  amount: number;
+  currency: string;
+  source: 'manual' | 'accounting' | 'bank' | 'swish' | 'autogiro';
+  reference: string;
+  external_payment_id: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AccountingIntegration {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  provider: 'none' | 'spiris' | 'accounted' | 'fortnox' | 'sie' | 'manual';
+  status: 'not_configured' | 'active' | 'paused' | 'error';
+  config: Record<string, unknown>;
+  last_sync_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SupplierInvoiceStatus = 'draft' | 'needs_review' | 'approved' | 'scheduled_for_payment' | 'paid' | 'rejected' | 'archived';
+export type SupplierInvoiceApprovalStatus = 'not_started' | 'pending' | 'approved' | 'rejected';
+export type SupplierInvoicePaymentStatus = 'unpaid' | 'scheduled' | 'paid';
+export type SupplierInvoiceOcrStatus = 'not_started' | 'queued' | 'processed' | 'needs_review' | 'failed';
+
+export interface SupplierInvoice {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  supplier_id: string | null;
+  supplier_invoice_number: string;
+  invoice_date: string;
+  due_date: string;
+  currency: string;
+  status: SupplierInvoiceStatus;
+  approval_status: SupplierInvoiceApprovalStatus;
+  payment_status: SupplierInvoicePaymentStatus;
+  subtotal_amount: number;
+  vat_amount: number;
+  total_amount: number;
+  paid_amount: number;
+  ocr_status: SupplierInvoiceOcrStatus;
+  ocr_data: Record<string, unknown>;
+  document_id: string | null;
+  assigned_approver_id: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  rejected_by: string | null;
+  rejected_at: string | null;
+  rejection_reason: string;
+  external_accounting_id: string;
+  notes: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+  company?: FinanceCompany | null;
+  supplier?: FinanceSupplier | null;
+}
+
+export interface SupplierInvoiceLine {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  supplier_invoice_id: string;
+  line_no: number;
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  vat_rate: number;
+  account_code: string;
+  project_id: string | null;
+  work_order_id: string | null;
+  line_total_excl_vat: number;
+  vat_amount: number;
+  line_total_incl_vat: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }

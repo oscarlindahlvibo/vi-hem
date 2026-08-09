@@ -3,6 +3,7 @@ import {
   Building2, Plus, Edit2, Check, X, Globe,
   Users, Home, ChevronRight, AlertTriangle, Shield, KeyRound, Mail,
   ClipboardCheck, BedDouble,
+  Landmark,
   CalendarDays,
   MessageSquareText,
 } from 'lucide-react';
@@ -60,6 +61,7 @@ interface OrgFormData {
   max_short_stay_units: string;
   year_planning_enabled: boolean;
   meetings_enabled: boolean;
+  finance_enabled: boolean;
   active: boolean;
 }
 
@@ -86,6 +88,7 @@ const defaultForm: OrgFormData = {
   max_short_stay_units: '3',
   year_planning_enabled: false,
   meetings_enabled: false,
+  finance_enabled: false,
   active: true,
 };
 
@@ -229,7 +232,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       const { data: moduleRows } = await supabase
         .from('vihem_organisation_modules')
         .select('organisation_id, module_key, enabled')
-        .in('module_key', ['customer_projects', 'short_stay', 'year_planning', 'meetings']);
+        .in('module_key', ['customer_projects', 'short_stay', 'year_planning', 'meetings', 'finance']);
 
       const nextOrgModules = (moduleRows || []).reduce((acc, row: any) => {
         const organisationId = row.organisation_id as string;
@@ -393,6 +396,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             enabled: form.meetings_enabled,
             limits: {},
           },
+          {
+            module_key: 'finance',
+            enabled: form.finance_enabled,
+            limits: {},
+          },
         ]);
       } else {
         const { data: createdOrg, error } = await supabase
@@ -423,6 +431,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             {
               module_key: 'meetings',
               enabled: form.meetings_enabled,
+              limits: {},
+            },
+            {
+              module_key: 'finance',
+              enabled: form.finance_enabled,
               limits: {},
             },
           ]);
@@ -470,6 +483,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       max_short_stay_units: String(org.max_short_stay_units ?? 3),
       year_planning_enabled: Boolean(moduleState.year_planning),
       meetings_enabled: Boolean(moduleState.meetings),
+      finance_enabled: Boolean(moduleState.finance),
       active: org.active,
     });
     setEditingOrg(org);
@@ -481,7 +495,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       .from('vihem_organisation_modules')
       .select('module_key, enabled')
       .eq('organisation_id', org.id)
-      .in('module_key', ['year_planning', 'meetings']);
+      .in('module_key', ['year_planning', 'meetings', 'finance']);
 
     if (!error) {
       const rows = (data || []) as Array<{ module_key: ModuleKey; enabled: boolean }>;
@@ -489,6 +503,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         ...current,
         year_planning_enabled: Boolean(rows.find(row => row.module_key === 'year_planning')?.enabled),
         meetings_enabled: Boolean(rows.find(row => row.module_key === 'meetings')?.enabled),
+        finance_enabled: Boolean(rows.find(row => row.module_key === 'finance')?.enabled),
       }));
     }
   };
@@ -813,6 +828,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
               const shortStayActive = moduleState.short_stay ?? org.short_stay_enabled;
               const yearPlanningActive = Boolean(moduleState.year_planning);
               const meetingsActive = Boolean(moduleState.meetings);
+              const financeActive = Boolean(moduleState.finance);
               const userPct = org.max_users > 0 ? (s.member_count / org.max_users) * 100 : 0;
               const propertyPct = org.max_properties > 0 ? (s.property_count / org.max_properties) * 100 : 0;
               const aptPct = org.max_apartments > 0 ? (s.apartment_count / org.max_apartments) * 100 : 0;
@@ -862,6 +878,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                         {meetingsActive && (
                           <Badge className="bg-indigo-100 text-indigo-700">
                             Möten
+                          </Badge>
+                        )}
+                        {financeActive && (
+                          <Badge className="bg-emerald-100 text-emerald-700">
+                            Ekonomi
                           </Badge>
                         )}
                       </div>
@@ -1211,6 +1232,25 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                 </span>
                 <span className="block text-xs text-slate-500">
                   Visar modulen för strukturerade möten, dagordningar, protokoll, beslut, uppgifter och AI-granskning.
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.finance_enabled}
+                onChange={e => setForm({ ...form, finance_enabled: e.target.checked })}
+                className="mt-1 w-4 h-4 rounded border-slate-300"
+              />
+              <span>
+                <span className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <Landmark className="w-4 h-4 text-emerald-600" /> Aktivera Ekonomi
+                </span>
+                <span className="block text-xs text-slate-500">
+                  Visar ekonomimodulen för bolag, kunder, fakturautkast och kommande bokföringskopplingar.
                 </span>
               </span>
             </label>
