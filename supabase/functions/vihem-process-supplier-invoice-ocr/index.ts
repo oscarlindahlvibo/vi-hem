@@ -500,7 +500,6 @@ async function callOpenAiChat(openAiKey: string, model: string, messages: any[])
     },
     body: JSON.stringify({
       model,
-      temperature: 0,
       response_format: {
         type: "json_schema",
         json_schema: {
