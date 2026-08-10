@@ -849,7 +849,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .order('created_at', { ascending: false }),
       supabase
         .from('vihem_supplier_invoices')
-        .select('*, company:company_id(*), supplier:supplier_id(*)')
+        .select('*, company:company_id(*), supplier:supplier_id(*), document:document_id(id, storage_bucket, storage_path)')
         .eq('organisation_id', organisationId)
         .order('due_date', { ascending: true }),
       supabase
@@ -1944,19 +1944,48 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const openSupplierInvoiceOriginal = async () => {
     if (!selectedSupplierInvoice) return;
-    const storagePath = String(selectedSupplierInvoice.ocr_data?.storage_path || selectedSupplierInvoice.ocr_data?.source_storage_path || '');
-    if (!storagePath) {
+    const popup = window.open('about:blank', '_blank');
+    let storageBucket = selectedSupplierInvoice.document?.storage_bucket || 'vihem-documents';
+    let storagePath = String(
+      selectedSupplierInvoice.ocr_data?.storage_path ||
+      selectedSupplierInvoice.ocr_data?.source_storage_path ||
+      selectedSupplierInvoice.document?.storage_path ||
+      '',
+    );
+
+    if (!storagePath && selectedSupplierInvoice.document_id) {
+      const { data: documentRow, error: documentError } = await supabase
+        .from('vihem_documents')
+        .select('storage_bucket, storage_path')
+        .eq('id', selectedSupplierInvoice.document_id)
+        .maybeSingle();
+
+      if (documentError) {
+        popup?.close();
+        setError(documentError.message);
+        return;
+      }
+
+      storageBucket = documentRow?.storage_bucket || storageBucket;
+      storagePath = documentRow?.storage_path || '';
+    }
+
+    if (!storagePath || !storageBucket) {
+      popup?.close();
       setError('Originalfilens sökväg saknas på dokumentet.');
       return;
     }
+
     const { data, error: signedUrlError } = await supabase.storage
-      .from('vihem-documents')
+      .from(storageBucket)
       .createSignedUrl(storagePath, 60 * 10);
     if (signedUrlError || !data?.signedUrl) {
+      popup?.close();
       setError(signedUrlError?.message || 'Kunde inte öppna originaldokumentet.');
       return;
     }
-    window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+    if (popup) popup.location.href = data.signedUrl;
+    else window.location.href = data.signedUrl;
   };
 
   const openIntegrationConfig = (

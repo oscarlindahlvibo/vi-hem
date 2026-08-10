@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera } from 'lucide-react';
+import { Camera, X } from 'lucide-react';
 import { Badge, Button } from './ui';
 
 export type DocumentCaptureKind = 'receipt' | 'supplier_invoice';
@@ -11,15 +11,17 @@ interface DocumentCaptureProps {
   documentKind: DocumentCaptureKind;
   file: File | null;
   onFileChange: (file: File | null) => void;
+  resetKey?: number | string;
 }
 
-export function DocumentCapture({ documentKind, file, onFileChange }: DocumentCaptureProps) {
+export function DocumentCapture({ documentKind, file, onFileChange, resetKey }: DocumentCaptureProps) {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerMessage, setScannerMessage] = useState('');
   const [scannerReady, setScannerReady] = useState(false);
   const [scannerCapturing, setScannerCapturing] = useState(false);
   const [scannerImageDataUrl, setScannerImageDataUrl] = useState('');
   const [scannerCorners, setScannerCorners] = useState<DocumentCaptureCorners | null>(null);
+  const [activeCorner, setActiveCorner] = useState<DocumentCaptureCornerKey | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -41,6 +43,14 @@ export function DocumentCapture({ documentKind, file, onFileChange }: DocumentCa
     bottomRight: { x: scannerFrame.left + scannerFrame.width, y: scannerFrame.top + scannerFrame.height },
     bottomLeft: { x: scannerFrame.left, y: scannerFrame.top + scannerFrame.height },
   }), [scannerFrame]);
+
+  const clearScanPreview = useCallback(() => {
+    setScannerImageDataUrl('');
+    setScannerCorners(null);
+    setScannerMessage('');
+    setActiveCorner(null);
+    activeCornerRef.current = null;
+  }, []);
 
   const stopScanner = useCallback(() => {
     if (scanIntervalRef.current) {
@@ -96,6 +106,74 @@ export function DocumentCapture({ documentKind, file, onFileChange }: DocumentCa
     setScannerMessage(message);
   }, [documentKind, onFileChange, scannerCorners, scannerImageDataUrl]);
 
+  const detectDocumentCorners = useCallback(async (imageDataUrl: string): Promise<DocumentCaptureCorners | null> => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+
+    const image = new Image();
+    image.src = imageDataUrl;
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('Kunde inte läsa bilden.'));
+    });
+
+    const width = 180;
+    const height = Math.max(120, Math.round(width * (image.naturalHeight / image.naturalWidth)));
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return null;
+    context.drawImage(image, 0, 0, width, height);
+    const pixels = context.getImageData(0, 0, width, height).data;
+    const luminance = (x: number, y: number) => {
+      const index = (y * width + x) * 4;
+      return pixels[index] * 0.299 + pixels[index + 1] * 0.587 + pixels[index + 2] * 0.114;
+    };
+
+    const search = {
+      left: Math.max(2, Math.round(width * ((scannerFrame.left - 10) / 100))),
+      right: Math.min(width - 3, Math.round(width * ((scannerFrame.left + scannerFrame.width + 10) / 100))),
+      top: Math.max(2, Math.round(height * ((scannerFrame.top - 5) / 100))),
+      bottom: Math.min(height - 3, Math.round(height * ((scannerFrame.top + scannerFrame.height + 5) / 100))),
+    };
+
+    const hits: Array<{ x: number; y: number }> = [];
+    for (let y = search.top; y <= search.bottom; y += 1) {
+      for (let x = search.left; x <= search.right; x += 1) {
+        const center = luminance(x, y);
+        const gradient = Math.abs(center - luminance(x + 1, y)) + Math.abs(center - luminance(x - 1, y)) +
+          Math.abs(center - luminance(x, y + 1)) + Math.abs(center - luminance(x, y - 1));
+        if (gradient > 42 && center > 65 && center < 248) hits.push({ x, y });
+      }
+    }
+
+    if (hits.length < 40) return null;
+
+    const xs = hits.map(hit => hit.x).sort((a, b) => a - b);
+    const ys = hits.map(hit => hit.y).sort((a, b) => a - b);
+    const percentile = (values: number[], ratio: number) => values[Math.max(0, Math.min(values.length - 1, Math.floor(values.length * ratio)))];
+    const minX = percentile(xs, 0.03);
+    const maxX = percentile(xs, 0.97);
+    const minY = percentile(ys, 0.03);
+    const maxY = percentile(ys, 0.97);
+
+    if (maxX - minX < width * 0.16 || maxY - minY < height * 0.16) return null;
+
+    const padX = width * 0.012;
+    const padY = height * 0.012;
+    const left = Math.max(1, ((minX - padX) / width) * 100);
+    const right = Math.min(99, ((maxX + padX) / width) * 100);
+    const top = Math.max(1, ((minY - padY) / height) * 100);
+    const bottom = Math.min(99, ((maxY + padY) / height) * 100);
+
+    return {
+      topLeft: { x: left, y: top },
+      topRight: { x: right, y: top },
+      bottomRight: { x: right, y: bottom },
+      bottomLeft: { x: left, y: bottom },
+    };
+  }, [scannerFrame]);
+
   const captureImage = useCallback(async (automatic = false) => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -112,7 +190,7 @@ export function DocumentCapture({ documentKind, file, onFileChange }: DocumentCa
 
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     const imageDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-    const corners = defaultCorners();
+    const corners = await detectDocumentCorners(imageDataUrl) ?? defaultCorners();
     setScannerImageDataUrl(imageDataUrl);
     setScannerCorners(corners);
     await createAdjustedFile(
@@ -122,7 +200,7 @@ export function DocumentCapture({ documentKind, file, onFileChange }: DocumentCa
     );
     setScannerOpen(false);
     stopScanner();
-  }, [createAdjustedFile, defaultCorners, scannerCapturing, stopScanner]);
+  }, [createAdjustedFile, defaultCorners, detectDocumentCorners, scannerCapturing, stopScanner]);
 
   const moveCorner = useCallback((clientX: number, clientY: number) => {
     const activeCorner = activeCornerRef.current;
@@ -133,6 +211,7 @@ export function DocumentCapture({ documentKind, file, onFileChange }: DocumentCa
     const x = Math.min(98, Math.max(2, ((clientX - rect.left) / rect.width) * 100));
     const y = Math.min(98, Math.max(2, ((clientY - rect.top) / rect.height) * 100));
     setScannerCorners(prev => prev ? ({ ...prev, [activeCorner]: { x, y } }) : prev);
+    setActiveCorner(activeCorner);
   }, []);
 
   const handleCornerPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -143,7 +222,12 @@ export function DocumentCapture({ documentKind, file, onFileChange }: DocumentCa
 
   const stopCornerDrag = useCallback(() => {
     activeCornerRef.current = null;
+    setActiveCorner(null);
   }, []);
+
+  useEffect(() => {
+    clearScanPreview();
+  }, [clearScanPreview, documentKind, resetKey]);
 
   const analyseFrame = useCallback(() => {
     const video = videoRef.current;
@@ -281,8 +365,18 @@ export function DocumentCapture({ documentKind, file, onFileChange }: DocumentCa
         </div>
       </div>
       {scannerOpen && (
-        <div className="mt-4 overflow-hidden rounded-2xl border border-slate-900 bg-slate-950">
-          <div className={`relative max-h-[78vh] w-full bg-slate-950 ${documentKind === 'receipt' ? 'aspect-[9/16] sm:aspect-[3/4]' : 'aspect-[3/4] sm:aspect-video'}`}>
+        <div className="fixed inset-0 z-[100] bg-slate-950">
+          <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-slate-950/75 px-4 py-3 text-white backdrop-blur">
+            <div>
+              <p className="text-sm font-bold">Scanna {documentKind === 'receipt' ? 'kvitto' : 'faktura'}</p>
+              <p className="text-xs text-slate-300">{scannerFrame.label}</p>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => setScannerOpen(false)}>
+              <X className="h-4 w-4" />
+              Stäng
+            </Button>
+          </div>
+          <div className="relative h-[100dvh] w-screen bg-slate-950">
             <video ref={videoRef} className="h-full w-full object-cover" muted playsInline autoPlay />
             <div className="pointer-events-none absolute inset-0 bg-slate-950/20" />
             <div
@@ -299,8 +393,14 @@ export function DocumentCapture({ documentKind, file, onFileChange }: DocumentCa
               <span className="absolute -bottom-0.5 -left-0.5 h-8 w-8 rounded-bl-2xl border-b-4 border-l-4 border-blue-400" />
               <span className="absolute -bottom-0.5 -right-0.5 h-8 w-8 rounded-br-2xl border-b-4 border-r-4 border-blue-400" />
             </div>
-            <div className="absolute bottom-3 left-3 right-3 rounded-xl bg-slate-950/75 px-4 py-3 text-sm font-semibold text-white">
-              {scannerMessage || 'Placera dokumentet innanför ramen.'}
+            <div className="absolute bottom-[calc(env(safe-area-inset-bottom)+20px)] left-4 right-4 flex flex-col gap-3">
+              <div className="rounded-xl bg-slate-950/75 px-4 py-3 text-center text-sm font-semibold text-white">
+                {scannerMessage || 'Placera dokumentet innanför ramen.'}
+              </div>
+              <Button onClick={() => captureImage(false)} disabled={!scannerReady || scannerCapturing} className="w-full justify-center py-4">
+                <Camera className="h-5 w-5" />
+                Ta bild nu
+              </Button>
             </div>
           </div>
         </div>
@@ -352,11 +452,27 @@ export function DocumentCapture({ documentKind, file, onFileChange }: DocumentCa
                 style={{ left: `${point.x}%`, top: `${point.y}%` }}
                 onPointerDown={event => {
                   activeCornerRef.current = corner;
+                  setActiveCorner(corner);
                   event.currentTarget.setPointerCapture(event.pointerId);
                   moveCorner(event.clientX, event.clientY);
                 }}
               />
             ))}
+            {activeCorner && scannerCorners[activeCorner] && (
+              <div
+                className="pointer-events-none absolute h-28 w-28 -translate-x-1/2 -translate-y-[125%] rounded-full border-4 border-white bg-slate-950 shadow-2xl ring-2 ring-blue-500"
+                style={{
+                  left: `${scannerCorners[activeCorner].x}%`,
+                  top: `${scannerCorners[activeCorner].y}%`,
+                  backgroundImage: `url(${scannerImageDataUrl})`,
+                  backgroundSize: '220% 220%',
+                  backgroundPosition: `${scannerCorners[activeCorner].x}% ${scannerCorners[activeCorner].y}%`,
+                }}
+              >
+                <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/80" />
+                <span className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-white/80" />
+              </div>
+            )}
           </div>
         </div>
       )}

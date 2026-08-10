@@ -26,6 +26,7 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [scanResetKey, setScanResetKey] = useState(0);
 
   const selectedCompany = useMemo(
     () => companies.find(company => company.id === companyId) ?? null,
@@ -86,6 +87,7 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
     setSuccess('Underlaget är inskickat till OCR och admin-granskning.');
     setFile(null);
     setNotes('');
+    setScanResetKey(prev => prev + 1);
     setSaving(false);
   };
 
@@ -157,7 +159,7 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
               </div>
             </Card>
 
-            <DocumentCapture documentKind={documentKind} file={file} onFileChange={setFile} />
+            <DocumentCapture documentKind={documentKind} file={file} onFileChange={setFile} resetKey={scanResetKey} />
 
             <Card>
               <Textarea

@@ -1716,6 +1716,7 @@ export interface SupplierInvoice {
   archived_at: string | null;
   company?: FinanceCompany | null;
   supplier?: FinanceSupplier | null;
+  document?: { id: string; storage_bucket: string | null; storage_path: string | null } | null;
 }
 
 export interface OcrUsageLog {
