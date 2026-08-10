@@ -875,6 +875,7 @@ export interface ShortStayBooking {
   payment_status: ShortStayPaymentStatus;
   cleaning_status: ShortStayCleaningStatus;
   cleaning_work_order_id: string | null;
+  finance_invoice_id?: string | null;
   notes: string;
   total_price: number;
   paid_amount: number;
@@ -1372,6 +1373,12 @@ export interface FinanceSupplier {
   city: string;
   country_code: string;
   payment_terms_days: number;
+  bankgiro: string;
+  plusgiro: string;
+  iban: string;
+  bic: string;
+  bank_account: string;
+  payment_reference: string;
   default_account_code: string;
   notes: string;
   active: boolean;
@@ -1380,6 +1387,21 @@ export interface FinanceSupplier {
   created_at: string;
   updated_at: string;
   company?: FinanceCompany | null;
+}
+
+export interface FinanceAuditLog {
+  id: string;
+  organisation_id: string | null;
+  company_id: string | null;
+  table_name: string;
+  record_id: string | null;
+  action: string;
+  old_data: Record<string, unknown> | null;
+  new_data: Record<string, unknown> | null;
+  changed_by: string | null;
+  created_at: string;
+  company?: FinanceCompany | null;
+  changed_by_profile?: Profile | null;
 }
 
 export interface InvoiceNumberSeries {
@@ -1519,6 +1541,40 @@ export interface AccountingIntegration {
   status: 'not_configured' | 'active' | 'paused' | 'error';
   config: Record<string, unknown>;
   last_sync_at: string | null;
+  has_secret?: boolean;
+  secret_hint?: string;
+  secret_rotated_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AccountingAccount {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  account_code: string;
+  name: string;
+  account_type: 'asset' | 'liability' | 'income' | 'expense' | 'vat' | 'bank' | 'receivable' | 'payable' | 'other';
+  default_role: '' | 'customer_receivable' | 'supplier_payable' | 'bank' | 'sales' | 'purchase' | 'output_vat' | 'input_vat';
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VatCode {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  code: string;
+  name: string;
+  rate: number;
+  sales_account_code: string;
+  purchase_account_code: string;
+  output_vat_account_code: string;
+  input_vat_account_code: string;
+  active: boolean;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1536,6 +1592,38 @@ export interface FinanceReminderSettings {
   created_at: string;
   updated_at: string;
   company?: FinanceCompany | null;
+}
+
+export interface FinanceAutomationRun {
+  id: string;
+  organisation_id: string | null;
+  job_key: string;
+  status: 'success' | 'failed';
+  overdue_updated: number;
+  reminders_queued: number;
+  emails_processed: number;
+  details: Record<string, unknown>;
+  error_message: string;
+  started_at: string;
+  finished_at: string;
+  created_at: string;
+}
+
+export interface FinanceAutomationSettings {
+  id: string;
+  organisation_id: string;
+  finance_cron_enabled: boolean;
+  queue_reminders: boolean;
+  send_emails: boolean;
+  email_limit: number;
+  process_accounting_sync: boolean;
+  accounting_sync_limit: number;
+  create_rent_billing: boolean;
+  rent_billing_months_ahead: number;
+  auto_generate_rent_invoices: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export type AccountingSyncQueueStatus = 'queued' | 'processing' | 'synced' | 'failed' | 'cancelled';
@@ -1579,12 +1667,16 @@ export interface SupplierInvoice {
   due_date: string;
   currency: string;
   status: SupplierInvoiceStatus;
+  accounting_status?: InvoiceAccountingStatus;
   approval_status: SupplierInvoiceApprovalStatus;
   payment_status: SupplierInvoicePaymentStatus;
   subtotal_amount: number;
   vat_amount: number;
   total_amount: number;
   paid_amount: number;
+  payment_reference: string;
+  payment_exported_at: string | null;
+  payment_export_id: string;
   ocr_status: SupplierInvoiceOcrStatus;
   ocr_data: Record<string, unknown>;
   document_id: string | null;
@@ -1660,6 +1752,8 @@ export interface RentBillingItem {
   due_date: string;
   description: string;
   amount: number;
+  base_rent_amount?: number;
+  adjustment_amount?: number;
   vat_rate: number;
   vat_amount: number;
   total_amount: number;
@@ -1672,4 +1766,51 @@ export interface RentBillingItem {
   property?: Property | null;
   apartment?: Apartment | null;
   invoice?: Invoice | null;
+}
+
+export interface RentAdjustment {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  tenancy_id: string;
+  rent_period: string;
+  adjustment_type: 'one_time' | 'recurring' | 'indexed';
+  start_period: string | null;
+  end_period: string | null;
+  description: string;
+  amount: number;
+  percentage_rate: number;
+  vat_rate: number;
+  status: 'active' | 'cancelled' | 'applied';
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  company?: FinanceCompany | null;
+  tenancy?: Tenancy | null;
+}
+
+export interface DirectDebitMandate {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  tenancy_id: string;
+  tenant_id: string | null;
+  finance_customer_id: string | null;
+  mandate_reference: string;
+  bankgiro_number: string;
+  payer_number: string;
+  account_holder: string;
+  account_mask: string;
+  status: 'draft' | 'pending_signature' | 'active' | 'paused' | 'cancelled' | 'rejected';
+  signed_at: string | null;
+  activated_at: string | null;
+  cancelled_at: string | null;
+  notes: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  company?: FinanceCompany | null;
+  tenancy?: Tenancy | null;
+  tenant?: Profile | null;
+  finance_customer?: FinanceCustomer | null;
 }

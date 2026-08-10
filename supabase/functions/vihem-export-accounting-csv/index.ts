@@ -160,6 +160,27 @@ async function buildExportRows(serviceClient: any, queueItems: any[]) {
         .maybeSingle();
 
       if (!supplierInvoice) continue;
+      if (item.action === "payment") {
+        const paidDate = typeof supplierInvoice.ocr_data?.paid_date === "string" ? supplierInvoice.ocr_data.paid_date : "";
+        rows.push([
+          item.id,
+          item.status,
+          "leverantorsbetalning",
+          item.action,
+          item.company?.name || "",
+          item.integration?.provider || "manual",
+          paidDate || supplierInvoice.updated_at?.slice(0, 10) || "",
+          supplierInvoice.supplier_invoice_number || supplierInvoice.id,
+          supplierInvoice.supplier?.name || "",
+          "",
+          "",
+          decimal(supplierInvoice.paid_amount || supplierInvoice.total_amount),
+          supplierInvoice.currency || "SEK",
+          item.external_id || supplierInvoice.external_accounting_id || "",
+        ]);
+        continue;
+      }
+
       rows.push([
         item.id,
         item.status,

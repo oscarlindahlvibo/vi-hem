@@ -167,6 +167,10 @@ Status i kod:
 - Admin kan uppdatera förfallna fakturor direkt från Fakturor-fliken.
 - Edge function för ekonomi-cron finns som `vihem-finance-cron` och kan köras med `VIHEM_CRON_SECRET` för att markera obetalda fakturor som försenade.
 - Samma cron kan köa betalningspåminnelser genom att anropas med `queue_reminders: true`.
+- Samma cron kan även skicka köade fakturamejl och påminnelser genom att anropas med `send_emails: true` och valfritt `email_limit`.
+- Ekonomi-cron skriver körningslogg till `vihem_finance_automation_runs`, inklusive fel, antal förfallna fakturor, köade påminnelser och behandlade mejl.
+- Admin kan se senaste ekonomi-automationerna i Bokföring-fliken och styra standarder i `vihem_finance_automation_settings`.
+- Cron-anrop kan fortfarande överstyra `finance_cron_enabled`, `queue_reminders`, `send_emails` och `email_limit` per enskild körning.
 - Faktura-e-postkön skiljer nu på vanliga fakturamejl och betalningspåminnelser.
 - Admin kan köa betalningspåminnelser för förfallna obetalda fakturor från E-post-fliken.
 - Påminnelsefunktionen kan köras både av admin i appen och av service-role cron.
@@ -176,9 +180,36 @@ Status i kod:
 - Admin kan köa en låst faktura för bokföring från fakturadetaljen och följa status i Bokföring-fliken.
 - Admin kan manuellt markera bokföringsköposter som bearbetas, synkade, misslyckade, avbrutna eller återköade.
 - När en fakturapost i bokföringskön markeras synkad eller misslyckad uppdateras fakturans `accounting_status`.
+- Admin kan konfigurera bokföringskopplingar per bolag med status, driftläge, exportformat, externt tenant-id, anteckning och extra public JSON.
+- API-hemligheter sparas separat via `vihem-save-accounting-secret` till `vihem_accounting_integration_secrets`.
+- Bokföringstokens krypteras i edge-funktionen med `VIHEM_ACCOUNTING_SECRET_KEY` och kan inte läsas tillbaka från frontend.
+- Bokföringskopplingen visar bara ofarlig tokenstatus: om token finns, maskerad hint och senaste rotation.
+- Edge function `vihem-test-accounting-integration` kontrollerar kopplingens behörighet, provider och tokenstatus.
+- Admin kan testa en bokföringskoppling från dialogen och få tydlig status utan att exponera token.
 - Edge function för manuell CSV-export av aktiva bokföringsköposter finns som `vihem-export-accounting-csv`.
 - Admin kan ladda ner aktiva köposter som CSV från Bokföring-fliken.
-- Kvar: riktiga adapter-edge-functions för direkt bank-/bokföringssynk.
+- Edge function för SIE-export finns som `vihem-export-accounting-sie`.
+- Admin kan ladda ner aktiva köposter som SIE-fil från Bokföring-fliken.
+- SIE-exporten använder bolagets egna standardkonton när de finns i kontoplanen och faller tillbaka till försiktiga BAS-konton annars.
+- Kontoplan och momskoder finns som bolagsspecifika tabeller: `vihem_accounting_accounts` och `vihem_vat_codes`.
+- Admin kan skapa en svensk standarduppsättning av konton och momskoder per bolag från Bokföring-fliken.
+- Admin kan skapa och redigera konton och momskoder per bolag från Bokföring-fliken.
+- Nya kundfakturor och leverantörsfakturor kan välja konto och momskod från bolagets kontoplan.
+- SIE-exporten använder fakturaradernas egna konton när de finns, annars bolagets standardkonto.
+- Fakturautkast kan byggas med flera manuella fakturarader, inklusive konto och momssats per rad.
+- Manuella fakturarader i utkast kan redigeras eller tas bort innan fakturan godkänns.
+- Leverantörsfakturor kan granskas med flera kostnadsrader, där varje rad kan ha eget konto och egen momssats innan attest.
+- Attesterade leverantörsfakturor kan köas till bokföringssynk/export från detaljvyn.
+- Betalningar på leverantörsfakturor exporteras som egna bokföringshändelser i CSV/SIE, separat från själva fakturan.
+- Edge function för att behandla bokföringskön finns som `vihem-process-accounting-sync`.
+- Admin kan köra bokföringskön från Bokföring-fliken.
+- Manual/SIE-köposter markeras som exporterade/synkade.
+- Bokföringskön kan behandlas av `vihem-process-accounting-sync` med riktig adapterdispatch.
+- Fortnox-adaptern kan skapa eller uppdatera kunder, leverantörer, kundfakturor, fakturabetalningar och leverantörsfakturor via sparad krypterad token.
+- Spiris/Accounted och andra system kan kopplas via generisk HTTP-adapter med endpoint-konfiguration per entity/action.
+- Adapterfel sparas på köposten och fakturans/leverantörsfakturans bokföringsstatus sätts till `failed`, så admin ser exakt vad som saknas.
+- Ekonomi-cron kan även behandla bokföringskön enligt organisationsinställningarna, med separat maxgräns för antal köposter per körning.
+- Kvar: produktionscertifiering och miljöspecifik konfiguration mot vald bokföringsleverantör.
 
 ### Phase 3: Hyra och kundprojekt
 
@@ -191,11 +222,27 @@ Status i kod:
 - Kundprojektens befintliga faktureringsunderlag visas i ekonomimodulen.
 - Admin kan omvandla ett projektunderlag till ett vanligt fakturautkast.
 - Underlaget markeras som fakturerat och kopplas till skapad faktura för att undvika dubbletter.
+- Om ingen ekonomikund väljs när projektunderlaget faktureras matchas projektkunden automatiskt mot befintlig ekonomikund eller skapas från projektets kunduppgifter.
+- Admin kan markera flera projektunderlag och skapa en samlingsfaktura, med spärr mot att automatiskt blanda olika projektkunder.
 - Återkommande hyresdebitering finns som körning per bolag och hyresmånad.
 - Hyreskörningen hämtar aktiva hyresförhållanden, skapar ekonomikund för hyresgästen vid behov och kan generera fakturautkast.
 - Admin kan granska hyresraderna i en körning och hoppa över en rad innan fakturautkast skapas.
 - Hyresförfallodag sätts till sista dagen i månaden före hyresperioden, exempelvis 31 maj för juni-hyran.
-- Kvar: automatisk schemakörning, autogiro/e-post, hyresjusteringar, påminnelser, automatisk kundmatchning från projektkund till ekonomikund och samlad fakturering av flera underlag.
+- Ekonomi-cron kan skapa kommande hyreskörningar automatiskt per aktivt bolag med dubblettskydd.
+- Admin kan styra om hyresautomation bara ska skapa hyreskörningen eller även fakturautkast.
+- Automationshistoriken visar hur många hyresrader och fakturautkast som skapats av cron.
+- Admin kan lägga in engångsjusteringar per hyresförhållande och hyresmånad, både tillägg och avdrag.
+- Hyresjusteringar räknas automatiskt in i hyresrader som skapas manuellt eller via ekonomi-cron.
+- Hyresjusteringar kan även vara återkommande tills vidare eller under ett periodspann, samt indexerade med procentsats ovanpå grundhyran.
+- Admin kan köa hyresfakturor för e-post samlat från en hyreskörning när fakturorna är godkända och har PDF.
+- Samlat hyresutskick hoppar över fakturor som saknar PDF, saknar mottagare, redan är köade/skickade eller inte är godkända.
+- Autogiromandat kan registreras per hyresförhållande med status, mandatreferens, betalarnummer och maskerat konto.
+- Admin kan aktivera, pausa och avsluta autogiromandat från Hyra-fliken.
+- Hyresfliken visar en enkel hyresreskontra per aktivt hyresförhållande med senaste period, fakturerat, betalt, öppet saldo och autogirostatus.
+- Hyreskörningar kan exporteras som bankneutral autogiro-CSV baserat på aktiva mandat och fakturerade hyresrader.
+- Hyreskörningar kan även exporteras som Bankgirot-inriktad autogirofil (`.txt`) med header, betalrader och summeringspost.
+- Autogiroexporten rapporterar vilka hyresrader som saknar aktivt mandat, saknar faktura eller inte är indrivningsbara.
+- Kvar: bankens test/certifiering av Bankgirot-filen innan skarp produktion samt mer hyresspecifika påminnelseflöden.
 
 ### Phase 4: Leverantörsfakturor
 
@@ -221,8 +268,11 @@ Status i kod:
 - Serverfunktion för attest/godkännande finns.
 - Attesterade leverantörsfakturor kan markeras som planerade för betalning eller betalda.
 - När leverantörsfakturor planeras/betalas köas de till bokföringssynken för kommande adapterflöde.
+- Leverantörer kan ha bankgiro, plusgiro, IBAN/BIC, bankkonto och standardreferens för betalningsunderlag.
+- Planerade leverantörsfakturor kan exporteras som CSV eller Bankgirot-inriktat betalningsunderlag från leverantörsfakturafliken.
+- Leverantörsbetalningsexporten markerar fakturor med export-id och exporttid samt rapporterar saknade betaluppgifter.
 - OCR-status och OCR-data är förberedda i datamodellen.
-- Kvar: faktisk e-postadapter som skickar mailbilagor till ingest-funktionen, riktig AI/OCR-tolkning av dokumentinnehåll och faktisk betalfil/bankkoppling.
+- Kvar: faktisk e-postadapter som skickar mailbilagor till ingest-funktionen, riktig AI/OCR-tolkning av dokumentinnehåll och bankens test/certifiering av betalfil innan skarp produktion.
 
 ### Phase 5: Integrationer
 
@@ -234,9 +284,19 @@ Status i kod:
 Status i kod:
 
 - Bokföringskopplingar kan läggas upp per bolag för Spiris, Accounted, Fortnox, SIE och manuell hantering.
+- Bokföringskopplingar kan redigeras från adminvyn med public adapterkonfiguration och status.
+- Bokföringskopplingar kan rotera/spara en adapterhemlighet via edge function utan att hemligheten lagras i vanlig `config`.
+- Admin kan se om extern adapter saknar token innan API-synk försöker köras.
+- Bokföringskön ger nu olika fel för saknad token, saknad endpoint och fel från extern leverantör.
 - Bokföringssynk köas i `vihem_accounting_sync_queue` med status, försök, externt id och felmeddelande.
-- Manuell CSV-export finns för aktiva köposter tills riktig adapter är inkopplad.
-- Kvar: riktiga adapter-edge-functions, tokenhantering och schemalagd hantering av köade poster.
+- Manuell CSV-export finns för aktiva köposter som kontroll- och fallbackflöde.
+- SIE-export finns för aktiva köposter och använder bolagets egna standardkonton för kundfordran, bank, försäljning, moms, leverantörsskuld och inköp när kontoplanen är upplagd.
+- Bolag kan nu ha egna konton och momskoder som grund för SIE-export och adapterpayloads.
+- Provider-processorn finns som `vihem-process-accounting-sync`, med säkert fallback-beteende för manual/SIE, Fortnox-adapter och generisk HTTP-adapter för Spiris/Accounted eller annan brygga.
+- Schemalagd hantering kan aktiveras i ekonomiautomationen, så bokföringskön kan behandlas från `vihem-finance-cron`.
+- Ekonomiöversikten visar produktionshygien per bolag: nummerserie, kontoplan, momskoder, fakturaavsändare, aktiv bokföringsadapter och leverantörsbetaluppgifter.
+- Korttidsbokningar från Airbnb, Booking, Expedia/Hotels.com och Vrbo/HomeAway behandlas som förbetalda även när kvitto/faktura skapas i efterhand.
+- Kvar: produktionsverifiering mot valt bokföringssystem och exakt fältmappning för organisationens kontoplan.
 
 ## Viktiga beslut innan senare faser
 

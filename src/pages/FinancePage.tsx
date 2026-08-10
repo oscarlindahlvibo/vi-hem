@@ -4,13 +4,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { buildInvoicePdfBlob } from '../lib/invoicePdf';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, Select, Textarea } from '../components/ui';
-import type { AccountingIntegration, AccountingSyncQueueItem, CustomerProject, FinanceCompany, FinanceCustomer, FinanceReminderSettings, FinanceSupplier, Invoice, InvoiceEmailOutbox, InvoiceLine, InvoiceNumberSeries, Payment, ProjectInvoiceBasis, RentBillingItem, RentBillingRun, SupplierInvoice, SupplierInvoiceLine } from '../types';
+import type { AccountingAccount, AccountingIntegration, AccountingSyncQueueItem, CustomerProject, DirectDebitMandate, FinanceAuditLog, FinanceAutomationRun, FinanceAutomationSettings, FinanceCompany, FinanceCustomer, FinanceReminderSettings, FinanceSupplier, Invoice, InvoiceEmailOutbox, InvoiceLine, InvoiceNumberSeries, Payment, ProjectInvoiceBasis, RentAdjustment, RentBillingItem, RentBillingRun, SupplierInvoice, SupplierInvoiceLine, Tenancy, VatCode } from '../types';
 
 interface FinancePageProps {
   onNavigate: (page: string) => void;
 }
 
-type FinanceTab = 'overview' | 'companies' | 'customers' | 'invoices' | 'payments' | 'email' | 'rent' | 'project-basis' | 'suppliers' | 'supplier-invoices' | 'number-series' | 'integrations';
+type FinanceTab = 'overview' | 'companies' | 'customers' | 'invoices' | 'payments' | 'email' | 'rent' | 'project-basis' | 'suppliers' | 'supplier-invoices' | 'number-series' | 'integrations' | 'audit';
 
 const customerTypeOptions = [
   { value: 'company', label: 'Företag' },
@@ -47,6 +47,12 @@ const emptySupplierForm = {
   organisation_number: '',
   email: '',
   payment_terms_days: '30',
+  bankgiro: '',
+  plusgiro: '',
+  iban: '',
+  bic: '',
+  bank_account: '',
+  payment_reference: '',
   default_account_code: '',
   notes: '',
 };
@@ -60,6 +66,8 @@ const emptyInvoiceForm = {
   quantity: '1',
   unit_price: '0',
   vat_rate: '25',
+  vat_code: '',
+  account_code: '',
   notes: '',
 };
 
@@ -86,6 +94,16 @@ const emptyCreditInvoiceForm = {
   reason: '',
 };
 
+const emptyInvoiceLineForm = {
+  description: '',
+  quantity: '1',
+  unit: 'st',
+  unit_price: '0',
+  vat_code: '',
+  vat_rate: '25',
+  account_code: '',
+};
+
 const emptySupplierInvoiceForm = {
   company_id: '',
   supplier_id: '',
@@ -96,6 +114,7 @@ const emptySupplierInvoiceForm = {
   quantity: '1',
   unit_price: '0',
   vat_rate: '25',
+  vat_code: '',
   account_code: '',
   notes: '',
 };
@@ -112,6 +131,30 @@ const emptyRentRunForm = {
   company_id: '',
   rent_period: new Date().toISOString().slice(0, 7),
   include_existing: false,
+};
+
+const emptyRentAdjustmentForm = {
+  company_id: '',
+  tenancy_id: '',
+  adjustment_type: 'one_time',
+  rent_period: new Date().toISOString().slice(0, 7),
+  end_period: '',
+  description: '',
+  amount: '',
+  percentage_rate: '',
+  vat_rate: '0',
+};
+
+const emptyDirectDebitMandateForm = {
+  company_id: '',
+  tenancy_id: '',
+  mandate_reference: '',
+  bankgiro_number: '',
+  payer_number: '',
+  account_holder: '',
+  account_mask: '',
+  status: 'draft' as DirectDebitMandate['status'],
+  notes: '',
 };
 
 const emptyNumberSeriesForm = {
@@ -134,6 +177,55 @@ const defaultReminderSettingsDraft = {
 
 type ReminderSettingsDraft = typeof defaultReminderSettingsDraft;
 
+const defaultAutomationSettingsDraft = {
+  finance_cron_enabled: true,
+  queue_reminders: true,
+  send_emails: false,
+  email_limit: '20',
+  process_accounting_sync: false,
+  accounting_sync_limit: '50',
+  create_rent_billing: false,
+  rent_billing_months_ahead: '1',
+  auto_generate_rent_invoices: false,
+};
+
+type AutomationSettingsDraft = typeof defaultAutomationSettingsDraft;
+
+const emptyIntegrationConfigForm = {
+  company_id: '',
+  provider: 'manual' as AccountingIntegration['provider'],
+  status: 'paused' as AccountingIntegration['status'],
+  mode: 'manual',
+  export_format: 'csv',
+  external_tenant_id: '',
+  notes: '',
+  config_json: '{}',
+  secret_value: '',
+};
+
+type IntegrationConfigForm = typeof emptyIntegrationConfigForm;
+
+const emptyAccountingAccountForm = {
+  company_id: '',
+  account_code: '',
+  name: '',
+  account_type: 'other' as AccountingAccount['account_type'],
+  default_role: '' as AccountingAccount['default_role'],
+  active: true,
+};
+
+const emptyVatCodeForm = {
+  company_id: '',
+  code: '',
+  name: '',
+  rate: '25',
+  sales_account_code: '',
+  purchase_account_code: '',
+  output_vat_account_code: '',
+  input_vat_account_code: '',
+  active: true,
+};
+
 function toNumber(value: string, fallback = 0) {
   const parsed = Number(value.replace(',', '.'));
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -147,6 +239,10 @@ function addDays(date: string, days: number) {
 
 function formatCurrency(amount: number, currency = 'SEK') {
   return new Intl.NumberFormat('sv-SE', { style: 'currency', currency }).format(amount || 0);
+}
+
+function prettyJson(value: unknown) {
+  return JSON.stringify(value && typeof value === 'object' ? value : {}, null, 2);
 }
 
 function safePathPart(value: string) {
@@ -249,6 +345,23 @@ function rentItemStatusLabel(status: RentBillingItem['status']) {
   return labels[status] ?? status;
 }
 
+function rentAdjustmentStatusLabel(status: RentAdjustment['status']) {
+  const labels: Record<RentAdjustment['status'], string> = {
+    active: 'Aktiv',
+    cancelled: 'Avbruten',
+    applied: 'Tillämpad',
+  };
+  return labels[status] ?? status;
+}
+
+function tenancyLabel(tenancy: Tenancy | null | undefined) {
+  if (!tenancy) return 'Hyresförhållande saknas';
+  const tenantName = tenancy.tenant?.name || 'Hyresgäst saknas';
+  const apartmentName = tenancy.apartment?.apartment_number ? `Lgh ${tenancy.apartment.apartment_number}` : 'Lägenhet saknas';
+  const propertyName = tenancy.property?.name || tenancy.property?.address || '';
+  return [tenantName, apartmentName, propertyName].filter(Boolean).join(' · ');
+}
+
 function paymentSourceLabel(source: Payment['source']) {
   const labels: Record<Payment['source'], string> = {
     manual: 'Manuell',
@@ -293,12 +406,22 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   const [invoiceEmails, setInvoiceEmails] = useState<InvoiceEmailOutbox[]>([]);
   const [supplierInvoices, setSupplierInvoices] = useState<SupplierInvoice[]>([]);
   const [rentRuns, setRentRuns] = useState<RentBillingRun[]>([]);
+  const [rentAdjustments, setRentAdjustments] = useState<RentAdjustment[]>([]);
+  const [directDebitMandates, setDirectDebitMandates] = useState<DirectDebitMandate[]>([]);
+  const [tenancies, setTenancies] = useState<Tenancy[]>([]);
   const [numberSeries, setNumberSeries] = useState<InvoiceNumberSeries[]>([]);
   const [integrations, setIntegrations] = useState<AccountingIntegration[]>([]);
+  const [accountingAccounts, setAccountingAccounts] = useState<AccountingAccount[]>([]);
+  const [vatCodes, setVatCodes] = useState<VatCode[]>([]);
   const [reminderSettings, setReminderSettings] = useState<FinanceReminderSettings[]>([]);
   const [reminderSettingsDrafts, setReminderSettingsDrafts] = useState<Record<string, ReminderSettingsDraft>>({});
   const [accountingQueue, setAccountingQueue] = useState<AccountingSyncQueueItem[]>([]);
+  const [financeAuditLogs, setFinanceAuditLogs] = useState<FinanceAuditLog[]>([]);
+  const [automationRuns, setAutomationRuns] = useState<FinanceAutomationRun[]>([]);
+  const [automationSettings, setAutomationSettings] = useState<FinanceAutomationSettings | null>(null);
+  const [automationSettingsDraft, setAutomationSettingsDraft] = useState<AutomationSettingsDraft>(defaultAutomationSettingsDraft);
   const [projectBases, setProjectBases] = useState<Array<ProjectInvoiceBasis & { project?: CustomerProject | null }>>([]);
+  const [rentItems, setRentItems] = useState<RentBillingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -317,6 +440,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   const [rentRunModalOpen, setRentRunModalOpen] = useState(false);
   const [rentRunDetailOpen, setRentRunDetailOpen] = useState(false);
   const [numberSeriesModalOpen, setNumberSeriesModalOpen] = useState(false);
+  const [integrationConfigModalOpen, setIntegrationConfigModalOpen] = useState(false);
+  const [accountingAccountModalOpen, setAccountingAccountModalOpen] = useState(false);
+  const [vatCodeModalOpen, setVatCodeModalOpen] = useState(false);
   const [companyForm, setCompanyForm] = useState(emptyCompanyForm);
   const [customerForm, setCustomerForm] = useState(emptyCustomerForm);
   const [supplierForm, setSupplierForm] = useState(emptySupplierForm);
@@ -325,20 +451,37 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   const [paymentImportForm, setPaymentImportForm] = useState(emptyPaymentImportForm);
   const [invoiceEmailForm, setInvoiceEmailForm] = useState(emptyInvoiceEmailForm);
   const [creditInvoiceForm, setCreditInvoiceForm] = useState(emptyCreditInvoiceForm);
+  const [invoiceLineForm, setInvoiceLineForm] = useState(emptyInvoiceLineForm);
   const [paymentImportResult, setPaymentImportResult] = useState('');
   const [supplierInvoiceForm, setSupplierInvoiceForm] = useState(emptySupplierInvoiceForm);
   const [supplierInvoiceReviewForm, setSupplierInvoiceReviewForm] = useState(emptySupplierInvoiceForm);
+  const [supplierInvoiceLineForm, setSupplierInvoiceLineForm] = useState(emptySupplierInvoiceForm);
   const [supplierInvoiceFile, setSupplierInvoiceFile] = useState<File | null>(null);
   const [projectInvoiceForm, setProjectInvoiceForm] = useState(emptyProjectInvoiceForm);
+  const [selectedProjectBasisIds, setSelectedProjectBasisIds] = useState<string[]>([]);
   const [rentRunForm, setRentRunForm] = useState(emptyRentRunForm);
+  const [rentAdjustmentForm, setRentAdjustmentForm] = useState(emptyRentAdjustmentForm);
+  const [directDebitMandateForm, setDirectDebitMandateForm] = useState(emptyDirectDebitMandateForm);
+  const [rentEmailQueueResult, setRentEmailQueueResult] = useState('');
   const [numberSeriesForm, setNumberSeriesForm] = useState(emptyNumberSeriesForm);
+  const [integrationConfigForm, setIntegrationConfigForm] = useState<IntegrationConfigForm>(emptyIntegrationConfigForm);
+  const [accountingAccountForm, setAccountingAccountForm] = useState(emptyAccountingAccountForm);
+  const [vatCodeForm, setVatCodeForm] = useState(emptyVatCodeForm);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [selectedInvoiceLines, setSelectedInvoiceLines] = useState<InvoiceLine[]>([]);
+  const [selectedInvoiceLine, setSelectedInvoiceLine] = useState<InvoiceLine | null>(null);
+  const [selectedSupplier, setSelectedSupplier] = useState<FinanceSupplier | null>(null);
   const [selectedSupplierInvoice, setSelectedSupplierInvoice] = useState<SupplierInvoice | null>(null);
   const [selectedSupplierInvoiceLines, setSelectedSupplierInvoiceLines] = useState<SupplierInvoiceLine[]>([]);
+  const [selectedSupplierInvoiceLine, setSelectedSupplierInvoiceLine] = useState<SupplierInvoiceLine | null>(null);
   const [selectedRentRun, setSelectedRentRun] = useState<RentBillingRun | null>(null);
   const [selectedRentItems, setSelectedRentItems] = useState<RentBillingItem[]>([]);
+  const [rentDirectDebitExportResult, setRentDirectDebitExportResult] = useState('');
+  const [supplierPaymentExportResult, setSupplierPaymentExportResult] = useState('');
   const [selectedNumberSeries, setSelectedNumberSeries] = useState<InvoiceNumberSeries | null>(null);
+  const [selectedIntegration, setSelectedIntegration] = useState<AccountingIntegration | null>(null);
+  const [selectedAccountingAccount, setSelectedAccountingAccount] = useState<AccountingAccount | null>(null);
+  const [selectedVatCode, setSelectedVatCode] = useState<VatCode | null>(null);
   const [selectedApprovalSeriesId, setSelectedApprovalSeriesId] = useState('');
 
   const organisationId = user?.organisation_id ?? null;
@@ -360,6 +503,121 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       ...scoped.map(customer => ({ value: customer.id, label: customer.name })),
     ];
   }, [customers, invoiceForm.company_id]);
+
+  const selectedProjectBases = useMemo(() => {
+    return projectBases.filter(basis => selectedProjectBasisIds.includes(basis.id));
+  }, [projectBases, selectedProjectBasisIds]);
+
+  const invoiceAccountOptions = useMemo(() => {
+    const scoped = invoiceForm.company_id
+      ? accountingAccounts.filter(account => account.company_id === invoiceForm.company_id && account.active)
+      : [];
+    return [
+      { value: '', label: 'Automatiskt försäljningskonto' },
+      ...scoped
+        .sort((a, b) => a.account_code.localeCompare(b.account_code, 'sv-SE'))
+        .map(account => ({ value: account.account_code, label: `${account.account_code} · ${account.name}` })),
+    ];
+  }, [accountingAccounts, invoiceForm.company_id]);
+
+  const invoiceVatCodeOptions = useMemo(() => {
+    const scoped = invoiceForm.company_id
+      ? vatCodes.filter(code => code.company_id === invoiceForm.company_id && code.active)
+      : [];
+    return [
+      { value: '', label: 'Ange moms manuellt' },
+      ...scoped
+        .sort((a, b) => a.code.localeCompare(b.code, 'sv-SE'))
+        .map(code => ({ value: code.code, label: `${code.code} · ${code.name} · ${Number(code.rate)}%` })),
+    ];
+  }, [invoiceForm.company_id, vatCodes]);
+
+  const selectedInvoiceAccountOptions = useMemo(() => {
+    const scoped = selectedInvoice
+      ? accountingAccounts.filter(account => account.company_id === selectedInvoice.company_id && account.active)
+      : [];
+    return [
+      { value: '', label: 'Automatiskt försäljningskonto' },
+      ...scoped
+        .sort((a, b) => a.account_code.localeCompare(b.account_code, 'sv-SE'))
+        .map(account => ({ value: account.account_code, label: `${account.account_code} · ${account.name}` })),
+    ];
+  }, [accountingAccounts, selectedInvoice]);
+
+  const selectedInvoiceVatCodeOptions = useMemo(() => {
+    const scoped = selectedInvoice
+      ? vatCodes.filter(code => code.company_id === selectedInvoice.company_id && code.active)
+      : [];
+    return [
+      { value: '', label: 'Ange moms manuellt' },
+      ...scoped
+        .sort((a, b) => a.code.localeCompare(b.code, 'sv-SE'))
+        .map(code => ({ value: code.code, label: `${code.code} · ${code.name} · ${Number(code.rate)}%` })),
+    ];
+  }, [selectedInvoice, vatCodes]);
+
+  const supplierInvoiceAccountOptions = useMemo(() => {
+    const scoped = supplierInvoiceForm.company_id
+      ? accountingAccounts.filter(account => account.company_id === supplierInvoiceForm.company_id && account.active)
+      : [];
+    return [
+      { value: '', label: 'Välj konto' },
+      ...scoped
+        .sort((a, b) => a.account_code.localeCompare(b.account_code, 'sv-SE'))
+        .map(account => ({ value: account.account_code, label: `${account.account_code} · ${account.name}` })),
+    ];
+  }, [accountingAccounts, supplierInvoiceForm.company_id]);
+
+  const supplierInvoiceVatCodeOptions = useMemo(() => {
+    const scoped = supplierInvoiceForm.company_id
+      ? vatCodes.filter(code => code.company_id === supplierInvoiceForm.company_id && code.active)
+      : [];
+    return [
+      { value: '', label: 'Ange moms manuellt' },
+      ...scoped
+        .sort((a, b) => a.code.localeCompare(b.code, 'sv-SE'))
+        .map(code => ({ value: code.code, label: `${code.code} · ${code.name} · ${Number(code.rate)}%` })),
+    ];
+  }, [supplierInvoiceForm.company_id, vatCodes]);
+
+  const supplierInvoiceReviewAccountOptions = useMemo(() => {
+    const companyId = supplierInvoiceReviewForm.company_id || selectedSupplierInvoice?.company_id || '';
+    const scoped = companyId
+      ? accountingAccounts.filter(account => account.company_id === companyId && account.active)
+      : [];
+    return [
+      { value: '', label: 'Välj konto' },
+      ...scoped
+        .sort((a, b) => a.account_code.localeCompare(b.account_code, 'sv-SE'))
+        .map(account => ({ value: account.account_code, label: `${account.account_code} · ${account.name}` })),
+    ];
+  }, [accountingAccounts, selectedSupplierInvoice, supplierInvoiceReviewForm.company_id]);
+
+  const supplierInvoiceReviewVatCodeOptions = useMemo(() => {
+    const companyId = supplierInvoiceReviewForm.company_id || selectedSupplierInvoice?.company_id || '';
+    const scoped = companyId
+      ? vatCodes.filter(code => code.company_id === companyId && code.active)
+      : [];
+    return [
+      { value: '', label: 'Ange moms manuellt' },
+      ...scoped
+        .sort((a, b) => a.code.localeCompare(b.code, 'sv-SE'))
+        .map(code => ({ value: code.code, label: `${code.code} · ${code.name} · ${Number(code.rate)}%` })),
+    ];
+  }, [selectedSupplierInvoice, supplierInvoiceReviewForm.company_id, vatCodes]);
+
+  const accountingAccountOptions = useMemo(() => {
+    const scoped = vatCodeForm.company_id
+      ? accountingAccounts.filter(account => account.company_id === vatCodeForm.company_id && account.active)
+      : accountingAccounts.filter(account => account.active);
+
+    return [
+      { value: '', label: 'Välj konto' },
+      ...scoped
+        .sort((a, b) => a.account_code.localeCompare(b.account_code, 'sv-SE'))
+        .map(account => ({ value: account.account_code, label: `${account.account_code} · ${account.name}` })),
+    ];
+  }, [accountingAccounts, vatCodeForm.company_id]);
 
   const supplierOptions = useMemo(() => {
     const scoped = supplierInvoiceForm.company_id
@@ -399,6 +657,37 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     return payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   }, [payments]);
 
+  const financeReadiness = useMemo(() => {
+    return companies.map(company => {
+      const companySeries = numberSeries.filter(series => series.company_id === company.id && series.active);
+      const companyAccounts = accountingAccounts.filter(account => account.company_id === company.id && account.active);
+      const companyVatCodes = vatCodes.filter(code => code.company_id === company.id && code.active);
+      const companyIntegration = integrations.find(integration => integration.company_id === company.id && integration.enabled);
+      const companySuppliers = suppliers.filter(supplier => !supplier.company_id || supplier.company_id === company.id);
+      const suppliersMissingPayment = companySuppliers.filter(supplier => !supplier.bankgiro && !supplier.plusgiro && !supplier.iban && !supplier.bank_account).length;
+      const companyInvoices = invoices.filter(invoice => invoice.company_id === company.id);
+      const emailReady = Boolean(company.email);
+      const checks = [
+        { key: 'series', label: 'Fakturanummerserie', ok: companySeries.length > 0, detail: companySeries.length > 0 ? `${companySeries.length} aktiv` : 'Skapa en aktiv serie' },
+        { key: 'accounts', label: 'Kontoplan', ok: companyAccounts.length > 0, detail: companyAccounts.length > 0 ? `${companyAccounts.length} konton` : 'Lägg upp konton' },
+        { key: 'vat', label: 'Momskoder', ok: companyVatCodes.length > 0, detail: companyVatCodes.length > 0 ? `${companyVatCodes.length} momskoder` : 'Lägg upp momskoder' },
+        { key: 'email', label: 'Fakturaavsändare', ok: emailReady, detail: emailReady ? company.email : 'Bolaget saknar e-post' },
+        { key: 'integration', label: 'Bokföring', ok: Boolean(companyIntegration), detail: companyIntegration ? companyIntegration.provider.toUpperCase() : 'Ingen aktiv adapter' },
+        { key: 'supplier-payments', label: 'Leverantörsbetalningar', ok: suppliersMissingPayment === 0, detail: suppliersMissingPayment === 0 ? 'Betaluppgifter ok' : `${suppliersMissingPayment} saknar betaluppgift` },
+      ];
+      const missing = checks.filter(check => !check.ok).length;
+      return {
+        company,
+        checks,
+        missing,
+        invoiceCount: companyInvoices.length,
+        openAmount: companyInvoices
+          .filter(invoice => !['paid', 'credited', 'cancelled'].includes(invoice.status))
+          .reduce((sum, invoice) => sum + Number(invoice.total_amount || 0) - Number(invoice.paid_amount || 0), 0),
+      };
+    });
+  }, [accountingAccounts, companies, integrations, invoices, numberSeries, suppliers, vatCodes]);
+
   const selectedInvoiceCanBeCredited = Boolean(
     selectedInvoice &&
     !selectedInvoice.original_invoice_id &&
@@ -406,12 +695,68 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     ['approved', 'sent', 'partially_paid', 'paid', 'overdue'].includes(selectedInvoice.status),
   );
 
+  const rentAdjustmentTenancyOptions = useMemo(() => {
+    const scoped = rentAdjustmentForm.company_id
+      ? tenancies.filter(tenancy => !tenancy.company_id || tenancy.company_id === rentAdjustmentForm.company_id)
+      : tenancies;
+
+    return [
+      { value: '', label: 'Välj hyresgäst/lägenhet' },
+      ...scoped.map(tenancy => ({ value: tenancy.id, label: tenancyLabel(tenancy) })),
+    ];
+  }, [rentAdjustmentForm.company_id, tenancies]);
+
+  const directDebitTenancyOptions = useMemo(() => {
+    const scoped = directDebitMandateForm.company_id
+      ? tenancies.filter(tenancy => !tenancy.company_id || tenancy.company_id === directDebitMandateForm.company_id)
+      : tenancies;
+    const usedTenancyIds = new Set(directDebitMandates.map(mandate => mandate.tenancy_id));
+
+    return [
+      { value: '', label: 'Välj hyresgäst/lägenhet' },
+      ...scoped
+        .filter(tenancy => tenancy.id === directDebitMandateForm.tenancy_id || !usedTenancyIds.has(tenancy.id))
+        .map(tenancy => ({ value: tenancy.id, label: tenancyLabel(tenancy) })),
+    ];
+  }, [directDebitMandateForm.company_id, directDebitMandateForm.tenancy_id, directDebitMandates, tenancies]);
+
+  const rentLedgerRows = useMemo(() => {
+    return tenancies
+      .filter(tenancy => tenancy.status === 'active')
+      .map(tenancy => {
+        const items = rentItems.filter(item => item.tenancy_id === tenancy.id);
+        const mandate = directDebitMandates.find(item => item.tenancy_id === tenancy.id && item.status === 'active');
+        const invoicedItems = items.filter(item => item.status === 'invoiced' && item.invoice);
+        const invoicedAmount = invoicedItems.reduce((sum, item) => sum + Number(item.invoice?.total_amount ?? item.total_amount ?? 0), 0);
+        const paidAmountForTenancy = invoicedItems.reduce((sum, item) => sum + Number(item.invoice?.paid_amount ?? 0), 0);
+        const balance = invoicedItems.reduce((sum, item) => {
+          const fallbackBalance = Math.max(Number(item.invoice?.total_amount ?? item.total_amount ?? 0) - Number(item.invoice?.paid_amount ?? 0), 0);
+          return sum + Number(item.invoice?.balance_due ?? fallbackBalance);
+        }, 0);
+        const unpaidCount = invoicedItems.filter(item => item.invoice && !['paid', 'credited', 'cancelled'].includes(item.invoice.status)).length;
+        const latestItem = items
+          .slice()
+          .sort((a, b) => b.rent_period.localeCompare(a.rent_period) || b.created_at.localeCompare(a.created_at))[0];
+        return {
+          tenancy,
+          latestPeriod: latestItem?.rent_period ? latestItem.rent_period.slice(0, 7) : '-',
+          invoicedAmount,
+          paidAmount: paidAmountForTenancy,
+          balance,
+          unpaidCount,
+          mandate,
+          lastInvoiceStatus: latestItem?.invoice?.payment_status || latestItem?.status || '-',
+        };
+      })
+      .sort((a, b) => b.balance - a.balance || tenancyLabel(a.tenancy).localeCompare(tenancyLabel(b.tenancy), 'sv-SE'));
+  }, [directDebitMandates, rentItems, tenancies]);
+
   const loadFinance = useCallback(async () => {
     if (!organisationId) return;
     setLoading(true);
     setError('');
 
-    const [companyResult, customerResult, supplierResult, invoiceResult, paymentResult, invoiceEmailResult, supplierInvoiceResult, integrationResult, reminderSettingsResult, accountingQueueResult, projectBasisResult, rentRunResult, numberSeriesResult] = await Promise.all([
+    const [companyResult, customerResult, supplierResult, invoiceResult, paymentResult, invoiceEmailResult, supplierInvoiceResult, integrationResult, accountingAccountsResult, vatCodesResult, reminderSettingsResult, accountingQueueResult, financeAuditResult, automationRunsResult, automationSettingsResult, projectBasisResult, rentRunResult, rentItemResult, rentAdjustmentResult, directDebitMandateResult, tenancyResult, numberSeriesResult] = await Promise.all([
       supabase
         .from('vihem_companies')
         .select('*')
@@ -453,6 +798,16 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .eq('organisation_id', organisationId)
         .order('created_at', { ascending: true }),
       supabase
+        .from('vihem_accounting_accounts')
+        .select('*')
+        .eq('organisation_id', organisationId)
+        .order('account_code', { ascending: true }),
+      supabase
+        .from('vihem_vat_codes')
+        .select('*')
+        .eq('organisation_id', organisationId)
+        .order('rate', { ascending: false }),
+      supabase
         .from('vihem_finance_reminder_settings')
         .select('*, company:company_id(*)')
         .eq('organisation_id', organisationId)
@@ -464,6 +819,23 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .order('created_at', { ascending: false })
         .limit(50),
       supabase
+        .from('vihem_finance_audit_log')
+        .select('*, company:company_id(*), changed_by_profile:changed_by(id,name,email)')
+        .eq('organisation_id', organisationId)
+        .order('created_at', { ascending: false })
+        .limit(80),
+      supabase
+        .from('vihem_finance_automation_runs')
+        .select('*')
+        .or(`organisation_id.eq.${organisationId},organisation_id.is.null`)
+        .order('created_at', { ascending: false })
+        .limit(10),
+      supabase
+        .from('vihem_finance_automation_settings')
+        .select('*')
+        .eq('organisation_id', organisationId)
+        .maybeSingle(),
+      supabase
         .from('vihem_project_invoice_basis')
         .select('*, lines:vihem_project_invoice_basis_lines(*), project:project_id(*)')
         .in('status', ['draft', 'ready_for_invoicing'])
@@ -474,13 +846,37 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .eq('organisation_id', organisationId)
         .order('rent_period', { ascending: false }),
       supabase
+        .from('vihem_rent_billing_items')
+        .select('*, company:company_id(*), tenant:tenant_id(id,name,email), property:property_id(id,name,address), apartment:apartment_id(id,apartment_number), invoice:invoice_id(*)')
+        .eq('organisation_id', organisationId)
+        .order('rent_period', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(500),
+      supabase
+        .from('vihem_rent_adjustments')
+        .select('*, company:company_id(*), tenancy:tenancy_id(*, tenant:tenant_id(id,name,email), property:property_id(id,name,address), apartment:apartment_id(id,apartment_number))')
+        .eq('organisation_id', organisationId)
+        .order('rent_period', { ascending: false })
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('vihem_direct_debit_mandates')
+        .select('*, company:company_id(*), tenancy:tenancy_id(*, tenant:tenant_id(id,name,email), property:property_id(id,name,address), apartment:apartment_id(id,apartment_number)), finance_customer:finance_customer_id(*)')
+        .eq('organisation_id', organisationId)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('vihem_tenancies')
+        .select('*, tenant:tenant_id(id,name,email), property:property_id(id,name,address), apartment:apartment_id(id,apartment_number)')
+        .eq('organisation_id', organisationId)
+        .eq('status', 'active')
+        .order('start_date', { ascending: false }),
+      supabase
         .from('vihem_invoice_number_series')
         .select('*, company:company_id(*)')
         .eq('organisation_id', organisationId)
         .order('created_at', { ascending: true }),
     ]);
 
-    const firstError = companyResult.error ?? customerResult.error ?? supplierResult.error ?? invoiceResult.error ?? paymentResult.error ?? invoiceEmailResult.error ?? supplierInvoiceResult.error ?? integrationResult.error ?? reminderSettingsResult.error ?? accountingQueueResult.error ?? projectBasisResult.error ?? rentRunResult.error ?? numberSeriesResult.error;
+    const firstError = companyResult.error ?? customerResult.error ?? supplierResult.error ?? invoiceResult.error ?? paymentResult.error ?? invoiceEmailResult.error ?? supplierInvoiceResult.error ?? integrationResult.error ?? accountingAccountsResult.error ?? vatCodesResult.error ?? reminderSettingsResult.error ?? accountingQueueResult.error ?? financeAuditResult.error ?? automationRunsResult.error ?? automationSettingsResult.error ?? projectBasisResult.error ?? rentRunResult.error ?? rentItemResult.error ?? rentAdjustmentResult.error ?? directDebitMandateResult.error ?? tenancyResult.error ?? numberSeriesResult.error;
     if (firstError) {
       setError(firstError.message.includes('schema cache')
         ? 'Databasen saknar ekonomitabellerna ännu. Kör senaste Supabase-migreringarna och ladda om appen.'
@@ -497,6 +893,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     setInvoiceEmails((invoiceEmailResult.data ?? []) as InvoiceEmailOutbox[]);
     setSupplierInvoices((supplierInvoiceResult.data ?? []) as SupplierInvoice[]);
     setIntegrations((integrationResult.data ?? []) as AccountingIntegration[]);
+    setAccountingAccounts((accountingAccountsResult.data ?? []) as AccountingAccount[]);
+    setVatCodes((vatCodesResult.data ?? []) as VatCode[]);
     const nextReminderSettings = (reminderSettingsResult.data ?? []) as FinanceReminderSettings[];
     setReminderSettings(nextReminderSettings);
     setReminderSettingsDrafts(
@@ -513,8 +911,27 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       }, {}),
     );
     setAccountingQueue((accountingQueueResult.data ?? []) as AccountingSyncQueueItem[]);
+    setFinanceAuditLogs((financeAuditResult.data ?? []) as FinanceAuditLog[]);
+    setAutomationRuns((automationRunsResult.data ?? []) as FinanceAutomationRun[]);
+    const nextAutomationSettings = automationSettingsResult.data as FinanceAutomationSettings | null;
+    setAutomationSettings(nextAutomationSettings);
+    setAutomationSettingsDraft({
+      finance_cron_enabled: nextAutomationSettings?.finance_cron_enabled ?? true,
+      queue_reminders: nextAutomationSettings?.queue_reminders ?? true,
+      send_emails: nextAutomationSettings?.send_emails ?? false,
+      email_limit: String(nextAutomationSettings?.email_limit ?? 20),
+      process_accounting_sync: nextAutomationSettings?.process_accounting_sync ?? false,
+      accounting_sync_limit: String(nextAutomationSettings?.accounting_sync_limit ?? 50),
+      create_rent_billing: nextAutomationSettings?.create_rent_billing ?? false,
+      rent_billing_months_ahead: String(nextAutomationSettings?.rent_billing_months_ahead ?? 1),
+      auto_generate_rent_invoices: nextAutomationSettings?.auto_generate_rent_invoices ?? false,
+    });
     setProjectBases((projectBasisResult.data ?? []) as Array<ProjectInvoiceBasis & { project?: CustomerProject | null }>);
     setRentRuns((rentRunResult.data ?? []) as RentBillingRun[]);
+    setRentItems((rentItemResult.data ?? []) as RentBillingItem[]);
+    setRentAdjustments((rentAdjustmentResult.data ?? []) as RentAdjustment[]);
+    setDirectDebitMandates((directDebitMandateResult.data ?? []) as DirectDebitMandate[]);
+    setTenancies((tenancyResult.data ?? []) as Tenancy[]);
     setNumberSeries((numberSeriesResult.data ?? []) as InvoiceNumberSeries[]);
     setLoading(false);
   }, [organisationId]);
@@ -525,7 +942,10 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const resetCompanyForm = () => setCompanyForm(emptyCompanyForm);
   const resetCustomerForm = () => setCustomerForm({ ...emptyCustomerForm, company_id: companies[0]?.id ?? '' });
-  const resetSupplierForm = () => setSupplierForm({ ...emptySupplierForm, company_id: companies[0]?.id ?? '' });
+  const resetSupplierForm = () => {
+    setSelectedSupplier(null);
+    setSupplierForm({ ...emptySupplierForm, company_id: companies[0]?.id ?? '' });
+  };
   const resetInvoiceForm = () => {
     const company = companies[0];
     const invoiceDate = new Date().toISOString().slice(0, 10);
@@ -535,6 +955,26 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       invoice_date: invoiceDate,
       due_date: addDays(invoiceDate, company?.default_payment_terms_days ?? 30),
     });
+  };
+
+  const openEditSupplier = (supplier: FinanceSupplier) => {
+    setSelectedSupplier(supplier);
+    setSupplierForm({
+      company_id: supplier.company_id || '',
+      name: supplier.name || '',
+      organisation_number: supplier.organisation_number || '',
+      email: supplier.email || '',
+      payment_terms_days: String(supplier.payment_terms_days ?? 30),
+      bankgiro: supplier.bankgiro || '',
+      plusgiro: supplier.plusgiro || '',
+      iban: supplier.iban || '',
+      bic: supplier.bic || '',
+      bank_account: supplier.bank_account || '',
+      payment_reference: supplier.payment_reference || '',
+      default_account_code: supplier.default_account_code || '',
+      notes: supplier.notes || '',
+    });
+    setSupplierModalOpen(true);
   };
 
   const resetSupplierInvoiceForm = () => {
@@ -685,19 +1125,34 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     setSaving(true);
     setError('');
 
-    const { error: supplierError } = await supabase
-      .from('vihem_finance_suppliers')
-      .insert({
-        organisation_id: organisationId,
-        company_id: supplierForm.company_id || null,
-        name: supplierForm.name.trim(),
-        organisation_number: supplierForm.organisation_number.trim(),
-        email: supplierForm.email.trim(),
-        payment_terms_days: Math.max(0, Math.round(toNumber(supplierForm.payment_terms_days, 30))),
-        default_account_code: supplierForm.default_account_code.trim(),
-        notes: supplierForm.notes.trim(),
-        created_by: user?.id ?? null,
-      });
+    const payload = {
+      company_id: supplierForm.company_id || null,
+      name: supplierForm.name.trim(),
+      organisation_number: supplierForm.organisation_number.trim(),
+      email: supplierForm.email.trim(),
+      payment_terms_days: Math.max(0, Math.round(toNumber(supplierForm.payment_terms_days, 30))),
+      bankgiro: supplierForm.bankgiro.trim(),
+      plusgiro: supplierForm.plusgiro.trim(),
+      iban: supplierForm.iban.trim(),
+      bic: supplierForm.bic.trim(),
+      bank_account: supplierForm.bank_account.trim(),
+      payment_reference: supplierForm.payment_reference.trim(),
+      default_account_code: supplierForm.default_account_code.trim(),
+      notes: supplierForm.notes.trim(),
+    };
+
+    const { error: supplierError } = selectedSupplier
+      ? await supabase
+        .from('vihem_finance_suppliers')
+        .update(payload)
+        .eq('id', selectedSupplier.id)
+      : await supabase
+        .from('vihem_finance_suppliers')
+        .insert({
+          ...payload,
+          organisation_id: organisationId,
+          created_by: user?.id ?? null,
+        });
 
     if (supplierError) {
       setError(supplierError.message);
@@ -763,9 +1218,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         quantity,
         unit_price: unitPrice,
         vat_rate: vatRate,
+        account_code: invoiceForm.account_code.trim(),
         line_total_excl_vat: subtotal,
         vat_amount: vat,
         line_total_incl_vat: total,
+        metadata: invoiceForm.vat_code ? { vat_code: invoiceForm.vat_code } : {},
       });
 
     if (lineError) {
@@ -947,33 +1404,42 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
     const firstLine = (lines?.[0] ?? null) as SupplierInvoiceLine | null;
     setSelectedSupplierInvoiceLines((lines ?? []) as SupplierInvoiceLine[]);
+    setSelectedSupplierInvoiceLine(null);
     setSupplierInvoiceReviewForm({
       company_id: supplierInvoice.company_id,
       supplier_id: supplierInvoice.supplier_id ?? '',
       supplier_invoice_number: supplierInvoice.supplier_invoice_number,
       invoice_date: supplierInvoice.invoice_date,
       due_date: supplierInvoice.due_date,
+      description: '',
+      quantity: '1',
+      unit_price: '0',
+      vat_code: '',
+      vat_rate: '25',
+      account_code: '',
+      notes: supplierInvoice.notes,
+    });
+    setSupplierInvoiceLineForm({
+      ...emptySupplierInvoiceForm,
+      company_id: supplierInvoice.company_id,
       description: firstLine?.description ?? '',
       quantity: String(firstLine?.quantity ?? 1),
       unit_price: String(firstLine?.unit_price ?? 0),
+      vat_code: typeof firstLine?.metadata?.vat_code === 'string' ? firstLine.metadata.vat_code : '',
       vat_rate: String(firstLine?.vat_rate ?? 25),
       account_code: firstLine?.account_code ?? '',
-      notes: supplierInvoice.notes,
     });
     setSupplierInvoiceDetailOpen(true);
   };
 
   const saveSupplierInvoiceReview = async () => {
-    if (!organisationId || !selectedSupplierInvoice || !supplierInvoiceReviewForm.company_id || !supplierInvoiceReviewForm.description.trim()) return;
+    if (!organisationId || !selectedSupplierInvoice || !supplierInvoiceReviewForm.company_id) return;
     setSaving(true);
     setError('');
 
-    const quantity = toNumber(supplierInvoiceReviewForm.quantity, 1);
-    const unitPrice = toNumber(supplierInvoiceReviewForm.unit_price, 0);
-    const vatRate = toNumber(supplierInvoiceReviewForm.vat_rate, 25);
-    const subtotal = Math.round(quantity * unitPrice * 100) / 100;
-    const vat = Math.round(subtotal * (vatRate / 100) * 100) / 100;
-    const total = subtotal + vat;
+    const subtotal = selectedSupplierInvoiceLines.reduce((sum, line) => sum + Number(line.line_total_excl_vat || 0), 0);
+    const vat = selectedSupplierInvoiceLines.reduce((sum, line) => sum + Number(line.vat_amount || 0), 0);
+    const total = selectedSupplierInvoiceLines.reduce((sum, line) => sum + Number(line.line_total_incl_vat || 0), 0);
 
     const { data: updatedInvoice, error: invoiceError } = await supabase
       .from('vihem_supplier_invoices')
@@ -998,34 +1464,6 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       return;
     }
 
-    const firstLine = selectedSupplierInvoiceLines[0];
-    const linePayload = {
-      organisation_id: organisationId,
-      company_id: supplierInvoiceReviewForm.company_id,
-      supplier_invoice_id: selectedSupplierInvoice.id,
-      line_no: 1,
-      description: supplierInvoiceReviewForm.description.trim(),
-      quantity,
-      unit_price: unitPrice,
-      vat_rate: vatRate,
-      account_code: supplierInvoiceReviewForm.account_code.trim(),
-      line_total_excl_vat: subtotal,
-      vat_amount: vat,
-      line_total_incl_vat: total,
-    };
-
-    const lineRequest = firstLine
-      ? supabase.from('vihem_supplier_invoice_lines').update(linePayload).eq('id', firstLine.id)
-      : supabase.from('vihem_supplier_invoice_lines').insert(linePayload);
-
-    const { error: lineError } = await lineRequest;
-
-    if (lineError) {
-      setError(lineError.message);
-      setSaving(false);
-      return;
-    }
-
     if (supplierInvoiceFile) {
       const attached = await attachSupplierInvoiceDocument(updatedInvoice as SupplierInvoice, supplierInvoiceFile);
       if (!attached) {
@@ -1037,6 +1475,138 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     setSelectedSupplierInvoice(updatedInvoice as SupplierInvoice);
     setSupplierInvoiceFile(null);
     await openSupplierInvoiceDetail(updatedInvoice as SupplierInvoice);
+    await loadFinance();
+    setSaving(false);
+  };
+
+  const refreshSupplierInvoice = async (supplierInvoiceId: string) => {
+    const { data, error: invoiceError } = await supabase
+      .from('vihem_supplier_invoices')
+      .select('*, company:company_id(*), supplier:supplier_id(*)')
+      .eq('id', supplierInvoiceId)
+      .single();
+
+    if (invoiceError) {
+      setError(invoiceError.message);
+      return null;
+    }
+
+    const nextInvoice = data as SupplierInvoice;
+    setSelectedSupplierInvoice(nextInvoice);
+    setSupplierInvoices(prev => prev.map(invoice => invoice.id === supplierInvoiceId ? nextInvoice : invoice));
+    return nextInvoice;
+  };
+
+  const reloadSupplierInvoiceLines = async (supplierInvoiceId: string) => {
+    const { data, error: lineError } = await supabase
+      .from('vihem_supplier_invoice_lines')
+      .select('*')
+      .eq('supplier_invoice_id', supplierInvoiceId)
+      .order('line_no', { ascending: true });
+
+    if (lineError) {
+      setError(lineError.message);
+      return false;
+    }
+
+    setSelectedSupplierInvoiceLines((data ?? []) as SupplierInvoiceLine[]);
+    return true;
+  };
+
+  const resetSupplierInvoiceLineDraft = () => {
+    setSelectedSupplierInvoiceLine(null);
+    setSupplierInvoiceLineForm(prev => ({
+      ...emptySupplierInvoiceForm,
+      company_id: supplierInvoiceReviewForm.company_id || selectedSupplierInvoice?.company_id || prev.company_id,
+    }));
+  };
+
+  const editSupplierInvoiceLineInReview = (line: SupplierInvoiceLine) => {
+    setSelectedSupplierInvoiceLine(line);
+    setSupplierInvoiceLineForm({
+      ...emptySupplierInvoiceForm,
+      company_id: line.company_id,
+      description: line.description,
+      quantity: String(line.quantity ?? 1),
+      unit_price: String(line.unit_price ?? 0),
+      vat_code: typeof line.metadata?.vat_code === 'string' ? line.metadata.vat_code : '',
+      vat_rate: String(line.vat_rate ?? 25),
+      account_code: line.account_code || '',
+    });
+  };
+
+  const saveSupplierInvoiceLineInReview = async () => {
+    if (!organisationId || !selectedSupplierInvoice || selectedSupplierInvoice.approval_status === 'approved' || !supplierInvoiceLineForm.description.trim()) return;
+    const companyId = supplierInvoiceReviewForm.company_id || selectedSupplierInvoice.company_id;
+    if (!companyId) return;
+
+    setSaving(true);
+    setError('');
+
+    const quantity = toNumber(supplierInvoiceLineForm.quantity, 1);
+    const unitPrice = toNumber(supplierInvoiceLineForm.unit_price, 0);
+    const vatRate = toNumber(supplierInvoiceLineForm.vat_rate, 25);
+    const subtotal = Math.round(quantity * unitPrice * 100) / 100;
+    const vat = Math.round(subtotal * (vatRate / 100) * 100) / 100;
+    const total = subtotal + vat;
+    const nextLineNo = selectedSupplierInvoiceLines.reduce((max, line) => Math.max(max, Number(line.line_no || 0)), 0) + 1;
+
+    const payload = {
+      organisation_id: organisationId,
+      company_id: companyId,
+      supplier_invoice_id: selectedSupplierInvoice.id,
+      line_no: selectedSupplierInvoiceLine?.line_no ?? nextLineNo,
+      description: supplierInvoiceLineForm.description.trim(),
+      quantity,
+      unit_price: unitPrice,
+      vat_rate: vatRate,
+      account_code: supplierInvoiceLineForm.account_code.trim(),
+      line_total_excl_vat: subtotal,
+      vat_amount: vat,
+      line_total_incl_vat: total,
+      metadata: supplierInvoiceLineForm.vat_code ? { ...(selectedSupplierInvoiceLine?.metadata ?? {}), vat_code: supplierInvoiceLineForm.vat_code } : { ...(selectedSupplierInvoiceLine?.metadata ?? {}), vat_code: '' },
+    };
+
+    const request = selectedSupplierInvoiceLine
+      ? supabase.from('vihem_supplier_invoice_lines').update(payload).eq('id', selectedSupplierInvoiceLine.id)
+      : supabase.from('vihem_supplier_invoice_lines').insert(payload);
+
+    const { error: lineError } = await request;
+
+    if (lineError) {
+      setError(lineError.message);
+      setSaving(false);
+      return;
+    }
+
+    resetSupplierInvoiceLineDraft();
+    await reloadSupplierInvoiceLines(selectedSupplierInvoice.id);
+    const refreshed = await refreshSupplierInvoice(selectedSupplierInvoice.id);
+    if (refreshed) setSelectedSupplierInvoice(refreshed);
+    await loadFinance();
+    setSaving(false);
+  };
+
+  const deleteSupplierInvoiceLineInReview = async (line: SupplierInvoiceLine) => {
+    if (!selectedSupplierInvoice || selectedSupplierInvoice.approval_status === 'approved' || selectedSupplierInvoiceLines.length <= 1) return;
+    setSaving(true);
+    setError('');
+
+    const { error: deleteError } = await supabase
+      .from('vihem_supplier_invoice_lines')
+      .delete()
+      .eq('id', line.id);
+
+    if (deleteError) {
+      setError(deleteError.message);
+      setSaving(false);
+      return;
+    }
+
+    if (selectedSupplierInvoiceLine?.id === line.id) resetSupplierInvoiceLineDraft();
+    await reloadSupplierInvoiceLines(selectedSupplierInvoice.id);
+    const refreshed = await refreshSupplierInvoice(selectedSupplierInvoice.id);
+    if (refreshed) setSelectedSupplierInvoice(refreshed);
     await loadFinance();
     setSaving(false);
   };
@@ -1095,6 +1665,62 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     await loadFinance();
   };
 
+  const exportSupplierPayments = async (format: 'csv' | 'bankgirot' = 'csv') => {
+    setSaving(true);
+    setError('');
+    setSupplierPaymentExportResult('');
+
+    const { data, error: exportError } = await supabase.functions.invoke('vihem-export-supplier-payments', {
+      body: { format },
+    });
+
+    if (exportError || data?.error) {
+      setError(data?.error || exportError?.message || 'Kunde inte exportera leverantörsbetalningar.');
+      setSaving(false);
+      return;
+    }
+
+    const content = String(data.content || data.csv || '');
+    const filename = String(data.filename || `vihem-leverantorsbetalningar.${format === 'bankgirot' ? 'txt' : 'csv'}`);
+    const blob = new Blob([format === 'csv' ? `\uFEFF${content}` : content], { type: format === 'bankgirot' ? 'text/plain;charset=utf-8' : 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    const skipped = (data.skipped || {}) as Record<string, number>;
+    setSupplierPaymentExportResult(
+      `${Number(data.count || 0)} leverantörsbetalningar exporterade (${format === 'bankgirot' ? 'Bankgirot-underlag' : 'CSV'}). ` +
+      `${Number(skipped.missing_payment_target || 0)} saknar betaluppgift, ` +
+      `${Number(skipped.already_exported || 0)} redan exporterade, ` +
+      `${Number(skipped.zero_amount || 0)} saknar belopp.`,
+    );
+    setSaving(false);
+    await loadFinance();
+  };
+
+  const queueSupplierInvoiceAccountingSync = async (supplierInvoiceId: string) => {
+    setSaving(true);
+    setError('');
+
+    const { error: syncError } = await supabase.rpc('vihem_queue_supplier_invoice_accounting_sync', {
+      target_supplier_invoice_id: supplierInvoiceId,
+    });
+
+    if (syncError) {
+      setError(syncError.message);
+      setSaving(false);
+      return;
+    }
+
+    const refreshed = await refreshSupplierInvoice(supplierInvoiceId);
+    if (refreshed) setSelectedSupplierInvoice(refreshed);
+    setSaving(false);
+    await loadFinance();
+  };
+
   const processSupplierInvoiceOcrQueue = async () => {
     setSaving(true);
     setError('');
@@ -1113,22 +1739,288 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     await loadFinance();
   };
 
-  const ensureIntegration = async (companyId: string, provider: AccountingIntegration['provider']) => {
-    if (!organisationId || !companyId) return;
+  const openIntegrationConfig = (
+    company: FinanceCompany,
+    provider: AccountingIntegration['provider'],
+    integration?: AccountingIntegration,
+  ) => {
+    const config = integration?.config ?? {};
+    setSelectedIntegration(integration ?? null);
+    setIntegrationConfigForm({
+      company_id: company.id,
+      provider,
+      status: integration?.status ?? (provider === 'manual' || provider === 'sie' ? 'active' : 'paused'),
+      mode: String(config.mode || (provider === 'sie' ? 'sie_export' : provider === 'manual' ? 'manual_export' : 'api')),
+      export_format: String(config.export_format || (provider === 'sie' ? 'sie' : 'csv')),
+      external_tenant_id: String(config.external_tenant_id || ''),
+      notes: String(config.notes || ''),
+      config_json: prettyJson(config.extra || {}),
+      secret_value: '',
+    });
+    setIntegrationConfigModalOpen(true);
+  };
+
+  const saveIntegrationConfig = async () => {
+    if (!organisationId || !integrationConfigForm.company_id) return;
     setSaving(true);
     setError('');
 
-    const { error: integrationError } = await supabase
+    let extraConfig: Record<string, unknown> = {};
+    try {
+      extraConfig = JSON.parse(integrationConfigForm.config_json || '{}');
+      if (!extraConfig || typeof extraConfig !== 'object' || Array.isArray(extraConfig)) {
+        throw new Error('Extra JSON måste vara ett objekt.');
+      }
+    } catch (parseError) {
+      setError(parseError instanceof Error ? parseError.message : 'Extra JSON är inte giltig.');
+      setSaving(false);
+      return;
+    }
+
+    const { data: integrationData, error: integrationError } = await supabase
       .from('vihem_accounting_integrations')
       .upsert({
         organisation_id: organisationId,
-        company_id: companyId,
-        provider,
-        status: provider === 'none' ? 'not_configured' : 'paused',
-        config: {},
-      }, { onConflict: 'company_id,provider' });
+        company_id: integrationConfigForm.company_id,
+        provider: integrationConfigForm.provider,
+        status: integrationConfigForm.status,
+        config: {
+          mode: integrationConfigForm.mode.trim(),
+          export_format: integrationConfigForm.export_format.trim(),
+          external_tenant_id: integrationConfigForm.external_tenant_id.trim(),
+          notes: integrationConfigForm.notes.trim(),
+          extra: extraConfig,
+        },
+      }, { onConflict: 'company_id,provider' })
+      .select('*')
+      .single();
 
-    if (integrationError) setError(integrationError.message);
+    if (integrationError) {
+      setError(integrationError.message);
+      setSaving(false);
+      return;
+    }
+
+    if (integrationConfigForm.secret_value.trim()) {
+      const { data: secretData, error: secretError } = await supabase.functions.invoke('vihem-save-accounting-secret', {
+        body: {
+          integration_id: integrationData.id,
+          secret_name: 'primary_token',
+          secret_value: integrationConfigForm.secret_value.trim(),
+        },
+      });
+
+      if (secretError || secretData?.error) {
+        setError(secretData?.error || secretError?.message || 'Kunde inte spara bokföringstoken.');
+        setSaving(false);
+        return;
+      }
+    }
+
+    setIntegrationConfigModalOpen(false);
+    setSelectedIntegration(null);
+    setSaving(false);
+    await loadFinance();
+  };
+
+  const testIntegrationConfig = async () => {
+    if (!selectedIntegration) return;
+    setSaving(true);
+    setError('');
+
+    const { data, error: testError } = await supabase.functions.invoke('vihem-test-accounting-integration', {
+      body: { integration_id: selectedIntegration.id },
+    });
+
+    if (testError || data?.error) {
+      setError(data?.error || testError?.message || 'Kunde inte testa bokföringskopplingen.');
+      setSaving(false);
+      await loadFinance();
+      return;
+    }
+
+    setSaving(false);
+    await loadFinance();
+  };
+
+  const createDefaultAccountingSetup = async (company: FinanceCompany) => {
+    if (!organisationId) return;
+    setSaving(true);
+    setError('');
+
+    const accountRows = [
+      ['1510', 'Kundfordringar', 'receivable', 'customer_receivable'],
+      ['1930', 'Företagskonto', 'bank', 'bank'],
+      ['2440', 'Leverantörsskulder', 'payable', 'supplier_payable'],
+      ['2611', 'Utgående moms', 'vat', 'output_vat'],
+      ['2641', 'Ingående moms', 'vat', 'input_vat'],
+      ['3001', 'Försäljning inom Sverige', 'income', 'sales'],
+      ['4000', 'Inköp', 'expense', 'purchase'],
+    ].map(([account_code, name, account_type, default_role]) => ({
+      organisation_id: organisationId,
+      company_id: company.id,
+      account_code,
+      name,
+      account_type,
+      default_role,
+      active: true,
+      created_by: user?.id ?? null,
+    }));
+
+    const vatRows = [
+      { code: 'SE25', name: 'Svensk moms 25%', rate: 25 },
+      { code: 'SE12', name: 'Svensk moms 12%', rate: 12 },
+      { code: 'SE06', name: 'Svensk moms 6%', rate: 6 },
+      { code: 'SE00', name: 'Momsfri försäljning', rate: 0 },
+    ].map(row => ({
+      organisation_id: organisationId,
+      company_id: company.id,
+      ...row,
+      sales_account_code: '3001',
+      purchase_account_code: '4000',
+      output_vat_account_code: row.rate > 0 ? '2611' : '',
+      input_vat_account_code: row.rate > 0 ? '2641' : '',
+      active: true,
+      created_by: user?.id ?? null,
+    }));
+
+    const { error: accountError } = await supabase
+      .from('vihem_accounting_accounts')
+      .upsert(accountRows, { onConflict: 'company_id,account_code' });
+
+    if (accountError) {
+      setError(accountError.message);
+      setSaving(false);
+      return;
+    }
+
+    const { error: vatError } = await supabase
+      .from('vihem_vat_codes')
+      .upsert(vatRows, { onConflict: 'company_id,code' });
+
+    if (vatError) setError(vatError.message);
+    setSaving(false);
+    await loadFinance();
+  };
+
+  const openAccountingAccountModal = (company: FinanceCompany, account?: AccountingAccount) => {
+    setError('');
+    setSelectedAccountingAccount(account ?? null);
+    setAccountingAccountForm(account
+      ? {
+          company_id: account.company_id,
+          account_code: account.account_code,
+          name: account.name,
+          account_type: account.account_type,
+          default_role: account.default_role,
+          active: account.active,
+        }
+      : {
+          ...emptyAccountingAccountForm,
+          company_id: company.id,
+        });
+    setAccountingAccountModalOpen(true);
+  };
+
+  const saveAccountingAccount = async () => {
+    if (!organisationId) return;
+    if (!accountingAccountForm.company_id || !accountingAccountForm.account_code.trim() || !accountingAccountForm.name.trim()) {
+      setError('Fyll i bolag, kontonummer och namn.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+
+    const payload = {
+      organisation_id: organisationId,
+      company_id: accountingAccountForm.company_id,
+      account_code: accountingAccountForm.account_code.trim(),
+      name: accountingAccountForm.name.trim(),
+      account_type: accountingAccountForm.account_type,
+      default_role: accountingAccountForm.default_role,
+      active: accountingAccountForm.active,
+      created_by: user?.id ?? null,
+    };
+
+    const query = selectedAccountingAccount
+      ? supabase.from('vihem_accounting_accounts').update(payload).eq('id', selectedAccountingAccount.id)
+      : supabase.from('vihem_accounting_accounts').insert(payload);
+
+    const { error: accountError } = await query;
+
+    if (accountError) {
+      setError(accountError.message);
+      setSaving(false);
+      return;
+    }
+
+    setAccountingAccountModalOpen(false);
+    setSelectedAccountingAccount(null);
+    setSaving(false);
+    await loadFinance();
+  };
+
+  const openVatCodeModal = (company: FinanceCompany, code?: VatCode) => {
+    setError('');
+    setSelectedVatCode(code ?? null);
+    setVatCodeForm(code
+      ? {
+          company_id: code.company_id,
+          code: code.code,
+          name: code.name,
+          rate: String(code.rate ?? 0),
+          sales_account_code: code.sales_account_code || '',
+          purchase_account_code: code.purchase_account_code || '',
+          output_vat_account_code: code.output_vat_account_code || '',
+          input_vat_account_code: code.input_vat_account_code || '',
+          active: code.active,
+        }
+      : {
+          ...emptyVatCodeForm,
+          company_id: company.id,
+        });
+    setVatCodeModalOpen(true);
+  };
+
+  const saveVatCode = async () => {
+    if (!organisationId) return;
+    if (!vatCodeForm.company_id || !vatCodeForm.code.trim() || !vatCodeForm.name.trim()) {
+      setError('Fyll i bolag, kod och namn.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+
+    const payload = {
+      organisation_id: organisationId,
+      company_id: vatCodeForm.company_id,
+      code: vatCodeForm.code.trim().toUpperCase(),
+      name: vatCodeForm.name.trim(),
+      rate: toNumber(vatCodeForm.rate, 0),
+      sales_account_code: vatCodeForm.sales_account_code,
+      purchase_account_code: vatCodeForm.purchase_account_code,
+      output_vat_account_code: vatCodeForm.output_vat_account_code,
+      input_vat_account_code: vatCodeForm.input_vat_account_code,
+      active: vatCodeForm.active,
+      created_by: user?.id ?? null,
+    };
+
+    const query = selectedVatCode
+      ? supabase.from('vihem_vat_codes').update(payload).eq('id', selectedVatCode.id)
+      : supabase.from('vihem_vat_codes').insert(payload);
+
+    const { error: vatError } = await query;
+
+    if (vatError) {
+      setError(vatError.message);
+      setSaving(false);
+      return;
+    }
+
+    setVatCodeModalOpen(false);
+    setSelectedVatCode(null);
     setSaving(false);
     await loadFinance();
   };
@@ -1161,6 +2053,32 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         reminder_fee: Math.max(0, toNumber(draft.reminder_fee, 0)),
         created_by: user?.id ?? null,
       }, { onConflict: 'company_id' });
+
+    if (settingsError) setError(settingsError.message);
+    setSaving(false);
+    await loadFinance();
+  };
+
+  const saveAutomationSettings = async () => {
+    if (!organisationId) return;
+    setSaving(true);
+    setError('');
+
+    const { error: settingsError } = await supabase
+      .from('vihem_finance_automation_settings')
+      .upsert({
+        organisation_id: organisationId,
+        finance_cron_enabled: automationSettingsDraft.finance_cron_enabled,
+        queue_reminders: automationSettingsDraft.queue_reminders,
+        send_emails: automationSettingsDraft.send_emails,
+        email_limit: Math.min(Math.max(Math.round(toNumber(automationSettingsDraft.email_limit, 20)), 1), 50),
+        process_accounting_sync: automationSettingsDraft.process_accounting_sync,
+        accounting_sync_limit: Math.min(Math.max(Math.round(toNumber(automationSettingsDraft.accounting_sync_limit, 50)), 1), 200),
+        create_rent_billing: automationSettingsDraft.create_rent_billing,
+        rent_billing_months_ahead: Math.min(Math.max(Math.round(toNumber(automationSettingsDraft.rent_billing_months_ahead, 1)), 0), 12),
+        auto_generate_rent_invoices: automationSettingsDraft.auto_generate_rent_invoices,
+        created_by: user?.id ?? null,
+      }, { onConflict: 'organisation_id' });
 
     if (settingsError) setError(settingsError.message);
     setSaving(false);
@@ -1238,15 +2156,59 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     setSaving(false);
   };
 
+  const exportAccountingQueueSie = async () => {
+    setSaving(true);
+    setError('');
+
+    const { data, error: exportError } = await supabase.functions.invoke('vihem-export-accounting-sie', {
+      body: { statuses: ['queued', 'processing'] },
+    });
+
+    if (exportError || data?.error) {
+      setError(data?.error || exportError?.message || 'Kunde inte exportera SIE-filen.');
+      setSaving(false);
+      return;
+    }
+
+    const sie = String(data?.sie || '');
+    const filename = String(data?.filename || 'vihem-bokforing.se');
+    const blob = new Blob([sie], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+    setSaving(false);
+  };
+
+  const processAccountingQueue = async () => {
+    setSaving(true);
+    setError('');
+
+    const { data, error: processError } = await supabase.functions.invoke('vihem-process-accounting-sync', {
+      body: { limit: 50 },
+    });
+
+    if (processError || data?.error) {
+      setError(data?.error || processError?.message || 'Kunde inte behandla bokföringskön.');
+      setSaving(false);
+      return;
+    }
+
+    setSaving(false);
+    await loadFinance();
+  };
+
   const createInvoiceFromProjectBasis = async () => {
-    if (!projectInvoiceForm.basis_id || !projectInvoiceForm.company_id || !projectInvoiceForm.customer_id) return;
+    if (!projectInvoiceForm.basis_id || !projectInvoiceForm.company_id) return;
     setSaving(true);
     setError('');
 
     const { data, error: conversionError } = await supabase.rpc('vihem_create_invoice_from_project_basis', {
       target_basis_id: projectInvoiceForm.basis_id,
       target_company_id: projectInvoiceForm.company_id,
-      target_customer_id: projectInvoiceForm.customer_id,
+      target_customer_id: projectInvoiceForm.customer_id || null,
       invoice_date: projectInvoiceForm.invoice_date,
       due_date: projectInvoiceForm.due_date || null,
     });
@@ -1259,6 +2221,40 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
     const invoice = (Array.isArray(data) ? data[0] : data) as Invoice | null;
     setProjectInvoiceModalOpen(false);
+    setSaving(false);
+    await loadFinance();
+    if (invoice) {
+      setActiveTab('invoices');
+      const hydrated = await refreshSelectedInvoice(invoice.id);
+      if (hydrated) await openInvoiceDetail(hydrated);
+    }
+  };
+
+  const createInvoiceFromSelectedProjectBases = async () => {
+    if (selectedProjectBasisIds.length === 0 || companies.length === 0) return;
+    setSaving(true);
+    setError('');
+
+    const firstBasis = selectedProjectBases[0];
+    const company = companies.find(item => item.id === firstBasis?.project?.company_id) ?? companies[0];
+    const invoiceDate = new Date().toISOString().slice(0, 10);
+
+    const { data, error: conversionError } = await supabase.rpc('vihem_create_invoice_from_project_basis_batch', {
+      target_basis_ids: selectedProjectBasisIds,
+      target_company_id: company.id,
+      target_customer_id: null,
+      invoice_date: invoiceDate,
+      due_date: addDays(invoiceDate, 30),
+    });
+
+    if (conversionError) {
+      setError(conversionError.message);
+      setSaving(false);
+      return;
+    }
+
+    const invoice = (Array.isArray(data) ? data[0] : data) as Invoice | null;
+    setSelectedProjectBasisIds([]);
     setSaving(false);
     await loadFinance();
     if (invoice) {
@@ -1288,6 +2284,118 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     setRentRunModalOpen(false);
     setSaving(false);
     setActiveTab('rent');
+    await loadFinance();
+  };
+
+  const createRentAdjustment = async () => {
+    if (!organisationId || !rentAdjustmentForm.company_id || !rentAdjustmentForm.tenancy_id || !rentAdjustmentForm.description.trim()) return;
+    setSaving(true);
+    setError('');
+
+    const { error: adjustmentError } = await supabase
+      .from('vihem_rent_adjustments')
+      .insert({
+        organisation_id: organisationId,
+        company_id: rentAdjustmentForm.company_id,
+        tenancy_id: rentAdjustmentForm.tenancy_id,
+        rent_period: `${rentAdjustmentForm.rent_period}-01`,
+        adjustment_type: rentAdjustmentForm.adjustment_type,
+        start_period: `${rentAdjustmentForm.rent_period}-01`,
+        end_period: rentAdjustmentForm.adjustment_type === 'one_time'
+          ? `${rentAdjustmentForm.rent_period}-01`
+          : rentAdjustmentForm.end_period
+            ? `${rentAdjustmentForm.end_period}-01`
+            : null,
+        description: rentAdjustmentForm.description.trim(),
+        amount: toNumber(rentAdjustmentForm.amount, 0),
+        percentage_rate: rentAdjustmentForm.adjustment_type === 'indexed' ? toNumber(rentAdjustmentForm.percentage_rate, 0) : 0,
+        vat_rate: Math.max(0, toNumber(rentAdjustmentForm.vat_rate, 0)),
+        status: 'active',
+        created_by: user?.id ?? null,
+      });
+
+    if (adjustmentError) {
+      setError(adjustmentError.message);
+      setSaving(false);
+      return;
+    }
+
+    setRentAdjustmentForm(prev => ({
+      ...emptyRentAdjustmentForm,
+      company_id: prev.company_id,
+      rent_period: prev.rent_period,
+      adjustment_type: prev.adjustment_type,
+    }));
+    setSaving(false);
+    await loadFinance();
+  };
+
+  const cancelRentAdjustment = async (adjustmentId: string) => {
+    setSaving(true);
+    setError('');
+
+    const { error: adjustmentError } = await supabase
+      .from('vihem_rent_adjustments')
+      .update({ status: 'cancelled' })
+      .eq('id', adjustmentId);
+
+    if (adjustmentError) setError(adjustmentError.message);
+    setSaving(false);
+    await loadFinance();
+  };
+
+  const createDirectDebitMandate = async () => {
+    if (!organisationId || !directDebitMandateForm.company_id || !directDebitMandateForm.tenancy_id) return;
+    setSaving(true);
+    setError('');
+
+    const tenancy = tenancies.find(item => item.id === directDebitMandateForm.tenancy_id);
+    const existingCustomer = customers.find(customer => customer.name === tenancy?.tenant?.name && (!customer.company_id || customer.company_id === directDebitMandateForm.company_id));
+
+    const { error: mandateError } = await supabase
+      .from('vihem_direct_debit_mandates')
+      .insert({
+        organisation_id: organisationId,
+        company_id: directDebitMandateForm.company_id,
+        tenancy_id: directDebitMandateForm.tenancy_id,
+        tenant_id: tenancy?.tenant_id ?? null,
+        finance_customer_id: existingCustomer?.id ?? null,
+        mandate_reference: directDebitMandateForm.mandate_reference.trim(),
+        bankgiro_number: directDebitMandateForm.bankgiro_number.trim(),
+        payer_number: directDebitMandateForm.payer_number.trim(),
+        account_holder: directDebitMandateForm.account_holder.trim() || tenancy?.tenant?.name || '',
+        account_mask: directDebitMandateForm.account_mask.trim(),
+        status: directDebitMandateForm.status,
+        notes: directDebitMandateForm.notes.trim(),
+        created_by: user?.id ?? null,
+      });
+
+    if (mandateError) {
+      setError(mandateError.message);
+      setSaving(false);
+      return;
+    }
+
+    setDirectDebitMandateForm(prev => ({
+      ...emptyDirectDebitMandateForm,
+      company_id: prev.company_id,
+      bankgiro_number: prev.bankgiro_number,
+    }));
+    setSaving(false);
+    await loadFinance();
+  };
+
+  const setDirectDebitMandateStatus = async (mandateId: string, status: DirectDebitMandate['status']) => {
+    setSaving(true);
+    setError('');
+
+    const { error: statusError } = await supabase.rpc('vihem_set_direct_debit_mandate_status', {
+      target_mandate_id: mandateId,
+      next_status: status,
+    });
+
+    if (statusError) setError(statusError.message);
+    setSaving(false);
     await loadFinance();
   };
 
@@ -1369,6 +2477,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   const openRentRunDetail = async (run: RentBillingRun) => {
     setSelectedRentRun(run);
     setSelectedRentItems([]);
+    setRentEmailQueueResult('');
+    setRentDirectDebitExportResult('');
     setRentRunDetailOpen(true);
     setError('');
 
@@ -1410,10 +2520,76 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     setSaving(false);
   };
 
+  const queueRentRunInvoiceEmails = async () => {
+    if (!selectedRentRun) return;
+    setSaving(true);
+    setError('');
+    setRentEmailQueueResult('');
+
+    const { data, error: queueError } = await supabase.rpc('vihem_queue_rent_run_invoice_emails', {
+      target_run_id: selectedRentRun.id,
+    });
+
+    if (queueError) {
+      setError(queueError.message);
+      setSaving(false);
+      return;
+    }
+
+    const result = (data || {}) as Record<string, unknown>;
+    setRentEmailQueueResult(
+      `${Number(result.queued || 0)} mejl köade. ` +
+      `${Number(result.skipped_missing_document || 0)} saknar PDF, ` +
+      `${Number(result.skipped_missing_email || 0)} saknar e-post, ` +
+      `${Number(result.skipped_duplicate || 0)} redan köade/skickade, ` +
+      `${Number(result.skipped_not_ready || 0)} inte godkända.`,
+    );
+    setSaving(false);
+    await loadFinance();
+  };
+
+  const exportRentRunDirectDebit = async (format: 'csv' | 'bankgirot' = 'csv') => {
+    if (!selectedRentRun) return;
+    setSaving(true);
+    setError('');
+    setRentDirectDebitExportResult('');
+
+    const { data, error: exportError } = await supabase.functions.invoke('vihem-export-direct-debit', {
+      body: { run_id: selectedRentRun.id, format },
+    });
+
+    if (exportError || data?.error) {
+      setError(data?.error || exportError?.message || 'Kunde inte skapa autogiroexport.');
+      setSaving(false);
+      return;
+    }
+
+    const content = String(data.content || data.csv || '');
+    const filename = String(data.filename || `vihem-autogiro-${selectedRentRun.rent_period.slice(0, 7)}.${format === 'bankgirot' ? 'txt' : 'csv'}`);
+    const blob = new Blob([content], { type: format === 'bankgirot' ? 'text/plain;charset=utf-8' : 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    const skipped = (data.skipped || {}) as Record<string, number>;
+    setRentDirectDebitExportResult(
+      `${Number(data.count || 0)} autogirorader exporterade (${format === 'bankgirot' ? 'Bankgirot-fil' : 'CSV'}). ` +
+      `${Number(skipped.missing_mandate || 0)} saknar aktivt mandat, ` +
+      `${Number(skipped.missing_invoice || 0)} saknar faktura, ` +
+      `${Number(skipped.not_collectable || 0)} är redan betalda/annullerade.`,
+    );
+    setSaving(false);
+  };
+
   const openInvoiceDetail = async (invoice: Invoice) => {
     setSelectedInvoice(invoice);
     setSelectedInvoiceLines([]);
+    setSelectedInvoiceLine(null);
     setSelectedApprovalSeriesId('');
+    setInvoiceLineForm(emptyInvoiceLineForm);
     setInvoiceDetailOpen(true);
     setError('');
 
@@ -1429,6 +2605,123 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     }
 
     setSelectedInvoiceLines((data ?? []) as InvoiceLine[]);
+  };
+
+  const reloadSelectedInvoiceLines = async (invoiceId: string) => {
+    const { data, error: lineError } = await supabase
+      .from('vihem_invoice_lines')
+      .select('*')
+      .eq('invoice_id', invoiceId)
+      .order('line_no', { ascending: true });
+
+    if (lineError) {
+      setError(lineError.message);
+      return false;
+    }
+
+    setSelectedInvoiceLines((data ?? []) as InvoiceLine[]);
+    return true;
+  };
+
+  const editInvoiceLineInDraft = (line: InvoiceLine) => {
+    setSelectedInvoiceLine(line);
+    setInvoiceLineForm({
+      description: line.description,
+      quantity: String(line.quantity ?? 1),
+      unit: line.unit || 'st',
+      unit_price: String(line.unit_price ?? 0),
+      vat_code: typeof line.metadata?.vat_code === 'string' ? line.metadata.vat_code : '',
+      vat_rate: String(line.vat_rate ?? 25),
+      account_code: line.account_code || '',
+    });
+  };
+
+  const resetInvoiceLineDraft = () => {
+    setSelectedInvoiceLine(null);
+    setInvoiceLineForm(emptyInvoiceLineForm);
+  };
+
+  const saveInvoiceLineToDraft = async () => {
+    if (!organisationId || !selectedInvoice || selectedInvoice.status !== 'draft' || !invoiceLineForm.description.trim()) return;
+    setSaving(true);
+    setError('');
+
+    const quantity = toNumber(invoiceLineForm.quantity, 1);
+    const unitPrice = toNumber(invoiceLineForm.unit_price, 0);
+    const vatRate = toNumber(invoiceLineForm.vat_rate, 25);
+    const subtotal = Math.round(quantity * unitPrice * 100) / 100;
+    const vat = Math.round(subtotal * (vatRate / 100) * 100) / 100;
+    const total = subtotal + vat;
+    const nextLineNo = selectedInvoiceLines.reduce((max, line) => Math.max(max, Number(line.line_no || 0)), 0) + 1;
+
+    const payload = {
+      organisation_id: organisationId,
+      company_id: selectedInvoice.company_id,
+      invoice_id: selectedInvoice.id,
+      line_no: selectedInvoiceLine?.line_no ?? nextLineNo,
+      description: invoiceLineForm.description.trim(),
+      quantity,
+      unit: invoiceLineForm.unit.trim() || 'st',
+      unit_price: unitPrice,
+      vat_rate: vatRate,
+      account_code: invoiceLineForm.account_code.trim(),
+      line_total_excl_vat: subtotal,
+      vat_amount: vat,
+      line_total_incl_vat: total,
+      line_type: selectedInvoiceLine?.line_type ?? 'manual',
+      metadata: invoiceLineForm.vat_code ? { ...(selectedInvoiceLine?.metadata ?? {}), vat_code: invoiceLineForm.vat_code } : { ...(selectedInvoiceLine?.metadata ?? {}), vat_code: '' },
+    };
+
+    const request = selectedInvoiceLine
+      ? supabase
+          .from('vihem_invoice_lines')
+          .update(payload)
+          .eq('id', selectedInvoiceLine.id)
+      : supabase
+          .from('vihem_invoice_lines')
+          .insert({
+            ...payload,
+            project_id: null,
+            work_order_id: null,
+            time_entry_id: null,
+          });
+
+    const { error: lineError } = await request;
+
+    if (lineError) {
+      setError(lineError.message);
+      setSaving(false);
+      return;
+    }
+
+    resetInvoiceLineDraft();
+    await refreshSelectedInvoice(selectedInvoice.id);
+    await reloadSelectedInvoiceLines(selectedInvoice.id);
+    await loadFinance();
+    setSaving(false);
+  };
+
+  const deleteInvoiceLineFromDraft = async (line: InvoiceLine) => {
+    if (!selectedInvoice || selectedInvoice.status !== 'draft' || selectedInvoiceLines.length <= 1) return;
+    setSaving(true);
+    setError('');
+
+    const { error: deleteError } = await supabase
+      .from('vihem_invoice_lines')
+      .delete()
+      .eq('id', line.id);
+
+    if (deleteError) {
+      setError(deleteError.message);
+      setSaving(false);
+      return;
+    }
+
+    if (selectedInvoiceLine?.id === line.id) resetInvoiceLineDraft();
+    await refreshSelectedInvoice(selectedInvoice.id);
+    await reloadSelectedInvoiceLines(selectedInvoice.id);
+    await loadFinance();
+    setSaving(false);
   };
 
   const refreshSelectedInvoice = async (invoiceId: string) => {
@@ -1846,6 +3139,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     { key: 'supplier-invoices', label: 'Leverantörsfakturor' },
     { key: 'number-series', label: 'Nummerserier' },
     { key: 'integrations', label: 'Bokföring' },
+    { key: 'audit', label: 'Logg' },
   ];
 
   return (
@@ -1920,6 +3214,52 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           <MetricCard icon={<Truck className="h-5 w-5" />} label="Leverantörsfakturor" value={supplierInvoices.length.toString()} />
           <MetricCard icon={<Link2 className="h-5 w-5" />} label="Projektunderlag" value={projectBases.length.toString()} />
           <MetricCard icon={<Hash className="h-5 w-5" />} label="Nummerserier" value={numberSeries.length.toString()} />
+
+          <Card className="p-5 lg:col-span-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-950">Produktionshygien</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Kontroll av bolag, nummerserier, konton, moms, e-post, bokföring och leverantörsbetalningar inför skarp drift.
+                </p>
+              </div>
+              <Badge className={financeReadiness.every(item => item.missing === 0) ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
+                {financeReadiness.every(item => item.missing === 0) ? 'Redo' : `${financeReadiness.reduce((sum, item) => sum + item.missing, 0)} saker att kontrollera`}
+              </Badge>
+            </div>
+            {financeReadiness.length === 0 ? (
+              <p className="mt-4 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">Lägg upp minst ett bolag för att få en komplett driftcheck.</p>
+            ) : (
+              <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                {financeReadiness.map(item => (
+                  <div key={item.company.id} className="rounded-lg border border-slate-200 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="font-bold text-slate-950">{item.company.name}</h3>
+                        <p className="text-sm text-slate-500">
+                          {item.invoiceCount} fakturor · öppet {formatCurrency(item.openAmount, item.company.default_currency || 'SEK')}
+                        </p>
+                      </div>
+                      <Badge className={item.missing === 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
+                        {item.missing === 0 ? 'Klar' : `${item.missing} kvar`}
+                      </Badge>
+                    </div>
+                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                      {item.checks.map(check => (
+                        <div key={check.key} className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                          <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${check.ok ? 'text-emerald-600' : 'text-amber-500'}`} />
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-800">{check.label}</p>
+                            <p className="truncate text-xs text-slate-500">{check.detail}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
 
           <Card className="p-5 lg:col-span-4">
             <div className="flex items-start gap-3">
@@ -2152,45 +3492,349 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       )}
 
       {activeTab === 'rent' && (
-        <Card className="overflow-hidden">
-          {rentRuns.length === 0 ? (
-            <EmptyState
-              title="Inga hyreskörningar ännu"
-              description="Skapa en körning per bolag och månad. Systemet hämtar aktiva hyresförhållanden och sätter förfallodatum till sista dagen i månaden innan."
-            />
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {rentRuns.map(run => (
-                <div key={run.id} className="grid gap-3 p-4 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr_auto_auto_auto] lg:items-center">
-                  <div>
-                    <h3 className="font-bold text-slate-950">
-                      Hyra {run.rent_period.slice(0, 7)}
-                    </h3>
-                    <p className="text-sm text-slate-500">{run.company?.name ?? 'Bolag saknas'}</p>
-                  </div>
-                  <p className="text-sm text-slate-600">Förfaller {run.due_date}</p>
-                  <p className="text-sm text-slate-600">{run.invoice_count} underlag/fakturor</p>
-                  <p className="font-semibold text-slate-950">{formatCurrency(Number(run.total_amount))}</p>
-                  <Badge className={run.status === 'generated' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'}>
-                    {rentRunStatusLabel(run.status)}
-                  </Badge>
-                  <Button variant="secondary" size="sm" onClick={() => openRentRunDetail(run)}>
-                    Granska
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    loading={saving}
-                    onClick={() => generateRentInvoices(run.id)}
-                    disabled={run.status !== 'draft' || run.invoice_count === 0}
-                  >
-                    Skapa fakturautkast
-                  </Button>
-                </div>
-              ))}
+        <div className="grid gap-5">
+          <Card className="overflow-hidden">
+            <div className="flex flex-col gap-2 border-b border-slate-100 p-5 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-950">Hyresreskontra</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Översikt per aktivt hyresförhållande med fakturerat, betalt, saldo, senaste hyresperiod och autogirostatus.
+                </p>
+              </div>
+              <Badge className={rentLedgerRows.some(row => row.balance > 0) ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}>
+                {formatCurrency(rentLedgerRows.reduce((sum, row) => sum + row.balance, 0))} öppet
+              </Badge>
             </div>
-          )}
-        </Card>
+            {rentLedgerRows.length === 0 ? (
+              <EmptyState title="Ingen hyresreskontra ännu" description="När hyresgäster och hyreskörningar finns visas saldo per hyresförhållande här." />
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {rentLedgerRows.slice(0, 12).map(row => (
+                  <div key={row.tenancy.id} className="grid gap-3 p-4 text-sm lg:grid-cols-[1.4fr_0.7fr_0.8fr_0.8fr_0.8fr_0.9fr] lg:items-center">
+                    <div>
+                      <p className="font-bold text-slate-950">{tenancyLabel(row.tenancy)}</p>
+                      <p className="text-slate-500">{row.tenancy.tenant?.email || row.tenancy.property?.name || 'Aktivt hyresförhållande'}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-slate-700">{row.latestPeriod}</p>
+                      <p className="text-xs text-slate-500">Senaste period</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-slate-950">{formatCurrency(row.invoicedAmount)}</p>
+                      <p className="text-xs text-slate-500">Fakturerat</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-emerald-700">{formatCurrency(row.paidAmount)}</p>
+                      <p className="text-xs text-slate-500">Betalt</p>
+                    </div>
+                    <div>
+                      <p className={row.balance > 0 ? 'font-bold text-amber-700' : 'font-semibold text-slate-700'}>{formatCurrency(row.balance)}</p>
+                      <p className="text-xs text-slate-500">{row.unpaidCount} öppna</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge className={row.mandate ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}>
+                        {row.mandate ? 'Autogiro' : 'Ingen AG'}
+                      </Badge>
+                      <Badge className={row.lastInvoiceStatus === 'paid' ? 'bg-emerald-50 text-emerald-700' : row.lastInvoiceStatus === 'partially_paid' ? 'bg-blue-50 text-blue-700' : row.lastInvoiceStatus === 'unpaid' ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'}>
+                        {row.lastInvoiceStatus === 'paid' ? 'Betald' : row.lastInvoiceStatus === 'partially_paid' ? 'Delbetald' : row.lastInvoiceStatus === 'unpaid' ? 'Obetald' : row.lastInvoiceStatus}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card className="p-5">
+            <div className="flex flex-col gap-2 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-950">Hyresjusteringar</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Lägg in engångstillägg, löpande tillägg/avdrag eller indexjusteringar innan hyreskörningen skapas. Negativt belopp blir avdrag.
+                </p>
+              </div>
+              <Badge className="bg-slate-100 text-slate-700">{rentAdjustments.filter(item => item.status === 'active').length} aktiva</Badge>
+            </div>
+            <div className="mt-4 grid gap-3 lg:grid-cols-4 lg:items-end">
+              <Select
+                label="Bolag"
+                value={rentAdjustmentForm.company_id}
+                onChange={event => setRentAdjustmentForm(prev => ({ ...prev, company_id: event.target.value, tenancy_id: '' }))}
+                options={[{ value: '', label: 'Välj bolag' }, ...companies.map(company => ({ value: company.id, label: company.name }))]}
+              />
+              <Select
+                label="Hyresförhållande"
+                value={rentAdjustmentForm.tenancy_id}
+                onChange={event => setRentAdjustmentForm(prev => ({ ...prev, tenancy_id: event.target.value }))}
+                options={rentAdjustmentTenancyOptions}
+              />
+              <Select
+                label="Typ"
+                value={rentAdjustmentForm.adjustment_type}
+                onChange={event => setRentAdjustmentForm(prev => ({ ...prev, adjustment_type: event.target.value, end_period: event.target.value === 'one_time' ? '' : prev.end_period }))}
+                options={[
+                  { value: 'one_time', label: 'Engångsjustering' },
+                  { value: 'recurring', label: 'Återkommande' },
+                  { value: 'indexed', label: 'Indexerad/procent' },
+                ]}
+              />
+              <Input
+                label={rentAdjustmentForm.adjustment_type === 'one_time' ? 'Hyresmånad' : 'Från månad'}
+                type="month"
+                value={rentAdjustmentForm.rent_period}
+                onChange={event => setRentAdjustmentForm(prev => ({ ...prev, rent_period: event.target.value }))}
+              />
+              {rentAdjustmentForm.adjustment_type !== 'one_time' && (
+                <Input
+                  label="Till månad"
+                  type="month"
+                  value={rentAdjustmentForm.end_period}
+                  onChange={event => setRentAdjustmentForm(prev => ({ ...prev, end_period: event.target.value }))}
+                  helperText="Lämna tom för tills vidare"
+                />
+              )}
+              <Input
+                className={rentAdjustmentForm.adjustment_type === 'one_time' ? 'lg:col-span-2' : ''}
+                label="Beskrivning"
+                value={rentAdjustmentForm.description}
+                onChange={event => setRentAdjustmentForm(prev => ({ ...prev, description: event.target.value }))}
+                placeholder="Ex. rabatt, parkeringsplats, tillägg"
+              />
+              <Input
+                label="Belopp"
+                type="number"
+                value={rentAdjustmentForm.amount}
+                onChange={event => setRentAdjustmentForm(prev => ({ ...prev, amount: event.target.value }))}
+                placeholder="-500"
+              />
+              {rentAdjustmentForm.adjustment_type === 'indexed' && (
+                <Input
+                  label="Procent %"
+                  type="number"
+                  value={rentAdjustmentForm.percentage_rate}
+                  onChange={event => setRentAdjustmentForm(prev => ({ ...prev, percentage_rate: event.target.value }))}
+                  placeholder="2"
+                />
+              )}
+              <Input
+                label="Moms %"
+                type="number"
+                min="0"
+                value={rentAdjustmentForm.vat_rate}
+                onChange={event => setRentAdjustmentForm(prev => ({ ...prev, vat_rate: event.target.value }))}
+              />
+              <Button
+                variant="secondary"
+                loading={saving}
+                onClick={createRentAdjustment}
+                disabled={!rentAdjustmentForm.company_id || !rentAdjustmentForm.tenancy_id || !rentAdjustmentForm.description.trim() || (!rentAdjustmentForm.amount && rentAdjustmentForm.adjustment_type !== 'indexed')}
+              >
+                Lägg till
+              </Button>
+            </div>
+            {rentAdjustments.length > 0 && (
+              <div className="mt-5 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200">
+                {rentAdjustments.slice(0, 8).map(adjustment => (
+                  <div key={adjustment.id} className="grid gap-3 p-3 text-sm lg:grid-cols-[1.4fr_0.8fr_1fr_0.8fr_0.7fr_auto] lg:items-center">
+                    <div>
+                      <p className="font-bold text-slate-950">{adjustment.description}</p>
+                      <p className="text-slate-500">{tenancyLabel(adjustment.tenancy)}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-slate-700">
+                        {adjustment.adjustment_type === 'one_time'
+                          ? adjustment.rent_period.slice(0, 7)
+                          : `${(adjustment.start_period || adjustment.rent_period).slice(0, 7)} - ${adjustment.end_period ? adjustment.end_period.slice(0, 7) : 'tills vidare'}`}
+                      </p>
+                      <p className="text-xs font-semibold text-slate-500">
+                        {adjustment.adjustment_type === 'indexed' ? 'Indexerad' : adjustment.adjustment_type === 'recurring' ? 'Återkommande' : 'Engång'}
+                      </p>
+                    </div>
+                    <p className="text-slate-600">{adjustment.company?.name || 'Bolag saknas'}</p>
+                    <p className={Number(adjustment.amount) < 0 ? 'font-bold text-emerald-700' : 'font-bold text-slate-950'}>
+                      {formatCurrency(Number(adjustment.amount))}
+                      {adjustment.adjustment_type === 'indexed' && Number(adjustment.percentage_rate || 0) !== 0 && (
+                        <span className="ml-1 text-slate-500">+ {Number(adjustment.percentage_rate)}%</span>
+                      )}
+                    </p>
+                    <Badge className={adjustment.status === 'active' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-600'}>
+                      {rentAdjustmentStatusLabel(adjustment.status)}
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      loading={saving}
+                      disabled={adjustment.status !== 'active'}
+                      onClick={() => cancelRentAdjustment(adjustment.id)}
+                    >
+                      Avbryt
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card className="p-5">
+            <div className="flex flex-col gap-2 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-950">Autogiro</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Registrera autogiromandat per hyresförhållande och exportera hyreskörningar som CSV eller Bankgirot-fil.
+                </p>
+              </div>
+              <Badge className="bg-slate-100 text-slate-700">{directDebitMandates.filter(item => item.status === 'active').length} aktiva</Badge>
+            </div>
+            <div className="mt-4 grid gap-3 lg:grid-cols-4 lg:items-end">
+              <Select
+                label="Bolag"
+                value={directDebitMandateForm.company_id}
+                onChange={event => setDirectDebitMandateForm(prev => ({ ...prev, company_id: event.target.value, tenancy_id: '' }))}
+                options={[{ value: '', label: 'Välj bolag' }, ...companies.map(company => ({ value: company.id, label: company.name }))]}
+              />
+              <Select
+                label="Hyresförhållande"
+                value={directDebitMandateForm.tenancy_id}
+                onChange={event => {
+                  const tenancy = tenancies.find(item => item.id === event.target.value);
+                  setDirectDebitMandateForm(prev => ({
+                    ...prev,
+                    tenancy_id: event.target.value,
+                    account_holder: prev.account_holder || tenancy?.tenant?.name || '',
+                  }));
+                }}
+                options={directDebitTenancyOptions}
+              />
+              <Input
+                label="Mandatreferens"
+                value={directDebitMandateForm.mandate_reference}
+                onChange={event => setDirectDebitMandateForm(prev => ({ ...prev, mandate_reference: event.target.value }))}
+                placeholder="Ex. AG-1001"
+              />
+              <Input
+                label="Bankgiro"
+                value={directDebitMandateForm.bankgiro_number}
+                onChange={event => setDirectDebitMandateForm(prev => ({ ...prev, bankgiro_number: event.target.value }))}
+              />
+              <Input
+                label="Betalarnummer"
+                value={directDebitMandateForm.payer_number}
+                onChange={event => setDirectDebitMandateForm(prev => ({ ...prev, payer_number: event.target.value }))}
+              />
+              <Input
+                label="Kontohavare"
+                value={directDebitMandateForm.account_holder}
+                onChange={event => setDirectDebitMandateForm(prev => ({ ...prev, account_holder: event.target.value }))}
+              />
+              <Input
+                label="Konto maskerat"
+                value={directDebitMandateForm.account_mask}
+                onChange={event => setDirectDebitMandateForm(prev => ({ ...prev, account_mask: event.target.value }))}
+                placeholder="****1234"
+              />
+              <Select
+                label="Status"
+                value={directDebitMandateForm.status}
+                onChange={event => setDirectDebitMandateForm(prev => ({ ...prev, status: event.target.value as DirectDebitMandate['status'] }))}
+                options={[
+                  { value: 'draft', label: 'Utkast' },
+                  { value: 'pending_signature', label: 'Väntar signatur' },
+                  { value: 'active', label: 'Aktiv' },
+                ]}
+              />
+              <Textarea
+                className="lg:col-span-3"
+                label="Anteckning"
+                value={directDebitMandateForm.notes}
+                onChange={event => setDirectDebitMandateForm(prev => ({ ...prev, notes: event.target.value }))}
+                rows={2}
+              />
+              <Button
+                variant="secondary"
+                loading={saving}
+                onClick={createDirectDebitMandate}
+                disabled={!directDebitMandateForm.company_id || !directDebitMandateForm.tenancy_id}
+              >
+                Lägg till mandat
+              </Button>
+            </div>
+            {directDebitMandates.length > 0 && (
+              <div className="mt-5 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200">
+                {directDebitMandates.slice(0, 10).map(mandate => (
+                  <div key={mandate.id} className="grid gap-3 p-3 text-sm lg:grid-cols-[1.5fr_0.9fr_0.8fr_0.8fr_0.8fr_auto] lg:items-center">
+                    <div>
+                      <p className="font-bold text-slate-950">{tenancyLabel(mandate.tenancy)}</p>
+                      <p className="text-slate-500">{mandate.mandate_reference || 'Referens saknas'} · {mandate.account_holder || mandate.tenancy?.tenant?.name || 'Kontohavare saknas'}</p>
+                    </div>
+                    <p className="text-slate-600">{mandate.company?.name || 'Bolag saknas'}</p>
+                    <p className="text-slate-600">{mandate.payer_number || 'Betalarnr saknas'}</p>
+                    <p className="text-slate-600">{mandate.account_mask || 'Konto saknas'}</p>
+                    <Badge className={mandate.status === 'active' ? 'bg-emerald-50 text-emerald-700' : mandate.status === 'cancelled' ? 'bg-slate-100 text-slate-600' : 'bg-amber-50 text-amber-700'}>
+                      {mandate.status === 'pending_signature' ? 'Väntar signatur' : mandate.status === 'active' ? 'Aktiv' : mandate.status === 'paused' ? 'Pausad' : mandate.status === 'cancelled' ? 'Avslutad' : mandate.status === 'rejected' ? 'Nekad' : 'Utkast'}
+                    </Badge>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      {mandate.status !== 'active' && (
+                        <Button variant="ghost" size="sm" loading={saving} onClick={() => setDirectDebitMandateStatus(mandate.id, 'active')}>
+                          Aktivera
+                        </Button>
+                      )}
+                      {mandate.status === 'active' && (
+                        <Button variant="ghost" size="sm" loading={saving} onClick={() => setDirectDebitMandateStatus(mandate.id, 'paused')}>
+                          Pausa
+                        </Button>
+                      )}
+                      {mandate.status !== 'cancelled' && (
+                        <Button variant="ghost" size="sm" loading={saving} onClick={() => setDirectDebitMandateStatus(mandate.id, 'cancelled')}>
+                          Avsluta
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card className="overflow-hidden">
+            {rentRuns.length === 0 ? (
+              <EmptyState
+                title="Inga hyreskörningar ännu"
+                description="Skapa en körning per bolag och månad. Systemet hämtar aktiva hyresförhållanden och sätter förfallodatum till sista dagen i månaden innan."
+              />
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {rentRuns.map(run => (
+                  <div key={run.id} className="grid gap-3 p-4 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr_auto_auto_auto] lg:items-center">
+                    <div>
+                      <h3 className="font-bold text-slate-950">
+                        Hyra {run.rent_period.slice(0, 7)}
+                      </h3>
+                      <p className="text-sm text-slate-500">{run.company?.name ?? 'Bolag saknas'}</p>
+                    </div>
+                    <p className="text-sm text-slate-600">Förfaller {run.due_date}</p>
+                    <p className="text-sm text-slate-600">{run.invoice_count} underlag/fakturor</p>
+                    <p className="font-semibold text-slate-950">{formatCurrency(Number(run.total_amount))}</p>
+                    <Badge className={run.status === 'generated' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'}>
+                      {rentRunStatusLabel(run.status)}
+                    </Badge>
+                    <Button variant="secondary" size="sm" onClick={() => openRentRunDetail(run)}>
+                      Granska
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={saving}
+                      onClick={() => generateRentInvoices(run.id)}
+                      disabled={run.status !== 'draft' || run.invoice_count === 0}
+                    >
+                      Skapa fakturautkast
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
       )}
 
       {activeTab === 'project-basis' && (
@@ -2198,9 +3842,49 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           {projectBases.length === 0 ? (
             <EmptyState title="Inga öppna projektunderlag" description="När kundprojekt får faktureringsunderlag visas de här och kan omvandlas till fakturautkast." />
           ) : (
-            <div className="divide-y divide-slate-100">
+            <>
+              <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50 p-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-950">Projektunderlag</h3>
+                  <p className="text-sm text-slate-500">
+                    {selectedProjectBasisIds.length > 0
+                      ? `${selectedProjectBasisIds.length} valda · ${formatCurrency(selectedProjectBases.reduce((sum, basis) => sum + Number(basis.total_amount || 0) + Number(basis.vat_amount || 0), 0))}`
+                      : 'Välj flera underlag för att skapa en samlingsfaktura.'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {selectedProjectBasisIds.length > 0 && (
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedProjectBasisIds([])} disabled={saving}>
+                      Rensa val
+                    </Button>
+                  )}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={createInvoiceFromSelectedProjectBases}
+                    loading={saving}
+                    disabled={selectedProjectBasisIds.length === 0 || companies.length === 0}
+                  >
+                    Skapa samlingsfaktura
+                  </Button>
+                </div>
+              </div>
+              <div className="divide-y divide-slate-100">
               {projectBases.map(basis => (
-                <div key={basis.id} className="grid gap-3 p-4 lg:grid-cols-[1.2fr_1fr_0.7fr_0.7fr_auto] lg:items-center">
+                <div key={basis.id} className="grid gap-3 p-4 lg:grid-cols-[auto_1.2fr_1fr_0.7fr_0.7fr_auto] lg:items-center">
+                  <label className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-blue-600"
+                      checked={selectedProjectBasisIds.includes(basis.id)}
+                      onChange={e => {
+                        setSelectedProjectBasisIds(prev => e.target.checked
+                          ? [...prev, basis.id]
+                          : prev.filter(id => id !== basis.id));
+                      }}
+                      aria-label={`Välj ${basis.basis_number || basis.title || 'projektunderlag'}`}
+                    />
+                  </label>
                   <div>
                     <h3 className="font-bold text-slate-950">{basis.title || basis.basis_number || 'Faktureringsunderlag'}</h3>
                     <p className="text-sm text-slate-500">{basis.project?.title || basis.project?.name || 'Kundprojekt'} · {basis.basis_number}</p>
@@ -2215,13 +3899,14 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                       resetProjectInvoiceForm(basis);
                       setProjectInvoiceModalOpen(true);
                     }}
-                    disabled={customers.length === 0 || companies.length === 0}
+                    disabled={companies.length === 0}
                   >
                     Skapa faktura
                   </Button>
                 </div>
               ))}
             </div>
+            </>
           )}
         </Card>
       )}
@@ -2233,7 +3918,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           ) : (
             <div className="divide-y divide-slate-100">
               {suppliers.map(supplier => (
-                <div key={supplier.id} className="grid gap-3 p-4 md:grid-cols-[1.5fr_1fr_1fr_auto] md:items-center">
+                <div key={supplier.id} className="grid gap-3 p-4 md:grid-cols-[1.5fr_1fr_1fr_auto_auto_auto] md:items-center">
                   <div>
                     <h3 className="font-bold text-slate-950">{supplier.name}</h3>
                     <p className="text-sm text-slate-500">{supplier.organisation_number || 'Organisationsnummer saknas'}</p>
@@ -2241,6 +3926,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   <p className="text-sm text-slate-600">{supplier.email || 'Ingen e-post'}</p>
                   <p className="text-sm text-slate-600">{supplier.company?.name ?? 'Alla bolag'}</p>
                   <Badge className="bg-slate-100 text-slate-700">{supplier.payment_terms_days} dagar</Badge>
+                  <Badge className={(supplier.bankgiro || supplier.plusgiro || supplier.iban || supplier.bank_account) ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
+                    {(supplier.bankgiro || supplier.plusgiro || supplier.iban || supplier.bank_account) ? 'Betalinfo' : 'Saknar betalinfo'}
+                  </Badge>
+                  <Button variant="secondary" size="sm" onClick={() => openEditSupplier(supplier)}>
+                    Redigera
+                  </Button>
                 </div>
               ))}
             </div>
@@ -2255,16 +3946,41 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               <h2 className="text-lg font-bold text-slate-950">Leverantörsfakturor</h2>
               <p className="text-sm text-slate-500">Granska, attestera och förbered inkommande fakturor för OCR och bokföring.</p>
             </div>
-            <Button
-              variant="secondary"
-              onClick={processSupplierInvoiceOcrQueue}
-              loading={saving}
-              disabled={!supplierInvoices.some(invoice => invoice.ocr_status === 'queued' && invoice.document_id)}
-            >
-              <FileText className="h-4 w-4" />
-              Behandla OCR-kö ({supplierInvoices.filter(invoice => invoice.ocr_status === 'queued' && invoice.document_id).length})
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                onClick={processSupplierInvoiceOcrQueue}
+                loading={saving}
+                disabled={!supplierInvoices.some(invoice => invoice.ocr_status === 'queued' && invoice.document_id)}
+              >
+                <FileText className="h-4 w-4" />
+                Behandla OCR-kö ({supplierInvoices.filter(invoice => invoice.ocr_status === 'queued' && invoice.document_id).length})
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => exportSupplierPayments('csv')}
+                loading={saving}
+                disabled={!supplierInvoices.some(invoice => invoice.approval_status === 'approved' && invoice.payment_status === 'scheduled' && !invoice.payment_exported_at)}
+              >
+                <Upload className="h-4 w-4" />
+                Exportera betalningar CSV
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => exportSupplierPayments('bankgirot')}
+                loading={saving}
+                disabled={!supplierInvoices.some(invoice => invoice.approval_status === 'approved' && invoice.payment_status === 'scheduled' && !invoice.payment_exported_at)}
+              >
+                <Landmark className="h-4 w-4" />
+                Bankgirot-underlag
+              </Button>
+            </div>
           </div>
+          {supplierPaymentExportResult && (
+            <div className="border-b border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-800">
+              {supplierPaymentExportResult}
+            </div>
+          )}
           {supplierInvoices.length === 0 ? (
             <EmptyState title="Inga leverantörsfakturor ännu" description="Registrera inkommande fakturor manuellt nu, OCR och e-postimport kopplas på i nästa lager." />
           ) : (
@@ -2286,6 +4002,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   </Badge>
                   <div className="flex flex-wrap gap-2">
                     {invoice.document_id && <Badge className="bg-blue-50 text-blue-700">Bilaga</Badge>}
+                    {invoice.payment_exported_at && <Badge className="bg-emerald-50 text-emerald-700">Exporterad</Badge>}
                     {invoice.ocr_status !== 'not_started' && (
                       <Badge className="bg-purple-50 text-purple-700">
                         OCR {invoice.ocr_status === 'queued' ? 'köad' : invoice.ocr_status}
@@ -2391,6 +4108,25 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   <Upload className="h-4 w-4" />
                   Exportera CSV
                 </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={exportAccountingQueueSie}
+                  loading={saving}
+                  disabled={!accountingQueue.some(item => ['queued', 'processing'].includes(item.status))}
+                >
+                  <Upload className="h-4 w-4" />
+                  Exportera SIE
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={processAccountingQueue}
+                  loading={saving}
+                  disabled={!accountingQueue.some(item => ['queued', 'processing'].includes(item.status))}
+                >
+                  Behandla kö
+                </Button>
               </div>
             </div>
             {accountingQueue.length === 0 ? (
@@ -2452,6 +4188,160 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+          </Card>
+          <Card className="p-5 lg:col-span-2">
+            <div className="flex flex-col gap-2 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-950">Automationsinställningar</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Standardbeteende för schemalagd ekonomi-cron. Servern kan fortfarande överstyra vid en enskild körning.
+                </p>
+              </div>
+              <Badge className={automationSettings ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-700'}>
+                {automationSettings ? 'Sparad' : 'Standard'}
+              </Badge>
+            </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4 xl:items-end">
+              <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                <input
+                  type="checkbox"
+                  checked={automationSettingsDraft.finance_cron_enabled}
+                  onChange={event => setAutomationSettingsDraft(prev => ({ ...prev, finance_cron_enabled: event.target.checked }))}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                />
+                <span>
+                  <span className="block font-bold text-slate-950">Aktivera ekonomi-cron</span>
+                  <span className="block text-sm text-slate-500">Om avstängd loggas körningen som hoppad.</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                <input
+                  type="checkbox"
+                  checked={automationSettingsDraft.queue_reminders}
+                  onChange={event => setAutomationSettingsDraft(prev => ({ ...prev, queue_reminders: event.target.checked }))}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                />
+                <span>
+                  <span className="block font-bold text-slate-950">Köa påminnelser</span>
+                  <span className="block text-sm text-slate-500">Följer bolagens påminnelseregler.</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                <input
+                  type="checkbox"
+                  checked={automationSettingsDraft.send_emails}
+                  onChange={event => setAutomationSettingsDraft(prev => ({ ...prev, send_emails: event.target.checked }))}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                />
+                <span>
+                  <span className="block font-bold text-slate-950">Skicka köade mejl</span>
+                  <span className="block text-sm text-slate-500">Kräver SMTP-inställningar i edge-miljön.</span>
+                </span>
+              </label>
+              <Input
+                label="Mejl per körning"
+                type="number"
+                min="1"
+                max="50"
+                value={automationSettingsDraft.email_limit}
+                onChange={event => setAutomationSettingsDraft(prev => ({ ...prev, email_limit: event.target.value }))}
+              />
+              <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                <input
+                  type="checkbox"
+                  checked={automationSettingsDraft.process_accounting_sync}
+                  onChange={event => setAutomationSettingsDraft(prev => ({ ...prev, process_accounting_sync: event.target.checked }))}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                />
+                <span>
+                  <span className="block font-bold text-slate-950">Behandla bokföringskö</span>
+                  <span className="block text-sm text-slate-500">Synkar manual/SIE automatiskt.</span>
+                </span>
+              </label>
+              <Input
+                label="Köposter"
+                type="number"
+                min="1"
+                max="200"
+                value={automationSettingsDraft.accounting_sync_limit}
+                onChange={event => setAutomationSettingsDraft(prev => ({ ...prev, accounting_sync_limit: event.target.value }))}
+              />
+              <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                <input
+                  type="checkbox"
+                  checked={automationSettingsDraft.create_rent_billing}
+                  onChange={event => setAutomationSettingsDraft(prev => ({ ...prev, create_rent_billing: event.target.checked }))}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                />
+                <span>
+                  <span className="block font-bold text-slate-950">Skapa hyreskörning</span>
+                  <span className="block text-sm text-slate-500">Skapar kommande månad per bolag med dubblettskydd.</span>
+                </span>
+              </label>
+              <Input
+                label="Månader framåt"
+                type="number"
+                min="0"
+                max="12"
+                value={automationSettingsDraft.rent_billing_months_ahead}
+                onChange={event => setAutomationSettingsDraft(prev => ({ ...prev, rent_billing_months_ahead: event.target.value }))}
+              />
+              <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                <input
+                  type="checkbox"
+                  checked={automationSettingsDraft.auto_generate_rent_invoices}
+                  onChange={event => setAutomationSettingsDraft(prev => ({ ...prev, auto_generate_rent_invoices: event.target.checked }))}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                />
+                <span>
+                  <span className="block font-bold text-slate-950">Skapa fakturautkast</span>
+                  <span className="block text-sm text-slate-500">Hyresrader blir utkast direkt, inte godkända fakturor.</span>
+                </span>
+              </label>
+              <Button variant="secondary" loading={saving} onClick={saveAutomationSettings}>
+                Spara
+              </Button>
+            </div>
+          </Card>
+          <Card className="p-5 lg:col-span-2">
+            <div className="flex flex-col gap-2 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-950">Automationshistorik</h3>
+                <p className="mt-1 text-sm text-slate-500">Senaste ekonomi-cron-körningarna med status, påminnelser och utskick.</p>
+              </div>
+              <Badge className="bg-slate-100 text-slate-700">{automationRuns.length} senaste</Badge>
+            </div>
+            {automationRuns.length === 0 ? (
+              <EmptyState title="Ingen automation körd ännu" description="När ekonomi-cron körs visas resultatet här för admin." />
+            ) : (
+              <div className="mt-4 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200">
+                {automationRuns.map(run => (
+                  <div key={run.id} className="grid gap-3 p-4 text-sm lg:grid-cols-[1fr_0.7fr_0.7fr_0.7fr_1fr] lg:items-center">
+                    <div>
+                      <p className="font-bold text-slate-950">{run.job_key === 'finance_cron' ? 'Ekonomi-cron' : run.job_key}</p>
+                      <p className="text-slate-500">
+                        {new Date(run.started_at).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' })}
+                      </p>
+                    </div>
+                    <Badge className={run.status === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}>
+                      {run.status === 'success' ? 'Lyckad' : 'Misslyckad'}
+                    </Badge>
+                    <p className="text-slate-600">{run.overdue_updated} förfallna</p>
+                    <p className="text-slate-600">{run.reminders_queued} påminnelser</p>
+                    <div>
+                      <p className="font-semibold text-slate-700">{run.emails_processed} mejl behandlade</p>
+                      {run.details?.rent_billing && typeof run.details.rent_billing === 'object' && (
+                        <p className="mt-1 text-xs font-semibold text-slate-500">
+                          Hyra: {Number((run.details.rent_billing as Record<string, unknown>).created_items || 0)} rader,
+                          {' '}{Number((run.details.rent_billing as Record<string, unknown>).generated_invoices || 0)} utkast
+                        </p>
+                      )}
+                      {run.error_message && <p className="mt-1 rounded-lg bg-red-50 px-2 py-1 text-xs font-semibold text-red-700">{run.error_message}</p>}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </Card>
@@ -2526,6 +4416,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           )}
           {companies.map(company => {
             const companyIntegrations = integrations.filter(integration => integration.company_id === company.id);
+            const companyAccounts = accountingAccounts.filter(account => account.company_id === company.id);
+            const companyVatCodes = vatCodes.filter(code => code.company_id === company.id);
             return (
               <Card key={company.id} className="p-5">
                 <div className="flex items-start justify-between gap-3">
@@ -2541,22 +4433,468 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                     return (
                       <button
                         key={provider}
-                        onClick={() => ensureIntegration(company.id, provider)}
-                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50"
+                        onClick={() => openIntegrationConfig(company, provider, existing)}
+                        className={[
+                          'rounded-lg border px-3 py-2 text-left text-sm font-semibold transition',
+                          existing?.status === 'active'
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50',
+                        ].join(' ')}
                       >
                         <span className="capitalize">{provider}</span>
                         <span className="mt-1 block text-xs font-medium text-slate-500">
                           {existing ? existing.status : 'Ej upplagd'}
                         </span>
+                        {existing?.config && typeof existing.config === 'object' && 'export_format' in existing.config && (
+                          <span className="mt-1 block text-xs font-medium text-slate-400">
+                            Format {String(existing.config.export_format || '').toUpperCase()}
+                          </span>
+                        )}
+                        {existing && !['manual', 'sie'].includes(provider) && (
+                          <span className={[
+                            'mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-bold',
+                            existing.has_secret ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700',
+                          ].join(' ')}>
+                            {existing.has_secret ? `Token ${existing.secret_hint || 'sparad'}` : 'Saknar token'}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
+                </div>
+                <div className="mt-5 grid gap-3 border-t border-slate-100 pt-4 lg:grid-cols-2">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="font-bold text-slate-900">Kontoplan</h4>
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-slate-100 text-slate-700">{companyAccounts.length} konton</Badge>
+                        <Button variant="ghost" size="sm" onClick={() => openAccountingAccountModal(company)}>
+                          Nytt konto
+                        </Button>
+                      </div>
+                    </div>
+                    {companyAccounts.length === 0 ? (
+                      <div className="mt-2 rounded-lg border border-dashed border-slate-200 p-3 text-sm text-slate-500">
+                        Inga konton upplagda ännu.
+                      </div>
+                    ) : (
+                      <div className="mt-2 grid gap-2">
+                        {companyAccounts
+                          .slice()
+                          .sort((a, b) => a.account_code.localeCompare(b.account_code, 'sv-SE'))
+                          .slice(0, 8)
+                          .map(account => (
+                          <button
+                            key={account.id}
+                            type="button"
+                            onClick={() => openAccountingAccountModal(company, account)}
+                            className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-blue-200 hover:bg-blue-50"
+                          >
+                            <span>
+                              <span className="font-bold text-slate-900">{account.account_code}</span>
+                              <span className="ml-2 text-slate-600">{account.name}</span>
+                            </span>
+                            <span className="flex shrink-0 items-center gap-2">
+                              {account.default_role && <Badge className="bg-blue-50 text-blue-700">{account.default_role}</Badge>}
+                              {!account.active && <Badge className="bg-slate-100 text-slate-500">Inaktiv</Badge>}
+                            </span>
+                          </button>
+                        ))}
+                        {companyAccounts.length > 8 && (
+                          <p className="text-xs font-semibold text-slate-500">+ {companyAccounts.length - 8} konton till</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="font-bold text-slate-900">Momskoder</h4>
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-slate-100 text-slate-700">{companyVatCodes.length} koder</Badge>
+                        <Button variant="ghost" size="sm" onClick={() => openVatCodeModal(company)}>
+                          Ny kod
+                        </Button>
+                      </div>
+                    </div>
+                    {companyVatCodes.length === 0 ? (
+                      <div className="mt-2 rounded-lg border border-dashed border-slate-200 p-3 text-sm text-slate-500">
+                        Inga momskoder upplagda ännu.
+                      </div>
+                    ) : (
+                      <div className="mt-2 grid gap-2">
+                        {companyVatCodes.map(code => (
+                          <button
+                            key={code.id}
+                            type="button"
+                            onClick={() => openVatCodeModal(company, code)}
+                            className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-emerald-200 hover:bg-emerald-50"
+                          >
+                            <span>
+                              <span className="font-bold text-slate-900">{code.code}</span>
+                              <span className="ml-2 text-slate-600">{code.name}</span>
+                            </span>
+                            <span className="flex shrink-0 items-center gap-2">
+                              <Badge className="bg-emerald-50 text-emerald-700">{Number(code.rate)}%</Badge>
+                              {!code.active && <Badge className="bg-slate-100 text-slate-500">Inaktiv</Badge>}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => createDefaultAccountingSetup(company)}
+                    loading={saving}
+                  >
+                    Skapa standardkonton
+                  </Button>
                 </div>
               </Card>
             );
           })}
         </div>
       )}
+
+      {activeTab === 'audit' && (
+        <Card className="overflow-hidden">
+          <div className="flex flex-col gap-2 border-b border-slate-100 p-5 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-lg font-bold text-slate-950">Ekonomilogg</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Senaste ändringarna i ekonomimodulen. Loggen skapas av databasens audit-triggers.
+              </p>
+            </div>
+            <Badge className="bg-slate-100 text-slate-700">{financeAuditLogs.length} senaste</Badge>
+          </div>
+          {financeAuditLogs.length === 0 ? (
+            <EmptyState title="Ingen ekonomilogg ännu" description="När ekonomiobjekt skapas, ändras eller raderas visas händelserna här." />
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {financeAuditLogs.map(log => {
+                const changedFields = Object.keys(log.new_data || {}).filter(key => {
+                  const oldValue = (log.old_data || {})[key];
+                  const newValue = (log.new_data || {})[key];
+                  return JSON.stringify(oldValue) !== JSON.stringify(newValue);
+                }).slice(0, 6);
+                return (
+                  <div key={log.id} className="grid gap-3 p-4 text-sm lg:grid-cols-[0.8fr_1fr_0.8fr_0.8fr_1.4fr] lg:items-center">
+                    <div>
+                      <Badge className={
+                        log.action === 'INSERT' ? 'bg-emerald-50 text-emerald-700' :
+                          log.action === 'DELETE' ? 'bg-red-50 text-red-700' :
+                            'bg-blue-50 text-blue-700'
+                      }>
+                        {log.action === 'INSERT' ? 'Skapad' : log.action === 'UPDATE' ? 'Ändrad' : log.action === 'DELETE' ? 'Raderad' : log.action}
+                      </Badge>
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-950">{financeTableLabel(log.table_name)}</p>
+                      <p className="text-xs text-slate-500">{log.record_id?.slice(0, 8) || 'Post saknas'}</p>
+                    </div>
+                    <p className="text-slate-600">{log.company?.name || 'Organisation'}</p>
+                    <div>
+                      <p className="font-semibold text-slate-700">{log.changed_by_profile?.name || log.changed_by_profile?.email || 'System'}</p>
+                      <p className="text-xs text-slate-500">{new Date(log.created_at).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' })}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {changedFields.length === 0 ? (
+                        <span className="text-slate-500">Ingen fältsammanfattning</span>
+                      ) : changedFields.map(field => (
+                        <Badge key={field} className="bg-slate-100 text-slate-700">{field}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      )}
+
+      <Modal
+        open={integrationConfigModalOpen}
+        onClose={() => {
+          setIntegrationConfigModalOpen(false);
+          setSelectedIntegration(null);
+        }}
+        title="Bokföringskoppling"
+        size="lg"
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <Input
+            label="Provider"
+            value={integrationConfigForm.provider}
+            disabled
+          />
+          <Select
+            label="Status"
+            value={integrationConfigForm.status}
+            onChange={event => setIntegrationConfigForm(prev => ({ ...prev, status: event.target.value as AccountingIntegration['status'] }))}
+            options={[
+              { value: 'not_configured', label: 'Ej konfigurerad' },
+              { value: 'active', label: 'Aktiv' },
+              { value: 'paused', label: 'Pausad' },
+              { value: 'error', label: 'Fel' },
+            ]}
+          />
+          <Input
+            label="Driftläge"
+            value={integrationConfigForm.mode}
+            onChange={event => setIntegrationConfigForm(prev => ({ ...prev, mode: event.target.value }))}
+            placeholder="manual_export, sie_export eller api"
+          />
+          <Input
+            label="Exportformat"
+            value={integrationConfigForm.export_format}
+            onChange={event => setIntegrationConfigForm(prev => ({ ...prev, export_format: event.target.value }))}
+            placeholder="csv, sie, api"
+          />
+          <Input
+            label="Externt bolags-/tenant-id"
+            value={integrationConfigForm.external_tenant_id}
+            onChange={event => setIntegrationConfigForm(prev => ({ ...prev, external_tenant_id: event.target.value }))}
+          />
+          <Input
+            label="Senast ändrad"
+            value={selectedIntegration?.updated_at ? new Date(selectedIntegration.updated_at).toLocaleString('sv-SE') : 'Ny koppling'}
+            disabled
+          />
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm md:col-span-2">
+            <p className="font-bold text-slate-900">
+              {selectedIntegration?.has_secret ? 'Token finns sparad' : 'Ingen token sparad'}
+            </p>
+            <p className="mt-1 text-slate-500">
+              {selectedIntegration?.has_secret
+                ? `${selectedIntegration.secret_hint || 'Maskerad token'}${selectedIntegration.secret_rotated_at ? ` · roterad ${new Date(selectedIntegration.secret_rotated_at).toLocaleString('sv-SE')}` : ''}`
+                : 'Fyll i fältet nedan för att spara eller rotera token.'}
+            </p>
+          </div>
+          <Input
+            className="md:col-span-2"
+            label="Ny API-token/hemlighet"
+            type="password"
+            value={integrationConfigForm.secret_value}
+            onChange={event => setIntegrationConfigForm(prev => ({ ...prev, secret_value: event.target.value }))}
+            placeholder="Lämna tomt för att behålla befintlig token"
+          />
+          <Textarea
+            className="md:col-span-2"
+            label="Anteckning"
+            value={integrationConfigForm.notes}
+            onChange={event => setIntegrationConfigForm(prev => ({ ...prev, notes: event.target.value }))}
+            rows={2}
+            placeholder="T.ex. vilket bolag i bokföringssystemet kopplingen avser."
+          />
+          <Textarea
+            className="font-mono md:col-span-2"
+            label="Extra public config som JSON"
+            value={integrationConfigForm.config_json}
+            onChange={event => setIntegrationConfigForm(prev => ({ ...prev, config_json: event.target.value }))}
+            rows={5}
+            placeholder={'{\n  "cost_center": "100"\n}'}
+          />
+          <div className="rounded-xl bg-amber-50 p-3 text-sm font-medium text-amber-800 md:col-span-2">
+            API-hemligheten sparas separat via edge function och går inte att läsa tillbaka i appen. Extra JSON ska bara innehålla publik adapterkonfiguration.
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setIntegrationConfigModalOpen(false);
+              setSelectedIntegration(null);
+            }}
+          >
+            Avbryt
+          </Button>
+          {selectedIntegration && (
+            <Button variant="secondary" onClick={testIntegrationConfig} loading={saving}>
+              Testa koppling
+            </Button>
+          )}
+          <Button onClick={saveIntegrationConfig} loading={saving}>Spara koppling</Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={accountingAccountModalOpen}
+        onClose={() => {
+          setAccountingAccountModalOpen(false);
+          setSelectedAccountingAccount(null);
+        }}
+        title={selectedAccountingAccount ? 'Redigera konto' : 'Nytt konto'}
+        size="lg"
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <Select
+            label="Bolag"
+            value={accountingAccountForm.company_id}
+            options={companyOptions}
+            onChange={event => setAccountingAccountForm(prev => ({ ...prev, company_id: event.target.value }))}
+            disabled={Boolean(selectedAccountingAccount)}
+          />
+          <Input
+            label="Kontonummer"
+            value={accountingAccountForm.account_code}
+            onChange={event => setAccountingAccountForm(prev => ({ ...prev, account_code: event.target.value }))}
+            disabled={Boolean(selectedAccountingAccount)}
+            placeholder="1510"
+          />
+          <Input
+            className="md:col-span-2"
+            label="Namn"
+            value={accountingAccountForm.name}
+            onChange={event => setAccountingAccountForm(prev => ({ ...prev, name: event.target.value }))}
+            placeholder="Kundfordringar"
+          />
+          <Select
+            label="Kontotyp"
+            value={accountingAccountForm.account_type}
+            onChange={event => setAccountingAccountForm(prev => ({ ...prev, account_type: event.target.value as AccountingAccount['account_type'] }))}
+            options={[
+              { value: 'asset', label: 'Tillgång' },
+              { value: 'liability', label: 'Skuld' },
+              { value: 'income', label: 'Intäkt' },
+              { value: 'expense', label: 'Kostnad' },
+              { value: 'vat', label: 'Moms' },
+              { value: 'bank', label: 'Bank' },
+              { value: 'receivable', label: 'Kundfordran' },
+              { value: 'payable', label: 'Leverantörsskuld' },
+              { value: 'other', label: 'Övrigt' },
+            ]}
+          />
+          <Select
+            label="Standardroll i export"
+            value={accountingAccountForm.default_role}
+            onChange={event => setAccountingAccountForm(prev => ({ ...prev, default_role: event.target.value as AccountingAccount['default_role'] }))}
+            options={[
+              { value: '', label: 'Ingen standardroll' },
+              { value: 'customer_receivable', label: 'Kundfordran' },
+              { value: 'supplier_payable', label: 'Leverantörsskuld' },
+              { value: 'bank', label: 'Bank' },
+              { value: 'sales', label: 'Försäljning' },
+              { value: 'purchase', label: 'Inköp' },
+              { value: 'output_vat', label: 'Utgående moms' },
+              { value: 'input_vat', label: 'Ingående moms' },
+            ]}
+          />
+          <label className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm font-semibold text-slate-700 md:col-span-2">
+            <input
+              type="checkbox"
+              checked={accountingAccountForm.active}
+              onChange={event => setAccountingAccountForm(prev => ({ ...prev, active: event.target.checked }))}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600"
+            />
+            Aktivt konto
+          </label>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setAccountingAccountModalOpen(false);
+              setSelectedAccountingAccount(null);
+            }}
+          >
+            Avbryt
+          </Button>
+          <Button onClick={saveAccountingAccount} loading={saving}>
+            Spara konto
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={vatCodeModalOpen}
+        onClose={() => {
+          setVatCodeModalOpen(false);
+          setSelectedVatCode(null);
+        }}
+        title={selectedVatCode ? 'Redigera momskod' : 'Ny momskod'}
+        size="lg"
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <Select
+            label="Bolag"
+            value={vatCodeForm.company_id}
+            options={companyOptions}
+            onChange={event => setVatCodeForm(prev => ({ ...prev, company_id: event.target.value }))}
+            disabled={Boolean(selectedVatCode)}
+          />
+          <Input
+            label="Kod"
+            value={vatCodeForm.code}
+            onChange={event => setVatCodeForm(prev => ({ ...prev, code: event.target.value }))}
+            disabled={Boolean(selectedVatCode)}
+            placeholder="SE25"
+          />
+          <Input
+            label="Namn"
+            value={vatCodeForm.name}
+            onChange={event => setVatCodeForm(prev => ({ ...prev, name: event.target.value }))}
+            placeholder="Svensk moms 25%"
+          />
+          <Input
+            label="Momsprocent"
+            type="number"
+            min="0"
+            step="0.01"
+            value={vatCodeForm.rate}
+            onChange={event => setVatCodeForm(prev => ({ ...prev, rate: event.target.value }))}
+          />
+          <Select
+            label="Försäljningskonto"
+            value={vatCodeForm.sales_account_code}
+            options={accountingAccountOptions}
+            onChange={event => setVatCodeForm(prev => ({ ...prev, sales_account_code: event.target.value }))}
+          />
+          <Select
+            label="Inköpskonto"
+            value={vatCodeForm.purchase_account_code}
+            options={accountingAccountOptions}
+            onChange={event => setVatCodeForm(prev => ({ ...prev, purchase_account_code: event.target.value }))}
+          />
+          <Select
+            label="Utgående momskonto"
+            value={vatCodeForm.output_vat_account_code}
+            options={accountingAccountOptions}
+            onChange={event => setVatCodeForm(prev => ({ ...prev, output_vat_account_code: event.target.value }))}
+          />
+          <Select
+            label="Ingående momskonto"
+            value={vatCodeForm.input_vat_account_code}
+            options={accountingAccountOptions}
+            onChange={event => setVatCodeForm(prev => ({ ...prev, input_vat_account_code: event.target.value }))}
+          />
+          <label className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm font-semibold text-slate-700 md:col-span-2">
+            <input
+              type="checkbox"
+              checked={vatCodeForm.active}
+              onChange={event => setVatCodeForm(prev => ({ ...prev, active: event.target.checked }))}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600"
+            />
+            Aktiv momskod
+          </label>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setVatCodeModalOpen(false);
+              setSelectedVatCode(null);
+            }}
+          >
+            Avbryt
+          </Button>
+          <Button onClick={saveVatCode} loading={saving}>
+            Spara momskod
+          </Button>
+        </div>
+      </Modal>
 
       <Modal open={companyModalOpen} onClose={() => setCompanyModalOpen(false)} title="Nytt bolag" size="lg">
         <div className="grid gap-4 md:grid-cols-2">
@@ -2591,19 +4929,27 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         </div>
       </Modal>
 
-      <Modal open={supplierModalOpen} onClose={() => setSupplierModalOpen(false)} title="Ny leverantör" size="lg">
+      <Modal open={supplierModalOpen} onClose={() => setSupplierModalOpen(false)} title={selectedSupplier ? 'Redigera leverantör' : 'Ny leverantör'} size="lg">
         <div className="grid gap-4 md:grid-cols-2">
           <Select label="Bolag" value={supplierForm.company_id} options={companyOptions} onChange={e => setSupplierForm(prev => ({ ...prev, company_id: e.target.value }))} />
           <Input label="Namn" value={supplierForm.name} onChange={e => setSupplierForm(prev => ({ ...prev, name: e.target.value }))} />
           <Input label="Organisationsnummer" value={supplierForm.organisation_number} onChange={e => setSupplierForm(prev => ({ ...prev, organisation_number: e.target.value }))} />
           <Input label="E-post" type="email" value={supplierForm.email} onChange={e => setSupplierForm(prev => ({ ...prev, email: e.target.value }))} />
           <Input label="Betalvillkor dagar" type="number" value={supplierForm.payment_terms_days} onChange={e => setSupplierForm(prev => ({ ...prev, payment_terms_days: e.target.value }))} />
+          <Input label="Bankgiro" value={supplierForm.bankgiro} onChange={e => setSupplierForm(prev => ({ ...prev, bankgiro: e.target.value }))} />
+          <Input label="Plusgiro" value={supplierForm.plusgiro} onChange={e => setSupplierForm(prev => ({ ...prev, plusgiro: e.target.value }))} />
+          <Input label="IBAN" value={supplierForm.iban} onChange={e => setSupplierForm(prev => ({ ...prev, iban: e.target.value }))} />
+          <Input label="BIC/SWIFT" value={supplierForm.bic} onChange={e => setSupplierForm(prev => ({ ...prev, bic: e.target.value }))} />
+          <Input label="Bankkonto" value={supplierForm.bank_account} onChange={e => setSupplierForm(prev => ({ ...prev, bank_account: e.target.value }))} />
+          <Input label="Standardreferens" value={supplierForm.payment_reference} onChange={e => setSupplierForm(prev => ({ ...prev, payment_reference: e.target.value }))} />
           <Input label="Standardkonto" value={supplierForm.default_account_code} onChange={e => setSupplierForm(prev => ({ ...prev, default_account_code: e.target.value }))} />
           <Textarea label="Anteckningar" value={supplierForm.notes} onChange={e => setSupplierForm(prev => ({ ...prev, notes: e.target.value }))} />
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setSupplierModalOpen(false)}>Avbryt</Button>
-          <Button onClick={createSupplier} loading={saving} disabled={!supplierForm.name.trim()}>Skapa leverantör</Button>
+          <Button onClick={createSupplier} loading={saving} disabled={!supplierForm.name.trim()}>
+            {selectedSupplier ? 'Spara ändringar' : 'Skapa leverantör'}
+          </Button>
         </div>
       </Modal>
 
@@ -2615,6 +4961,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               ...prev,
               company_id: e.target.value,
               customer_id: '',
+              vat_code: '',
+              account_code: '',
               due_date: addDays(prev.invoice_date, company?.default_payment_terms_days ?? 30),
             }));
           }} />
@@ -2631,7 +4979,28 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           <Input className="md:col-span-2" label="Radtext" value={invoiceForm.description} onChange={e => setInvoiceForm(prev => ({ ...prev, description: e.target.value }))} />
           <Input label="Antal" inputMode="decimal" value={invoiceForm.quantity} onChange={e => setInvoiceForm(prev => ({ ...prev, quantity: e.target.value }))} />
           <Input label="Pris exkl. moms" inputMode="decimal" value={invoiceForm.unit_price} onChange={e => setInvoiceForm(prev => ({ ...prev, unit_price: e.target.value }))} />
+          <Select
+            label="Momskod"
+            value={invoiceForm.vat_code}
+            options={invoiceVatCodeOptions}
+            onChange={e => {
+              const selectedCode = vatCodes.find(code => code.company_id === invoiceForm.company_id && code.code === e.target.value);
+              setInvoiceForm(prev => ({
+                ...prev,
+                vat_code: e.target.value,
+                vat_rate: selectedCode ? String(selectedCode.rate) : prev.vat_rate,
+                account_code: selectedCode?.sales_account_code || prev.account_code,
+              }));
+            }}
+          />
           <Input label="Moms %" inputMode="decimal" value={invoiceForm.vat_rate} onChange={e => setInvoiceForm(prev => ({ ...prev, vat_rate: e.target.value }))} />
+          <Select
+            className="md:col-span-2"
+            label="Försäljningskonto"
+            value={invoiceForm.account_code}
+            options={invoiceAccountOptions}
+            onChange={e => setInvoiceForm(prev => ({ ...prev, account_code: e.target.value }))}
+          />
           <Textarea label="Intern anteckning" value={invoiceForm.notes} onChange={e => setInvoiceForm(prev => ({ ...prev, notes: e.target.value }))} />
         </div>
         <div className="mt-6 flex justify-end gap-2">
@@ -2648,15 +5017,34 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
       <Modal open={supplierInvoiceModalOpen} onClose={() => setSupplierInvoiceModalOpen(false)} title="Ny leverantörsfaktura" size="lg">
         <div className="grid gap-4 md:grid-cols-2">
-          <Select label="Bolag" value={supplierInvoiceForm.company_id} options={companyOptions} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, company_id: e.target.value, supplier_id: '' }))} />
+          <Select label="Bolag" value={supplierInvoiceForm.company_id} options={companyOptions} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, company_id: e.target.value, supplier_id: '', vat_code: '', account_code: '' }))} />
           <Select label="Leverantör" value={supplierInvoiceForm.supplier_id} options={supplierOptions} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, supplier_id: e.target.value }))} />
           <Input label="Leverantörens fakturanummer" value={supplierInvoiceForm.supplier_invoice_number} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, supplier_invoice_number: e.target.value }))} />
           <Input label="Fakturadatum" type="date" value={supplierInvoiceForm.invoice_date} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, invoice_date: e.target.value }))} />
           <Input label="Förfallodatum" type="date" value={supplierInvoiceForm.due_date} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, due_date: e.target.value }))} />
-          <Input label="Konto" value={supplierInvoiceForm.account_code} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, account_code: e.target.value }))} />
+          <Select
+            label="Konto"
+            value={supplierInvoiceForm.account_code}
+            options={supplierInvoiceAccountOptions}
+            onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, account_code: e.target.value }))}
+          />
           <Input className="md:col-span-2" label="Radtext" value={supplierInvoiceForm.description} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, description: e.target.value }))} />
           <Input label="Antal" inputMode="decimal" value={supplierInvoiceForm.quantity} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, quantity: e.target.value }))} />
           <Input label="Pris exkl. moms" inputMode="decimal" value={supplierInvoiceForm.unit_price} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, unit_price: e.target.value }))} />
+          <Select
+            label="Momskod"
+            value={supplierInvoiceForm.vat_code}
+            options={supplierInvoiceVatCodeOptions}
+            onChange={e => {
+              const selectedCode = vatCodes.find(code => code.company_id === supplierInvoiceForm.company_id && code.code === e.target.value);
+              setSupplierInvoiceForm(prev => ({
+                ...prev,
+                vat_code: e.target.value,
+                vat_rate: selectedCode ? String(selectedCode.rate) : prev.vat_rate,
+                account_code: selectedCode?.purchase_account_code || prev.account_code,
+              }));
+            }}
+          />
           <Input label="Moms %" inputMode="decimal" value={supplierInvoiceForm.vat_rate} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, vat_rate: e.target.value }))} />
           <Textarea label="Intern anteckning" value={supplierInvoiceForm.notes} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, notes: e.target.value }))} />
           <label className="block text-sm font-semibold text-slate-700 md:col-span-2">
@@ -2725,7 +5113,10 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 label="Bolag"
                 value={supplierInvoiceReviewForm.company_id}
                 options={companyOptions}
-                onChange={e => setSupplierInvoiceReviewForm(prev => ({ ...prev, company_id: e.target.value, supplier_id: '' }))}
+                onChange={e => {
+                  setSupplierInvoiceReviewForm(prev => ({ ...prev, company_id: e.target.value, supplier_id: '' }));
+                  setSupplierInvoiceLineForm(prev => ({ ...prev, company_id: e.target.value, vat_code: '', account_code: '' }));
+                }}
               />
               <Select
                 label="Leverantör"
@@ -2755,35 +5146,6 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 value={supplierInvoiceReviewForm.due_date}
                 onChange={e => setSupplierInvoiceReviewForm(prev => ({ ...prev, due_date: e.target.value }))}
               />
-              <Input
-                label="Konto"
-                value={supplierInvoiceReviewForm.account_code}
-                onChange={e => setSupplierInvoiceReviewForm(prev => ({ ...prev, account_code: e.target.value }))}
-              />
-              <Input
-                className="md:col-span-2"
-                label="Radtext"
-                value={supplierInvoiceReviewForm.description}
-                onChange={e => setSupplierInvoiceReviewForm(prev => ({ ...prev, description: e.target.value }))}
-              />
-              <Input
-                label="Antal"
-                inputMode="decimal"
-                value={supplierInvoiceReviewForm.quantity}
-                onChange={e => setSupplierInvoiceReviewForm(prev => ({ ...prev, quantity: e.target.value }))}
-              />
-              <Input
-                label="Pris exkl. moms"
-                inputMode="decimal"
-                value={supplierInvoiceReviewForm.unit_price}
-                onChange={e => setSupplierInvoiceReviewForm(prev => ({ ...prev, unit_price: e.target.value }))}
-              />
-              <Input
-                label="Moms %"
-                inputMode="decimal"
-                value={supplierInvoiceReviewForm.vat_rate}
-                onChange={e => setSupplierInvoiceReviewForm(prev => ({ ...prev, vat_rate: e.target.value }))}
-              />
               <Textarea
                 className="md:col-span-2"
                 label="Intern anteckning"
@@ -2806,16 +5168,126 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               </label>
             </div>
 
-            <div className="rounded-lg bg-slate-50 p-4">
-              <p className="text-sm font-semibold text-slate-700">Beräknad total</p>
-              <p className="mt-1 text-2xl font-bold text-slate-950">
-                {formatCurrency(
-                  toNumber(supplierInvoiceReviewForm.quantity, 1) *
-                    toNumber(supplierInvoiceReviewForm.unit_price, 0) *
-                    (1 + toNumber(supplierInvoiceReviewForm.vat_rate, 25) / 100),
-                )}
-              </p>
-            </div>
+            <Card className="overflow-hidden">
+              <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-950">Kostnadsrader</h3>
+                  <p className="text-sm text-slate-500">Raderna summerar leverantörsfakturan och styr bokföringskonto i exporten.</p>
+                </div>
+                <Badge className="bg-slate-100 text-slate-700">{selectedSupplierInvoiceLines.length} rader</Badge>
+              </div>
+              {selectedSupplierInvoiceLines.length === 0 ? (
+                <EmptyState title="Inga rader" description="Lägg till minst en kostnadsrad innan fakturan attesteras." />
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {selectedSupplierInvoiceLines.map(line => (
+                    <div key={line.id} className="grid gap-3 p-4 md:grid-cols-[1.4fr_0.5fr_0.6fr_0.45fr_0.55fr_0.6fr_auto] md:items-center">
+                      <div>
+                        <p className="font-semibold text-slate-900">{line.description}</p>
+                        {line.account_code && <p className="mt-1 text-xs font-semibold text-slate-500">Konto {line.account_code}</p>}
+                      </div>
+                      <p className="text-sm text-slate-600">{line.quantity} {line.unit}</p>
+                      <p className="text-sm text-slate-600">{formatCurrency(Number(line.unit_price), selectedSupplierInvoice.currency)}</p>
+                      <p className="text-sm text-slate-600">{line.vat_rate}%</p>
+                      <p className="text-sm text-slate-600">{formatCurrency(Number(line.vat_amount), selectedSupplierInvoice.currency)}</p>
+                      <p className="font-semibold text-slate-950">{formatCurrency(Number(line.line_total_incl_vat), selectedSupplierInvoice.currency)}</p>
+                      {selectedSupplierInvoice.approval_status !== 'approved' ? (
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => editSupplierInvoiceLineInReview(line)} disabled={saving}>
+                            Redigera
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => deleteSupplierInvoiceLineInReview(line)}
+                            disabled={selectedSupplierInvoiceLines.length <= 1 || saving}
+                          >
+                            Ta bort
+                          </Button>
+                        </div>
+                      ) : (
+                        <span />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {selectedSupplierInvoice.approval_status !== 'approved' && (
+                <div className="border-t border-slate-100 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <h4 className="font-bold text-slate-900">{selectedSupplierInvoiceLine ? 'Redigera rad' : 'Lägg till rad'}</h4>
+                    {selectedSupplierInvoiceLine && (
+                      <Button variant="ghost" size="sm" onClick={resetSupplierInvoiceLineDraft}>
+                        Avbryt redigering
+                      </Button>
+                    )}
+                  </div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-6">
+                    <Input
+                      className="md:col-span-2"
+                      label="Radtext"
+                      value={supplierInvoiceLineForm.description}
+                      onChange={e => setSupplierInvoiceLineForm(prev => ({ ...prev, description: e.target.value }))}
+                    />
+                    <Input
+                      label="Antal"
+                      inputMode="decimal"
+                      value={supplierInvoiceLineForm.quantity}
+                      onChange={e => setSupplierInvoiceLineForm(prev => ({ ...prev, quantity: e.target.value }))}
+                    />
+                    <Input
+                      label="Pris exkl. moms"
+                      inputMode="decimal"
+                      value={supplierInvoiceLineForm.unit_price}
+                      onChange={e => setSupplierInvoiceLineForm(prev => ({ ...prev, unit_price: e.target.value }))}
+                    />
+                    <Select
+                      label="Momskod"
+                      value={supplierInvoiceLineForm.vat_code}
+                      options={supplierInvoiceReviewVatCodeOptions}
+                      onChange={e => {
+                        const companyId = supplierInvoiceReviewForm.company_id || selectedSupplierInvoice.company_id;
+                        const selectedCode = vatCodes.find(code => code.company_id === companyId && code.code === e.target.value);
+                        setSupplierInvoiceLineForm(prev => ({
+                          ...prev,
+                          vat_code: e.target.value,
+                          vat_rate: selectedCode ? String(selectedCode.rate) : prev.vat_rate,
+                          account_code: selectedCode?.purchase_account_code || prev.account_code,
+                        }));
+                      }}
+                    />
+                    <Input
+                      label="Moms %"
+                      inputMode="decimal"
+                      value={supplierInvoiceLineForm.vat_rate}
+                      onChange={e => setSupplierInvoiceLineForm(prev => ({ ...prev, vat_rate: e.target.value }))}
+                    />
+                    <Select
+                      className="md:col-span-3"
+                      label="Konto"
+                      value={supplierInvoiceLineForm.account_code}
+                      options={supplierInvoiceReviewAccountOptions}
+                      onChange={e => setSupplierInvoiceLineForm(prev => ({ ...prev, account_code: e.target.value }))}
+                    />
+                    <Button
+                      className="self-end md:col-span-3"
+                      onClick={saveSupplierInvoiceLineInReview}
+                      loading={saving}
+                      disabled={!supplierInvoiceLineForm.description.trim()}
+                    >
+                      {selectedSupplierInvoiceLine ? 'Spara rad' : 'Lägg till rad'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end border-t border-slate-100 bg-slate-50 p-4">
+                <div className="w-full max-w-sm space-y-2 text-sm">
+                  <div className="flex justify-between"><span>Exkl. moms</span><strong>{formatCurrency(selectedSupplierInvoiceLines.reduce((sum, line) => sum + Number(line.line_total_excl_vat || 0), 0), selectedSupplierInvoice.currency)}</strong></div>
+                  <div className="flex justify-between"><span>Moms</span><strong>{formatCurrency(selectedSupplierInvoiceLines.reduce((sum, line) => sum + Number(line.vat_amount || 0), 0), selectedSupplierInvoice.currency)}</strong></div>
+                  <div className="flex justify-between border-t border-slate-200 pt-2 text-base"><span>Total</span><strong>{formatCurrency(selectedSupplierInvoiceLines.reduce((sum, line) => sum + Number(line.line_total_incl_vat || 0), 0), selectedSupplierInvoice.currency)}</strong></div>
+                </div>
+              </div>
+            </Card>
 
             {selectedSupplierInvoice.ocr_status !== 'not_started' && (
               <Card className="p-4">
@@ -2853,12 +5325,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 variant="secondary"
                 onClick={saveSupplierInvoiceReview}
                 loading={saving}
-                disabled={!supplierInvoiceReviewForm.company_id || !supplierInvoiceReviewForm.description.trim()}
+                disabled={!supplierInvoiceReviewForm.company_id}
               >
                 Spara granskning
               </Button>
               {selectedSupplierInvoice.approval_status !== 'approved' && (
-                <Button onClick={() => approveSupplierInvoice(selectedSupplierInvoice.id)} loading={saving}>
+                <Button onClick={() => approveSupplierInvoice(selectedSupplierInvoice.id)} loading={saving} disabled={selectedSupplierInvoiceLines.length === 0}>
                   <CheckCircle2 className="h-4 w-4" />
                   Attestera
                 </Button>
@@ -2866,6 +5338,16 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               {selectedSupplierInvoice.approval_status === 'approved' && selectedSupplierInvoice.payment_status === 'unpaid' && (
                 <Button variant="secondary" onClick={() => scheduleSupplierInvoicePayment(selectedSupplierInvoice.id)} loading={saving}>
                   Planera betalning
+                </Button>
+              )}
+              {selectedSupplierInvoice.approval_status === 'approved' && (
+                <Button
+                  variant="secondary"
+                  onClick={() => queueSupplierInvoiceAccountingSync(selectedSupplierInvoice.id)}
+                  loading={saving}
+                >
+                  <Landmark className="h-4 w-4" />
+                  Köa bokföring
                 </Button>
               )}
               {selectedSupplierInvoice.approval_status === 'approved' && selectedSupplierInvoice.payment_status !== 'paid' && (
@@ -2898,10 +5380,10 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           />
           <Select label="Bolag" value={projectInvoiceForm.company_id} options={companyOptions} onChange={e => setProjectInvoiceForm(prev => ({ ...prev, company_id: e.target.value }))} />
           <Select
-            label="Ekonomikund"
+            label="Ekonomikund (valfritt)"
             value={projectInvoiceForm.customer_id}
             options={[
-              { value: '', label: 'Välj kund' },
+              { value: '', label: 'Matcha eller skapa automatiskt' },
               ...customers.map(customer => ({ value: customer.id, label: customer.name })),
             ]}
             onChange={e => setProjectInvoiceForm(prev => ({ ...prev, customer_id: e.target.value }))}
@@ -2910,14 +5392,14 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           <Input label="Förfallodatum" type="date" value={projectInvoiceForm.due_date} onChange={e => setProjectInvoiceForm(prev => ({ ...prev, due_date: e.target.value }))} />
         </div>
         <div className="mt-6 rounded-lg bg-blue-50 p-4 text-sm text-blue-800">
-          Projektets faktureringsrader kopieras till ett vanligt fakturautkast. Underlaget markeras som fakturerat så det inte kan skapas dubbelt.
+          Projektets faktureringsrader kopieras till ett vanligt fakturautkast. Om du inte väljer en ekonomikund matchar systemet på projektkundens namn eller skapar en ny kund automatiskt.
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setProjectInvoiceModalOpen(false)}>Avbryt</Button>
           <Button
             onClick={createInvoiceFromProjectBasis}
             loading={saving}
-            disabled={!projectInvoiceForm.basis_id || !projectInvoiceForm.company_id || !projectInvoiceForm.customer_id}
+            disabled={!projectInvoiceForm.basis_id || !projectInvoiceForm.company_id}
           >
             Skapa fakturautkast
           </Button>
@@ -3076,15 +5558,23 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               ) : (
                 <div className="divide-y divide-slate-100">
                   {selectedRentItems.map(item => (
-                    <div key={item.id} className="grid gap-3 p-4 lg:grid-cols-[1.3fr_1fr_0.8fr_0.8fr_auto_auto] lg:items-center">
+                    <div key={item.id} className="grid gap-3 p-4 lg:grid-cols-[1.3fr_1fr_0.8fr_0.8fr_0.8fr_auto_auto] lg:items-center">
                       <div>
                         <h3 className="font-bold text-slate-950">{item.tenant?.name ?? 'Hyresgäst saknas'}</h3>
                         <p className="text-sm text-slate-500">
-                          {item.apartment?.number || item.apartment?.address || 'Lägenhet saknas'} · {item.property?.name || 'Fastighet saknas'}
+                          {item.apartment?.apartment_number || 'Lägenhet saknas'} · {item.property?.name || item.property?.address || 'Fastighet saknas'}
                         </p>
                       </div>
                       <p className="text-sm text-slate-600">{item.description}</p>
                       <p className="text-sm text-slate-600">Förfaller {item.due_date}</p>
+                      <p className="text-sm text-slate-600">
+                        Grund {formatCurrency(Number(item.base_rent_amount || item.amount || 0))}
+                        {Number(item.adjustment_amount || 0) !== 0 && (
+                          <span className={Number(item.adjustment_amount || 0) < 0 ? 'ml-1 font-bold text-emerald-700' : 'ml-1 font-bold text-slate-700'}>
+                            {Number(item.adjustment_amount || 0) < 0 ? '' : '+'}{formatCurrency(Number(item.adjustment_amount || 0))}
+                          </span>
+                        )}
+                      </p>
                       <p className="font-semibold text-slate-950">{formatCurrency(Number(item.total_amount))}</p>
                       <Badge className={item.status === 'invoiced' ? 'bg-emerald-50 text-emerald-700' : item.status === 'skipped' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}>
                         {rentItemStatusLabel(item.status)}
@@ -3119,7 +5609,41 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
             </Card>
 
             <div className="flex flex-wrap justify-end gap-2">
+              {rentEmailQueueResult && (
+                <p className="mr-auto rounded-lg bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
+                  {rentEmailQueueResult}
+                </p>
+              )}
+              {rentDirectDebitExportResult && (
+                <p className="mr-auto rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                  {rentDirectDebitExportResult}
+                </p>
+              )}
               <Button variant="secondary" onClick={() => setRentRunDetailOpen(false)}>Stäng</Button>
+              <Button
+                variant="secondary"
+                onClick={() => exportRentRunDirectDebit('csv')}
+                loading={saving}
+                disabled={!selectedRentItems.some(item => item.invoice_id)}
+              >
+                Exportera autogiro CSV
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => exportRentRunDirectDebit('bankgirot')}
+                loading={saving}
+                disabled={!selectedRentItems.some(item => item.invoice_id)}
+              >
+                Exportera Bankgirot-fil
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={queueRentRunInvoiceEmails}
+                loading={saving}
+                disabled={!selectedRentItems.some(item => item.invoice_id)}
+              >
+                Köa hyresmejl
+              </Button>
               <Button
                 onClick={() => generateRentInvoices(selectedRentRun.id)}
                 loading={saving}
@@ -3175,15 +5699,114 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               </div>
               <div className="divide-y divide-slate-100">
                 {selectedInvoiceLines.map(line => (
-                  <div key={line.id} className="grid gap-3 p-4 md:grid-cols-[1.4fr_0.5fr_0.6fr_0.4fr_0.6fr] md:items-center">
-                    <p className="font-semibold text-slate-900">{line.description}</p>
+                  <div key={line.id} className="grid gap-3 p-4 md:grid-cols-[1.4fr_0.5fr_0.6fr_0.45fr_0.55fr_0.6fr_auto] md:items-center">
+                    <div>
+                      <p className="font-semibold text-slate-900">{line.description}</p>
+                      {line.account_code && <p className="mt-1 text-xs font-semibold text-slate-500">Konto {line.account_code}</p>}
+                    </div>
                     <p className="text-sm text-slate-600">{line.quantity} {line.unit}</p>
                     <p className="text-sm text-slate-600">{formatCurrency(Number(line.unit_price), selectedInvoice.currency)}</p>
                     <p className="text-sm text-slate-600">{line.vat_rate}%</p>
+                    <p className="text-sm text-slate-600">{formatCurrency(Number(line.vat_amount), selectedInvoice.currency)}</p>
                     <p className="font-semibold text-slate-950">{formatCurrency(Number(line.line_total_incl_vat), selectedInvoice.currency)}</p>
+                    {selectedInvoice.status === 'draft' ? (
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => editInvoiceLineInDraft(line)}
+                          disabled={saving}
+                        >
+                          Redigera
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => deleteInvoiceLineFromDraft(line)}
+                          disabled={selectedInvoiceLines.length <= 1 || saving}
+                        >
+                          Ta bort
+                        </Button>
+                      </div>
+                    ) : (
+                      <span />
+                    )}
                   </div>
                 ))}
               </div>
+              {selectedInvoice.status === 'draft' && (
+                <div className="border-t border-slate-100 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <h4 className="font-bold text-slate-900">{selectedInvoiceLine ? 'Redigera rad' : 'Lägg till rad'}</h4>
+                    {selectedInvoiceLine && (
+                      <Button variant="ghost" size="sm" onClick={resetInvoiceLineDraft}>
+                        Avbryt redigering
+                      </Button>
+                    )}
+                  </div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-6">
+                    <Input
+                      className="md:col-span-2"
+                      label="Radtext"
+                      value={invoiceLineForm.description}
+                      onChange={e => setInvoiceLineForm(prev => ({ ...prev, description: e.target.value }))}
+                    />
+                    <Input
+                      label="Antal"
+                      inputMode="decimal"
+                      value={invoiceLineForm.quantity}
+                      onChange={e => setInvoiceLineForm(prev => ({ ...prev, quantity: e.target.value }))}
+                    />
+                    <Input
+                      label="Enhet"
+                      value={invoiceLineForm.unit}
+                      onChange={e => setInvoiceLineForm(prev => ({ ...prev, unit: e.target.value }))}
+                    />
+                    <Input
+                      label="Pris exkl. moms"
+                      inputMode="decimal"
+                      value={invoiceLineForm.unit_price}
+                      onChange={e => setInvoiceLineForm(prev => ({ ...prev, unit_price: e.target.value }))}
+                    />
+                    <Button
+                      className="self-end"
+                      onClick={saveInvoiceLineToDraft}
+                      loading={saving}
+                      disabled={!invoiceLineForm.description.trim()}
+                    >
+                      {selectedInvoiceLine ? 'Spara rad' : 'Lägg till'}
+                    </Button>
+                    <Select
+                      className="md:col-span-2"
+                      label="Momskod"
+                      value={invoiceLineForm.vat_code}
+                      options={selectedInvoiceVatCodeOptions}
+                      onChange={e => {
+                        const selectedCode = vatCodes.find(code => code.company_id === selectedInvoice.company_id && code.code === e.target.value);
+                        setInvoiceLineForm(prev => ({
+                          ...prev,
+                          vat_code: e.target.value,
+                          vat_rate: selectedCode ? String(selectedCode.rate) : prev.vat_rate,
+                          account_code: selectedCode?.sales_account_code || prev.account_code,
+                        }));
+                      }}
+                    />
+                    <Input
+                      label="Moms %"
+                      inputMode="decimal"
+                      value={invoiceLineForm.vat_rate}
+                      onChange={e => setInvoiceLineForm(prev => ({ ...prev, vat_rate: e.target.value }))}
+                    />
+                    <Select
+                      className="md:col-span-3"
+                      label="Försäljningskonto"
+                      value={invoiceLineForm.account_code}
+                      options={selectedInvoiceAccountOptions}
+                      onChange={e => setInvoiceLineForm(prev => ({ ...prev, account_code: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              )}
               <div className="flex justify-end border-t border-slate-100 bg-slate-50 p-4">
                 <div className="w-full max-w-sm space-y-2 text-sm">
                   <div className="flex justify-between"><span>Exkl. moms</span><strong>{formatCurrency(Number(selectedInvoice.subtotal_amount), selectedInvoice.currency)}</strong></div>
@@ -3433,6 +6056,30 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       </Modal>
     </div>
   );
+}
+
+function financeTableLabel(tableName: string) {
+  const labels: Record<string, string> = {
+    vihem_companies: 'Bolag',
+    vihem_company_user_permissions: 'Bolagsbehörighet',
+    vihem_finance_customers: 'Kund',
+    vihem_finance_suppliers: 'Leverantör',
+    vihem_invoice_number_series: 'Nummerserie',
+    vihem_invoices: 'Faktura',
+    vihem_invoice_lines: 'Fakturarad',
+    vihem_payments: 'Betalning',
+    vihem_accounting_integrations: 'Bokföringskoppling',
+    vihem_accounting_sync_queue: 'Bokföringskö',
+    vihem_supplier_invoices: 'Leverantörsfaktura',
+    vihem_supplier_invoice_lines: 'Leverantörsfakturarad',
+    vihem_rent_billing_runs: 'Hyreskörning',
+    vihem_rent_billing_items: 'Hyresrad',
+    vihem_rent_adjustments: 'Hyresjustering',
+    vihem_direct_debit_mandates: 'Autogiromandat',
+    vihem_finance_automation_settings: 'Automationsinställning',
+    vihem_finance_reminder_settings: 'Påminnelseregel',
+  };
+  return labels[tableName] || tableName.replace(/^vihem_/, '').replaceAll('_', ' ');
 }
 
 function MetricCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {

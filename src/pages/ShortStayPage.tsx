@@ -413,7 +413,7 @@ async function edgeFunctionErrorMessage(error: any, fallback: string) {
   return error?.message || fallback;
 }
 
-export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
+export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>('overview');
   const [units, setUnits] = useState<ShortStayUnit[]>([]);
@@ -448,6 +448,8 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
   const [beds24Message, setBeds24Message] = useState('');
   const [updatingCleaningId, setUpdatingCleaningId] = useState<string | null>(null);
   const [conflictsModalOpen, setConflictsModalOpen] = useState(false);
+  const [receiptMessage, setReceiptMessage] = useState('');
+  const [creatingReceiptId, setCreatingReceiptId] = useState<string | null>(null);
 
   const isAdmin = user?.role === 'admin';
   const organisationId = user?.organisation_id;
@@ -1034,6 +1036,35 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
     receiptWindow.focus();
   }
 
+  async function createFinanceReceipt(booking: ShortStayBooking) {
+    if (!isAdmin) {
+      setError('Endast admin kan skapa ekonomiskt kvitto.');
+      return;
+    }
+
+    setCreatingReceiptId(booking.id);
+    setReceiptMessage('');
+    setError('');
+
+    const { data, error: receiptError } = await supabase.rpc('vihem_create_invoice_from_short_stay_booking', {
+      target_booking_id: booking.id,
+      target_company_id: null,
+      target_customer_id: null,
+      approve_invoice: booking.payment_status === 'paid',
+    });
+
+    setCreatingReceiptId(null);
+
+    if (receiptError) {
+      setError(receiptError.message || 'Kunde inte skapa ekonomiskt kvitto.');
+      return;
+    }
+
+    const invoice = Array.isArray(data) ? data[0] : data;
+    setReceiptMessage(`Kvitto/faktura skapad${invoice?.invoice_number ? `: ${invoice.invoice_number}` : ''}.`);
+    await fetchData();
+  }
+
   async function deleteBooking() {
     if (!editingBooking) return;
     setSaving(true);
@@ -1467,10 +1498,15 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">Kvitton</h2>
-                <p className="text-sm text-slate-500">Skapa utskriftsvänliga kvitton från korttidsbokningar.</p>
+                <p className="text-sm text-slate-500">Skapa utskriftsvänliga kvitton eller riktiga ekonomiunderlag från korttidsbokningar.</p>
               </div>
               <ReceiptText className="h-8 w-8 text-blue-600" />
             </div>
+            {receiptMessage && (
+              <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                {receiptMessage}
+              </p>
+            )}
           </Card>
           <div className="grid gap-3">
             {bookings.filter(booking => booking.booking_type === 'booking').length === 0 ? (
@@ -1500,11 +1536,30 @@ export function ShortStayPage({ onNavigate: _onNavigate }: ShortStayPageProps) {
                         <p className="mt-1 text-xs text-slate-500">
                           Totalt {formatMoney(total, booking.currency)} · betalt {formatMoney(paid, booking.currency)}
                         </p>
+                        {booking.finance_invoice_id && (
+                          <p className="mt-1 text-xs font-semibold text-emerald-700">Kopplad till ekonomifaktura</p>
+                        )}
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Button variant="secondary" onClick={() => openEditBooking(booking)}>
                           <Edit2 className="w-4 h-4" /> Redigera pris
                         </Button>
+                        {isAdmin && (
+                          booking.finance_invoice_id ? (
+                            <Button variant="secondary" onClick={() => onNavigate('finance')}>
+                              <ReceiptText className="w-4 h-4" /> Öppna ekonomi
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="secondary"
+                              onClick={() => createFinanceReceipt(booking)}
+                              loading={creatingReceiptId === booking.id}
+                              disabled={total <= 0}
+                            >
+                              <ReceiptText className="w-4 h-4" /> Skapa i ekonomi
+                            </Button>
+                          )
+                        )}
                         <Button onClick={() => printReceipt(booking)} disabled={total <= 0}>
                           <Printer className="w-4 h-4" /> Skapa kvitto
                         </Button>
