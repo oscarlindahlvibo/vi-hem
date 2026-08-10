@@ -8,7 +8,7 @@ import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
   ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase,
-  BedDouble, CalendarDays, Landmark, MessageSquareText, Monitor, ScanLine,
+  BedDouble, CalendarDays, Landmark, MessageSquareText, Monitor, ScanLine, SlidersHorizontal,
 } from 'lucide-react';
 
 interface NavItem {
@@ -64,6 +64,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     { label: 'Hyresgäster', icon: <Users className="w-5 h-5" />, page: 'admin-tenants', roles: ['admin'] },
     { label: 'Personal', icon: <Settings className="w-5 h-5" />, page: 'admin-staff', roles: ['admin'] },
     { label: 'TV-skärm', icon: <Monitor className="w-5 h-5" />, page: 'screen-settings', roles: ['admin'] },
+    { label: 'Inställningar', icon: <SlidersHorizontal className="w-5 h-5" />, page: 'admin-settings', roles: ['admin'] },
     { label: 'Ekonomi', icon: <Landmark className="w-5 h-5" />, page: 'finance', roles: ['admin'], module: 'finance' },
     { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['admin'] },
     { label: 'Uppsägningar', icon: <FileX className="w-5 h-5" />, page: 'admin-terminations', roles: ['admin'] },

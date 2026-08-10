@@ -36,6 +36,7 @@ import { ScreenDisplayPage } from './pages/ScreenDisplayPage';
 import { ScreenSettingsPage } from './pages/ScreenSettingsPage';
 import { GuestLaundryPage } from './pages/GuestLaundryPage';
 import { FinancePage } from './pages/FinancePage';
+import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { StaffDocumentScannerPage } from './pages/StaffDocumentScannerPage';
 import type { ModuleKey } from './types';
 
@@ -477,6 +478,10 @@ function AppInner() {
       case 'screen-settings':
         if (!isAdmin) return renderDashboard();
         return <ScreenSettingsPage onNavigate={navigate} />;
+
+      case 'admin-settings':
+        if (!isAdmin) return renderDashboard();
+        return <PlatformSettingsPage />;
 
       case 'finance':
         if (!isAdmin || !enabledModules.finance) return renderDashboard();
