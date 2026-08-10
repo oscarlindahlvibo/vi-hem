@@ -1655,7 +1655,8 @@ export interface AccountingSyncQueueItem {
 export type SupplierInvoiceStatus = 'draft' | 'needs_review' | 'approved' | 'scheduled_for_payment' | 'paid' | 'rejected' | 'archived';
 export type SupplierInvoiceApprovalStatus = 'not_started' | 'pending' | 'approved' | 'rejected';
 export type SupplierInvoicePaymentStatus = 'unpaid' | 'scheduled' | 'paid';
-export type SupplierInvoiceOcrStatus = 'not_started' | 'queued' | 'processed' | 'needs_review' | 'failed';
+export type SupplierInvoiceOcrStatus = 'not_started' | 'uploaded' | 'queued' | 'extracting_text' | 'ocr_processing' | 'ai_processing' | 'validating' | 'processed' | 'needs_review' | 'completed' | 'failed';
+export type SupplierInvoiceDocumentKind = 'supplier_invoice' | 'receipt';
 
 export interface SupplierInvoice {
   id: string;
@@ -1666,6 +1667,7 @@ export interface SupplierInvoice {
   invoice_date: string;
   due_date: string;
   currency: string;
+  document_kind?: SupplierInvoiceDocumentKind;
   status: SupplierInvoiceStatus;
   accounting_status?: InvoiceAccountingStatus;
   approval_status: SupplierInvoiceApprovalStatus;
@@ -1679,6 +1681,26 @@ export interface SupplierInvoice {
   payment_export_id: string;
   ocr_status: SupplierInvoiceOcrStatus;
   ocr_data: Record<string, unknown>;
+  extracted_text?: string;
+  ocr_provider?: string;
+  ai_model?: string;
+  ai_call_count?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  ocr_pages?: number;
+  estimated_cost_sek?: number;
+  processing_attempts?: number;
+  processing_started_at?: string | null;
+  processing_finished_at?: string | null;
+  validation_results?: Record<string, unknown>;
+  confidence?: Record<string, unknown>;
+  final_data?: Record<string, unknown>;
+  duplicate_supplier_invoice_id?: string | null;
+  project_id?: string | null;
+  work_order_id?: string | null;
+  property_id?: string | null;
+  vehicle_id?: string | null;
+  cost_center?: string;
   document_id: string | null;
   assigned_approver_id: string | null;
   approved_by: string | null;
@@ -1694,6 +1716,30 @@ export interface SupplierInvoice {
   archived_at: string | null;
   company?: FinanceCompany | null;
   supplier?: FinanceSupplier | null;
+}
+
+export interface OcrUsageLog {
+  id: string;
+  organisation_id: string;
+  company_id: string | null;
+  supplier_invoice_id: string | null;
+  document_id: string | null;
+  document_kind: SupplierInvoiceDocumentKind | 'unknown';
+  ocr_provider: string;
+  ai_model: string;
+  extraction_method: string;
+  ai_call_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  ocr_pages: number;
+  vision_fallback_used: boolean;
+  estimated_cost_sek: number;
+  processing_ms: number;
+  retries: number;
+  status: 'completed' | 'failed' | 'needs_review';
+  error_message: string;
+  created_at: string;
+  company?: FinanceCompany | null;
 }
 
 export interface SupplierInvoiceLine {

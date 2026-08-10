@@ -272,7 +272,26 @@ Status i kod:
 - Planerade leverantörsfakturor kan exporteras som CSV eller Bankgirot-inriktat betalningsunderlag från leverantörsfakturafliken.
 - Leverantörsbetalningsexporten markerar fakturor med export-id och exporttid samt rapporterar saknade betaluppgifter.
 - OCR-status och OCR-data är förberedda i datamodellen.
-- Kvar: faktisk e-postadapter som skickar mailbilagor till ingest-funktionen, riktig AI/OCR-tolkning av dokumentinnehåll och bankens test/certifiering av betalfil innan skarp produktion.
+- Riktig scanner bygger nu vidare på samma flöde: `vihem_supplier_invoices`, `vihem_supplier_invoice_lines`, `vihem_documents`, `vihem-documents` och Edge Function `vihem-process-supplier-invoice-ocr`.
+- Kvitton hanteras i samma tabell med `document_kind = receipt`, så attest, originaldokument, kontering och kostnadslogg återanvänds.
+- Pipelineprioritet:
+  1. direkt PDF-text ur originalfilen utan extern kostnad,
+  2. OCR-adapter vid bild/skannat dokument,
+  3. billig OpenAI-strukturtolkning,
+  4. regelbaserade förslag från tidigare leverantörskontering,
+  5. deterministisk validering och dubblettkontroll,
+  6. vision-fallback endast när confidence/validering kräver det,
+  7. manuell granskning före attest/betalning/bokföring.
+- Admin kan hantera OpenAI/Google Vision under `Ekonomi > AI/OCR`; nycklar sparas krypterat i `vihem_ocr_provider_settings` via Edge Function `vihem-manage-ocr-settings`.
+- Nya driftsecrets:
+  - `VIHEM_OCR_SECRET_KEY` eller `VIHEM_ACCOUNTING_SECRET_KEY` krävs för kryptering av organisationsspecifika API-nycklar.
+  - `OPENAI_API_KEY` eller `VIHEM_OPENAI_API_KEY`
+  - valfritt `GOOGLE_VISION_API_KEY`
+  - valfritt `VIHEM_OCR_AI_MODEL`, default `gpt-5-nano`
+  - valfritt `VIHEM_OCR_VISION_MODEL`, default `gpt-5-mini`
+  - valfritt `VIHEM_OCR_MIN_TEXT_LENGTH`, `VIHEM_OCR_MIN_CONFIDENCE`, `VIHEM_OCR_ENABLE_VISION_FALLBACK`
+- Kostnad loggas per dokument i `vihem_ocr_usage_logs` och visas i ekonomifliken `AI/OCR`.
+- Kvar innan skarp drift: testa Google Vision/OpenAI-nycklar mot riktiga dokument, justera model/priströsklar och bygga eventuell e-postadapter som skickar mailbilagor till ingest-funktionen.
 
 ### Phase 5: Integrationer
 

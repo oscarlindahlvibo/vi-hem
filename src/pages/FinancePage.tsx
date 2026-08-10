@@ -1,16 +1,48 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Building2, CalendarDays, CheckCircle2, CircleDollarSign, CreditCard, FileText, Hash, Landmark, Link2, Mail, Plus, Printer, ReceiptText, RotateCcw, Send, Truck, Upload, Users, WalletCards } from 'lucide-react';
+import { AlertTriangle, Building2, CalendarDays, Camera, CheckCircle2, CircleDollarSign, CreditCard, FileText, Hash, Landmark, Link2, Mail, Plus, Printer, ReceiptText, RotateCcw, Send, Sparkles, Truck, Upload, Users, WalletCards } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { buildInvoicePdfBlob } from '../lib/invoicePdf';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, Select, Textarea } from '../components/ui';
-import type { AccountingAccount, AccountingIntegration, AccountingSyncQueueItem, CustomerProject, DirectDebitMandate, FinanceAuditLog, FinanceAutomationRun, FinanceAutomationSettings, FinanceCompany, FinanceCustomer, FinanceReminderSettings, FinanceSupplier, Invoice, InvoiceEmailOutbox, InvoiceLine, InvoiceNumberSeries, Payment, ProjectInvoiceBasis, RentAdjustment, RentBillingItem, RentBillingRun, SupplierInvoice, SupplierInvoiceLine, Tenancy, VatCode } from '../types';
+import type { AccountingAccount, AccountingIntegration, AccountingSyncQueueItem, CustomerProject, DirectDebitMandate, FinanceAuditLog, FinanceAutomationRun, FinanceAutomationSettings, FinanceCompany, FinanceCustomer, FinanceReminderSettings, FinanceSupplier, Invoice, InvoiceEmailOutbox, InvoiceLine, InvoiceNumberSeries, OcrUsageLog, Payment, ProjectInvoiceBasis, RentAdjustment, RentBillingItem, RentBillingRun, SupplierInvoice, SupplierInvoiceLine, Tenancy, VatCode } from '../types';
 
 interface FinancePageProps {
   onNavigate: (page: string) => void;
 }
 
-type FinanceTab = 'overview' | 'companies' | 'customers' | 'invoices' | 'payments' | 'email' | 'rent' | 'project-basis' | 'suppliers' | 'supplier-invoices' | 'number-series' | 'integrations' | 'audit';
+type FinanceTab = 'overview' | 'companies' | 'customers' | 'invoices' | 'payments' | 'email' | 'rent' | 'project-basis' | 'suppliers' | 'supplier-invoices' | 'number-series' | 'integrations' | 'ocr-usage' | 'audit';
+
+type OcrProviderSettings = {
+  provider: 'google_vision' | 'none';
+  enabled: boolean;
+  has_openai_key: boolean;
+  openai_key_hint: string;
+  openai_key_rotated_at: string | null;
+  has_google_vision_key: boolean;
+  google_vision_key_hint: string;
+  google_vision_key_rotated_at: string | null;
+  ai_model: string;
+  vision_model: string;
+  min_text_length: number;
+  min_confidence: number;
+  enable_vision_fallback: boolean;
+  last_tested_at: string | null;
+  last_test_result: string;
+  last_test_openai?: { ok?: boolean; message?: string } | null;
+  last_test_google_vision?: { ok?: boolean; message?: string } | null;
+};
+
+const emptyOcrSettingsForm = {
+  provider: 'google_vision' as 'google_vision' | 'none',
+  enabled: true,
+  openai_key: '',
+  google_vision_key: '',
+  ai_model: 'gpt-5-nano',
+  vision_model: 'gpt-5-mini',
+  min_text_length: '250',
+  min_confidence: '0.72',
+  enable_vision_fallback: true,
+};
 
 const customerTypeOptions = [
   { value: 'company', label: 'Företag' },
@@ -105,6 +137,7 @@ const emptyInvoiceLineForm = {
 };
 
 const emptySupplierInvoiceForm = {
+  document_kind: 'supplier_invoice',
   company_id: '',
   supplier_id: '',
   supplier_invoice_number: '',
@@ -417,6 +450,10 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   const [reminderSettingsDrafts, setReminderSettingsDrafts] = useState<Record<string, ReminderSettingsDraft>>({});
   const [accountingQueue, setAccountingQueue] = useState<AccountingSyncQueueItem[]>([]);
   const [financeAuditLogs, setFinanceAuditLogs] = useState<FinanceAuditLog[]>([]);
+  const [ocrUsageLogs, setOcrUsageLogs] = useState<OcrUsageLog[]>([]);
+  const [ocrSettings, setOcrSettings] = useState<OcrProviderSettings | null>(null);
+  const [ocrSettingsForm, setOcrSettingsForm] = useState(emptyOcrSettingsForm);
+  const [ocrSettingsMessage, setOcrSettingsMessage] = useState('');
   const [automationRuns, setAutomationRuns] = useState<FinanceAutomationRun[]>([]);
   const [automationSettings, setAutomationSettings] = useState<FinanceAutomationSettings | null>(null);
   const [automationSettingsDraft, setAutomationSettingsDraft] = useState<AutomationSettingsDraft>(defaultAutomationSettingsDraft);
@@ -653,6 +690,28 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   const draftCount = invoices.filter(invoice => invoice.status === 'draft').length;
   const queuedEmailCount = invoiceEmails.filter(email => email.status === 'queued').length;
 
+  const ocrUsageThisMonth = useMemo(() => {
+    const month = new Date().toISOString().slice(0, 7);
+    const rows = ocrUsageLogs.filter(log => log.created_at.slice(0, 7) === month);
+    const documents = new Set(rows.map(log => log.supplier_invoice_id || log.document_id || log.id)).size;
+    const totalCost = rows.reduce((sum, log) => sum + Number(log.estimated_cost_sek || 0), 0);
+    return {
+      documents,
+      pdfText: rows.filter(log => log.extraction_method.includes('pdf_text')).length,
+      ocr: rows.filter(log => log.ocr_provider && !['', 'none'].includes(log.ocr_provider)).length,
+      vision: rows.filter(log => log.vision_fallback_used).length,
+      cost: totalCost,
+      average: documents > 0 ? totalCost / documents : 0,
+    };
+  }, [ocrUsageLogs]);
+
+  const confidenceBadgeClass = (value: unknown) => {
+    const number = Number(value ?? 0);
+    if (number >= 0.85) return 'bg-emerald-50 text-emerald-700';
+    if (number >= 0.6) return 'bg-amber-50 text-amber-700';
+    return 'bg-red-50 text-red-700';
+  };
+
   const paidAmount = useMemo(() => {
     return payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   }, [payments]);
@@ -756,7 +815,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     setLoading(true);
     setError('');
 
-    const [companyResult, customerResult, supplierResult, invoiceResult, paymentResult, invoiceEmailResult, supplierInvoiceResult, integrationResult, accountingAccountsResult, vatCodesResult, reminderSettingsResult, accountingQueueResult, financeAuditResult, automationRunsResult, automationSettingsResult, projectBasisResult, rentRunResult, rentItemResult, rentAdjustmentResult, directDebitMandateResult, tenancyResult, numberSeriesResult] = await Promise.all([
+    const [companyResult, customerResult, supplierResult, invoiceResult, paymentResult, invoiceEmailResult, supplierInvoiceResult, integrationResult, accountingAccountsResult, vatCodesResult, reminderSettingsResult, accountingQueueResult, financeAuditResult, ocrUsageResult, automationRunsResult, automationSettingsResult, projectBasisResult, rentRunResult, rentItemResult, rentAdjustmentResult, directDebitMandateResult, tenancyResult, numberSeriesResult] = await Promise.all([
       supabase
         .from('vihem_companies')
         .select('*')
@@ -825,6 +884,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .order('created_at', { ascending: false })
         .limit(80),
       supabase
+        .from('vihem_ocr_usage_logs')
+        .select('*, company:company_id(*)')
+        .eq('organisation_id', organisationId)
+        .order('created_at', { ascending: false })
+        .limit(250),
+      supabase
         .from('vihem_finance_automation_runs')
         .select('*')
         .or(`organisation_id.eq.${organisationId},organisation_id.is.null`)
@@ -876,7 +941,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .order('created_at', { ascending: true }),
     ]);
 
-    const firstError = companyResult.error ?? customerResult.error ?? supplierResult.error ?? invoiceResult.error ?? paymentResult.error ?? invoiceEmailResult.error ?? supplierInvoiceResult.error ?? integrationResult.error ?? accountingAccountsResult.error ?? vatCodesResult.error ?? reminderSettingsResult.error ?? accountingQueueResult.error ?? financeAuditResult.error ?? automationRunsResult.error ?? automationSettingsResult.error ?? projectBasisResult.error ?? rentRunResult.error ?? rentItemResult.error ?? rentAdjustmentResult.error ?? directDebitMandateResult.error ?? tenancyResult.error ?? numberSeriesResult.error;
+    const firstError = companyResult.error ?? customerResult.error ?? supplierResult.error ?? invoiceResult.error ?? paymentResult.error ?? invoiceEmailResult.error ?? supplierInvoiceResult.error ?? integrationResult.error ?? accountingAccountsResult.error ?? vatCodesResult.error ?? reminderSettingsResult.error ?? accountingQueueResult.error ?? financeAuditResult.error ?? ocrUsageResult.error ?? automationRunsResult.error ?? automationSettingsResult.error ?? projectBasisResult.error ?? rentRunResult.error ?? rentItemResult.error ?? rentAdjustmentResult.error ?? directDebitMandateResult.error ?? tenancyResult.error ?? numberSeriesResult.error;
     if (firstError) {
       setError(firstError.message.includes('schema cache')
         ? 'Databasen saknar ekonomitabellerna ännu. Kör senaste Supabase-migreringarna och ladda om appen.'
@@ -911,6 +976,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       }, {}),
     );
     setAccountingQueue((accountingQueueResult.data ?? []) as AccountingSyncQueueItem[]);
+    setOcrUsageLogs((ocrUsageResult.data ?? []) as OcrUsageLog[]);
     setFinanceAuditLogs((financeAuditResult.data ?? []) as FinanceAuditLog[]);
     setAutomationRuns((automationRunsResult.data ?? []) as FinanceAutomationRun[]);
     const nextAutomationSettings = automationSettingsResult.data as FinanceAutomationSettings | null;
@@ -936,9 +1002,97 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     setLoading(false);
   }, [organisationId]);
 
+  const applyOcrSettings = useCallback((settings: OcrProviderSettings | null) => {
+    setOcrSettings(settings);
+    if (!settings) return;
+    setOcrSettingsForm({
+      provider: settings.provider || 'google_vision',
+      enabled: settings.enabled ?? true,
+      openai_key: '',
+      google_vision_key: '',
+      ai_model: settings.ai_model || 'gpt-5-nano',
+      vision_model: settings.vision_model || 'gpt-5-mini',
+      min_text_length: String(settings.min_text_length ?? 250),
+      min_confidence: String(settings.min_confidence ?? 0.72),
+      enable_vision_fallback: settings.enable_vision_fallback ?? true,
+    });
+  }, []);
+
+  const loadOcrSettings = useCallback(async () => {
+    if (!organisationId || !['admin', 'superadmin'].includes(user?.role || '')) return;
+    const { data, error: settingsError } = await supabase.functions.invoke('vihem-manage-ocr-settings', {
+      body: { action: 'get' },
+    });
+    if (settingsError) {
+      setOcrSettingsMessage(settingsError.message || 'Kunde inte hämta AI/OCR-inställningar.');
+      return;
+    }
+    applyOcrSettings((data?.settings ?? null) as OcrProviderSettings | null);
+  }, [applyOcrSettings, organisationId, user?.role]);
+
   useEffect(() => {
     void loadFinance();
   }, [loadFinance]);
+
+  useEffect(() => {
+    void loadOcrSettings();
+  }, [loadOcrSettings]);
+
+  const saveOcrSettings = async () => {
+    setSaving(true);
+    setOcrSettingsMessage('');
+    const { data, error: settingsError } = await supabase.functions.invoke('vihem-manage-ocr-settings', {
+      body: {
+        action: 'save',
+        provider: ocrSettingsForm.provider,
+        enabled: ocrSettingsForm.enabled,
+        openai_key: ocrSettingsForm.openai_key.trim(),
+        google_vision_key: ocrSettingsForm.google_vision_key.trim(),
+        ai_model: ocrSettingsForm.ai_model.trim(),
+        vision_model: ocrSettingsForm.vision_model.trim(),
+        min_text_length: Number(ocrSettingsForm.min_text_length || 250),
+        min_confidence: Number(ocrSettingsForm.min_confidence || 0.72),
+        enable_vision_fallback: ocrSettingsForm.enable_vision_fallback,
+      },
+    });
+    setSaving(false);
+    if (settingsError) {
+      setOcrSettingsMessage(settingsError.message || 'Kunde inte spara AI/OCR-inställningarna.');
+      return;
+    }
+    applyOcrSettings((data?.settings ?? null) as OcrProviderSettings | null);
+    setOcrSettingsMessage('AI/OCR-kopplingen är sparad.');
+  };
+
+  const testOcrSettings = async () => {
+    setSaving(true);
+    setOcrSettingsMessage('');
+    const { data, error: settingsError } = await supabase.functions.invoke('vihem-manage-ocr-settings', {
+      body: { action: 'test' },
+    });
+    setSaving(false);
+    if (settingsError) {
+      setOcrSettingsMessage(settingsError.message || 'Testet misslyckades.');
+      return;
+    }
+    applyOcrSettings((data?.settings ?? null) as OcrProviderSettings | null);
+    setOcrSettingsMessage(data?.ok ? 'Kopplingen fungerar.' : 'Kopplingen behöver kontrolleras.');
+  };
+
+  const deleteOcrSecret = async (deleteSecretName: 'openai' | 'google_vision') => {
+    setSaving(true);
+    setOcrSettingsMessage('');
+    const { data, error: settingsError } = await supabase.functions.invoke('vihem-manage-ocr-settings', {
+      body: { action: 'delete_secret', delete_secret_name: deleteSecretName },
+    });
+    setSaving(false);
+    if (settingsError) {
+      setOcrSettingsMessage(settingsError.message || 'Kunde inte ta bort nyckeln.');
+      return;
+    }
+    applyOcrSettings((data?.settings ?? null) as OcrProviderSettings | null);
+    setOcrSettingsMessage('Nyckeln är borttagen.');
+  };
 
   const resetCompanyForm = () => setCompanyForm(emptyCompanyForm);
   const resetCustomerForm = () => setCustomerForm({ ...emptyCustomerForm, company_id: companies[0]?.id ?? '' });
@@ -1294,9 +1448,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         document_id: documentRow.id,
         ocr_status: 'queued',
         ocr_data: {
+          ...(supplierInvoice.ocr_data ?? {}),
           file_name: file.name,
           content_type: file.type || 'application/octet-stream',
           storage_path: storagePath,
+          document_kind: supplierInvoice.document_kind || supplierInvoiceForm.document_kind,
           queued_at: new Date().toISOString(),
         },
       })
@@ -1311,10 +1467,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   };
 
   const createSupplierInvoice = async () => {
-    if (!organisationId || !supplierInvoiceForm.company_id || !supplierInvoiceForm.description.trim()) return;
+    if (!organisationId || !supplierInvoiceForm.company_id || (!supplierInvoiceForm.description.trim() && !supplierInvoiceFile)) return;
     setSaving(true);
     setError('');
 
+    const description = supplierInvoiceForm.description.trim()
+      || (supplierInvoiceForm.document_kind === 'receipt' ? 'Skannat kvitto' : 'Skannad leverantörsfaktura');
     const quantity = toNumber(supplierInvoiceForm.quantity, 1);
     const unitPrice = toNumber(supplierInvoiceForm.unit_price, 0);
     const vatRate = toNumber(supplierInvoiceForm.vat_rate, 25);
@@ -1331,6 +1489,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         supplier_invoice_number: supplierInvoiceForm.supplier_invoice_number.trim(),
         invoice_date: supplierInvoiceForm.invoice_date,
         due_date: supplierInvoiceForm.due_date || addDays(supplierInvoiceForm.invoice_date, 30),
+        document_kind: supplierInvoiceForm.document_kind,
         status: 'needs_review',
         approval_status: 'pending',
         subtotal_amount: subtotal,
@@ -1355,7 +1514,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         company_id: supplierInvoiceForm.company_id,
         supplier_invoice_id: supplierInvoice.id,
         line_no: 1,
-        description: supplierInvoiceForm.description.trim(),
+        description,
         quantity,
         unit_price: unitPrice,
         vat_rate: vatRate,
@@ -1407,6 +1566,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     setSelectedSupplierInvoiceLine(null);
     setSupplierInvoiceReviewForm({
       company_id: supplierInvoice.company_id,
+      document_kind: supplierInvoice.document_kind || 'supplier_invoice',
       supplier_id: supplierInvoice.supplier_id ?? '',
       supplier_invoice_number: supplierInvoice.supplier_invoice_number,
       invoice_date: supplierInvoice.invoice_date,
@@ -1737,6 +1897,65 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
     setSaving(false);
     await loadFinance();
+  };
+
+  const processSingleSupplierInvoiceOcr = async (supplierInvoiceId: string, forceVision = false) => {
+    setSaving(true);
+    setError('');
+
+    const { data, error: ocrError } = await supabase.functions.invoke('vihem-process-supplier-invoice-ocr', {
+      body: { supplier_invoice_id: supplierInvoiceId, force_vision: forceVision },
+    });
+
+    if (ocrError || data?.error) {
+      setError(data?.error || ocrError?.message || 'Kunde inte tolka dokumentet.');
+      setSaving(false);
+      return;
+    }
+
+    const refreshed = await refreshSupplierInvoice(supplierInvoiceId);
+    if (refreshed) await openSupplierInvoiceDetail(refreshed);
+    setSaving(false);
+    await loadFinance();
+  };
+
+  const applySupplierInvoiceOcrSuggestion = () => {
+    if (!selectedSupplierInvoice) return;
+    const extracted = selectedSupplierInvoice.ocr_data?.extracted as Record<string, unknown> | undefined;
+    if (!extracted) return;
+    setSupplierInvoiceReviewForm(prev => ({
+      ...prev,
+      company_id: String(extracted.suggested_company_id || prev.company_id || selectedSupplierInvoice.company_id),
+      supplier_invoice_number: String(extracted.invoice_number || extracted.receipt_number || prev.supplier_invoice_number),
+      invoice_date: String(extracted.invoice_date || prev.invoice_date),
+      due_date: String(extracted.due_date || prev.due_date),
+      notes: [
+        prev.notes,
+        String(extracted.payment_method || '') ? `Betalsätt: ${String(extracted.payment_method)}` : '',
+        String(extracted.ocr_reference || '') ? `OCR: ${String(extracted.ocr_reference)}` : '',
+      ].filter(Boolean).join('\n'),
+    }));
+    const accountCode = String(extracted.suggested_account_code || '');
+    if (accountCode) {
+      setSupplierInvoiceLineForm(prev => ({ ...prev, account_code: accountCode }));
+    }
+  };
+
+  const openSupplierInvoiceOriginal = async () => {
+    if (!selectedSupplierInvoice) return;
+    const storagePath = String(selectedSupplierInvoice.ocr_data?.storage_path || selectedSupplierInvoice.ocr_data?.source_storage_path || '');
+    if (!storagePath) {
+      setError('Originalfilens sökväg saknas på dokumentet.');
+      return;
+    }
+    const { data, error: signedUrlError } = await supabase.storage
+      .from('vihem-documents')
+      .createSignedUrl(storagePath, 60 * 10);
+    if (signedUrlError || !data?.signedUrl) {
+      setError(signedUrlError?.message || 'Kunde inte öppna originaldokumentet.');
+      return;
+    }
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
   };
 
   const openIntegrationConfig = (
@@ -3139,6 +3358,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     { key: 'supplier-invoices', label: 'Leverantörsfakturor' },
     { key: 'number-series', label: 'Nummerserier' },
     { key: 'integrations', label: 'Bokföring' },
+    { key: 'ocr-usage', label: 'AI/OCR' },
     { key: 'audit', label: 'Logg' },
   ];
 
@@ -3949,12 +4169,24 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
             <div className="flex flex-wrap gap-2">
               <Button
                 variant="secondary"
+                onClick={() => {
+                  resetSupplierInvoiceForm();
+                  setSupplierInvoiceForm(prev => ({ ...prev, document_kind: 'receipt' }));
+                  setSupplierInvoiceModalOpen(true);
+                }}
+                disabled={companies.length === 0}
+              >
+                <Camera className="h-4 w-4" />
+                Scanna kvitto
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={processSupplierInvoiceOcrQueue}
                 loading={saving}
                 disabled={!supplierInvoices.some(invoice => invoice.ocr_status === 'queued' && invoice.document_id)}
               >
-                <FileText className="h-4 w-4" />
-                Behandla OCR-kö ({supplierInvoices.filter(invoice => invoice.ocr_status === 'queued' && invoice.document_id).length})
+                <Sparkles className="h-4 w-4" />
+                Tolka kö ({supplierInvoices.filter(invoice => invoice.ocr_status === 'queued' && invoice.document_id).length})
               </Button>
               <Button
                 variant="secondary"
@@ -3988,7 +4220,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               {supplierInvoices.map(invoice => (
                 <div key={invoice.id} className="grid gap-3 p-4 lg:grid-cols-[1.1fr_1fr_0.7fr_0.8fr_auto_auto_auto_auto_auto] lg:items-center">
                   <div>
-                    <h3 className="font-bold text-slate-950">{invoice.supplier?.name || 'Leverantör saknas'}</h3>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-bold text-slate-950">{invoice.supplier?.name || 'Leverantör saknas'}</h3>
+                      <Badge className={invoice.document_kind === 'receipt' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'}>
+                        {invoice.document_kind === 'receipt' ? 'Kvitto' : 'Faktura'}
+                      </Badge>
+                    </div>
                     <p className="text-sm text-slate-500">{invoice.supplier_invoice_number || 'Fakturanummer saknas'}</p>
                   </div>
                   <p className="text-sm text-slate-600">{invoice.company?.name || 'Bolag saknas'}</p>
@@ -4004,9 +4241,17 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                     {invoice.document_id && <Badge className="bg-blue-50 text-blue-700">Bilaga</Badge>}
                     {invoice.payment_exported_at && <Badge className="bg-emerald-50 text-emerald-700">Exporterad</Badge>}
                     {invoice.ocr_status !== 'not_started' && (
-                      <Badge className="bg-purple-50 text-purple-700">
+                      <Badge className={
+                        invoice.ocr_status === 'failed' ? 'bg-red-50 text-red-700' :
+                          invoice.ocr_status === 'needs_review' ? 'bg-amber-50 text-amber-700' :
+                            'bg-purple-50 text-purple-700'
+                      }>
                         OCR {invoice.ocr_status === 'queued' ? 'köad' : invoice.ocr_status}
                       </Badge>
+                    )}
+                    {invoice.duplicate_supplier_invoice_id && <Badge className="bg-red-50 text-red-700">Möjlig dubblett</Badge>}
+                    {Array.isArray(invoice.validation_results?.errors) && invoice.validation_results.errors.length > 0 && (
+                      <Badge className="bg-red-50 text-red-700">Valideringsfel</Badge>
                     )}
                   </div>
                   <Button variant="secondary" size="sm" onClick={() => openSupplierInvoiceDetail(invoice)}>
@@ -4559,6 +4804,182 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         </div>
       )}
 
+      {activeTab === 'ocr-usage' && (
+        <div className="grid gap-4">
+          {['admin', 'superadmin'].includes(user?.role || '') && (
+            <Card className="p-5">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-950">AI/OCR-kopplingar</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Lägg in OpenAI och Google Vision per organisation. Nycklarna sparas krypterat i backend och visas aldrig i appen.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Badge className={ocrSettings?.has_openai_key ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
+                      OpenAI {ocrSettings?.has_openai_key ? `aktiv ${ocrSettings.openai_key_hint ? `(${ocrSettings.openai_key_hint})` : ''}` : 'saknas'}
+                    </Badge>
+                    <Badge className={ocrSettings?.has_google_vision_key ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
+                      Google Vision {ocrSettings?.has_google_vision_key ? `aktiv ${ocrSettings.google_vision_key_hint ? `(${ocrSettings.google_vision_key_hint})` : ''}` : 'saknas'}
+                    </Badge>
+                    <Badge className={ocrSettingsForm.enabled ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-600'}>
+                      {ocrSettingsForm.enabled ? 'Extern tolkning på' : 'Extern tolkning av'}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" onClick={testOcrSettings} loading={saving}>Testa koppling</Button>
+                  <Button onClick={saveOcrSettings} loading={saving}>Spara koppling</Button>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <Select
+                  label="OCR-provider"
+                  value={ocrSettingsForm.provider}
+                  options={[
+                    { value: 'google_vision', label: 'Google Vision' },
+                    { value: 'none', label: 'Ingen extern OCR' },
+                  ]}
+                  onChange={e => setOcrSettingsForm(prev => ({ ...prev, provider: e.target.value as 'google_vision' | 'none' }))}
+                />
+                <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={ocrSettingsForm.enabled}
+                    onChange={e => setOcrSettingsForm(prev => ({ ...prev, enabled: e.target.checked }))}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  />
+                  Tillåt extern OCR/AI för dokumenttolkning
+                </label>
+                <Input
+                  label="OpenAI API-nyckel"
+                  type="password"
+                  value={ocrSettingsForm.openai_key}
+                  placeholder={ocrSettings?.has_openai_key ? 'Nyckel finns sparad. Fyll bara i om den ska bytas.' : 'sk-...'}
+                  onChange={e => setOcrSettingsForm(prev => ({ ...prev, openai_key: e.target.value }))}
+                />
+                <Input
+                  label="Google Vision API-nyckel"
+                  type="password"
+                  value={ocrSettingsForm.google_vision_key}
+                  placeholder={ocrSettings?.has_google_vision_key ? 'Nyckel finns sparad. Fyll bara i om den ska bytas.' : 'AIza...'}
+                  onChange={e => setOcrSettingsForm(prev => ({ ...prev, google_vision_key: e.target.value }))}
+                />
+                <Input
+                  label="Billig AI-modell"
+                  value={ocrSettingsForm.ai_model}
+                  onChange={e => setOcrSettingsForm(prev => ({ ...prev, ai_model: e.target.value }))}
+                />
+                <Input
+                  label="Vision fallback-modell"
+                  value={ocrSettingsForm.vision_model}
+                  onChange={e => setOcrSettingsForm(prev => ({ ...prev, vision_model: e.target.value }))}
+                />
+                <Input
+                  label="Minsta PDF-text innan OCR"
+                  type="number"
+                  value={ocrSettingsForm.min_text_length}
+                  onChange={e => setOcrSettingsForm(prev => ({ ...prev, min_text_length: e.target.value }))}
+                />
+                <Input
+                  label="Minsta confidence före fallback"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="1"
+                  value={ocrSettingsForm.min_confidence}
+                  onChange={e => setOcrSettingsForm(prev => ({ ...prev, min_confidence: e.target.value }))}
+                />
+              </div>
+
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <label className="flex items-center gap-3 text-sm font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={ocrSettingsForm.enable_vision_fallback}
+                    onChange={e => setOcrSettingsForm(prev => ({ ...prev, enable_vision_fallback: e.target.checked }))}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  />
+                  Använd dyrare visionmodell bara när billig pipeline inte räcker
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => deleteOcrSecret('openai')} disabled={!ocrSettings?.has_openai_key || saving}>Ta bort OpenAI-nyckel</Button>
+                  <Button variant="secondary" size="sm" onClick={() => deleteOcrSecret('google_vision')} disabled={!ocrSettings?.has_google_vision_key || saving}>Ta bort Google-nyckel</Button>
+                </div>
+              </div>
+
+              {(ocrSettingsMessage || ocrSettings?.last_tested_at) && (
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                  {ocrSettingsMessage && <p className="font-semibold">{ocrSettingsMessage}</p>}
+                  {ocrSettings?.last_tested_at && (
+                    <div className="mt-2 grid gap-1">
+                      <p>Senast testad: {new Date(ocrSettings.last_tested_at).toLocaleString('sv-SE')}</p>
+                      {ocrSettings.last_test_openai?.message && <p>OpenAI: {ocrSettings.last_test_openai.message}</p>}
+                      {ocrSettings.last_test_google_vision?.message && <p>Google Vision: {ocrSettings.last_test_google_vision.message}</p>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          )}
+
+          <Card className="p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-950">AI/OCR-användning</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Kostnadslogg för kvitto- och leverantörsfakturascannern. Målet är att låta gratis PDF-text och billig AI göra jobbet innan dyrare vision används.
+                </p>
+              </div>
+              <Badge className={ocrUsageThisMonth.average <= 0.05 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
+                {ocrUsageThisMonth.average.toFixed(3)} kr/dokument
+              </Badge>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+              <MetricCard icon={<FileText className="h-5 w-5" />} label="Dokument" value={ocrUsageThisMonth.documents.toString()} />
+              <MetricCard icon={<FileText className="h-5 w-5" />} label="PDF direktlästa" value={ocrUsageThisMonth.pdfText.toString()} />
+              <MetricCard icon={<Camera className="h-5 w-5" />} label="OCR" value={ocrUsageThisMonth.ocr.toString()} />
+              <MetricCard icon={<Sparkles className="h-5 w-5" />} label="Vision fallback" value={ocrUsageThisMonth.vision.toString()} />
+              <MetricCard icon={<CircleDollarSign className="h-5 w-5" />} label="Total API-kostnad" value={`${ocrUsageThisMonth.cost.toFixed(2)} kr`} />
+              <MetricCard icon={<Hash className="h-5 w-5" />} label="Anrop" value={ocrUsageLogs.reduce((sum, log) => sum + Number(log.ai_call_count || 0), 0).toString()} />
+            </div>
+          </Card>
+
+          <Card className="overflow-hidden">
+            <div className="border-b border-slate-100 p-4">
+              <h3 className="font-bold text-slate-950">Senaste OCR-körningar</h3>
+              <p className="text-sm text-slate-500">Visar provider, modell, tokens, retries och uppskattad kostnad per dokument.</p>
+            </div>
+            {ocrUsageLogs.length === 0 ? (
+              <EmptyState title="Ingen OCR-användning loggad ännu" description="När du tolkar fakturor eller kvitton visas kostnader och pipelineval här." />
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {ocrUsageLogs.slice(0, 40).map(log => (
+                  <div key={log.id} className="grid gap-3 p-4 text-sm lg:grid-cols-[0.8fr_1fr_1fr_0.7fr_0.8fr_0.7fr_0.7fr] lg:items-center">
+                    <div>
+                      <p className="font-semibold text-slate-900">{log.document_kind === 'receipt' ? 'Kvitto' : 'Leverantörsfaktura'}</p>
+                      <p className="text-xs text-slate-500">{new Date(log.created_at).toLocaleString('sv-SE')}</p>
+                    </div>
+                    <p className="text-slate-600">{log.company?.name || 'Bolag saknas'}</p>
+                    <p className="text-slate-600">{log.extraction_method || '-'}</p>
+                    <p className="text-slate-600">{log.ocr_provider || '-'}</p>
+                    <p className="text-slate-600">{log.ai_model || '-'}</p>
+                    <p className="text-slate-600">{Number(log.input_tokens || 0) + Number(log.output_tokens || 0)} tokens</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge className={log.status === 'failed' ? 'bg-red-50 text-red-700' : log.vision_fallback_used ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}>
+                        {log.status === 'failed' ? 'Fel' : log.vision_fallback_used ? 'Vision' : 'OK'}
+                      </Badge>
+                      <span className="font-semibold text-slate-900">{Number(log.estimated_cost_sek || 0).toFixed(4)} kr</span>
+                    </div>
+                    {log.error_message && <p className="lg:col-span-7 text-sm text-red-600">{log.error_message}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
       {activeTab === 'audit' && (
         <Card className="overflow-hidden">
           <div className="flex flex-col gap-2 border-b border-slate-100 p-5 sm:flex-row sm:items-start sm:justify-between">
@@ -5017,6 +5438,15 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
       <Modal open={supplierInvoiceModalOpen} onClose={() => setSupplierInvoiceModalOpen(false)} title="Ny leverantörsfaktura" size="lg">
         <div className="grid gap-4 md:grid-cols-2">
+          <Select
+            label="Dokumenttyp"
+            value={supplierInvoiceForm.document_kind}
+            options={[
+              { value: 'supplier_invoice', label: 'Leverantörsfaktura' },
+              { value: 'receipt', label: 'Kvitto' },
+            ]}
+            onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, document_kind: e.target.value as 'supplier_invoice' | 'receipt' }))}
+          />
           <Select label="Bolag" value={supplierInvoiceForm.company_id} options={companyOptions} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, company_id: e.target.value, supplier_id: '', vat_code: '', account_code: '' }))} />
           <Select label="Leverantör" value={supplierInvoiceForm.supplier_id} options={supplierOptions} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, supplier_id: e.target.value }))} />
           <Input label="Leverantörens fakturanummer" value={supplierInvoiceForm.supplier_invoice_number} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, supplier_invoice_number: e.target.value }))} />
@@ -5048,10 +5478,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           <Input label="Moms %" inputMode="decimal" value={supplierInvoiceForm.vat_rate} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, vat_rate: e.target.value }))} />
           <Textarea label="Intern anteckning" value={supplierInvoiceForm.notes} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, notes: e.target.value }))} />
           <label className="block text-sm font-semibold text-slate-700 md:col-span-2">
-            Fakturafil
+            {supplierInvoiceForm.document_kind === 'receipt' ? 'Kvittofil eller kamerabild' : 'Fakturafil'}
             <input
               type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/*"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/*"
+              capture={supplierInvoiceForm.document_kind === 'receipt' ? 'environment' : undefined}
               onChange={e => setSupplierInvoiceFile(e.target.files?.[0] ?? null)}
               className="mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-blue-700"
             />
@@ -5067,9 +5498,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           <Button
             onClick={createSupplierInvoice}
             loading={saving}
-            disabled={!supplierInvoiceForm.company_id || !supplierInvoiceForm.description.trim()}
+            disabled={!supplierInvoiceForm.company_id || (!supplierInvoiceForm.description.trim() && !supplierInvoiceFile)}
           >
-            Skapa för attest
+            Skapa för tolkning/attest
           </Button>
         </div>
       </Modal>
@@ -5298,23 +5729,92 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                       {String(selectedSupplierInvoice.ocr_data?.extraction_note || 'Kontrollera uppgifterna mot bilagan innan attest.')}
                     </p>
                   </div>
-                  <Badge className="bg-purple-50 text-purple-700">
-                    {selectedSupplierInvoice.ocr_status === 'queued' ? 'Köad' : selectedSupplierInvoice.ocr_status === 'needs_review' ? 'Behöver granskas' : selectedSupplierInvoice.ocr_status}
-                  </Badge>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Badge className={
+                      selectedSupplierInvoice.validation_results?.severity === 'red' ? 'bg-red-50 text-red-700' :
+                        selectedSupplierInvoice.validation_results?.severity === 'yellow' ? 'bg-amber-50 text-amber-700' :
+                          'bg-emerald-50 text-emerald-700'
+                    }>
+                      {selectedSupplierInvoice.validation_results?.severity === 'red' ? 'Kontroll krävs' :
+                        selectedSupplierInvoice.validation_results?.severity === 'yellow' ? 'Kontrollera' : 'Stämmer'}
+                    </Badge>
+                    <Badge className="bg-purple-50 text-purple-700">
+                      {selectedSupplierInvoice.ocr_status === 'queued' ? 'Köad' : selectedSupplierInvoice.ocr_status === 'needs_review' ? 'Behöver granskas' : selectedSupplierInvoice.ocr_status}
+                    </Badge>
+                  </div>
                 </div>
-                <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+                <div className="mt-4 grid gap-3 text-sm md:grid-cols-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fil</p>
                     <p className="mt-1 font-semibold text-slate-900">{String(selectedSupplierInvoice.ocr_data?.source_file_name || selectedSupplierInvoice.ocr_data?.file_name || 'Saknas')}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Föreslaget datum</p>
-                    <p className="mt-1 font-semibold text-slate-900">{String(selectedSupplierInvoice.ocr_data?.suggested_invoice_date || '-')}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Metod</p>
+                    <p className="mt-1 font-semibold text-slate-900">{String(selectedSupplierInvoice.ocr_data?.extraction_method || selectedSupplierInvoice.ocr_provider || '-')}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Föreslaget fakturanr</p>
-                    <p className="mt-1 font-semibold text-slate-900">{String(selectedSupplierInvoice.ocr_data?.suggested_supplier_invoice_number || '-')}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">AI-modell</p>
+                    <p className="mt-1 font-semibold text-slate-900">{selectedSupplierInvoice.ai_model || '-'}</p>
                   </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Kostnad</p>
+                    <p className="mt-1 font-semibold text-slate-900">{Number(selectedSupplierInvoice.estimated_cost_sek || 0).toFixed(4)} kr</p>
+                  </div>
+                </div>
+                {Array.isArray(selectedSupplierInvoice.validation_results?.errors) && selectedSupplierInvoice.validation_results.errors.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    <p className="font-bold">Valideringsfel</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-5">
+                      {selectedSupplierInvoice.validation_results.errors.map((item, index) => (
+                        <li key={index}>{String(item)}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {Array.isArray(selectedSupplierInvoice.validation_results?.warnings) && selectedSupplierInvoice.validation_results.warnings.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    <p className="font-bold">Behöver kontrolleras</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-5">
+                      {selectedSupplierInvoice.validation_results.warnings.map((item, index) => (
+                        <li key={index}>{String(item)}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {selectedSupplierInvoice.duplicate_supplier_invoice_id && (
+                  <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
+                    <AlertTriangle className="h-4 w-4" />
+                    Möjlig dubblett hittad. Kontrollera innan attest.
+                  </div>
+                )}
+                {selectedSupplierInvoice.confidence && Object.keys(selectedSupplierInvoice.confidence).length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Säkerhet per fält</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {Object.entries(selectedSupplierInvoice.confidence).map(([field, value]) => (
+                        <Badge key={field} className={confidenceBadgeClass(value)}>
+                          {field}: {Math.round(Number(value || 0) * 100)}%
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button variant="secondary" size="sm" onClick={openSupplierInvoiceOriginal}>
+                    <FileText className="h-4 w-4" />
+                    Öppna original
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={applySupplierInvoiceOcrSuggestion}>
+                    Använd förslag
+                  </Button>
+                  <Button variant="secondary" size="sm" loading={saving} onClick={() => processSingleSupplierInvoiceOcr(selectedSupplierInvoice.id)}>
+                    <RotateCcw className="h-4 w-4" />
+                    Kör om tolkning
+                  </Button>
+                  <Button variant="secondary" size="sm" loading={saving} onClick={() => processSingleSupplierInvoiceOcr(selectedSupplierInvoice.id, true)}>
+                    <Sparkles className="h-4 w-4" />
+                    Kör vision-fallback
+                  </Button>
                 </div>
               </Card>
             )}
