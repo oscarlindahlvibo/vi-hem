@@ -302,7 +302,7 @@ async function processInvoice(serviceClient: any, invoice: any, options: { force
     let confidence = normalizeConfidence(data.confidence, validation);
 
     const shouldUseVision = options.settings.enabled && options.settings.enableVisionFallback && !options.forceVision
-      && (validation.severity === "red" || averageConfidence(confidence) < options.settings.minConfidence);
+      && (validation.severity === "red" || relevantAverageConfidence(confidence, data, invoice.document_kind || "supplier_invoice") < options.settings.minConfidence);
 
     if (shouldUseVision) {
       const vision = await structureWithAi(text, context, invoice.document_kind || "supplier_invoice", true, {
@@ -1047,6 +1047,18 @@ function normalizeConfidence(confidence: Record<string, unknown> | undefined, va
 function averageConfidence(confidence: Record<string, number>) {
   const values = Object.values(confidence).filter(value => Number.isFinite(value));
   if (!values.length) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function relevantAverageConfidence(confidence: Record<string, number>, data: ExtractedDocument, documentKind: string) {
+  const documentType = data.document_type || documentKind;
+  const keys = documentType === "receipt"
+    ? ["supplier", "company", "gross_amount", "vat_amount", "invoice_date", "payment_reference", "validation"]
+    : ["supplier", "company", "gross_amount", "vat_amount", "invoice_date", "due_date", "invoice_number", "payment_reference", "bankgiro", "validation"];
+  const values = keys
+    .map(key => confidence[key])
+    .filter(value => Number.isFinite(value));
+  if (!values.length) return averageConfidence(confidence);
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 

@@ -678,6 +678,17 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     return 'bg-red-50 text-red-700';
   };
 
+  const visibleOcrWarnings = (warnings: unknown[] | undefined) => {
+    return (warnings || []).filter(item => !String(item).toLowerCase().includes('temperature'));
+  };
+
+  const visibleConfidenceEntries = (invoice: SupplierInvoice) => {
+    const entries = Object.entries(invoice.confidence || {});
+    if (invoice.document_kind !== 'receipt') return entries;
+    const hiddenReceiptFields = new Set(['bankgiro', 'due_date', 'invoice_number']);
+    return entries.filter(([field]) => !hiddenReceiptFields.has(field));
+  };
+
   const paidAmount = useMemo(() => {
     return payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   }, [payments]);
@@ -5573,11 +5584,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                     <p className="mt-1">{String(selectedSupplierInvoice.ocr_data.error)}</p>
                   </div>
                 )}
-                {Array.isArray(selectedSupplierInvoice.validation_results?.warnings) && selectedSupplierInvoice.validation_results.warnings.length > 0 && (
+                {Array.isArray(selectedSupplierInvoice.validation_results?.warnings) && visibleOcrWarnings(selectedSupplierInvoice.validation_results.warnings).length > 0 && (
                   <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                     <p className="font-bold">Behöver kontrolleras</p>
                     <ul className="mt-1 list-disc space-y-1 pl-5">
-                      {selectedSupplierInvoice.validation_results.warnings.map((item, index) => (
+                      {visibleOcrWarnings(selectedSupplierInvoice.validation_results.warnings).map((item, index) => (
                         <li key={index}>{String(item)}</li>
                       ))}
                     </ul>
@@ -5589,11 +5600,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                     Möjlig dubblett hittad. Kontrollera innan attest.
                   </div>
                 )}
-                {selectedSupplierInvoice.confidence && Object.keys(selectedSupplierInvoice.confidence).length > 0 && (
+                {selectedSupplierInvoice.confidence && visibleConfidenceEntries(selectedSupplierInvoice).length > 0 && (
                   <div className="mt-4">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Säkerhet per fält</p>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      {Object.entries(selectedSupplierInvoice.confidence).map(([field, value]) => (
+                      {visibleConfidenceEntries(selectedSupplierInvoice).map(([field, value]) => (
                         <Badge key={field} className={confidenceBadgeClass(value)}>
                           {field}: {Math.round(Number(value || 0) * 100)}%
                         </Badge>
