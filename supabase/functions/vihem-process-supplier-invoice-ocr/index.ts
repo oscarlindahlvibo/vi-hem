@@ -65,6 +65,16 @@ type Usage = {
   retries: number;
 };
 
+type AiExtractionResult = {
+  data: ExtractedDocument;
+  model: string;
+  aiCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCostSek: number;
+  warning?: string;
+};
+
 type OcrRuntimeSettings = {
   enabled: boolean;
   provider: string;
@@ -255,14 +265,21 @@ async function processInvoice(serviceClient: any, invoice: any, options: { force
       usage.extraction_method = "pdf_text";
     }
 
+    let ocrWarning = "";
     if (options.settings.enabled && (!text || text.length < options.settings.minTextLength) && !options.forceVision) {
       await updateInvoiceStatus(serviceClient, invoice.id, "ocr_processing");
-      const ocr = await runOcrAdapter(bytes, contentType, fileName, options.settings);
-      text = ocr.text || text;
-      usage.ocr_provider = ocr.provider;
-      usage.ocr_pages = ocr.pages;
-      usage.estimated_cost_sek += ocr.estimatedCostSek;
-      usage.extraction_method = usage.extraction_method === "pdf_text" ? "pdf_text_plus_ocr" : "ocr";
+      try {
+        const ocr = await runOcrAdapter(bytes, contentType, fileName, options.settings);
+        text = ocr.text || text;
+        usage.ocr_provider = ocr.provider;
+        usage.ocr_pages = ocr.pages;
+        usage.estimated_cost_sek += ocr.estimatedCostSek;
+        usage.extraction_method = usage.extraction_method === "pdf_text" ? "pdf_text_plus_ocr" : "ocr";
+      } catch (error) {
+        ocrWarning = error instanceof Error ? error.message : "OCR misslyckades.";
+        usage.ocr_provider = `${options.settings.provider || "ocr"}_failed`;
+        usage.extraction_method = usage.extraction_method === "pdf_text" ? "pdf_text_plus_ocr_failed" : "ocr_failed";
+      }
     }
 
     if (!text || text.trim().length < 20) {
@@ -282,7 +299,7 @@ async function processInvoice(serviceClient: any, invoice: any, options: { force
     let data = extracted.data;
     data = applyContextSuggestions(data, context);
     let validation = await validateExtraction(serviceClient, invoice, data, context);
-    const confidence = normalizeConfidence(data.confidence, validation);
+    let confidence = normalizeConfidence(data.confidence, validation);
 
     const shouldUseVision = options.settings.enabled && options.settings.enableVisionFallback && !options.forceVision
       && (validation.severity === "red" || averageConfidence(confidence) < options.settings.minConfidence);
@@ -301,6 +318,27 @@ async function processInvoice(serviceClient: any, invoice: any, options: { force
       usage.estimated_cost_sek += vision.estimatedCostSek;
       data = applyContextSuggestions(vision.data, context);
       validation = await validateExtraction(serviceClient, invoice, data, context);
+      confidence = normalizeConfidence(data.confidence, validation);
+      if (vision.warning) {
+        validation = {
+          ...validation,
+          warnings: [...(validation.warnings || []), `Vision: ${vision.warning}`],
+          severity: validation.severity === "green" ? "yellow" : validation.severity,
+        };
+      }
+    }
+
+    const processingWarnings = [
+      ocrWarning ? `OCR: ${ocrWarning}` : "",
+      extracted.warning ? `AI: ${extracted.warning}` : "",
+    ].filter(Boolean);
+    if (processingWarnings.length) {
+      validation = {
+        ...validation,
+        warnings: [...(validation.warnings || []), ...processingWarnings],
+        severity: validation.severity === "green" ? "yellow" : validation.severity,
+      };
+      confidence = normalizeConfidence(data.confidence, validation);
     }
 
     await persistExtraction(serviceClient, invoice, data, validation, confidence, text, usage, options.actorId);
@@ -379,7 +417,7 @@ async function structureWithAi(
   useVision: boolean,
   original?: { base64: string; contentType: string; fileName: string },
   settings?: OcrRuntimeSettings,
-) {
+): Promise<AiExtractionResult> {
   const openAiKey = settings?.enabled === false ? "" : settings?.openaiKey || Deno.env.get("OPENAI_API_KEY") || Deno.env.get("VIHEM_OPENAI_API_KEY") || "";
   if (!openAiKey) {
     return {
@@ -393,6 +431,7 @@ async function structureWithAi(
   }
 
   const model = useVision ? (settings?.visionModel || "gpt-5-mini") : (settings?.aiModel || "gpt-5-nano");
+  const fallbackModel = useVision ? "gpt-4o-mini" : "gpt-4o-mini";
   const messages: any[] = [
     {
       role: "system",
@@ -414,6 +453,45 @@ async function structureWithAi(
     };
   }
 
+  const firstAttempt = await callOpenAiChat(openAiKey, model, messages);
+  const payload = firstAttempt.ok
+    ? firstAttempt.payload
+    : await callOpenAiChat(openAiKey, fallbackModel, messages).then(result => {
+      if (result.ok) return { ...result.payload, __vihem_model: fallbackModel, __vihem_warning: firstAttempt.error };
+      return null;
+    });
+
+  if (!payload) {
+    return {
+      data: regexExtraction(text, documentKind),
+      model: "local-regex",
+      aiCalls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostSek: 0,
+      warning: firstAttempt.error || "OpenAI-tolkningen misslyckades. Lokal enkel tolkning användes.",
+    };
+  }
+
+  const raw = payload?.choices?.[0]?.message?.content || "{}";
+  const data = safeJsonParse(raw) as ExtractedDocument;
+  const apiUsage = payload?.usage || {};
+  const inputTokens = Number(apiUsage.prompt_tokens || apiUsage.input_tokens || 0);
+  const outputTokens = Number(apiUsage.completion_tokens || apiUsage.output_tokens || 0);
+  const usedModel = payload.__vihem_model || model;
+
+  return {
+    data,
+    model: usedModel,
+    aiCalls: 1,
+    inputTokens,
+    outputTokens,
+    estimatedCostSek: estimateOpenAiCostSek(usedModel, inputTokens, outputTokens),
+    warning: payload.__vihem_warning ? `Första modellen (${model}) misslyckades: ${payload.__vihem_warning}` : undefined,
+  };
+}
+
+async function callOpenAiChat(openAiKey: string, model: string, messages: any[]) {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -436,21 +514,8 @@ async function structureWithAi(
   });
 
   const payload = await res.json();
-  if (!res.ok) throw new Error(payload?.error?.message || "OpenAI-tolkningen misslyckades.");
-  const raw = payload?.choices?.[0]?.message?.content || "{}";
-  const data = safeJsonParse(raw) as ExtractedDocument;
-  const usage = payload?.usage || {};
-  const inputTokens = Number(usage.prompt_tokens || usage.input_tokens || 0);
-  const outputTokens = Number(usage.completion_tokens || usage.output_tokens || 0);
-
-  return {
-    data,
-    model,
-    aiCalls: 1,
-    inputTokens,
-    outputTokens,
-    estimatedCostSek: estimateOpenAiCostSek(model, inputTokens, outputTokens),
-  };
+  if (!res.ok) return { ok: false, error: payload?.error?.message || `OpenAI svarade ${res.status}.`, payload: null };
+  return { ok: true, error: "", payload };
 }
 
 async function loadBusinessContext(serviceClient: any, invoice: any) {

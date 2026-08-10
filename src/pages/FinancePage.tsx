@@ -1791,6 +1791,13 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       return;
     }
 
+    const failedResult = Array.isArray(data?.results)
+      ? data.results.find((result: { status?: string }) => result.status === 'failed')
+      : null;
+    if (failedResult?.error) {
+      setError(String(failedResult.error));
+    }
+
     const refreshed = await refreshSupplierInvoice(supplierInvoiceId);
     if (refreshed) await openSupplierInvoiceDetail(refreshed);
     setSaving(false);
@@ -4090,10 +4097,10 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 variant="secondary"
                 onClick={processSupplierInvoiceOcrQueue}
                 loading={saving}
-                disabled={!supplierInvoices.some(invoice => invoice.ocr_status === 'queued' && invoice.document_id)}
+                disabled={!supplierInvoices.some(invoice => ['queued', 'uploaded', 'failed'].includes(invoice.ocr_status) && invoice.document_id)}
               >
                 <Sparkles className="h-4 w-4" />
-                Tolka kö ({supplierInvoices.filter(invoice => invoice.ocr_status === 'queued' && invoice.document_id).length})
+                Tolka kö ({supplierInvoices.filter(invoice => ['queued', 'uploaded', 'failed'].includes(invoice.ocr_status) && invoice.document_id).length})
               </Button>
               <Button
                 variant="secondary"
@@ -5558,6 +5565,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                         <li key={index}>{String(item)}</li>
                       ))}
                     </ul>
+                  </div>
+                )}
+                {selectedSupplierInvoice.ocr_status === 'failed' && selectedSupplierInvoice.ocr_data?.error && (
+                  <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    <p className="font-bold">Tolkningen misslyckades</p>
+                    <p className="mt-1">{String(selectedSupplierInvoice.ocr_data.error)}</p>
                   </div>
                 )}
                 {Array.isArray(selectedSupplierInvoice.validation_results?.warnings) && selectedSupplierInvoice.validation_results.warnings.length > 0 && (
