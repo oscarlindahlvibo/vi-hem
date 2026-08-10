@@ -21,6 +21,8 @@ type IngestBody = {
   file_name?: string;
   content_type?: string;
   file_base64?: string;
+  document_kind?: "supplier_invoice" | "receipt";
+  source?: string;
 };
 
 Deno.serve(async (req: Request) => {
@@ -33,6 +35,7 @@ Deno.serve(async (req: Request) => {
     const serviceClient = createClient(supabaseUrl, serviceKey);
     const body = (await req.json().catch(() => ({}))) as IngestBody;
     const companyId = body.company_id || "";
+    const isStaffScanner = body.source === "staff_scanner";
     if (!companyId) return json({ error: "company_id saknas." }, 400);
 
     const { data: company, error: companyError } = await serviceClient
@@ -68,7 +71,10 @@ Deno.serve(async (req: Request) => {
       if (profile.role !== "superadmin" && profile.organisation_id !== company.organisation_id) {
         return json({ error: "Saknar behörighet för organisationen." }, 403);
       }
-      if (profile.role !== "superadmin" && profile.role !== "admin") {
+      if (isStaffScanner && !["admin", "staff", "superadmin"].includes(profile.role)) {
+        return json({ error: "Endast personal kan scanna ekonomiska underlag." }, 403);
+      }
+      if (!isStaffScanner && profile.role !== "superadmin" && profile.role !== "admin") {
         const { data: permission } = await serviceClient
           .from("vihem_company_user_permissions")
           .select("role")
@@ -107,10 +113,12 @@ Deno.serve(async (req: Request) => {
         subtotal_amount: subtotal,
         vat_amount: vat,
         total_amount: totalAmount,
+        document_kind: body.document_kind === "receipt" ? "receipt" : "supplier_invoice",
         notes: body.message || title,
         ocr_status: body.file_base64 ? "queued" : "not_started",
         ocr_data: {
-          source: isInbound ? "inbound_secret" : "authenticated",
+          source: isInbound ? "inbound_secret" : isStaffScanner ? "staff_scanner" : "authenticated",
+          document_kind: body.document_kind === "receipt" ? "receipt" : "supplier_invoice",
           subject: body.subject || "",
           supplier_email: body.supplier_email || "",
           received_at: new Date().toISOString(),
@@ -216,7 +224,7 @@ async function saveAttachment(serviceClient: any, company: any, supplierInvoice:
     .from("vihem_documents")
     .insert({
       organisation_id: company.organisation_id,
-      title: `Leverantörsfaktura ${supplierInvoice.supplier_invoice_number || supplierInvoice.id.slice(0, 8)}`,
+      title: `${body.document_kind === "receipt" ? "Kvitto" : "Leverantörsfaktura"} ${supplierInvoice.supplier_invoice_number || supplierInvoice.id.slice(0, 8)}`,
       file_url: "",
       file_name: originalFileName,
       file_size: bytes.byteLength,
@@ -230,7 +238,7 @@ async function saveAttachment(serviceClient: any, company: any, supplierInvoice:
       apartment_id: null,
       storage_bucket: "vihem-documents",
       storage_path: storagePath,
-      description: "Inkommen bilaga till leverantörsfaktura",
+      description: body.document_kind === "receipt" ? "Inskickat kvitto för granskning" : "Inkommen bilaga till leverantörsfaktura",
       created_by: actorId,
     })
     .select("id")
@@ -248,6 +256,7 @@ async function saveAttachment(serviceClient: any, company: any, supplierInvoice:
         file_name: originalFileName,
         content_type: contentType,
         storage_path: storagePath,
+        document_kind: body.document_kind === "receipt" ? "receipt" : "supplier_invoice",
         queued_at: new Date().toISOString(),
       },
     })

@@ -36,6 +36,7 @@ import { ScreenDisplayPage } from './pages/ScreenDisplayPage';
 import { ScreenSettingsPage } from './pages/ScreenSettingsPage';
 import { GuestLaundryPage } from './pages/GuestLaundryPage';
 import { FinancePage } from './pages/FinancePage';
+import { StaffDocumentScannerPage } from './pages/StaffDocumentScannerPage';
 import type { ModuleKey } from './types';
 
 type ModuleState = Partial<Record<ModuleKey, boolean>>;
@@ -429,6 +430,10 @@ function AppInner() {
       case 'purchases':
         if (!isStaff) return renderDashboard();
         return <PurchaseListPage onNavigate={navigate} />;
+
+      case 'document-scanner':
+        if (!isStaff || !enabledModules.finance) return renderDashboard();
+        return <StaffDocumentScannerPage onNavigate={navigate} />;
 
       case 'calendar':
         if (!isStaff) return renderDashboard();

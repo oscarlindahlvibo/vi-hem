@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Building2, CalendarDays, Camera, CheckCircle2, CircleDollarSign, CreditCard, FileText, Hash, Landmark, Link2, Mail, Plus, Printer, ReceiptText, RotateCcw, Send, Sparkles, Truck, Upload, Users, WalletCards } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { buildInvoicePdfBlob } from '../lib/invoicePdf';
+import { DocumentCapture } from '../components/DocumentCapture';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, Select, Textarea } from '../components/ui';
 import type { AccountingAccount, AccountingIntegration, AccountingSyncQueueItem, CustomerProject, DirectDebitMandate, FinanceAuditLog, FinanceAutomationRun, FinanceAutomationSettings, FinanceCompany, FinanceCustomer, FinanceReminderSettings, FinanceSupplier, Invoice, InvoiceEmailOutbox, InvoiceLine, InvoiceNumberSeries, OcrUsageLog, Payment, ProjectInvoiceBasis, RentAdjustment, RentBillingItem, RentBillingRun, SupplierInvoice, SupplierInvoiceLine, Tenancy, VatCode } from '../types';
 
@@ -494,16 +495,6 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   const [supplierInvoiceReviewForm, setSupplierInvoiceReviewForm] = useState(emptySupplierInvoiceForm);
   const [supplierInvoiceLineForm, setSupplierInvoiceLineForm] = useState(emptySupplierInvoiceForm);
   const [supplierInvoiceFile, setSupplierInvoiceFile] = useState<File | null>(null);
-  const [documentScannerOpen, setDocumentScannerOpen] = useState(false);
-  const [documentScannerMessage, setDocumentScannerMessage] = useState('');
-  const [documentScannerReady, setDocumentScannerReady] = useState(false);
-  const [documentScannerCapturing, setDocumentScannerCapturing] = useState(false);
-  const documentVideoRef = useRef<HTMLVideoElement | null>(null);
-  const documentCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const documentStreamRef = useRef<MediaStream | null>(null);
-  const documentScanIntervalRef = useRef<number | null>(null);
-  const documentLastSignatureRef = useRef<number | null>(null);
-  const documentStableFramesRef = useRef(0);
   const [projectInvoiceForm, setProjectInvoiceForm] = useState(emptyProjectInvoiceForm);
   const [selectedProjectBasisIds, setSelectedProjectBasisIds] = useState<string[]>([]);
   const [rentRunForm, setRentRunForm] = useState(emptyRentRunForm);
@@ -1151,8 +1142,6 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       due_date: addDays(invoiceDate, 30),
     });
     setSupplierInvoiceFile(null);
-    setDocumentScannerOpen(false);
-    setDocumentScannerMessage('');
   };
 
   const resetProjectInvoiceForm = (basis?: ProjectInvoiceBasis & { project?: CustomerProject | null }) => {
@@ -1892,152 +1881,6 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     setSaving(false);
     await loadFinance();
   };
-
-  const stopDocumentScanner = useCallback(() => {
-    if (documentScanIntervalRef.current) {
-      window.clearInterval(documentScanIntervalRef.current);
-      documentScanIntervalRef.current = null;
-    }
-    documentStreamRef.current?.getTracks().forEach(track => track.stop());
-    documentStreamRef.current = null;
-    if (documentVideoRef.current) documentVideoRef.current.srcObject = null;
-    documentLastSignatureRef.current = null;
-    documentStableFramesRef.current = 0;
-    setDocumentScannerReady(false);
-    setDocumentScannerCapturing(false);
-  }, []);
-
-  const captureDocumentImage = useCallback(async (automatic = false) => {
-    const video = documentVideoRef.current;
-    const canvas = documentCanvasRef.current;
-    if (!video || !canvas || video.videoWidth === 0 || video.videoHeight === 0 || documentScannerCapturing) return;
-
-    setDocumentScannerCapturing(true);
-    const cropX = Math.round(video.videoWidth * 0.08);
-    const cropY = Math.round(video.videoHeight * 0.08);
-    const cropWidth = Math.round(video.videoWidth * 0.84);
-    const cropHeight = Math.round(video.videoHeight * 0.84);
-    canvas.width = cropWidth;
-    canvas.height = cropHeight;
-    const context = canvas.getContext('2d');
-    if (!context) {
-      setDocumentScannerCapturing(false);
-      return;
-    }
-
-    context.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
-    if (!blob) {
-      setDocumentScannerCapturing(false);
-      return;
-    }
-
-    const prefix = supplierInvoiceForm.document_kind === 'receipt' ? 'kvitto' : 'faktura';
-    const fileName = `${prefix}-${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`;
-    setSupplierInvoiceFile(new File([blob], fileName, { type: 'image/jpeg' }));
-    setDocumentScannerMessage(automatic ? 'Dokumentet fångades automatiskt.' : 'Bilden är sparad.');
-    setDocumentScannerOpen(false);
-    stopDocumentScanner();
-  }, [documentScannerCapturing, stopDocumentScanner, supplierInvoiceForm.document_kind]);
-
-  const analyseDocumentFrame = useCallback(() => {
-    const video = documentVideoRef.current;
-    const canvas = documentCanvasRef.current;
-    if (!video || !canvas || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) return;
-
-    const width = 96;
-    const height = 72;
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) return;
-
-    context.drawImage(video, 0, 0, width, height);
-    const data = context.getImageData(0, 0, width, height).data;
-    let contrast = 0;
-    let centerLight = 0;
-    let centerSamples = 0;
-    let signature = 0;
-
-    for (let y = 8; y < height - 8; y += 4) {
-      for (let x = 8; x < width - 8; x += 4) {
-        const index = (y * width + x) * 4;
-        const rightIndex = (y * width + x + 2) * 4;
-        const downIndex = ((y + 2) * width + x) * 4;
-        const lum = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
-        const rightLum = data[rightIndex] * 0.299 + data[rightIndex + 1] * 0.587 + data[rightIndex + 2] * 0.114;
-        const downLum = data[downIndex] * 0.299 + data[downIndex + 1] * 0.587 + data[downIndex + 2] * 0.114;
-        contrast += Math.abs(lum - rightLum) + Math.abs(lum - downLum);
-        signature += lum * ((x % 13) + (y % 17) + 1);
-        if (x > 18 && x < width - 18 && y > 12 && y < height - 12) {
-          centerLight += lum;
-          centerSamples += 1;
-        }
-      }
-    }
-
-    const normalizedContrast = contrast / 700;
-    const normalizedLight = centerSamples ? centerLight / centerSamples : 0;
-    const lastSignature = documentLastSignatureRef.current;
-    const motion = lastSignature === null ? 9999 : Math.abs(signature - lastSignature) / 100000;
-    documentLastSignatureRef.current = signature;
-
-    const hasDocumentLikeFrame = normalizedContrast > 18 && normalizedLight > 55 && normalizedLight < 235;
-    const stable = motion < 24;
-    if (hasDocumentLikeFrame && stable) documentStableFramesRef.current += 1;
-    else documentStableFramesRef.current = Math.max(0, documentStableFramesRef.current - 1);
-
-    if (!hasDocumentLikeFrame) setDocumentScannerMessage('Placera dokumentet innanför ramen.');
-    else if (!stable) setDocumentScannerMessage('Håll mobilen stilla.');
-    else setDocumentScannerMessage('Dokument hittat, håller fokus...');
-
-    if (documentStableFramesRef.current >= 5) {
-      void captureDocumentImage(true);
-    }
-  }, [captureDocumentImage]);
-
-  useEffect(() => {
-    if (!documentScannerOpen) {
-      stopDocumentScanner();
-      return;
-    }
-
-    let cancelled = false;
-    const start = async () => {
-      try {
-        setDocumentScannerMessage('Startar kamera...');
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-          },
-          audio: false,
-        });
-        if (cancelled) {
-          stream.getTracks().forEach(track => track.stop());
-          return;
-        }
-        documentStreamRef.current = stream;
-        if (documentVideoRef.current) {
-          documentVideoRef.current.srcObject = stream;
-          await documentVideoRef.current.play();
-        }
-        setDocumentScannerReady(true);
-        setDocumentScannerMessage('Placera dokumentet innanför ramen.');
-        documentScanIntervalRef.current = window.setInterval(analyseDocumentFrame, 450);
-      } catch (scannerError) {
-        setDocumentScannerMessage(scannerError instanceof Error ? scannerError.message : 'Kunde inte starta kameran.');
-        setDocumentScannerReady(false);
-      }
-    };
-
-    void start();
-    return () => {
-      cancelled = true;
-      stopDocumentScanner();
-    };
-  }, [analyseDocumentFrame, documentScannerOpen, stopDocumentScanner]);
 
   const processSupplierInvoiceOcrQueue = async () => {
     setSaving(true);
@@ -5598,8 +5441,6 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         open={supplierInvoiceModalOpen}
         onClose={() => {
           setSupplierInvoiceModalOpen(false);
-          setDocumentScannerOpen(false);
-          stopDocumentScanner();
         }}
         title="Ny leverantörsfaktura"
         size="lg"
@@ -5644,70 +5485,13 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           />
           <Input label="Moms %" inputMode="decimal" value={supplierInvoiceForm.vat_rate} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, vat_rate: e.target.value }))} />
           <Textarea label="Intern anteckning" value={supplierInvoiceForm.notes} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, notes: e.target.value }))} />
-          <div className="md:col-span-2 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-bold text-slate-950">Dokumentscanner</p>
-                <p className="text-sm text-slate-600">Öppna kameran, håll dokumentet inom ramen och låt appen ta bilden när den är stabil.</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setDocumentScannerOpen(prev => !prev);
-                    setDocumentScannerMessage('');
-                  }}
-                >
-                  <Camera className="h-4 w-4" />
-                  {documentScannerOpen ? 'Stäng kamera' : 'Öppna scanner'}
-                </Button>
-                {documentScannerOpen && (
-                  <Button onClick={() => captureDocumentImage(false)} disabled={!documentScannerReady || documentScannerCapturing}>
-                    Ta bild nu
-                  </Button>
-                )}
-              </div>
-            </div>
-            {documentScannerOpen && (
-              <div className="mt-4 overflow-hidden rounded-2xl border border-slate-900 bg-slate-950">
-                <div className="relative aspect-[3/4] max-h-[70vh] w-full bg-slate-950 sm:aspect-video">
-                  <video
-                    ref={documentVideoRef}
-                    className="h-full w-full object-cover"
-                    muted
-                    playsInline
-                    autoPlay
-                  />
-                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_48%,rgba(15,23,42,0.58)_49%)]" />
-                  <div className="pointer-events-none absolute inset-[8%] rounded-2xl border-2 border-white/80 shadow-[0_0_0_999px_rgba(15,23,42,0.35)]">
-                    <span className="absolute -left-0.5 -top-0.5 h-8 w-8 rounded-tl-2xl border-l-4 border-t-4 border-blue-400" />
-                    <span className="absolute -right-0.5 -top-0.5 h-8 w-8 rounded-tr-2xl border-r-4 border-t-4 border-blue-400" />
-                    <span className="absolute -bottom-0.5 -left-0.5 h-8 w-8 rounded-bl-2xl border-b-4 border-l-4 border-blue-400" />
-                    <span className="absolute -bottom-0.5 -right-0.5 h-8 w-8 rounded-br-2xl border-b-4 border-r-4 border-blue-400" />
-                  </div>
-                  <div className="absolute bottom-3 left-3 right-3 rounded-xl bg-slate-950/75 px-4 py-3 text-sm font-semibold text-white">
-                    {documentScannerMessage || 'Placera dokumentet innanför ramen.'}
-                  </div>
-                </div>
-              </div>
-            )}
-            <canvas ref={documentCanvasRef} className="hidden" />
-          </div>
-          <label className="block text-sm font-semibold text-slate-700 md:col-span-2">
-            {supplierInvoiceForm.document_kind === 'receipt' ? 'Kvittofil eller kamerabild' : 'Fakturafil'}
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/*"
-              capture={supplierInvoiceForm.document_kind === 'receipt' ? 'environment' : undefined}
-              onChange={e => setSupplierInvoiceFile(e.target.files?.[0] ?? null)}
-              className="mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-blue-700"
+          <div className="md:col-span-2">
+            <DocumentCapture
+              documentKind={supplierInvoiceForm.document_kind}
+              file={supplierInvoiceFile}
+              onFileChange={setSupplierInvoiceFile}
             />
-            {supplierInvoiceFile && (
-              <span className="mt-2 block text-xs font-medium text-slate-500">
-                {supplierInvoiceFile.name} · {Math.round(supplierInvoiceFile.size / 1024)} kB
-              </span>
-            )}
-          </label>
+          </div>
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setSupplierInvoiceModalOpen(false)}>Avbryt</Button>
