@@ -6,6 +6,15 @@
   repair linked finance invoices that may have been created before the guard.
 */
 
+ALTER TABLE public.vihem_invoices
+  ADD COLUMN IF NOT EXISTS balance_due numeric(14,2) NOT NULL DEFAULT 0;
+
+UPDATE public.vihem_invoices
+SET
+  balance_due = GREATEST(COALESCE(total_amount, 0) - COALESCE(paid_amount, 0), 0),
+  updated_at = now()
+WHERE balance_due IS DISTINCT FROM GREATEST(COALESCE(total_amount, 0) - COALESCE(paid_amount, 0), 0);
+
 WITH prepaid_bookings AS (
   SELECT
     id,
