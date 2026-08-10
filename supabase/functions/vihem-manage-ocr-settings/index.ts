@@ -133,35 +133,101 @@ Deno.serve(async (req: Request) => {
 });
 
 async function getSettings(serviceClient: any, organisationId: string) {
+  const fallback = await getFallbackSettings(serviceClient, organisationId).catch(() => null);
   const { data, error } = await serviceClient
     .from("vihem_ocr_provider_settings")
     .select("*")
     .eq("organisation_id", organisationId)
     .maybeSingle();
-  if (error) throw error;
-  return data;
+  if (error) return fallback;
+  return mergeSettings(data, fallback);
 }
 
 async function upsertSettings(serviceClient: any, organisationId: string, userId: string, patch: Record<string, unknown>) {
+  const baseSettings = {
+    organisation_id: organisationId,
+    provider: "google_vision",
+    enabled: true,
+    ai_model: "gpt-5-nano",
+    vision_model: "gpt-5-mini",
+    min_text_length: 250,
+    min_confidence: 0.72,
+    enable_vision_fallback: true,
+    created_by: userId,
+    updated_by: userId,
+    ...patch,
+  };
+
   const { data, error } = await serviceClient
     .from("vihem_ocr_provider_settings")
-    .upsert({
-      organisation_id: organisationId,
-      provider: "google_vision",
-      enabled: true,
-      ai_model: "gpt-5-nano",
-      vision_model: "gpt-5-mini",
-      min_text_length: 250,
-      min_confidence: 0.72,
-      enable_vision_fallback: true,
-      created_by: userId,
-      updated_by: userId,
-      ...patch,
-    }, { onConflict: "organisation_id" })
+    .upsert(baseSettings, { onConflict: "organisation_id" })
     .select("*")
     .single();
-  if (error) throw error;
+  if (error) return await upsertFallbackSettings(serviceClient, organisationId, baseSettings);
+  await upsertFallbackSettings(serviceClient, organisationId, data).catch(error => {
+    console.warn("Could not mirror OCR settings to organisation settings", error.message);
+  });
   return data;
+}
+
+function mergeSettings(primary: any, fallback: any) {
+  if (!primary) return fallback || null;
+  if (!fallback) return primary;
+  return {
+    ...fallback,
+    ...primary,
+    encrypted_openai_key: primary.encrypted_openai_key || fallback.encrypted_openai_key || "",
+    openai_key_hint: primary.openai_key_hint || fallback.openai_key_hint || "",
+    openai_key_rotated_at: primary.openai_key_rotated_at || fallback.openai_key_rotated_at || null,
+    encrypted_google_vision_key: primary.encrypted_google_vision_key || fallback.encrypted_google_vision_key || "",
+    google_vision_key_hint: primary.google_vision_key_hint || fallback.google_vision_key_hint || "",
+    google_vision_key_rotated_at: primary.google_vision_key_rotated_at || fallback.google_vision_key_rotated_at || null,
+    config: {
+      ...(fallback.config || {}),
+      ...(primary.config || {}),
+    },
+  };
+}
+
+async function getFallbackSettings(serviceClient: any, organisationId: string) {
+  const { data, error } = await serviceClient
+    .from("vihem_organisations")
+    .select("settings")
+    .eq("id", organisationId)
+    .maybeSingle();
+  if (error) throw error;
+  const settings = data?.settings || {};
+  return settings.ocr_provider_settings || null;
+}
+
+async function upsertFallbackSettings(serviceClient: any, organisationId: string, nextSettings: Record<string, unknown>) {
+  const { data, error } = await serviceClient
+    .from("vihem_organisations")
+    .select("settings")
+    .eq("id", organisationId)
+    .maybeSingle();
+  if (error) throw error;
+
+  const organisationSettings = data?.settings || {};
+  const existing = organisationSettings.ocr_provider_settings || {};
+  const fallbackSettings = {
+    ...existing,
+    ...nextSettings,
+    organisation_id: organisationId,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error: updateError } = await serviceClient
+    .from("vihem_organisations")
+    .update({
+      settings: {
+        ...organisationSettings,
+        ocr_provider_settings: fallbackSettings,
+      },
+    })
+    .eq("id", organisationId);
+  if (updateError) throw updateError;
+  return fallbackSettings;
 }
 
 function publicSettings(settings: any) {

@@ -133,7 +133,7 @@ export function PlatformSettingsPage() {
     });
     setSaving(false);
     if (error) {
-      setOcrSettingsMessage(error.message || 'Kunde inte spara AI/OCR-inställningarna.');
+      setOcrSettingsMessage(await getFunctionErrorMessage(error, 'Kunde inte spara AI/OCR-inställningarna.'));
       return;
     }
     applyOcrSettings((data?.settings ?? null) as OcrProviderSettings | null);
@@ -148,7 +148,7 @@ export function PlatformSettingsPage() {
     });
     setSaving(false);
     if (error) {
-      setOcrSettingsMessage(error.message || 'Testet misslyckades.');
+      setOcrSettingsMessage(await getFunctionErrorMessage(error, 'Testet misslyckades.'));
       return;
     }
     applyOcrSettings((data?.settings ?? null) as OcrProviderSettings | null);
@@ -163,7 +163,7 @@ export function PlatformSettingsPage() {
     });
     setSaving(false);
     if (error) {
-      setOcrSettingsMessage(error.message || 'Kunde inte ta bort nyckeln.');
+      setOcrSettingsMessage(await getFunctionErrorMessage(error, 'Kunde inte ta bort nyckeln.'));
       return;
     }
     applyOcrSettings((data?.settings ?? null) as OcrProviderSettings | null);
@@ -416,4 +416,13 @@ export function PlatformSettingsPage() {
       )}
     </div>
   );
+}
+
+async function getFunctionErrorMessage(error: unknown, fallback: string) {
+  const context = (error as { context?: Response })?.context;
+  if (context) {
+    const payload = await context.clone().json().catch(() => null);
+    if (payload?.error) return String(payload.error);
+  }
+  return (error as Error)?.message || fallback;
 }

@@ -155,13 +155,15 @@ Deno.serve(async (req: Request) => {
 
 async function loadOcrRuntimeSettings(serviceClient: any, organisationId: string): Promise<OcrRuntimeSettings> {
   const encryptionSecret = getEncryptionSecret();
-  const { data, error } = await serviceClient
+  const fallbackSettings = await getFallbackOcrSettings(serviceClient, organisationId);
+  const { data: tableSettings, error } = await serviceClient
     .from("vihem_ocr_provider_settings")
     .select("*")
     .eq("organisation_id", organisationId)
     .maybeSingle();
 
-  if (error && !String(error.message || "").includes("schema cache")) throw error;
+  if (error) console.warn("Could not load vihem_ocr_provider_settings, using organisation fallback", error.message);
+  const data = mergeOcrSettings(tableSettings, fallbackSettings);
 
   const openaiKey = data?.encrypted_openai_key && encryptionSecret
     ? await decryptSecret(data.encrypted_openai_key, encryptionSecret).catch(() => "")
@@ -181,6 +183,27 @@ async function loadOcrRuntimeSettings(serviceClient: any, organisationId: string
     minConfidence: Number(data?.min_confidence ?? Deno.env.get("VIHEM_OCR_MIN_CONFIDENCE") ?? 0.72),
     enableVisionFallback: data?.enable_vision_fallback ?? ((Deno.env.get("VIHEM_OCR_ENABLE_VISION_FALLBACK") || "true") !== "false"),
   };
+}
+
+function mergeOcrSettings(primary: any, fallback: any) {
+  if (!primary) return fallback || null;
+  if (!fallback) return primary;
+  return {
+    ...fallback,
+    ...primary,
+    encrypted_openai_key: primary.encrypted_openai_key || fallback.encrypted_openai_key || "",
+    encrypted_google_vision_key: primary.encrypted_google_vision_key || fallback.encrypted_google_vision_key || "",
+  };
+}
+
+async function getFallbackOcrSettings(serviceClient: any, organisationId: string) {
+  const { data, error } = await serviceClient
+    .from("vihem_organisations")
+    .select("settings")
+    .eq("id", organisationId)
+    .maybeSingle();
+  if (error) return null;
+  return data?.settings?.ocr_provider_settings || null;
 }
 
 function getEncryptionSecret() {
