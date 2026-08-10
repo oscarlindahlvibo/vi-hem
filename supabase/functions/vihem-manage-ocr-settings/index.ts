@@ -28,10 +28,9 @@ Deno.serve(async (req: Request) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const encryptionSecret = Deno.env.get("VIHEM_OCR_SECRET_KEY") || Deno.env.get("VIHEM_ACCOUNTING_SECRET_KEY") || "";
+    const encryptionSecret = getEncryptionSecret(serviceKey);
     const authHeader = req.headers.get("Authorization") || "";
     if (!authHeader) return json({ error: "Unauthorized" }, 401);
-    if (!encryptionSecret) return json({ error: "VIHEM_OCR_SECRET_KEY eller VIHEM_ACCOUNTING_SECRET_KEY saknas i edge-miljön." }, 500);
 
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
@@ -250,6 +249,12 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(Math.max(parsed, min), max);
+}
+
+function getEncryptionSecret(serviceKey: string) {
+  return Deno.env.get("VIHEM_OCR_SECRET_KEY")
+    || Deno.env.get("VIHEM_ACCOUNTING_SECRET_KEY")
+    || serviceKey;
 }
 
 function json(data: Record<string, unknown>, status = 200) {

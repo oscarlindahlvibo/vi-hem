@@ -154,7 +154,7 @@ Deno.serve(async (req: Request) => {
 });
 
 async function loadOcrRuntimeSettings(serviceClient: any, organisationId: string): Promise<OcrRuntimeSettings> {
-  const encryptionSecret = Deno.env.get("VIHEM_OCR_SECRET_KEY") || Deno.env.get("VIHEM_ACCOUNTING_SECRET_KEY") || "";
+  const encryptionSecret = getEncryptionSecret();
   const { data, error } = await serviceClient
     .from("vihem_ocr_provider_settings")
     .select("*")
@@ -181,6 +181,13 @@ async function loadOcrRuntimeSettings(serviceClient: any, organisationId: string
     minConfidence: Number(data?.min_confidence ?? Deno.env.get("VIHEM_OCR_MIN_CONFIDENCE") ?? 0.72),
     enableVisionFallback: data?.enable_vision_fallback ?? ((Deno.env.get("VIHEM_OCR_ENABLE_VISION_FALLBACK") || "true") !== "false"),
   };
+}
+
+function getEncryptionSecret() {
+  return Deno.env.get("VIHEM_OCR_SECRET_KEY")
+    || Deno.env.get("VIHEM_ACCOUNTING_SECRET_KEY")
+    || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+    || "";
 }
 
 async function processInvoice(serviceClient: any, invoice: any, options: { forceVision: boolean; actorId: string; settings: OcrRuntimeSettings }) {

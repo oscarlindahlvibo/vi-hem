@@ -269,9 +269,21 @@ export function PlatformSettingsPage() {
                 </Badge>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" onClick={testOcrSettings} loading={saving}>Testa koppling</Button>
-              <Button onClick={saveOcrSettings} loading={saving}>Spara koppling</Button>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={testOcrSettings} loading={saving}>Testa koppling</Button>
+                <Button onClick={saveOcrSettings} loading={saving}>Spara koppling</Button>
+              </div>
+              {ocrSettingsMessage && (
+                <p className={[
+                  'rounded-xl px-3 py-2 text-sm font-semibold',
+                  ocrSettingsMessage.toLowerCase().includes('kunde') || ocrSettingsMessage.toLowerCase().includes('misslyckades')
+                    ? 'bg-red-50 text-red-700'
+                    : 'bg-emerald-50 text-emerald-700',
+                ].join(' ')}>
+                  {ocrSettingsMessage}
+                </p>
+              )}
             </div>
           </div>
 
@@ -330,16 +342,13 @@ export function PlatformSettingsPage() {
             </div>
           </div>
 
-          {(ocrSettingsMessage || ocrSettings?.last_tested_at) && (
+          {ocrSettings?.last_tested_at && (
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-              {ocrSettingsMessage && <p className="font-semibold">{ocrSettingsMessage}</p>}
-              {ocrSettings?.last_tested_at && (
-                <div className="mt-2 grid gap-1">
-                  <p>Senast testad: {new Date(ocrSettings.last_tested_at).toLocaleString('sv-SE')}</p>
-                  {ocrSettings.last_test_openai?.message && <p>OpenAI: {ocrSettings.last_test_openai.message}</p>}
-                  {ocrSettings.last_test_google_vision?.message && <p>Google Vision: {ocrSettings.last_test_google_vision.message}</p>}
-                </div>
-              )}
+              <div className="grid gap-1">
+                <p>Senast testad: {new Date(ocrSettings.last_tested_at).toLocaleString('sv-SE')}</p>
+                {ocrSettings.last_test_openai?.message && <p>OpenAI: {ocrSettings.last_test_openai.message}</p>}
+                {ocrSettings.last_test_google_vision?.message && <p>Google Vision: {ocrSettings.last_test_google_vision.message}</p>}
+              </div>
             </div>
           )}
         </Card>
