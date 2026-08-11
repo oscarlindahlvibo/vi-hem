@@ -709,6 +709,13 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
 
       return matchesTab && matchesSearch && matchesStatus && matchesPriority && matchesView;
     }).sort((a, b) => {
+      // Akuta ordrar utan förfallodatum får högsta synlighet oavsett vald sortering.
+      const aUrgentWithoutDueDate = a.priority === 'urgent' && !a.due_date;
+      const bUrgentWithoutDueDate = b.priority === 'urgent' && !b.due_date;
+      if (aUrgentWithoutDueDate !== bUrgentWithoutDueDate) {
+        return aUrgentWithoutDueDate ? -1 : 1;
+      }
+
       if (sortBy === 'created_at') {
         return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
       }
