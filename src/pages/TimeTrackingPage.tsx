@@ -631,22 +631,22 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
                 </p>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={() => { setStampMode('switch'); setShowStampModal(true); }} variant="secondary" className="gap-2">
+            <div className="grid w-full grid-cols-3 gap-2 lg:max-w-2xl">
+              <Button onClick={() => { setStampMode('switch'); setShowStampModal(true); }} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
                 <Repeat2 className="w-4 h-4" /> Byt jobb
               </Button>
+              <Button onClick={() => setShowEndDayModal(true)} variant="danger" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
+                <Square className="w-4 h-4" /> Stämpla ut
+              </Button>
               {currentEntry.entry_type === 'break' ? (
-                <Button onClick={handleReturnFromBreak} variant="secondary" className="gap-2">
+                <Button onClick={handleReturnFromBreak} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
                   <Timer className="w-4 h-4" /> Återgå till jobb
                 </Button>
               ) : (
-                <Button onClick={handleStartBreak} variant="secondary" className="gap-2">
-                  <Coffee className="w-4 h-4" /> Byt till rast
+                <Button onClick={handleStartBreak} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
+                  <Coffee className="w-4 h-4" /> Gå på rast
                 </Button>
               )}
-              <Button onClick={() => setShowEndDayModal(true)} variant="danger" className="gap-2">
-                <Square className="w-4 h-4" /> Stämpla ut
-              </Button>
             </div>
           </div>
         </Card>
