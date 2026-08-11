@@ -4,18 +4,21 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../components/ui';
 
-type Tab = 'overview' | 'calendar' | 'products' | 'bookings' | 'blocks';
+type Tab = 'overview' | 'calendar' | 'bookings' | 'products' | 'customers' | 'blocks' | 'settings';
 type Product = { id: string; name: string; slug: string; description: string; category: string; active: boolean; visible_publicly: boolean; vat_rate: number | null; deposit: number; location: string };
 type Asset = { id: string; product_id: string; name: string; internal_identifier: string; status: string; location: string; active: boolean };
 type PriceRule = { id: string; product_id: string; rule_type: string; price: number; currency: string; priority: number; active: boolean };
 type Booking = { id: string; public_reference: string; product_id: string | null; status: string; start_at: string; end_at: string; total: number; customer_id: string | null };
 type Block = { id: string; product_id: string; asset_id: string | null; start_at: string; end_at: string; block_type: string; reason: string };
+type RentalCustomer = { id: string; first_name: string; last_name: string; company_name: string; email: string; phone: string; city: string; created_at: string };
 
 const emptyProduct = { name: '', slug: '', description: '', category: '', vat_rate: '25', deposit: '0', location: '', active: true, visible_publicly: false };
 const emptyAsset = { product_id: '', name: '', internal_identifier: '', status: 'available', location: '' };
 const emptyPrice = { product_id: '', rule_type: 'daily', price: '', priority: '0' };
 const emptyBlock = { product_id: '', asset_id: '', start_at: '', end_at: '', block_type: 'internal_use', reason: '', notes: '' };
 const emptyBooking = { product_id: '', start_at: '', end_at: '', quantity: '1', first_name: '', last_name: '', company_name: '', email: '', phone: '', customer_notes: '' };
+const emptyCustomer = { first_name: '', last_name: '', company_name: '', email: '', phone: '', address: '', postal_code: '', city: '', country: 'SE', notes: '' };
+const emptySettings = { currency: 'SEK', vat_rate: '25', timezone: 'Europe/Stockholm', booking_prefix: 'VR', minimum_advance_hours: '0', maximum_advance_days: '730', default_return_buffer_minutes: '0', cancellation_policy: '', customer_support_email: '', customer_support_phone: '', terms_url: '', privacy_url: '' };
 
 function money(value: number) {
   return new Intl.NumberFormat('sv-SE', { style: 'currency', currency: 'SEK' }).format(value || 0);
@@ -34,6 +37,8 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
   const [prices, setPrices] = useState<PriceRule[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [blocks, setBlocks] = useState<Block[]>([]);
+  const [customers, setCustomers] = useState<RentalCustomer[]>([]);
+  const [settingsForm, setSettingsForm] = useState(emptySettings);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [productModal, setProductModal] = useState(false);
@@ -41,12 +46,14 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
   const [priceModal, setPriceModal] = useState(false);
   const [blockModal, setBlockModal] = useState(false);
   const [bookingModal, setBookingModal] = useState(false);
+  const [customerModal, setCustomerModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [productForm, setProductForm] = useState(emptyProduct);
   const [assetForm, setAssetForm] = useState(emptyAsset);
   const [priceForm, setPriceForm] = useState(emptyPrice);
   const [blockForm, setBlockForm] = useState(emptyBlock);
   const [bookingForm, setBookingForm] = useState(emptyBooking);
+  const [customerForm, setCustomerForm] = useState(emptyCustomer);
   const [saving, setSaving] = useState(false);
 
   const productById = useMemo(() => new Map(products.map(product => [product.id, product])), [products]);
@@ -55,20 +62,24 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
   async function fetchData() {
     if (!organisationId) return;
     setLoading(true);
-    const [productResult, assetResult, priceResult, bookingResult, blockResult] = await Promise.all([
+    const [productResult, assetResult, priceResult, bookingResult, blockResult, customerResult, settingsResult] = await Promise.all([
       supabase.from('vihem_rental_products').select('*').eq('organisation_id', organisationId).order('sort_order').order('name'),
       supabase.from('vihem_rental_assets').select('*').eq('organisation_id', organisationId).order('name'),
       supabase.from('vihem_rental_pricing_rules').select('*').eq('organisation_id', organisationId).order('priority', { ascending: false }),
       supabase.from('vihem_rental_bookings').select('id,public_reference,status,start_at,end_at,total,customer_id,vihem_rental_booking_items(product_id)').eq('organisation_id', organisationId).order('start_at'),
       supabase.from('vihem_rental_blocks').select('*').eq('organisation_id', organisationId).order('start_at'),
+      supabase.from('vihem_rental_customers').select('id,first_name,last_name,company_name,email,phone,city,created_at').eq('organisation_id', organisationId).order('created_at', { ascending: false }),
+      supabase.from('vihem_rental_settings').select('*').eq('organisation_id', organisationId).maybeSingle(),
     ]);
-    const firstError = productResult.error || assetResult.error || priceResult.error || bookingResult.error || blockResult.error;
+    const firstError = productResult.error || assetResult.error || priceResult.error || bookingResult.error || blockResult.error || customerResult.error || settingsResult.error;
     if (firstError) setError(firstError.message);
     setProducts((productResult.data || []) as Product[]);
     setAssets((assetResult.data || []) as Asset[]);
     setPrices((priceResult.data || []) as PriceRule[]);
     setBookings(((bookingResult.data || []) as any[]).map(row => ({ ...row, product_id: row.vihem_rental_booking_items?.[0]?.product_id || null })));
     setBlocks((blockResult.data || []) as Block[]);
+    setCustomers((customerResult.data || []) as RentalCustomer[]);
+    if (settingsResult.data) setSettingsForm({ ...emptySettings, ...Object.fromEntries(Object.keys(emptySettings).map(key => [key, String(settingsResult.data[key] ?? emptySettings[key as keyof typeof emptySettings])])) } as typeof emptySettings);
     setLoading(false);
   }
 
@@ -139,6 +150,23 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
     setBookingModal(false); setBookingForm(emptyBooking); await fetchData();
   }
 
+  async function saveCustomer() {
+    if (!organisationId || (!customerForm.email.trim() && !customerForm.phone.trim())) return;
+    setSaving(true); setError('');
+    const result = await supabase.from('vihem_rental_customers').insert({ ...customerForm, organisation_id: organisationId });
+    setSaving(false);
+    if (result.error) { setError(result.error.message); return; }
+    setCustomerModal(false); setCustomerForm(emptyCustomer); await fetchData();
+  }
+
+  async function saveSettings() {
+    if (!organisationId || user?.role !== 'admin') return;
+    setSaving(true); setError('');
+    const result = await supabase.from('vihem_rental_settings').upsert({ organisation_id: organisationId, ...settingsForm, vat_rate: Number(settingsForm.vat_rate) || 0, minimum_advance_hours: Number(settingsForm.minimum_advance_hours) || 0, maximum_advance_days: Number(settingsForm.maximum_advance_days) || 0, default_return_buffer_minutes: Number(settingsForm.default_return_buffer_minutes) || 0, updated_at: new Date().toISOString() }, { onConflict: 'organisation_id' });
+    setSaving(false);
+    if (result.error) setError(result.error.message); else setError('Inställningarna är sparade.');
+  }
+
   if (loading) return <LoadingPage />;
   const today = new Date();
   const activeBookings = bookings.filter(booking => !['cancelled', 'completed'].includes(booking.status));
@@ -149,7 +177,7 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
       <PageHeader title="Uthyrning" subtitle="Hantera ViboRents produkter, priser, assets, kunder, bokningar och interna spärrar." icon={BedDouble} />
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
-        {([['overview', 'Översikt'], ['calendar', 'Kalender'], ['bookings', 'Bokningar'], ['products', 'Produkter & assets'], ['blocks', 'Spärrar']] as [Tab, string][]).map(([value, label]) => <Button key={value} size="sm" variant={tab === value ? 'primary' : 'secondary'} onClick={() => setTab(value)}>{label}</Button>)}
+        {([['overview', 'Översikt'], ['calendar', 'Kalender'], ['bookings', 'Bokningar'], ['products', 'Produkter & assets'], ['customers', 'Kunder'], ['blocks', 'Spärrar'], ...(user?.role === 'admin' ? [['settings', 'Inställningar'] as [Tab, string]] : [])] as [Tab, string][]).map(([value, label]) => <Button key={value} size="sm" variant={tab === value ? 'primary' : 'secondary'} onClick={() => setTab(value)}>{label}</Button>)}
       </div>
 
       {tab === 'overview' && <div className="grid gap-4 md:grid-cols-3">
@@ -164,6 +192,10 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
 
       {tab === 'bookings' && <Card className="overflow-hidden"><div className="flex items-center justify-between gap-3 border-b border-slate-200 p-4"><div><h2 className="font-semibold">Bokningar</h2><p className="text-sm text-slate-500">Bokningar från viborent.se och intern administration visas här.</p></div><Button onClick={() => { setBookingForm({ ...emptyBooking, product_id: products[0]?.id || '' }); setBookingModal(true); }}><Plus className="h-4 w-4" /> Ny bokning</Button></div>{bookings.length === 0 ? <EmptyState title="Inga bokningar ännu" /> : <div className="divide-y divide-slate-100">{bookings.map(booking => <div key={booking.id} className="grid gap-2 p-4 md:grid-cols-[1fr_1fr_auto_auto] md:items-center"><div><p className="font-semibold">{booking.public_reference}</p><p className="text-sm text-slate-500">{productById.get(booking.product_id || '')?.name || 'Produkt'}</p></div><p className="text-sm text-slate-600">{dateTime(booking.start_at)} - {dateTime(booking.end_at)}</p><Badge className="bg-slate-100 text-slate-700">{booking.status}</Badge><span className="font-semibold">{money(booking.total)}</span></div>)}</div>}</Card>}
 
+      {tab === 'customers' && <Card className="overflow-hidden"><div className="flex items-center justify-between gap-3 border-b border-slate-200 p-4"><div><h2 className="font-semibold">Uthyrningskunder</h2><p className="text-sm text-slate-500">Kunduppgifter återanvänds vid interna och publika bokningar.</p></div><Button onClick={() => setCustomerModal(true)}><Plus className="h-4 w-4" /> Ny kund</Button></div>{customers.length === 0 ? <EmptyState title="Inga kunder ännu" /> : <div className="divide-y divide-slate-100">{customers.map(customer => <div key={customer.id} className="flex flex-col gap-1 p-4 md:flex-row md:items-center md:justify-between"><div><p className="font-semibold">{[customer.first_name, customer.last_name].filter(Boolean).join(' ') || customer.company_name || 'Namnlös kund'}</p><p className="text-sm text-slate-500">{customer.company_name && customer.company_name !== `${customer.first_name} ${customer.last_name}` ? `${customer.company_name} · ` : ''}{customer.email || customer.phone || 'Ingen kontaktuppgift'}</p></div><span className="text-sm text-slate-500">{customer.city || 'Ingen ort'}</span></div>)}</div>}</Card>}
+
+      {tab === 'settings' && user?.role === 'admin' && <Card className="p-5"><div className="mb-5"><h2 className="font-semibold">Uthyrningsinställningar</h2><p className="text-sm text-slate-500">Dessa värden används av pris- och bokningsmotorn för organisationen.</p></div><div className="grid gap-4 sm:grid-cols-2"><Input label="Valuta" value={settingsForm.currency} onChange={e => setSettingsForm({ ...settingsForm, currency: e.target.value.toUpperCase() })} /><Input label="Standardmoms %" type="number" min="0" value={settingsForm.vat_rate} onChange={e => setSettingsForm({ ...settingsForm, vat_rate: e.target.value })} /><Input label="Bokningsprefix" value={settingsForm.booking_prefix} onChange={e => setSettingsForm({ ...settingsForm, booking_prefix: e.target.value.toUpperCase() })} /><Input label="Tidszon" value={settingsForm.timezone} onChange={e => setSettingsForm({ ...settingsForm, timezone: e.target.value })} /><Input label="Minsta framförhållning (timmar)" type="number" min="0" value={settingsForm.minimum_advance_hours} onChange={e => setSettingsForm({ ...settingsForm, minimum_advance_hours: e.target.value })} /><Input label="Max framförhållning (dagar)" type="number" min="0" value={settingsForm.maximum_advance_days} onChange={e => setSettingsForm({ ...settingsForm, maximum_advance_days: e.target.value })} /><Input label="Återlämningsbuffert (minuter)" type="number" min="0" value={settingsForm.default_return_buffer_minutes} onChange={e => setSettingsForm({ ...settingsForm, default_return_buffer_minutes: e.target.value })} /><Input label="Support e-post" type="email" value={settingsForm.customer_support_email} onChange={e => setSettingsForm({ ...settingsForm, customer_support_email: e.target.value })} /><Input label="Support telefon" value={settingsForm.customer_support_phone} onChange={e => setSettingsForm({ ...settingsForm, customer_support_phone: e.target.value })} /><Input label="Villkors-URL" value={settingsForm.terms_url} onChange={e => setSettingsForm({ ...settingsForm, terms_url: e.target.value })} /><Input label="Integritetspolicy-URL" value={settingsForm.privacy_url} onChange={e => setSettingsForm({ ...settingsForm, privacy_url: e.target.value })} /></div><div className="mt-5 flex justify-end"><Button onClick={saveSettings} loading={saving}>Spara inställningar</Button></div></Card>}
+
       {tab === 'calendar' && <Card className="p-5"><div className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-blue-600" /><h2 className="font-semibold">Uthyrningskalender</h2></div><div className="mt-4 grid gap-3">{[...activeBookings.map(booking => ({ kind: 'booking', id: booking.id, start: booking.start_at, end: booking.end_at, title: `${booking.public_reference} · ${productById.get(booking.product_id || '')?.name || 'Produkt'}` })), ...blocks.map(block => ({ kind: block.block_type, id: block.id, start: block.start_at, end: block.end_at, title: `${block.reason || 'Spärr'} · ${productById.get(block.product_id)?.name || 'Produkt'}${block.asset_id ? ` · ${assetById.get(block.asset_id)?.name || ''}` : ''}` }))].sort((a, b) => a.start.localeCompare(b.start)).map(item => <div key={`${item.kind}-${item.id}`} className="flex flex-col gap-1 rounded-xl border border-slate-200 p-3 md:flex-row md:items-center md:justify-between"><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${item.kind === 'booking' ? 'bg-blue-500' : 'bg-amber-500'}`} /><span className="font-medium">{item.title}</span></div><span className="text-sm text-slate-500">{dateTime(item.start)} - {dateTime(item.end)}</span></div>)}</div></Card>}
 
       {tab === 'blocks' && <Card className="overflow-hidden"><div className="flex items-center justify-between border-b border-slate-200 p-4"><div><h2 className="font-semibold">Interna spärrar</h2><p className="text-sm text-slate-500">Spärrar produkter eller enskilda assets från publik bokning.</p></div><Button onClick={() => setBlockModal(true)}><Plus className="h-4 w-4" /> Ny spärr</Button></div>{blocks.length === 0 ? <EmptyState title="Inga spärrar ännu" /> : <div className="divide-y divide-slate-100">{blocks.map(block => <div key={block.id} className="p-4"><p className="font-semibold">{block.reason || 'Intern spärr'}</p><p className="text-sm text-slate-600">{productById.get(block.product_id)?.name || 'Produkt'}{block.asset_id ? ` · ${assetById.get(block.asset_id)?.name || ''}` : ''}</p><p className="text-sm text-slate-500">{dateTime(block.start_at)} - {dateTime(block.end_at)} · {block.block_type}</p></div>)}</div>}</Card>}
@@ -177,6 +209,8 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
       <Modal open={blockModal} onClose={() => setBlockModal(false)} title="Skapa intern spärr"><div className="space-y-4"><Select label="Produkt" value={blockForm.product_id} onChange={e => setBlockForm({ ...blockForm, product_id: e.target.value, asset_id: '' })} options={products.map(p => ({ value: p.id, label: p.name }))} /><Select label="Asset (valfritt)" value={blockForm.asset_id} onChange={e => setBlockForm({ ...blockForm, asset_id: e.target.value })} options={[{ value: '', label: 'Alla assets för produkten' }, ...assets.filter(a => a.product_id === blockForm.product_id).map(a => ({ value: a.id, label: a.name }))]} /><div className="grid gap-4 sm:grid-cols-2"><Input label="Start" type="datetime-local" value={blockForm.start_at} onChange={e => setBlockForm({ ...blockForm, start_at: e.target.value })} /><Input label="Slut" type="datetime-local" value={blockForm.end_at} onChange={e => setBlockForm({ ...blockForm, end_at: e.target.value })} /></div><Select label="Typ" value={blockForm.block_type} onChange={e => setBlockForm({ ...blockForm, block_type: e.target.value })} options={[{ value: 'internal_use', label: 'Intern användning' }, { value: 'maintenance', label: 'Service' }, { value: 'admin_block', label: 'Administrativ spärr' }, { value: 'unavailable', label: 'Otillgänglig' }]} /><Input label="Orsak" value={blockForm.reason} onChange={e => setBlockForm({ ...blockForm, reason: e.target.value })} /><div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setBlockModal(false)}>Avbryt</Button><Button onClick={saveBlock} loading={saving}>Spara spärr</Button></div></div></Modal>
 
       <Modal open={bookingModal} onClose={() => setBookingModal(false)} title="Ny bokning"><div className="space-y-4"><Select label="Produkt" value={bookingForm.product_id} onChange={e => setBookingForm({ ...bookingForm, product_id: e.target.value })} options={products.map(p => ({ value: p.id, label: p.name }))} /><div className="grid gap-4 sm:grid-cols-2"><Input label="Start" type="datetime-local" value={bookingForm.start_at} onChange={e => setBookingForm({ ...bookingForm, start_at: e.target.value })} /><Input label="Slut" type="datetime-local" value={bookingForm.end_at} onChange={e => setBookingForm({ ...bookingForm, end_at: e.target.value })} /><Input label="Antal" type="number" min="1" value={bookingForm.quantity} onChange={e => setBookingForm({ ...bookingForm, quantity: e.target.value })} /><Input label="E-post" type="email" value={bookingForm.email} onChange={e => setBookingForm({ ...bookingForm, email: e.target.value })} /><Input label="Förnamn" value={bookingForm.first_name} onChange={e => setBookingForm({ ...bookingForm, first_name: e.target.value })} /><Input label="Efternamn" value={bookingForm.last_name} onChange={e => setBookingForm({ ...bookingForm, last_name: e.target.value })} /><Input label="Telefon" value={bookingForm.phone} onChange={e => setBookingForm({ ...bookingForm, phone: e.target.value })} /><Input label="Företag (valfritt)" value={bookingForm.company_name} onChange={e => setBookingForm({ ...bookingForm, company_name: e.target.value })} /></div><Textarea label="Kundanteckning" rows={3} value={bookingForm.customer_notes} onChange={e => setBookingForm({ ...bookingForm, customer_notes: e.target.value })} /><p className="text-xs text-slate-500">Pris och tillgänglighet räknas om och valideras på servern när bokningen sparas.</p><div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setBookingModal(false)}>Avbryt</Button><Button onClick={saveBooking} loading={saving}>Skapa bokning</Button></div></div></Modal>
+
+      <Modal open={customerModal} onClose={() => setCustomerModal(false)} title="Ny uthyrningskund"><div className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><Input label="Förnamn" value={customerForm.first_name} onChange={e => setCustomerForm({ ...customerForm, first_name: e.target.value })} /><Input label="Efternamn" value={customerForm.last_name} onChange={e => setCustomerForm({ ...customerForm, last_name: e.target.value })} /><Input label="Företag" value={customerForm.company_name} onChange={e => setCustomerForm({ ...customerForm, company_name: e.target.value })} /><Input label="E-post" type="email" value={customerForm.email} onChange={e => setCustomerForm({ ...customerForm, email: e.target.value })} /><Input label="Telefon" value={customerForm.phone} onChange={e => setCustomerForm({ ...customerForm, phone: e.target.value })} /><Input label="Ort" value={customerForm.city} onChange={e => setCustomerForm({ ...customerForm, city: e.target.value })} /></div><Textarea label="Adress och anteckningar" rows={3} value={customerForm.address} onChange={e => setCustomerForm({ ...customerForm, address: e.target.value })} /><div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setCustomerModal(false)}>Avbryt</Button><Button onClick={saveCustomer} loading={saving}>Spara kund</Button></div></div></Modal>
     </div>
   );
 }
