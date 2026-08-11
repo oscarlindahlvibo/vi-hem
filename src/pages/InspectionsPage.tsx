@@ -348,23 +348,27 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
     `${(t.tenant as any)?.name || 'Okänd'} — ${(t.property as any)?.address || ''} Lgh ${(t.apartment as any)?.apartment_number || ''}`;
 
   // ─── Photo upload ─────────────────────────────────────────────────────────
-  const uploadPhoto = async (file: File, roomIndex?: number) => {
+  const uploadPhotos = async (files: File[], roomIndex?: number) => {
+    if (files.length === 0) return;
     setUploadingPhoto(true);
     try {
-      const ext = file.name.split('.').pop();
-      const path = `inspections/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error } = await supabase.storage.from('vihem-inspection-photos').upload(path, file, { upsert: false });
-      if (error) throw error;
-      const { data: urlData } = supabase.storage.from('vihem-inspection-photos').getPublicUrl(path);
-      const url = urlData.publicUrl;
+      const uploadedUrls = await Promise.all(files.map(async (file, index) => {
+        const ext = file.name.split('.').pop() || 'jpg';
+        const path = `inspections/${Date.now()}-${index}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const { error } = await supabase.storage.from('vihem-inspection-photos').upload(path, file, { upsert: false });
+        if (error) throw error;
+        const { data: urlData } = supabase.storage.from('vihem-inspection-photos').getPublicUrl(path);
+        return urlData.publicUrl;
+      }));
 
-      if (roomIndex !== undefined) {
-        const updated = [...inspectionForm.rooms];
-        updated[roomIndex] = { ...updated[roomIndex], photos: [...(updated[roomIndex].photos || []), url] };
-        setInspectionForm({ ...inspectionForm, rooms: updated });
-      } else {
-        setInspectionForm({ ...inspectionForm, photo_urls: [...inspectionForm.photo_urls, url] });
-      }
+      setInspectionForm(previous => {
+        if (roomIndex !== undefined) {
+          const rooms = [...previous.rooms];
+          rooms[roomIndex] = { ...rooms[roomIndex], photos: [...(rooms[roomIndex].photos || []), ...uploadedUrls] };
+          return { ...previous, rooms };
+        }
+        return { ...previous, photo_urls: [...previous.photo_urls, ...uploadedUrls] };
+      });
     } catch (err) {
       console.error('Photo upload failed:', err);
     } finally {
@@ -373,9 +377,9 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
   };
 
   const handlePhotoFile = async (e: React.ChangeEvent<HTMLInputElement>, roomIndex?: number) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    await uploadPhoto(file, roomIndex);
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    await uploadPhotos(files, roomIndex);
     e.target.value = '';
   };
 
@@ -931,10 +935,11 @@ Foton bifogade i systemet: ${photoCount}
                     ))}
                     <label className="w-16 h-16 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
                       <Camera className="w-4 h-4 text-slate-400" />
-                      <span className="text-xs text-slate-400 mt-0.5">Foto</span>
-                      <input ref={el => { roomPhotoRefs.current[i] = el; }} type="file" accept="image/*" className="hidden" onChange={(e) => handlePhotoFile(e, i)} />
+                      <span className="text-[10px] text-center leading-tight text-slate-400 mt-0.5">Lägg till<br />bilder</span>
+                      <input ref={el => { roomPhotoRefs.current[i] = el; }} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handlePhotoFile(e, i)} />
                     </label>
                   </div>
+                  <p className="text-[11px] text-slate-400 mt-2">Du kan välja flera bilder samtidigt.</p>
                 </div>
               ))}
             </div>
@@ -953,12 +958,12 @@ Foton bifogade i systemet: ${photoCount}
               <label className="w-20 h-20 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
                 {uploadingPhoto ? <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" /> : <>
                   <Camera className="w-5 h-5 text-slate-400" />
-                  <span className="text-xs text-slate-400 mt-1">Bifoga bild</span>
+                  <span className="text-[10px] text-center leading-tight text-slate-400 mt-1">Lägg till<br />bilder</span>
                 </>}
-                <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => handlePhotoFile(e)} />
+                <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handlePhotoFile(e)} />
               </label>
             </div>
-            <p className="text-xs text-slate-400 mt-1">Bilder sparas automatiskt när du väljer dem.</p>
+            <p className="text-xs text-slate-400 mt-1">Välj flera bilder samtidigt. Bilderna sparas automatiskt när de laddats upp.</p>
           </div>
 
           <Textarea label="Allmänna noteringar" value={inspectionForm.notes} onChange={(e) => setInspectionForm({ ...inspectionForm, notes: e.target.value })} placeholder="Övergripande noteringar om lägenheten..." rows={3} />
