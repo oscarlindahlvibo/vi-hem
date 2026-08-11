@@ -654,10 +654,10 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                         <Clock className="w-3 h-3" />
                         {formatDateTime(req.created_at)}
                       </div>
-                      {req.assigned && (
+                      {(req.assigned_to || req.assigned_to_ids?.length) && (
                         <div className="flex items-center gap-1">
                           <User className="w-3 h-3" />
-                          Tilldelad: {req.assigned.name}
+                          Tilldelad: Ja
                         </div>
                       )}
                     </div>
@@ -860,7 +860,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                         Tilldelad
                       </h3>
                       <p className="text-sm text-slate-700">
-                        {requestAssigneeNames(selectedRequest)}
+                        {selectedRequest.assigned_to || selectedRequest.assigned_to_ids?.length ? 'Ja' : 'Nej'}
                       </p>
                     </div>
                   </div>
