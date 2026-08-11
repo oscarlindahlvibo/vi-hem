@@ -3,7 +3,7 @@ import {
   BedDouble, CalendarDays, RefreshCw, Plus, Edit2, ExternalLink,
   Sparkles, Search, ClipboardCheck, AlertTriangle, DoorOpen,
   ChevronLeft, ChevronRight, LogIn, LogOut, Users, Wrench,
-  ReceiptText, Printer, CheckCircle2,
+  ReceiptText, Printer, CheckCircle2, Trash2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -485,6 +485,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const [commonCleaningModalOpen, setCommonCleaningModalOpen] = useState(false);
   const [editingUnit, setEditingUnit] = useState<ShortStayUnit | null>(null);
   const [editingBooking, setEditingBooking] = useState<ShortStayBooking | null>(null);
+  const [editingCommonCleaningRule, setEditingCommonCleaningRule] = useState<CommonCleaningRule | null>(null);
   const [unitForm, setUnitForm] = useState<UnitForm>(defaultUnitForm);
   const [bookingForm, setBookingForm] = useState<BookingForm>(defaultBookingForm);
   const [commonCleaningForm, setCommonCleaningForm] = useState<CommonCleaningForm>(defaultCommonCleaningForm);
@@ -792,12 +793,41 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   }
 
   function openCreateCommonCleaning() {
+    setEditingCommonCleaningRule(null);
     setCommonCleaningForm({
       ...defaultCommonCleaningForm,
       required_unit_ids: [],
     });
     setFormError('');
     setCommonCleaningModalOpen(true);
+  }
+
+  function openEditCommonCleaning(rule: CommonCleaningRule) {
+    setEditingCommonCleaningRule(rule);
+    setCommonCleaningForm({
+      title: rule.title,
+      description: rule.description || '',
+      required_unit_ids: [...rule.required_unit_ids],
+      weekdays: [...rule.weekdays],
+    });
+    setFormError('');
+    setCommonCleaningModalOpen(true);
+  }
+
+  async function deleteCommonCleaningRule(rule: CommonCleaningRule) {
+    if (!window.confirm(`Ta bort städregeln "${rule.title}"? Befintliga städningar påverkas inte.`)) return;
+    setError('');
+    const { error: deleteError } = await supabase
+      .from('vihem_short_stay_common_cleaning_rules')
+      .delete()
+      .eq('id', rule.id);
+    if (deleteError) {
+      setError(isMissingSchemaError(deleteError)
+        ? 'Databasen behöver uppdateras med senaste migrationen innan städregler kan tas bort.'
+        : deleteError.message || 'Kunde inte ta bort städregeln.');
+      return;
+    }
+    await fetchData();
   }
 
   function openEditBooking(booking: ShortStayBooking) {
@@ -968,18 +998,23 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     }
 
     setSaving(true);
-    const { error: insertError } = await supabase
-      .from('vihem_short_stay_common_cleaning_rules')
-      .insert({
-        organisation_id: organisationId,
-        title: commonCleaningForm.title.trim(),
-        description: commonCleaningForm.description.trim(),
-        required_unit_ids: commonCleaningForm.required_unit_ids,
-        weekdays: commonCleaningForm.weekdays,
-        active: true,
-        created_by: user.id,
-        updated_at: new Date().toISOString(),
-      });
+    const rulePayload = {
+      title: commonCleaningForm.title.trim(),
+      description: commonCleaningForm.description.trim(),
+      required_unit_ids: commonCleaningForm.required_unit_ids,
+      weekdays: commonCleaningForm.weekdays,
+      active: true,
+      updated_at: new Date().toISOString(),
+    };
+    const result = editingCommonCleaningRule
+      ? await supabase
+        .from('vihem_short_stay_common_cleaning_rules')
+        .update(rulePayload)
+        .eq('id', editingCommonCleaningRule.id)
+      : await supabase
+        .from('vihem_short_stay_common_cleaning_rules')
+        .insert({ ...rulePayload, organisation_id: organisationId, created_by: user.id });
+    const insertError = result.error;
     setSaving(false);
 
     if (insertError) {
@@ -990,6 +1025,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     }
 
     setCommonCleaningModalOpen(false);
+    setEditingCommonCleaningRule(null);
     await supabase.rpc('vihem_generate_short_stay_common_cleanings', {
       p_organisation_id: organisationId,
       p_from: toDateKey(addDays(new Date(), -3)),
@@ -1410,9 +1446,21 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Aktiva städregler</p>
                   <div className="mt-2 grid gap-2">
                     {commonCleaningRules.map(rule => (
-                      <div key={rule.id} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                        <p className="font-medium text-slate-800">{rule.title}</p>
-                        <p className="text-xs text-slate-500">{rule.required_unit_ids.length} valda rum · {rule.weekdays.map(day => weekdayOptions.find(option => option.value === day)?.label.slice(0, 3)).join(', ')}</p>
+                      <div key={rule.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                        <div className="min-w-0">
+                          <p className="font-medium text-slate-800">{rule.title}</p>
+                          <p className="text-xs text-slate-500">{rule.required_unit_ids.length} valda rum · {rule.weekdays.map(day => weekdayOptions.find(option => option.value === day)?.label.slice(0, 3)).join(', ')}</p>
+                        </div>
+                        {isAdmin && (
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Button size="sm" variant="ghost" onClick={() => openEditCommonCleaning(rule)} aria-label={`Redigera ${rule.title}`} title="Redigera städregel">
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => deleteCommonCleaningRule(rule)} aria-label={`Ta bort ${rule.title}`} title="Ta bort städregel">
+                              <Trash2 className="h-4 w-4 text-rose-600" />
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -2169,7 +2217,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
         </div>
       </Modal>
 
-      <Modal open={commonCleaningModalOpen} onClose={() => setCommonCleaningModalOpen(false)} title="Automatisk städning av gemensam yta" size="lg">
+      <Modal open={commonCleaningModalOpen} onClose={() => setCommonCleaningModalOpen(false)} title={editingCommonCleaningRule ? 'Redigera städregel' : 'Automatisk städning av gemensam yta'} size="lg">
         <div className="space-y-4">
           <Input
             label="Gemensam yta"
@@ -2243,7 +2291,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setCommonCleaningModalOpen(false)}>Avbryt</Button>
             <Button onClick={saveCommonCleaning} loading={saving}>
-              <ClipboardCheck className="w-4 h-4" /> Spara automatisk regel
+              <ClipboardCheck className="w-4 h-4" /> {editingCommonCleaningRule ? 'Spara ändringar' : 'Spara automatisk regel'}
             </Button>
           </div>
         </div>
