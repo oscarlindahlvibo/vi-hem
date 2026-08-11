@@ -76,6 +76,133 @@ const DEFAULT_ROOMS = [
   { name: 'Badrum', condition: 'good', notes: '', photos: [] as string[] },
 ];
 
+interface InspectionCameraProps {
+  open: boolean;
+  roomName: string;
+  onClose: () => void;
+  onCapture: (files: File[]) => void;
+}
+
+function InspectionCamera({ open, roomName, onClose, onCapture }: InspectionCameraProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [ready, setReady] = useState(false);
+  const [message, setMessage] = useState('Startar kamera...');
+  const [captures, setCaptures] = useState<Array<{ file: File; preview: string }>>([]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    let cancelled = false;
+    const videoElement = videoRef.current;
+    const start = async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('Kameran stöds inte i denna webbläsare.');
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+        setReady(true);
+        setMessage('Kameran är redo. Ta så många bilder du behöver.');
+      } catch (error) {
+        setReady(false);
+        setMessage(error instanceof Error ? error.message : 'Kunde inte starta kameran.');
+      }
+    };
+    void start();
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+      if (videoElement) videoElement.srcObject = null;
+      setReady(false);
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  const takePhoto = async () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || !ready || video.videoWidth === 0) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    if (!blob) return;
+    const file = new File([blob], `besiktning-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    setCaptures(previous => [...previous, { file, preview: URL.createObjectURL(blob) }]);
+    setMessage('Bild sparad. Du kan ta en till utan att öppna kameran igen.');
+  };
+
+  const finish = () => {
+    if (captures.length > 0) onCapture(captures.map(capture => capture.file));
+    captures.forEach(capture => URL.revokeObjectURL(capture.preview));
+    setCaptures([]);
+    onClose();
+  };
+
+  const closeWithoutSaving = () => {
+    captures.forEach(capture => URL.revokeObjectURL(capture.preview));
+    setCaptures([]);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-slate-950 text-white">
+      <canvas ref={canvasRef} className="hidden" />
+      <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-slate-950/80 px-4 py-3 backdrop-blur">
+        <div>
+          <p className="text-sm font-bold">Fota {roomName}</p>
+          <p className="text-xs text-slate-300">{captures.length} {captures.length === 1 ? 'bild' : 'bilder'} tagna</p>
+        </div>
+        <Button variant="secondary" size="sm" onClick={closeWithoutSaving}><X className="h-4 w-4" /> Stäng</Button>
+      </div>
+      <div className="relative flex h-full w-full items-center justify-center overflow-hidden">
+        <video ref={videoRef} className="h-full w-full object-cover" muted playsInline autoPlay />
+        <div className="pointer-events-none absolute inset-0 bg-slate-950/15" />
+        <div className="pointer-events-none absolute inset-x-8 top-24 bottom-52 rounded-2xl border-2 border-white/80 shadow-[0_0_0_999px_rgba(15,23,42,0.4)]" />
+        <div className="absolute bottom-[calc(env(safe-area-inset-bottom)+16px)] left-4 right-4 flex flex-col gap-3">
+          <div className="rounded-xl bg-slate-950/80 px-4 py-3 text-center text-sm font-semibold">{message}</div>
+          {captures.length > 0 && (
+            <div className="flex max-h-20 gap-2 overflow-x-auto">
+              {captures.map((capture, index) => (
+                <div key={`${capture.file.name}-${index}`} className="relative shrink-0">
+                  <img src={capture.preview} alt={`Bild ${index + 1}`} className="h-16 w-16 rounded-lg object-cover ring-2 ring-white/70" />
+                  <button
+                    type="button"
+                    aria-label={`Ta bort bild ${index + 1}`}
+                    onClick={() => {
+                      URL.revokeObjectURL(capture.preview);
+                      setCaptures(previous => previous.filter((_, captureIndex) => captureIndex !== index));
+                    }}
+                    className="absolute -right-1.5 -top-1.5 rounded-full bg-red-500 p-1 text-white"
+                  ><X className="h-3 w-3" /></button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <Button onClick={() => void takePhoto()} disabled={!ready} className="justify-center py-4"><Camera className="h-5 w-5" /> Ta bild</Button>
+            <Button onClick={finish} variant={captures.length ? 'primary' : 'secondary'} disabled={!captures.length} className="justify-center py-4">Klar ({captures.length})</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Default apartment contract data
 const DEFAULT_APARTMENT_CONTRACT: Record<string, any> = {
   notice_months: 3,
@@ -299,6 +426,7 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
   });
   const [savingInspection, setSavingInspection] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [inspectionCameraRoomIndex, setInspectionCameraRoomIndex] = useState<number | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const roomPhotoRefs = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -884,7 +1012,7 @@ Foton bifogade i systemet: ${photoCount}
       </div>
 
       {/* ═══ INSPECTION MODAL ═══════════════════════════════════════════════ */}
-      <Modal open={showInspectionModal} onClose={() => { setShowInspectionModal(false); resetInspectionForm(); }} title={selectedInspection ? 'Redigera besiktning' : 'Ny besiktning'} size="xl">
+      <Modal open={showInspectionModal} onClose={() => { setInspectionCameraRoomIndex(null); setShowInspectionModal(false); resetInspectionForm(); }} title={selectedInspection ? 'Redigera besiktning' : 'Ny besiktning'} size="xl">
         <div className="space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -933,13 +1061,17 @@ Foton bifogade i systemet: ${photoCount}
                         <button onClick={() => removePhoto(url, i)} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
                       </div>
                     ))}
+                    <button type="button" onClick={() => setInspectionCameraRoomIndex(i)} className="h-16 w-16 rounded-lg border-2 border-blue-200 bg-blue-50 flex flex-col items-center justify-center hover:border-blue-400 hover:bg-blue-100 transition-colors">
+                      <Camera className="w-4 h-4 text-blue-600" />
+                      <span className="text-[10px] text-center leading-tight text-blue-700 mt-0.5">Fota<br />flera</span>
+                    </button>
                     <label className="w-16 h-16 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
-                      <Camera className="w-4 h-4 text-slate-400" />
-                      <span className="text-[10px] text-center leading-tight text-slate-400 mt-0.5">Lägg till<br />bilder</span>
+                      <Image className="w-4 h-4 text-slate-400" />
+                      <span className="text-[10px] text-center leading-tight text-slate-400 mt-0.5">Välj<br />bilder</span>
                       <input ref={el => { roomPhotoRefs.current[i] = el; }} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handlePhotoFile(e, i)} />
                     </label>
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-2">Du kan välja flera bilder samtidigt.</p>
+                  <p className="text-[11px] text-slate-400 mt-2">Fota flera i samma kamerafönster eller välj flera från bildbiblioteket.</p>
                 </div>
               ))}
             </div>
@@ -978,6 +1110,15 @@ Foton bifogade i systemet: ${photoCount}
           </div>
         </div>
       </Modal>
+
+      <InspectionCamera
+        open={inspectionCameraRoomIndex !== null}
+        roomName={inspectionCameraRoomIndex === null ? 'rum' : inspectionForm.rooms[inspectionCameraRoomIndex]?.name || 'rum'}
+        onClose={() => setInspectionCameraRoomIndex(null)}
+        onCapture={(files) => {
+          if (inspectionCameraRoomIndex !== null) void uploadPhotos(files, inspectionCameraRoomIndex);
+        }}
+      />
 
       {/* ═══ CONTRACT MODAL ═══════════════════════════════════════════════════ */}
       <Modal open={showContractModal} onClose={() => { setShowContractModal(false); resetContractForm(); }} title={selectedContract ? 'Redigera hyresavtal' : 'Nytt hyresavtal'} size="xl">
