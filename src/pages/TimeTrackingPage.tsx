@@ -368,7 +368,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     return customerProjects.find(project => project.id === projectId);
   }
 
-  async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string) {
+  async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope: TimeEntry['project_billing_scope'] = 'included_in_quote') {
     const project = getCustomerProject(customerProjectId);
     await finishOpenEntries();
     await supabase.from('vihem_time_entries').insert({
@@ -377,6 +377,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       entry_type: 'work',
       customer_project_id: category === 'customer_project' ? customerProjectId || null : null,
       customer_name: category === 'customer_project' ? project?.customer_name || customerName || null : customerName || null,
+      project_billing_scope: category === 'customer_project' ? projectBillingScope : 'internal',
       start_time: new Date().toISOString(), end_time: null,
       break_minutes: 0, total_minutes: 0, comment: comment || '', status: 'draft',
     });
@@ -384,7 +385,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     fetchData();
   }
 
-  async function handleSwitchJob(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string) {
+  async function handleSwitchJob(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope: TimeEntry['project_billing_scope'] = 'included_in_quote') {
     if (!currentEntry) return;
     const project = getCustomerProject(customerProjectId);
     await finishOpenEntries();
@@ -396,6 +397,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       entry_type: 'work',
       customer_project_id: category === 'customer_project' ? customerProjectId || null : null,
       customer_name: category === 'customer_project' ? project?.customer_name || customerName || null : customerName || null,
+      project_billing_scope: category === 'customer_project' ? projectBillingScope : 'internal',
       start_time: new Date().toISOString(),
       end_time: null,
       break_minutes: 0,
@@ -430,7 +432,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
 
     const { data: previousEntries, error } = await supabase
       .from('vihem_time_entries')
-      .select('category, work_order_id, customer_project_id, customer_name, comment')
+      .select('category, work_order_id, customer_project_id, customer_name, project_billing_scope, comment')
       .eq('user_id', user.id)
       .eq('entry_type', 'work')
       .lte('end_time', currentEntry.start_time)
@@ -455,6 +457,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       entry_type: 'work',
       customer_project_id: previous.category === 'customer_project' ? previous.customer_project_id || null : null,
       customer_name: previous.customer_name || null,
+      project_billing_scope: previous.category === 'customer_project' ? previous.project_billing_scope || 'internal' : 'internal',
       start_time: new Date().toISOString(),
       end_time: null,
       break_minutes: 0,
@@ -626,7 +629,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
                   {String(elapsedSeconds % 60).padStart(2, '0')}
                 </p>
                 <p className={`text-xs mt-0.5 ${currentEntry.entry_type === 'break' ? 'text-amber-700' : 'text-emerald-700'}`}>
-                  {TIME_CATEGORY_LABELS[currentEntry.category]} · Startade {new Date(currentEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+                  {TIME_CATEGORY_LABELS[currentEntry.category]}{currentEntry.category === 'customer_project' && currentEntry.project_billing_scope === 'outside_quote' ? ' · ÄTA-tid' : ''} · Startade {new Date(currentEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
                   {timeEntryProjectLabel(currentEntry) && ` · ${timeEntryProjectLabel(currentEntry)}`}
                 </p>
               </div>
@@ -1113,7 +1116,7 @@ function timeEntryProjectLabel(entry: Pick<TimeEntry, 'customer_name'> & { custo
 
 function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, title = 'Stämpla in', submitLabel = 'Stämpla in' }: {
   open: boolean; onClose: () => void;
-  onSubmit: (cat: TimeCategory, woId?: string, comment?: string, customerName?: string, customerProjectId?: string) => void;
+  onSubmit: (cat: TimeCategory, woId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope?: TimeEntry['project_billing_scope']) => void;
   workOrders: WorkOrderSummary[];
   customerProjects: CustomerProjectSummary[];
   title?: string;
@@ -1122,9 +1125,10 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
   const [category, setCategory] = useState<TimeCategory>('general');
   const [workOrderId, setWorkOrderId] = useState('');
   const [customerProjectId, setCustomerProjectId] = useState('');
+  const [projectBillingScope, setProjectBillingScope] = useState<TimeEntry['project_billing_scope']>('included_in_quote');
   const [comment, setComment] = useState('');
 
-  function reset() { setCategory('general'); setWorkOrderId(''); setCustomerProjectId(''); setComment(''); }
+  function reset() { setCategory('general'); setWorkOrderId(''); setCustomerProjectId(''); setProjectBillingScope('included_in_quote'); setComment(''); }
 
   const selectedProject = customerProjects.find(project => project.id === customerProjectId);
   const requiresProject = category === 'customer_project';
@@ -1137,22 +1141,33 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
         <Select label="Arbetsorder (valfritt)" value={workOrderId} onChange={e => setWorkOrderId(e.target.value)}
           options={[{ value: '', label: 'Ingen' }, ...workOrders.map(wo => ({ value: wo.id, label: wo.title }))]} />
         {category === 'customer_project' && (
-          <Select
-            label="Kundprojekt"
-            value={customerProjectId}
-            onChange={e => setCustomerProjectId(e.target.value)}
-            options={[
-              { value: '', label: customerProjects.length === 0 ? 'Inga tillgängliga kundprojekt' : 'Välj kundprojekt' },
-              ...customerProjects.map(project => ({ value: project.id, label: projectOptionLabel(project) })),
-            ]}
-          />
+          <>
+            <Select
+              label="Kundprojekt"
+              value={customerProjectId}
+              onChange={e => setCustomerProjectId(e.target.value)}
+              options={[
+                { value: '', label: customerProjects.length === 0 ? 'Inga tillgängliga kundprojekt' : 'Välj kundprojekt' },
+                ...customerProjects.map(project => ({ value: project.id, label: projectOptionLabel(project) })),
+              ]}
+            />
+            <Select
+              label="Tidstyp"
+              value={projectBillingScope}
+              onChange={e => setProjectBillingScope(e.target.value as TimeEntry['project_billing_scope'])}
+              options={[
+                { value: 'included_in_quote', label: 'Ordinarie projektarbete' },
+                { value: 'outside_quote', label: 'ÄTA-tid (utanför offert)' },
+              ]}
+            />
+          </>
         )}
         <Textarea label="Kommentar (valfritt)" value={comment} onChange={e => setComment(e.target.value)} rows={2} />
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={() => { onClose(); reset(); }} className="flex-1">Avbryt</Button>
           <Button
             variant="primary"
-            onClick={() => { onSubmit(category, workOrderId || undefined, comment, selectedProject?.customer_name || '', customerProjectId || undefined); reset(); }}
+            onClick={() => { onSubmit(category, workOrderId || undefined, comment, selectedProject?.customer_name || '', customerProjectId || undefined, projectBillingScope); reset(); }}
             disabled={requiresProject && !customerProjectId}
             className="flex-1 gap-2"
           >
