@@ -388,10 +388,10 @@ function formatMoney(amount: number | string | null | undefined, currency = 'SEK
   return moneyFormatterCache.get(`sv-SE-${normalizedCurrency}`)!.format(numeric);
 }
 
-function parseMoneyInput(value: string) {
+function parseMoneyInput(value: string, allowNegative = false) {
   const normalized = value.replace(/\s/g, '').replace(',', '.');
   const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? Math.max(parsed, 0) : 0;
+  return Number.isFinite(parsed) ? (allowNegative ? parsed : Math.max(parsed, 0)) : 0;
 }
 
 function escapeHtml(value: unknown) {
@@ -1082,13 +1082,17 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     const booking = bookings.find(item => item.id === receiptForm.booking_id);
     if (!booking || !organisationId) return;
     const lines = receiptForm.lines
-      .map(line => ({ id: line.id, description: line.description.trim(), amount: parseMoneyInput(line.amount) }))
-      .filter(line => line.description && line.amount >= 0);
+      .map(line => ({ id: line.id, description: line.description.trim(), amount: parseMoneyInput(line.amount, true) }))
+      .filter(line => line.description);
     if (lines.length === 0) {
       setFormError('Lägg till minst en kvittorad.');
       return;
     }
-    const total = lines.reduce((sum, line) => sum + line.amount, 0);
+    const total = Math.round(lines.reduce((sum, line) => sum + line.amount, 0) * 100) / 100;
+    if (total <= 0) {
+      setFormError('Kvittots total måste vara större än 0 kr. Negativa rader kan användas som avdrag.');
+      return;
+    }
     const commissionRate = Math.max(parseMoneyInput(receiptForm.commission_rate), 0);
     const commissionAmount = Math.min(Math.max(parseMoneyInput(receiptForm.commission_amount), 0), total);
     setSaving(true);
@@ -2141,7 +2145,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-slate-900">Kvittorader</p>
-                <p className="text-xs text-slate-500">Beloppen anges inklusive moms och summeras till kvittots total.</p>
+                <p className="text-xs text-slate-500">Beloppen anges inklusive moms. Negativa belopp kan användas för rabatt, avdrag eller provision.</p>
               </div>
               <Button size="sm" variant="secondary" onClick={() => setReceiptForm(prev => ({ ...prev, lines: [...prev.lines, { id: crypto.randomUUID(), description: '', amount: '0' }] }))}>
                 <Plus className="h-4 w-4" /> Lägg till rad
