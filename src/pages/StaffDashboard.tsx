@@ -287,6 +287,8 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
 
     const channel = supabase
       .channel(`staff-dashboard-${user.organisation_id || user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_maintenance_requests' }, () => fetchDashboardData())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'vihem_maintenance_request_comments' }, () => fetchDashboardData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_staff_absence_requests' }, () => fetchDashboardData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_time_entries' }, () => fetchDashboardData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_short_stay_bookings' }, () => fetchDashboardData())
@@ -309,7 +311,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
     ...todayCheckOuts.map(booking => ({ booking, type: 'out' as const })),
   ];
   const shortStayAttentionCount = shortStayEvents.length;
-  const attentionCount = attentionWorkOrdersCount + shortStayAttentionCount + ongoingCustomerProjects.length;
+  const attentionCount = attentionWorkOrdersCount + newMRCount + shortStayAttentionCount + ongoingCustomerProjects.length;
   const quickLinks = [
     {
       label: 'Arbetsordrar',
@@ -482,6 +484,27 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
         </button>
         <div className="divide-y divide-slate-100 border-t border-slate-100">
+          {(user?.role === 'admin' || user?.role === 'staff') && (
+            <button
+              onClick={() => onNavigate('maintenance')}
+              className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 sm:px-6"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-100 text-red-600 shadow-sm sm:h-14 sm:w-14">
+                  <Wrench className="h-6 w-6 sm:h-7 sm:w-7" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-black leading-5 text-slate-950 sm:text-base">
+                    {newMRCount} inkommande felanmälningar
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500">
+                    Nya ärenden från hyresgäster som behöver hanteras
+                  </span>
+                </span>
+              </div>
+              <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
+            </button>
+          )}
           <button
             onClick={() => onNavigate(myWorkOrdersCount > 0 ? 'workorders' : 'maintenance')}
             className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 sm:px-6"
