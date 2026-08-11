@@ -11,6 +11,19 @@ npm run mobile:ios
 npm run mobile:android
 ```
 
+## Produktionskontroll
+
+Kör alltid releasekontrollen före ett produktionsbygge. Den stoppar bygget om lokal Supabase, test-superadmin, fel publik URL, saknade ikoner eller fel app-id används:
+
+```sh
+VITE_SUPABASE_URL=https://<supabase-host> \
+VITE_SUPABASE_ANON_KEY=<publishable-anon-key> \
+VITE_PUBLIC_APP_URL=https://app.vi-hem.se \
+npm run release:check
+```
+
+Bygg därefter med samma miljövariabler och kör `npm run mobile:sync`.
+
 `npm run mobile:sync` bygger webbappen och kopierar den till både `ios/` och `android/`. Kör den efter varje ändring i `src/` eller `public/`.
 
 ## Offline och konflikter
@@ -41,6 +54,7 @@ Appskalet cachas av service worker i webb/PWA-läge. Tidstämpling, frånvaro, f
 - Sätt `VIHEM_CRON_SECRET` och kör `vihem-dispatch-scheduled-notifications` varje minut via Supabase Cron eller er deploy-scheduler.
 - För native push: konfigurera APNs/FCM-leverans i servermiljön och kontrollera att `vihem_push_tokens` fylls efter första appstarten.
 - Testa inloggning, offlinekö, återanslutning, dokumentuppladdning och lösenordsåterställning på riktiga iOS- och Android-enheter.
+- Kör `npm run release:check` i CI eller deployscript före varje produktionsbygge.
 - Sätt aldrig Supabase service role, OpenAI- eller Google-nycklar i appens buildmiljö eller i Git.
 
 Själva certifikaten och keystores kan inte skapas säkert här utan era utvecklarkonton och ska därför göras i Xcode/Android Studio eller CI med hemliga variabler.
