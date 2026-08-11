@@ -84,6 +84,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
   const [comments, setComments] = useState<MaintenanceRequestComment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
   const [commentText, setCommentText] = useState('');
+  const [commentInternal, setCommentInternal] = useState(false);
   const [postingComment, setPostingComment] = useState(false);
 
   // New request form state
@@ -142,6 +143,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
   useEffect(() => {
     if (selectedRequest && showDetailModal) {
       fetchComments(selectedRequest.id);
+      setCommentInternal(false);
       setInternalNotes(selectedRequest.internal_notes || '');
       setNewStatus(selectedRequest.status);
       setAssignedToIds(selectedRequest.assigned_to_ids?.length ? selectedRequest.assigned_to_ids : selectedRequest.assigned_to ? [selectedRequest.assigned_to] : []);
@@ -316,19 +318,20 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
     try {
       setPostingComment(true);
       const { error } = await supabase
-        .from('vihem_maintenance_request_comments')
+      .from('vihem_maintenance_request_comments')
         .insert([
           {
             request_id: selectedRequest.id,
             user_id: user.id,
             comment: commentText,
-            internal: isStaff && isTenant === false,
+            internal: isStaff ? commentInternal : false,
           },
         ]);
 
       if (error) throw error;
 
       setCommentText('');
+      setCommentInternal(false);
       await fetchComments(selectedRequest.id);
     } catch (err) {
       console.error('Error adding comment:', err);
@@ -920,10 +923,28 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
 
                   {/* Add Comment Form */}
                   <form onSubmit={handleAddComment} className="space-y-2">
+                    {isStaff && (
+                      <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={commentInternal}
+                          onChange={e => setCommentInternal(e.target.checked)}
+                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600"
+                        />
+                        <span>
+                          <span className="block font-semibold">Intern kommentar</span>
+                          <span className="block text-xs text-slate-500">
+                            {commentInternal
+                              ? 'Visas bara för personal och admin.'
+                              : 'Kommentaren syns även för hyresgästen.'}
+                          </span>
+                        </span>
+                      </label>
+                    )}
                     <Textarea
                       value={commentText}
                       onChange={e => setCommentText(e.target.value)}
-                      placeholder="Lägg till kommentar..."
+                      placeholder={commentInternal ? 'Skriv intern kommentar...' : 'Skriv kommentar som hyresgästen kan se...'}
                       rows={3}
                     />
                     <Button
@@ -1433,10 +1454,26 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
 
                   {/* Add Comment Form */}
                   <form onSubmit={handleAddComment} className="space-y-2">
+                    <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={commentInternal}
+                        onChange={e => setCommentInternal(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600"
+                      />
+                      <span>
+                        <span className="block font-semibold">Intern kommentar</span>
+                        <span className="block text-xs text-slate-500">
+                          {commentInternal
+                            ? 'Visas bara för personal och admin.'
+                            : 'Kommentaren syns även för hyresgästen.'}
+                        </span>
+                      </span>
+                    </label>
                     <Textarea
                       value={commentText}
                       onChange={e => setCommentText(e.target.value)}
-                      placeholder="Lägg till kommentar..."
+                      placeholder={commentInternal ? 'Skriv intern kommentar...' : 'Skriv kommentar som hyresgästen kan se...'}
                       rows={3}
                     />
                     <Button
