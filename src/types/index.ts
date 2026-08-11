@@ -829,6 +829,8 @@ export interface ShortStayUnit {
   name: string;
   description: string;
   max_guests: number;
+  receipt_vat_rate?: number;
+  receipt_vat_exempt?: boolean;
   is_active: boolean;
   beds24_enabled: boolean;
   beds24_property_id: string;
@@ -883,6 +885,14 @@ export interface ShortStayBooking {
   balance_due: number;
   currency: string;
   price_breakdown: Record<string, unknown>;
+  receipt_company_id?: string | null;
+  receipt_title?: string;
+  receipt_lines?: Array<{ id?: string; description: string; amount: number }>;
+  receipt_vat_rate?: number;
+  receipt_vat_exempt?: boolean;
+  platform_commission_rate?: number;
+  platform_commission_amount?: number;
+  platform_settlement_amount?: number;
   source_payload: Record<string, unknown>;
   created_by: string | null;
   created_at: string;

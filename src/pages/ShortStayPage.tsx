@@ -15,6 +15,7 @@ import {
 import type {
   Apartment, Property, ShortStayBooking, ShortStayBookingType,
   ShortStayCleaningStatus, ShortStayPaymentStatus, ShortStayUnit,
+  FinanceCompany,
 } from '../types';
 
 interface ShortStayPageProps {
@@ -27,6 +28,8 @@ interface UnitForm {
   name: string;
   description: string;
   max_guests: string;
+  receipt_vat_rate: string;
+  receipt_vat_exempt: boolean;
   property_id: string;
   apartment_id: string;
   is_active: boolean;
@@ -113,6 +116,23 @@ interface CommonCleaningForm {
   weekdays: number[];
 }
 
+interface ReceiptLineForm {
+  id: string;
+  description: string;
+  amount: string;
+}
+
+interface ReceiptForm {
+  booking_id: string;
+  company_id: string;
+  title: string;
+  vat_rate: string;
+  vat_exempt: boolean;
+  commission_rate: string;
+  commission_amount: string;
+  lines: ReceiptLineForm[];
+}
+
 type CleaningItem =
   | { kind: 'booking'; id: string; status: ShortStayCleaningStatus; date: string; title: string; subtitle: string; booking: ShortStayBooking }
   | { kind: 'common'; id: string; status: ShortStayCleaningStatus; date: string; title: string; subtitle: string; cleaning: CommonCleaning };
@@ -172,6 +192,8 @@ const defaultUnitForm: UnitForm = {
   name: '',
   description: '',
   max_guests: '2',
+  receipt_vat_rate: '12',
+  receipt_vat_exempt: false,
   property_id: '',
   apartment_id: '',
   is_active: true,
@@ -211,6 +233,17 @@ const defaultCommonCleaningForm: CommonCleaningForm = {
   description: '',
   required_unit_ids: [],
   weekdays: [1, 2, 3, 4, 5],
+};
+
+const defaultReceiptForm: ReceiptForm = {
+  booking_id: '',
+  company_id: '',
+  title: 'Kvitto',
+  vat_rate: '12',
+  vat_exempt: false,
+  commission_rate: '0',
+  commission_amount: '0',
+  lines: [],
 };
 
 const weekdayOptions = [
@@ -443,6 +476,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const [commonCleaningRules, setCommonCleaningRules] = useState<CommonCleaningRule[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [apartments, setApartments] = useState<Apartment[]>([]);
+  const [financeCompanies, setFinanceCompanies] = useState<FinanceCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -472,6 +506,8 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const [conflictsModalOpen, setConflictsModalOpen] = useState(false);
   const [receiptMessage, setReceiptMessage] = useState('');
   const [creatingReceiptId, setCreatingReceiptId] = useState<string | null>(null);
+  const [receiptModalOpen, setReceiptModalOpen] = useState(false);
+  const [receiptForm, setReceiptForm] = useState<ReceiptForm>(defaultReceiptForm);
 
   const isAdmin = user?.role === 'admin';
   const organisationId = user?.organisation_id;
@@ -571,6 +607,12 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
 
   useEffect(() => {
     if (organisationId && isAdmin) fetchBeds24Connection();
+  }, [organisationId, isAdmin]);
+
+  useEffect(() => {
+    if (!organisationId || !isAdmin) return;
+    supabase.from('vihem_companies').select('*').eq('organisation_id', organisationId).eq('active', true).order('name')
+      .then(({ data }) => setFinanceCompanies((data || []) as FinanceCompany[]));
   }, [organisationId, isAdmin]);
 
   async function fetchData() {
@@ -717,6 +759,8 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
       name: unit.name,
       description: unit.description || '',
       max_guests: String(unit.max_guests || 2),
+      receipt_vat_rate: String(unit.receipt_vat_rate ?? 12),
+      receipt_vat_exempt: Boolean(unit.receipt_vat_exempt),
       property_id: unit.property_id || '',
       apartment_id: unit.apartment_id || '',
       is_active: unit.is_active,
@@ -801,6 +845,8 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
       name: unitForm.name.trim(),
       description: unitForm.description.trim(),
       max_guests: Math.max(parseInt(unitForm.max_guests) || 1, 1),
+      receipt_vat_rate: Math.max(parseMoneyInput(unitForm.receipt_vat_rate), 0),
+      receipt_vat_exempt: unitForm.receipt_vat_exempt,
       property_id: unitForm.property_id || null,
       apartment_id: unitForm.apartment_id || null,
       is_active: unitForm.is_active,
@@ -1014,10 +1060,74 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     }
   }
 
+  function openReceiptEditor(booking: ShortStayBooking) {
+    const existingLines = Array.isArray(booking.receipt_lines) && booking.receipt_lines.length > 0
+      ? booking.receipt_lines
+      : [{ description: `Boende · ${units.find(unit => unit.id === booking.unit_id)?.name || 'Korttidsboende'}`, amount: Number(booking.total_price || 0) }];
+    setReceiptForm({
+      booking_id: booking.id,
+      company_id: booking.receipt_company_id || financeCompanies[0]?.id || '',
+      title: booking.receipt_title || 'Kvitto',
+      vat_rate: String(booking.receipt_vat_rate ?? units.find(unit => unit.id === booking.unit_id)?.receipt_vat_rate ?? 12),
+      vat_exempt: Boolean(booking.receipt_vat_exempt ?? units.find(unit => unit.id === booking.unit_id)?.receipt_vat_exempt),
+      commission_rate: String(booking.platform_commission_rate ?? 0),
+      commission_amount: String(booking.platform_commission_amount ?? 0),
+      lines: existingLines.map(line => ({ id: crypto.randomUUID(), description: line.description, amount: String(line.amount ?? 0) })),
+    });
+    setFormError('');
+    setReceiptModalOpen(true);
+  }
+
+  async function saveReceiptConfiguration() {
+    const booking = bookings.find(item => item.id === receiptForm.booking_id);
+    if (!booking || !organisationId) return;
+    const lines = receiptForm.lines
+      .map(line => ({ id: line.id, description: line.description.trim(), amount: parseMoneyInput(line.amount) }))
+      .filter(line => line.description && line.amount >= 0);
+    if (lines.length === 0) {
+      setFormError('Lägg till minst en kvittorad.');
+      return;
+    }
+    const total = lines.reduce((sum, line) => sum + line.amount, 0);
+    const commissionRate = Math.max(parseMoneyInput(receiptForm.commission_rate), 0);
+    const commissionAmount = Math.min(Math.max(parseMoneyInput(receiptForm.commission_amount), 0), total);
+    setSaving(true);
+    const { error: updateError } = await supabase
+      .from('vihem_short_stay_bookings')
+      .update({
+        receipt_company_id: receiptForm.company_id || null,
+        receipt_title: receiptForm.title.trim() || 'Kvitto',
+        receipt_lines: lines,
+        receipt_vat_rate: Math.max(parseMoneyInput(receiptForm.vat_rate), 0),
+        receipt_vat_exempt: receiptForm.vat_exempt,
+        platform_commission_rate: commissionRate,
+        platform_commission_amount: commissionAmount,
+        platform_settlement_amount: Math.max(total - commissionAmount, 0),
+        total_price: total,
+        balance_due: Math.max(total - Number(booking.paid_amount || 0), 0),
+        price_breakdown: { ...(booking.price_breakdown || {}), receipt_lines: lines, commission_amount: commissionAmount },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', booking.id);
+    if (!updateError) {
+      await supabase.rpc('vihem_upsert_short_stay_settlement', { target_booking_id: booking.id, target_company_id: receiptForm.company_id || null });
+      setReceiptModalOpen(false);
+      await fetchData();
+    }
+    setSaving(false);
+    if (updateError) setFormError(updateError.message);
+  }
+
   function printReceipt(booking: ShortStayBooking) {
     const unit = units.find(u => u.id === booking.unit_id);
     const currency = booking.currency || 'SEK';
-    const total = Number(booking.total_price || 0);
+    const configuredLines = Array.isArray(booking.receipt_lines) && booking.receipt_lines.length > 0
+      ? booking.receipt_lines
+      : [{ description: `Boende · ${unit?.name || 'Korttidsboende'}`, amount: Number(booking.total_price || 0) }];
+    const total = configuredLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    const vatRate = booking.receipt_vat_exempt ? 0 : Number(booking.receipt_vat_rate ?? 12);
+    const subtotal = vatRate === 0 ? total : Math.round((total / (1 + vatRate / 100)) * 100) / 100;
+    const vat = Math.round((total - subtotal) * 100) / 100;
     const paid = Number(booking.paid_amount || 0);
     const due = Number(booking.balance_due ?? Math.max(total - paid, 0));
     const receiptWindow = window.open('', '_blank');
@@ -1052,8 +1162,9 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
           <main>
             <header>
               <div>
-                <h1>Kvitto</h1>
-                <p>VI-HEM korttidsuthyrning</p>
+                <h1>${escapeHtml(booking.receipt_title || 'Kvitto')}</h1>
+                <p>${escapeHtml(financeCompanies.find(company => company.id === booking.receipt_company_id)?.legal_name || financeCompanies.find(company => company.id === booking.receipt_company_id)?.name || 'VI-HEM korttidsuthyrning')}</p>
+                ${financeCompanies.find(company => company.id === booking.receipt_company_id)?.organisation_number ? `<p>Org.nr ${escapeHtml(financeCompanies.find(company => company.id === booking.receipt_company_id)?.organisation_number || '')}</p>` : ''}
               </div>
               <div>
                 <p><strong>Datum:</strong> ${escapeHtml(new Date().toLocaleDateString('sv-SE'))}</p>
@@ -1071,7 +1182,9 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
             <table>
               <thead><tr><th>Rad</th><th>Belopp</th></tr></thead>
               <tbody>
-                <tr><td>Boende</td><td>${escapeHtml(formatMoney(total, currency))}</td></tr>
+                ${configuredLines.map(line => `<tr><td>${escapeHtml(line.description)}</td><td>${escapeHtml(formatMoney(Number(line.amount || 0), currency))}</td></tr>`).join('')}
+                <tr><td>Exkl. moms</td><td>${escapeHtml(formatMoney(subtotal, currency))}</td></tr>
+                <tr><td>Moms (${vatRate}%)</td><td>${escapeHtml(formatMoney(vat, currency))}</td></tr>
                 <tr><td>Betalt</td><td>${escapeHtml(formatMoney(paid, currency))}</td></tr>
                 <tr class="total"><td>Kvar att betala</td><td>${escapeHtml(formatMoney(due, currency))}</td></tr>
               </tbody>
@@ -1096,7 +1209,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
 
     const { data, error: receiptError } = await supabase.rpc('vihem_create_invoice_from_short_stay_booking', {
       target_booking_id: booking.id,
-      target_company_id: null,
+      target_company_id: booking.receipt_company_id || null,
       target_customer_id: null,
       approve_invoice: booking.payment_status === 'paid',
     });
@@ -1603,13 +1716,19 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
                         <p className="mt-1 text-xs text-slate-500">
                           Totalt {formatMoney(total, booking.currency)} · betalt {formatMoney(paid, booking.currency)}
                         </p>
+                        {(Number(booking.platform_commission_amount || 0) > 0 || booking.receipt_vat_exempt || booking.receipt_vat_rate !== undefined) && (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Moms {booking.receipt_vat_exempt ? 'momsfritt' : `${booking.receipt_vat_rate ?? 12}%`}
+                            {Number(booking.platform_commission_amount || 0) > 0 ? ` · provision ${formatMoney(Number(booking.platform_commission_amount), booking.currency)} · netto ${formatMoney(Math.max(total - Number(booking.platform_commission_amount), 0), booking.currency)}` : ''}
+                          </p>
+                        )}
                         {booking.finance_invoice_id && (
                           <p className="mt-1 text-xs font-semibold text-emerald-700">Kopplad till ekonomifaktura</p>
                         )}
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Button variant="secondary" onClick={() => openEditBooking(booking)}>
-                          <Edit2 className="w-4 h-4" /> Redigera pris
+                        <Button variant="secondary" onClick={() => openReceiptEditor(booking)}>
+                          <Edit2 className="w-4 h-4" /> Anpassa kvitto
                         </Button>
                         {isAdmin && (
                           booking.finance_invoice_id ? (
@@ -1900,6 +2019,13 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
             value={unitForm.max_guests}
             onChange={e => setUnitForm({ ...unitForm, max_guests: e.target.value })}
           />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Input label="Standardmoms på kvitto (%)" type="number" min={0} step={0.01} value={unitForm.receipt_vat_rate} disabled={unitForm.receipt_vat_exempt} onChange={e => setUnitForm({ ...unitForm, receipt_vat_rate: e.target.value })} />
+            <label className="flex items-center gap-2 self-end pb-2 text-sm text-slate-700">
+              <input type="checkbox" checked={unitForm.receipt_vat_exempt} onChange={e => setUnitForm({ ...unitForm, receipt_vat_exempt: e.target.checked })} className="h-4 w-4 rounded border-slate-300" />
+              Standard är momsfritt
+            </label>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Select
               label="Fastighet"
@@ -1973,6 +2099,68 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setUnitModalOpen(false)}>Avbryt</Button>
             <Button onClick={saveUnit} loading={saving}>{editingUnit ? 'Spara' : 'Skapa'}</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={receiptModalOpen} onClose={() => setReceiptModalOpen(false)} title="Anpassa korttidskvitto" size="lg">
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Input label="Rubrik på kvittot" value={receiptForm.title} onChange={event => setReceiptForm(prev => ({ ...prev, title: event.target.value }))} />
+            <Select
+              label="Utfärdande bolag"
+              value={receiptForm.company_id}
+              options={financeCompanies.map(company => ({ value: company.id, label: `${company.name}${company.organisation_number ? ` · ${company.organisation_number}` : ''}` }))}
+              onChange={event => setReceiptForm(prev => ({ ...prev, company_id: event.target.value }))}
+            />
+            <Input label="Moms %" type="number" min={0} step={0.01} value={receiptForm.vat_rate} disabled={receiptForm.vat_exempt} onChange={event => setReceiptForm(prev => ({ ...prev, vat_rate: event.target.value }))} />
+            <Input label="Plattformsprovision" inputMode="decimal" value={receiptForm.commission_amount} onChange={event => setReceiptForm(prev => ({ ...prev, commission_amount: event.target.value }))} placeholder="0" />
+          </div>
+          <div className="flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 p-3 text-sm text-slate-700">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={receiptForm.vat_exempt} onChange={event => setReceiptForm(prev => ({ ...prev, vat_exempt: event.target.checked }))} className="h-4 w-4 rounded border-slate-300" />
+              Momsfritt
+            </label>
+            <label className="flex items-center gap-2">
+              Provisionen är avdragen av bokningskanalen
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={receiptForm.commission_rate}
+                onChange={event => {
+                  const rate = Math.max(parseMoneyInput(event.target.value), 0);
+                  const gross = receiptForm.lines.reduce((sum, line) => sum + parseMoneyInput(line.amount), 0);
+                  setReceiptForm(prev => ({ ...prev, commission_rate: event.target.value, commission_amount: String(Math.round(gross * rate) / 100) }));
+                }}
+                className="w-20 rounded-lg border border-slate-300 px-2 py-1"
+              /> %
+            </label>
+          </div>
+          <div className="rounded-lg border border-slate-200 p-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Kvittorader</p>
+                <p className="text-xs text-slate-500">Beloppen anges inklusive moms och summeras till kvittots total.</p>
+              </div>
+              <Button size="sm" variant="secondary" onClick={() => setReceiptForm(prev => ({ ...prev, lines: [...prev.lines, { id: crypto.randomUUID(), description: '', amount: '0' }] }))}>
+                <Plus className="h-4 w-4" /> Lägg till rad
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {receiptForm.lines.map((line, index) => (
+                <div key={line.id} className="grid grid-cols-[1fr_110px_auto] items-end gap-2">
+                  <Input label={index === 0 ? 'Text' : undefined} value={line.description} onChange={event => setReceiptForm(prev => ({ ...prev, lines: prev.lines.map(item => item.id === line.id ? { ...item, description: event.target.value } : item) }))} placeholder="T.ex. boende, städning, extra säng" />
+                  <Input label={index === 0 ? 'Belopp' : undefined} inputMode="decimal" value={line.amount} onChange={event => setReceiptForm(prev => ({ ...prev, lines: prev.lines.map(item => item.id === line.id ? { ...item, amount: event.target.value } : item) }))} />
+                  <Button size="sm" variant="ghost" onClick={() => setReceiptForm(prev => ({ ...prev, lines: prev.lines.filter(item => item.id !== line.id) }))} aria-label="Ta bort kvittorad">×</Button>
+                </div>
+              ))}
+            </div>
+          </div>
+          {formError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{formError}</div>}
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => setReceiptModalOpen(false)}>Avbryt</Button>
+            <Button onClick={saveReceiptConfiguration} loading={saving}>Spara kvittoinställningar</Button>
           </div>
         </div>
       </Modal>
