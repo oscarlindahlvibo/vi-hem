@@ -489,6 +489,41 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     }
   }
 
+  async function syncLinkedMaintenanceStatus(maintenanceRequestId: string | null) {
+    if (!maintenanceRequestId) return;
+
+    const { data: linkedOrders, error: linkedOrdersError } = await supabase
+      .from('vihem_work_orders')
+      .select('status')
+      .eq('maintenance_request_id', maintenanceRequestId);
+
+    if (linkedOrdersError) throw linkedOrdersError;
+
+    const statuses = (linkedOrders || []).map(order => order.status as WOStatus);
+    const openStatuses = statuses.filter(status => !ARCHIVED_WO_STATUSES.includes(status));
+    const completedCount = statuses.filter(status => status === 'completed').length;
+    let customerStatus: 'received' | 'assigned' | 'started' | 'waiting_material' | 'waiting_contractor' | 'done' | 'closed' = 'received';
+
+    if (openStatuses.length === 0) {
+      customerStatus = completedCount > 0 ? 'done' : 'closed';
+    } else if (openStatuses.includes('waiting_material')) {
+      customerStatus = 'waiting_material';
+    } else if (openStatuses.includes('waiting_contractor')) {
+      customerStatus = 'waiting_contractor';
+    } else if (openStatuses.some(status => ['started', 'paused', 'waiting_tenant', 'ready_for_check'].includes(status))) {
+      customerStatus = 'started';
+    } else if (openStatuses.some(status => ['assigned', 'new'].includes(status))) {
+      customerStatus = 'assigned';
+    }
+
+    const { error: maintenanceError } = await supabase
+      .from('vihem_maintenance_requests')
+      .update({ status: customerStatus, updated_at: new Date().toISOString() })
+      .eq('id', maintenanceRequestId);
+
+    if (maintenanceError) throw maintenanceError;
+  }
+
   async function updateWorkOrderStatus() {
     if (!selectedWorkOrder || !newDetailStatus) return;
 
@@ -500,6 +535,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         .eq('id', selectedWorkOrder.id);
 
       if (error) throw error;
+      await syncLinkedMaintenanceStatus(selectedWorkOrder.maintenance_request_id);
       setSelectedWorkOrder({ ...selectedWorkOrder, status: newDetailStatus });
       await fetchWorkOrders();
     } catch (err) {
@@ -530,6 +566,13 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         .in('id', ids);
 
       if (error) throw error;
+
+      const linkedMaintenanceRequestIds = [...new Set(
+        workOrders
+          .filter(order => ids.includes(order.id) && order.maintenance_request_id)
+          .map(order => order.maintenance_request_id as string)
+      )];
+      await Promise.all(linkedMaintenanceRequestIds.map(syncLinkedMaintenanceStatus));
 
       setWorkOrders((orders) => orders.map((order) => (
         ids.includes(order.id) ? { ...order, ...payload } : order
