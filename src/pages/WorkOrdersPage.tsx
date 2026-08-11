@@ -71,6 +71,7 @@ interface WOWithRelations extends Omit<WorkOrder, 'property' | 'apartment' | 'te
   tenant?: WorkOrderPerson;
   assigned?: WorkOrderPerson;
   creator?: WorkOrderPerson;
+  maintenance_request?: { id: string; title: string; status: string; tenant_id: string } | null;
 }
 
 type CreateWorkOrderForm = {
@@ -234,7 +235,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
           apartment:vihem_apartments(apartment_number),
           tenant:vihem_profiles!work_orders_tenant_id_fkey(name),
           assigned:vihem_profiles!work_orders_assigned_to_fkey(name),
-          creator:vihem_profiles!work_orders_created_by_fkey(name)`
+          creator:vihem_profiles!work_orders_created_by_fkey(name),
+          maintenance_request:vihem_maintenance_requests(id,title,status,tenant_id)`
         )
         .order('created_at', { ascending: false });
 
@@ -1552,7 +1554,22 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                     {WO_STATUS_LABELS[selectedWorkOrder.status]}
                   </Badge>
                 )}
+                {selectedWorkOrder.maintenance_request && (
+                  <p className="mt-2 text-xs font-medium text-blue-700">
+                    Synkas till kunden via den kopplade felanmälan
+                  </p>
+                )}
               </div>
+
+              {selectedWorkOrder.maintenance_request && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 md:col-span-2">
+                  <p className="text-xs font-semibold uppercase text-blue-700">Kopplad felanmälan</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-800">{selectedWorkOrder.maintenance_request.title}</p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Kundstatus: {selectedWorkOrder.maintenance_request.status === 'waiting_material' ? 'Inväntar material' : selectedWorkOrder.maintenance_request.status === 'waiting_contractor' ? 'Inväntar entreprenör' : selectedWorkOrder.maintenance_request.status === 'done' ? 'Klar' : selectedWorkOrder.maintenance_request.status === 'closed' ? 'Stängd' : selectedWorkOrder.maintenance_request.status === 'started' ? 'Pågår' : 'Mottagen'}
+                  </p>
+                </div>
+              )}
 
               <div>
                 <p className="text-xs font-medium text-slate-500 uppercase">Fastighet</p>
@@ -1743,7 +1760,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                   label="Ny kommentar"
                   value={commentText}
                   onChange={(e) => setCommentText(e.target.value)}
-                  placeholder="Skriv din kommentar..."
+                  placeholder={commentInternal ? 'Skriv intern kommentar...' : 'Skriv kommentar som kunden kan se...'}
                   rows={3}
                 />
 
@@ -1756,7 +1773,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                     className="rounded border-slate-300"
                   />
                   <label htmlFor="internal" className="text-sm text-slate-700">
-                    Intern kommentar
+                    Intern kommentar (annars syns kommentaren för kunden)
                   </label>
                 </div>
 
