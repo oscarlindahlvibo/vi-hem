@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { Mail, Lock, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { AppLogo } from './AppLogo';
 import { Button } from './ui';
+import { passwordResetRedirectUrl } from '../lib/authUrls';
 
 export function LoginPage() {
   const { signIn, signInWithBankID, bankIDAvailable } = useAuth();
@@ -39,7 +40,7 @@ export function LoginPage() {
     setResetSent(false);
     setLoading(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: passwordResetRedirectUrl(),
     });
     if (error) {
       setError(

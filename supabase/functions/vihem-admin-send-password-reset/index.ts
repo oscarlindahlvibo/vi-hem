@@ -63,7 +63,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const { error } = await adminClient.auth.resetPasswordForEmail(targetProfile.email, {
-      redirectTo: redirect_to || `${req.headers.get("origin") ?? ""}/reset-password`,
+      redirectTo: redirect_to || `${publicAppUrl()}/reset-password`,
     });
 
     if (error) {
@@ -85,4 +85,8 @@ function json(body: Record<string, unknown>, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+function publicAppUrl() {
+  return (Deno.env.get("APP_PUBLIC_URL") || "https://app.vi-hem.se").replace(/\/$/, "");
 }

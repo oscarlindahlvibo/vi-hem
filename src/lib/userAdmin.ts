@@ -1,4 +1,5 @@
 import { supabase, supabaseAnonKey, supabaseUrl } from './supabase';
+import { passwordResetRedirectUrl } from './authUrls';
 import type { Role } from '../types';
 
 interface CreateUserInput {
@@ -70,7 +71,7 @@ export function resetUserPassword(userId: string) {
 export function sendUserPasswordResetEmail(userId: string) {
   return callUserFunction<SendPasswordResetResult>('vihem-admin-send-password-reset', {
     user_id: userId,
-    redirect_to: `${window.location.origin}/reset-password`,
+    redirect_to: passwordResetRedirectUrl(),
   });
 }
 

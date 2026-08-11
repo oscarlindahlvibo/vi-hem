@@ -12,6 +12,7 @@ Om Supabase körs self-hosted på samma server som Postfix ska SMTP konfigureras
 API_EXTERNAL_URL=https://app.vi-hem.se
 GOTRUE_SITE_URL=https://app.vi-hem.se
 GOTRUE_URI_ALLOW_LIST=https://app.vi-hem.se/reset-password,https://app.vi-hem.se/**
+APP_PUBLIC_URL=https://app.vi-hem.se
 GOTRUE_SMTP_HOST=host.docker.internal
 GOTRUE_SMTP_PORT=25
 GOTRUE_SMTP_USER=
@@ -21,6 +22,8 @@ GOTRUE_SMTP_SENDER_NAME=VI-HEM
 ```
 
 `API_EXTERNAL_URL` är den publika URL som Supabase Auth använder när den bygger länken i mejlet, till exempel `/auth/v1/verify?...`. Om den står som `http://localhost` får mottagaren en återställningslänk till localhost även om `redirect_to` är rätt.
+
+Frontendbygget kan dessutom använda `VITE_PUBLIC_APP_URL=https://app.vi-hem.se`. Den påverkar redirecten efter verifieringen, medan `API_EXTERNAL_URL` styr hostnamnet före `/auth/v1/verify`. Båda måste vara publika produktionsadresser i drift.
 
 Om GoTrue kör i Docker och Postfix kör direkt på servern fungerar `127.0.0.1` oftast inte, eftersom det då pekar på containern. Använd en host-adress som containern når, till exempel `host.docker.internal` om den är konfigurerad, serverns interna IP, Docker bridge gateway, eller kör Postfix så att den lyssnar på Docker-nätet.
 
