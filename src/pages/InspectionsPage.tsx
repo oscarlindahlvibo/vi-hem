@@ -407,6 +407,8 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
   const [inspections, setInspections] = useState<any[]>([]);
   const [contracts, setContracts] = useState<any[]>([]);
   const [tenancies, setTenancies] = useState<any[]>([]);
+  const [properties, setProperties] = useState<any[]>([]);
+  const [apartments, setApartments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -415,6 +417,8 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
   const [selectedInspection, setSelectedInspection] = useState<any>(null);
   const [inspectionForm, setInspectionForm] = useState({
     tenancy_id: '',
+    property_id: '',
+    apartment_id: '',
     inspection_type: 'routine',
     inspection_date: new Date().toISOString().split('T')[0],
     tenant_present: false,
@@ -448,7 +452,7 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [inspRes, contractRes, tenancyRes] = await Promise.all([
+      const [inspRes, contractRes, tenancyRes, propertyRes, apartmentRes] = await Promise.all([
         supabase
           .from('vihem_apartment_inspections')
           .select(`*, inspector:vihem_profiles!apartment_inspections_inspector_id_fkey(name), tenancy:vihem_tenancies!apartment_inspections_tenancy_id_fkey(id, start_date, tenant:vihem_profiles!tenancies_tenant_id_fkey(id, name, email), apartment:vihem_apartments!tenancies_apartment_id_fkey(apartment_number), property:vihem_properties!tenancies_property_id_fkey(name, address))`)
@@ -461,10 +465,14 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
           .from('vihem_tenancies')
           .select(`id, apartment_id, property_id, start_date, monthly_rent, tenant:vihem_profiles!tenancies_tenant_id_fkey(id, name, email), apartment:vihem_apartments!tenancies_apartment_id_fkey(apartment_number, size), property:vihem_properties!tenancies_property_id_fkey(name, address, city)`)
           .eq('status', 'active'),
+        supabase.from('vihem_properties').select('id, name, address, city').order('name'),
+        supabase.from('vihem_apartments').select('id, property_id, apartment_number, size').order('apartment_number'),
       ]);
       setInspections(inspRes.data || []);
       setContracts(contractRes.data || []);
       setTenancies(tenancyRes.data || []);
+      setProperties(propertyRes.data || []);
+      setApartments(apartmentRes.data || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -474,6 +482,18 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
 
   const getTenancyLabel = (t: any) =>
     `${(t.tenant as any)?.name || 'Okänd'} — ${(t.property as any)?.address || ''} Lgh ${(t.apartment as any)?.apartment_number || ''}`;
+
+  const getInspectionProperty = (inspection: any) =>
+    inspection.property || properties.find(property => property.id === inspection.property_id);
+
+  const getInspectionApartment = (inspection: any) =>
+    inspection.apartment || apartments.find(apartment => apartment.id === inspection.apartment_id);
+
+  const getInspectionLocation = (inspection: any) => {
+    const property = getInspectionProperty(inspection);
+    const apartment = getInspectionApartment(inspection);
+    return `${property?.address || property?.name || ''} ${apartment?.apartment_number ? `Lgh ${apartment.apartment_number}` : ''}`.trim();
+  };
 
   // ─── Photo upload ─────────────────────────────────────────────────────────
   const uploadPhotos = async (files: File[], roomIndex?: number) => {
@@ -521,10 +541,10 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
     }
   };
 
-  const buildInspectionDocumentBody = (inspection: any, tenancy: any) => {
+  const buildInspectionDocumentBody = (inspection: any, tenancy: any, property: any, apartment: any) => {
     const tenant = tenancy?.tenant as any;
-    const apt = tenancy?.apartment as any;
-    const prop = tenancy?.property as any;
+    const apt = apartment || tenancy?.apartment as any;
+    const prop = property || tenancy?.property as any;
     const rooms = Array.isArray(inspection.rooms) ? inspection.rooms : [];
     const roomRows = rooms.map((room: any) =>
       `${room.name || 'Rum'}: ${CONDITION_LABELS[room.condition] || room.condition || '-'}${room.notes ? ` - ${room.notes}` : ''}`
@@ -555,21 +575,21 @@ Foton bifogade i systemet: ${photoCount}
 `;
   };
 
-  const createOrUpdateInspectionDocument = async (inspection: any, tenancy: any) => {
+  const createOrUpdateInspectionDocument = async (inspection: any, tenancy: any, property: any, apartment: any) => {
     const tenant = tenancy?.tenant as any;
-    const apt = tenancy?.apartment as any;
-    const prop = tenancy?.property as any;
+    const apt = apartment || tenancy?.apartment as any;
+    const prop = property || tenancy?.property as any;
     const title = `${INSPECTION_TYPE_LABELS[inspection.inspection_type] || 'Besiktning'} - ${tenant?.name || 'Hyresgast'}`;
     const documentPayload = buildGeneratedDocument({
       title,
       fileName: `besiktning-${apt?.apartment_number || inspection.id}.pdf`,
       documentType: 'inspection',
       description: `Besiktningsprotokoll for ${prop?.address || 'fastighet'}${apt?.apartment_number ? `, lgh ${apt.apartment_number}` : ''}.`,
-      body: buildInspectionDocumentBody(inspection, tenancy),
+      body: buildInspectionDocumentBody(inspection, tenancy, prop, apt),
       organisationId: user?.organisation_id,
       tenantId: tenant?.id,
-      propertyId: tenancy?.property_id,
-      apartmentId: tenancy?.apartment_id,
+      propertyId: inspection.property_id || tenancy?.property_id,
+      apartmentId: inspection.apartment_id || tenancy?.apartment_id,
       createdBy: user?.id,
     });
 
@@ -586,14 +606,16 @@ Foton bifogade i systemet: ${photoCount}
 
   // ─── Inspection save ──────────────────────────────────────────────────────
   const handleSaveInspection = async (status: 'draft' | 'completed') => {
-    if (!inspectionForm.tenancy_id) return;
+    if (!inspectionForm.property_id || !inspectionForm.apartment_id) return;
     setSavingInspection(true);
     try {
       const tenancy = tenancies.find((t) => t.id === inspectionForm.tenancy_id);
+      const property = properties.find((item) => item.id === inspectionForm.property_id);
+      const apartment = apartments.find((item) => item.id === inspectionForm.apartment_id);
       const payload = {
-        apartment_id: tenancy?.apartment_id || null,
-        property_id: tenancy?.property_id || null,
-        tenancy_id: inspectionForm.tenancy_id,
+        apartment_id: inspectionForm.apartment_id,
+        property_id: inspectionForm.property_id,
+        tenancy_id: inspectionForm.tenancy_id || null,
         inspection_type: inspectionForm.inspection_type,
         inspection_date: inspectionForm.inspection_date,
         inspector_id: user!.id,
@@ -617,7 +639,7 @@ Foton bifogade i systemet: ${photoCount}
       }
 
       if (status === 'completed' && savedInspection) {
-        const documentId = await createOrUpdateInspectionDocument(savedInspection, tenancy);
+        const documentId = await createOrUpdateInspectionDocument(savedInspection, tenancy, property, apartment);
         await supabase.from('vihem_apartment_inspections').update({ document_id: documentId }).eq('id', savedInspection.id);
       }
       setShowInspectionModal(false);
@@ -633,6 +655,8 @@ Foton bifogade i systemet: ${photoCount}
   const resetInspectionForm = () => {
     setInspectionForm({
       tenancy_id: '',
+      property_id: '',
+      apartment_id: '',
       inspection_type: 'routine',
       inspection_date: new Date().toISOString().split('T')[0],
       tenant_present: false,
@@ -649,6 +673,8 @@ Foton bifogade i systemet: ${photoCount}
     setSelectedInspection(insp);
     setInspectionForm({
       tenancy_id: insp.tenancy_id || '',
+      property_id: insp.property_id || insp.tenancy?.property_id || '',
+      apartment_id: insp.apartment_id || insp.tenancy?.apartment_id || '',
       inspection_type: insp.inspection_type,
       inspection_date: insp.inspection_date,
       tenant_present: insp.tenant_present || false,
@@ -763,7 +789,7 @@ Foton bifogade i systemet: ${photoCount}
   const filteredInspections = searchQuery
     ? inspections.filter(i =>
         (i.tenancy?.tenant?.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (i.tenancy?.property?.address || '').toLowerCase().includes(searchQuery.toLowerCase()))
+        getInspectionLocation(i).toLowerCase().includes(searchQuery.toLowerCase()))
     : inspections;
 
   const filteredContracts = searchQuery
@@ -829,10 +855,7 @@ Foton bifogade i systemet: ${photoCount}
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="break-words text-sm font-semibold text-slate-900">{insp.tenancy?.tenant?.name || '—'}</p>
-                          <p className="mt-1 break-words text-sm text-slate-600">
-                            {insp.tenancy?.property?.address || '—'}
-                            {insp.tenancy?.apartment?.apartment_number && <span className="text-slate-400">, Lgh {insp.tenancy.apartment.apartment_number}</span>}
-                          </p>
+                          <p className="mt-1 break-words text-sm text-slate-600">{getInspectionLocation(insp) || '—'}</p>
                           <p className="mt-1 text-xs text-slate-500">{INSPECTION_TYPE_LABELS[insp.inspection_type] || insp.inspection_type}</p>
                         </div>
                         <Button size="sm" variant="ghost" onClick={() => openEditInspection(insp)} className="flex-shrink-0 gap-1">
@@ -877,10 +900,7 @@ Foton bifogade i systemet: ${photoCount}
                       return (
                         <tr key={insp.id} className="hover:bg-slate-50 transition-colors">
                           <td className="py-3 px-4 font-medium text-slate-900 text-sm">{insp.tenancy?.tenant?.name || '—'}</td>
-                          <td className="py-3 px-4 text-sm text-slate-600">
-                            {insp.tenancy?.property?.address || '—'}
-                            {insp.tenancy?.apartment?.apartment_number && <span className="text-slate-400 ml-1">Lgh {insp.tenancy.apartment.apartment_number}</span>}
-                          </td>
+                          <td className="py-3 px-4 text-sm text-slate-600">{getInspectionLocation(insp) || '—'}</td>
                           <td className="py-3 px-4 text-sm text-slate-600">{INSPECTION_TYPE_LABELS[insp.inspection_type] || insp.inspection_type}</td>
                           <td className="py-3 px-4 text-sm text-slate-600">{formatDate(insp.inspection_date)}</td>
                           <td className="py-3 px-4">
@@ -1016,11 +1036,34 @@ Foton bifogade i systemet: ${photoCount}
         <div className="space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Hyresgäst</label>
-              <select value={inspectionForm.tenancy_id} onChange={(e) => setInspectionForm({ ...inspectionForm, tenancy_id: e.target.value })} disabled={!!selectedInspection} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-50">
-                <option value="">Välj hyresgäst</option>
-                {tenancies.map((t) => <option key={t.id} value={t.id}>{getTenancyLabel(t)}</option>)}
+              <label className="block text-sm font-medium text-slate-700 mb-1">Byggnad</label>
+              <select value={inspectionForm.property_id} onChange={(e) => setInspectionForm({ ...inspectionForm, property_id: e.target.value, apartment_id: '', tenancy_id: '' })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                <option value="">Välj byggnad</option>
+                {properties.map((property) => <option key={property.id} value={property.id}>{property.name} · {property.address}</option>)}
               </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Lägenhet</label>
+              <select value={inspectionForm.apartment_id} onChange={(e) => setInspectionForm({ ...inspectionForm, apartment_id: e.target.value, tenancy_id: '' })} disabled={!inspectionForm.property_id} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-50">
+                <option value="">Välj lägenhet</option>
+                {apartments.filter(apartment => apartment.property_id === inspectionForm.property_id).map((apartment) => <option key={apartment.id} value={apartment.id}>Lgh {apartment.apartment_number}</option>)}
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-slate-700 mb-1">Hyresgäst (valfritt)</label>
+              <select value={inspectionForm.tenancy_id} onChange={(e) => {
+                const tenancy = tenancies.find(item => item.id === e.target.value);
+                setInspectionForm({
+                  ...inspectionForm,
+                  tenancy_id: e.target.value,
+                  property_id: tenancy?.property_id || inspectionForm.property_id,
+                  apartment_id: tenancy?.apartment_id || inspectionForm.apartment_id,
+                });
+              }} disabled={!inspectionForm.apartment_id} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-50">
+                <option value="">Ingen hyresgäst kopplad ännu</option>
+                {tenancies.filter(t => t.property_id === inspectionForm.property_id && t.apartment_id === inspectionForm.apartment_id).map((t) => <option key={t.id} value={t.id}>{getTenancyLabel(t)}</option>)}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">Hyresgästen kan kopplas senare genom att öppna protokollet igen.</p>
             </div>
             <Select label="Besiktningstyp" value={inspectionForm.inspection_type} onChange={(e) => setInspectionForm({ ...inspectionForm, inspection_type: e.target.value })} options={Object.entries(INSPECTION_TYPE_LABELS).map(([v, l]) => ({ value: v, label: l }))} />
             <Input label="Besiktningsdatum" type="date" value={inspectionForm.inspection_date} onChange={(e) => setInspectionForm({ ...inspectionForm, inspection_date: e.target.value })} />
@@ -1103,8 +1146,8 @@ Foton bifogade i systemet: ${photoCount}
 
           <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:justify-end">
             <Button variant="secondary" onClick={() => { setShowInspectionModal(false); resetInspectionForm(); }} className="w-full sm:w-auto">Avbryt</Button>
-            <Button variant="secondary" onClick={() => handleSaveInspection('draft')} loading={savingInspection} disabled={!inspectionForm.tenancy_id} className="w-full sm:w-auto">Spara utkast</Button>
-            <Button variant="primary" onClick={() => handleSaveInspection('completed')} loading={savingInspection} disabled={!inspectionForm.tenancy_id} className="gap-1 w-full sm:w-auto">
+            <Button variant="secondary" onClick={() => handleSaveInspection('draft')} loading={savingInspection} disabled={!inspectionForm.apartment_id} className="w-full sm:w-auto">Spara utkast</Button>
+            <Button variant="primary" onClick={() => handleSaveInspection('completed')} loading={savingInspection} disabled={!inspectionForm.apartment_id} className="gap-1 w-full sm:w-auto">
               <CheckCircle className="w-4 h-4" /> Slutför besiktning
             </Button>
           </div>
