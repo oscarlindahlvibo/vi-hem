@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CalendarDays, ClipboardList, Monitor, Newspaper, RefreshCw, Timer, Users, Briefcase, CheckCircle2, UserRoundX } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -31,6 +31,8 @@ import {
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
 const SCREEN_APP_VERSION = '2026-08-07-tv-layout-11';
 const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
+const SCREEN_SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const SCREEN_SESSION_REFRESH_MARGIN_SECONDS = 15 * 60;
 
 const addDays = (date: Date, days: number) => {
   const next = new Date(date);
@@ -171,11 +173,37 @@ export function ScreenDisplayPage() {
     width: window.innerWidth || 1920,
     height: window.innerHeight || 1080,
   }));
+  const screenSessionRefreshRef = useRef<Promise<boolean> | null>(null);
 
   const allowed = user && ['screen', 'admin', 'staff'].includes(user.role);
   const selectedScreenConfig = screenConfigs.find(screen => screen.screenKey === selectedScreenKey) || screenConfigs[0] || defaultScreenConfig(1);
   const dayCount = screenSize.width < 1400 ? 8 : screenSize.width < 1700 ? 9 : 10;
   const days = useMemo(() => Array.from({ length: dayCount }, (_, index) => dateKey(addDays(today(), index))), [dayCount]);
+
+  async function ensureScreenSession() {
+    if (screenSessionRefreshRef.current) return screenSessionRefreshRef.current;
+
+    const refreshPromise = (async () => {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) throw error;
+      if (!data.session) return false;
+
+      const expiresAt = data.session.expires_at || 0;
+      const expiresSoon = expiresAt > 0 && expiresAt - Math.floor(Date.now() / 1000) <= SCREEN_SESSION_REFRESH_MARGIN_SECONDS;
+      if (!expiresSoon) return true;
+
+      const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshError) throw refreshError;
+      return Boolean(refreshed.session);
+    })();
+
+    screenSessionRefreshRef.current = refreshPromise;
+    try {
+      return await refreshPromise;
+    } finally {
+      screenSessionRefreshRef.current = null;
+    }
+  }
 
   useEffect(() => {
     localStorage.setItem(SCREEN_VIEW_STORAGE_KEY, view);
@@ -216,6 +244,31 @@ export function ScreenDisplayPage() {
     const interval = window.setInterval(checkScreenVersion, SCREEN_REFRESH_INTERVAL_MS);
     checkScreenVersion();
     return () => window.clearInterval(interval);
+  }, [allowed]);
+
+  useEffect(() => {
+    if (!allowed) return;
+
+    // TVs can sleep or lose focus for hours. Check the persisted refresh token
+    // when they wake up so the display can continue without a manual login.
+    const refreshWhenActive = () => {
+      if (document.visibilityState === 'hidden') return;
+      ensureScreenSession().catch(() => {
+        // A temporary network error should not blank an already rendered screen.
+      });
+    };
+    const interval = window.setInterval(refreshWhenActive, SCREEN_SESSION_REFRESH_INTERVAL_MS);
+    window.addEventListener('focus', refreshWhenActive);
+    window.addEventListener('online', refreshWhenActive);
+    document.addEventListener('visibilitychange', refreshWhenActive);
+    refreshWhenActive();
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshWhenActive);
+      window.removeEventListener('online', refreshWhenActive);
+      document.removeEventListener('visibilitychange', refreshWhenActive);
+    };
   }, [allowed]);
 
   const chooseScreenConfig = (screen: ScreenConfig) => {
@@ -259,6 +312,19 @@ export function ScreenDisplayPage() {
     if (!user?.organisation_id) return;
     setDataLoading(true);
     setDataError('');
+
+    try {
+      const sessionAvailable = await ensureScreenSession();
+      if (!sessionAvailable) {
+        setDataError('Skärmanslutningen har gått ut. Logga in igen för att fortsätta visa aktuell information.');
+        setDataLoading(false);
+        return;
+      }
+    } catch {
+      // Keep the last rendered data visible during a short network interruption.
+      setDataLoading(false);
+      return;
+    }
 
     const panelHistoryStart = dateKey(addDays(today(), -30));
     const end = dateKey(addDays(new Date(`${days[days.length - 1]}T12:00:00`), 1));
