@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Building2, CalendarDays, Camera, CheckCircle2, CircleDollarSign, CreditCard, FileText, Hash, Landmark, Link2, Mail, Plus, Printer, ReceiptText, RotateCcw, Send, Sparkles, Truck, Upload, Users, WalletCards } from 'lucide-react';
+import { AlertTriangle, Building2, CalendarDays, Camera, CheckCircle2, CircleDollarSign, CreditCard, Edit3, FileText, Hash, Landmark, Link2, Mail, Plus, Printer, ReceiptText, RotateCcw, Send, Sparkles, Truck, Upload, Users, WalletCards } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { buildInvoicePdfBlob } from '../lib/invoicePdf';
@@ -429,6 +429,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [companyModalOpen, setCompanyModalOpen] = useState(false);
+  const [selectedCompany, setSelectedCompany] = useState<FinanceCompany | null>(null);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
@@ -983,7 +984,24 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     void loadFinance();
   }, [loadFinance]);
 
-  const resetCompanyForm = () => setCompanyForm(emptyCompanyForm);
+  const resetCompanyForm = () => {
+    setSelectedCompany(null);
+    setCompanyForm({ ...emptyCompanyForm });
+  };
+
+  const openCompanyEditor = (company: FinanceCompany) => {
+    setSelectedCompany(company);
+    setCompanyForm({
+      name: company.name ?? '',
+      legal_name: company.legal_name ?? '',
+      organisation_number: company.organisation_number ?? '',
+      email: company.email ?? '',
+      phone: company.phone ?? '',
+      invoice_prefix: company.invoice_prefix ?? '',
+      default_payment_terms_days: String(company.default_payment_terms_days ?? 30),
+    });
+    setCompanyModalOpen(true);
+  };
   const resetCustomerForm = () => setCustomerForm({ ...emptyCustomerForm, company_id: companies[0]?.id ?? '' });
   const resetSupplierForm = () => {
     setSelectedSupplier(null);
@@ -1087,27 +1105,41 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     });
   };
 
-  const createCompany = async () => {
+  const saveCompany = async () => {
     if (!organisationId || !companyForm.name.trim()) return;
     setSaving(true);
     setError('');
 
-    const { data, error: companyError } = await supabase
-      .from('vihem_companies')
-      .insert({
-        organisation_id: organisationId,
-        name: companyForm.name.trim(),
-        legal_name: companyForm.legal_name.trim() || companyForm.name.trim(),
-        organisation_number: companyForm.organisation_number.trim(),
-        email: companyForm.email.trim(),
-        phone: companyForm.phone.trim(),
-        invoice_prefix: companyForm.invoice_prefix.trim().toUpperCase(),
-        default_payment_terms_days: Math.max(0, Math.round(toNumber(companyForm.default_payment_terms_days, 30))),
-        created_by: user?.id ?? null,
-        updated_by: user?.id ?? null,
-      })
-      .select('*')
-      .single();
+    const companyPayload = {
+      name: companyForm.name.trim(),
+      legal_name: companyForm.legal_name.trim() || companyForm.name.trim(),
+      organisation_number: companyForm.organisation_number.trim(),
+      email: companyForm.email.trim(),
+      phone: companyForm.phone.trim(),
+      invoice_prefix: companyForm.invoice_prefix.trim().toUpperCase(),
+      default_payment_terms_days: Math.max(0, Math.round(toNumber(companyForm.default_payment_terms_days, 30))),
+      updated_by: user?.id ?? null,
+    };
+
+    const query = selectedCompany
+      ? supabase
+        .from('vihem_companies')
+        .update(companyPayload)
+        .eq('id', selectedCompany.id)
+        .eq('organisation_id', organisationId)
+        .select('*')
+        .single()
+      : supabase
+        .from('vihem_companies')
+        .insert({
+          organisation_id: organisationId,
+          ...companyPayload,
+          created_by: user?.id ?? null,
+        })
+        .select('*')
+        .single();
+
+    const { data, error: companyError } = await query;
 
     if (companyError) {
       setError(companyError.message);
@@ -1115,7 +1147,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       return;
     }
 
-    if (data) {
+    if (data && !selectedCompany) {
       await supabase.from('vihem_invoice_number_series').insert({
         organisation_id: organisationId,
         company_id: data.id,
@@ -3456,9 +3488,15 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                       {company.organisation_number || 'Organisationsnummer saknas'} · {company.email || 'Ingen e-post'} · Betalvillkor {company.default_payment_terms_days} dagar
                     </p>
                   </div>
-                  <Badge className="bg-blue-50 text-blue-700">
-                    Serie {company.invoice_prefix || 'F'}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-blue-50 text-blue-700">
+                      Serie {company.invoice_prefix || 'F'}
+                    </Badge>
+                    <Button variant="secondary" size="sm" onClick={() => openCompanyEditor(company)}>
+                      <Edit3 className="h-4 w-4" />
+                      Redigera
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -5145,7 +5183,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         </div>
       </Modal>
 
-      <Modal open={companyModalOpen} onClose={() => setCompanyModalOpen(false)} title="Nytt bolag" size="lg">
+      <Modal open={companyModalOpen} onClose={() => { setCompanyModalOpen(false); setSelectedCompany(null); }} title={selectedCompany ? 'Redigera bolag' : 'Nytt bolag'} size="lg">
         <div className="grid gap-4 md:grid-cols-2">
           <Input label="Namn" value={companyForm.name} onChange={e => setCompanyForm(prev => ({ ...prev, name: e.target.value }))} />
           <Input label="Juridiskt namn" value={companyForm.legal_name} onChange={e => setCompanyForm(prev => ({ ...prev, legal_name: e.target.value }))} />
@@ -5156,8 +5194,10 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           <Input label="Betalvillkor dagar" type="number" value={companyForm.default_payment_terms_days} onChange={e => setCompanyForm(prev => ({ ...prev, default_payment_terms_days: e.target.value }))} />
         </div>
         <div className="mt-6 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setCompanyModalOpen(false)}>Avbryt</Button>
-          <Button onClick={createCompany} loading={saving} disabled={!companyForm.name.trim()}>Skapa bolag</Button>
+          <Button variant="secondary" onClick={() => { setCompanyModalOpen(false); setSelectedCompany(null); }}>Avbryt</Button>
+          <Button onClick={saveCompany} loading={saving} disabled={!companyForm.name.trim()}>
+            {selectedCompany ? 'Spara ändringar' : 'Skapa bolag'}
+          </Button>
         </div>
       </Modal>
 
