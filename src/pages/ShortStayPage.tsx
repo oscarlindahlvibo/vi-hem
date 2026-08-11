@@ -93,13 +93,24 @@ interface CommonCleaning {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  rule_id?: string | null;
+}
+
+interface CommonCleaningRule {
+  id: string;
+  organisation_id: string;
+  title: string;
+  description: string;
+  required_unit_ids: string[];
+  weekdays: number[];
+  active: boolean;
 }
 
 interface CommonCleaningForm {
   title: string;
   description: string;
-  due_date: string;
   required_unit_ids: string[];
+  weekdays: number[];
 }
 
 type CleaningItem =
@@ -198,9 +209,19 @@ const defaultBookingForm: BookingForm = {
 const defaultCommonCleaningForm: CommonCleaningForm = {
   title: '',
   description: '',
-  due_date: todayKey(),
   required_unit_ids: [],
+  weekdays: [1, 2, 3, 4, 5],
 };
+
+const weekdayOptions = [
+  { value: 1, label: 'Måndag' },
+  { value: 2, label: 'Tisdag' },
+  { value: 3, label: 'Onsdag' },
+  { value: 4, label: 'Torsdag' },
+  { value: 5, label: 'Fredag' },
+  { value: 6, label: 'Lördag' },
+  { value: 7, label: 'Söndag' },
+];
 
 const cleaningLabels: Record<ShortStayCleaningStatus, string> = {
   not_needed: 'Arkiverad',
@@ -419,6 +440,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const [units, setUnits] = useState<ShortStayUnit[]>([]);
   const [bookings, setBookings] = useState<ShortStayBooking[]>([]);
   const [commonCleanings, setCommonCleanings] = useState<CommonCleaning[]>([]);
+  const [commonCleaningRules, setCommonCleaningRules] = useState<CommonCleaningRule[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [apartments, setApartments] = useState<Apartment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -556,7 +578,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     setLoading(true);
     setError('');
 
-    const [unitsRes, bookingsRes, commonCleaningsRes, propertiesRes, apartmentsRes] = await Promise.all([
+    const [unitsRes, bookingsRes, commonCleaningsRes, rulesRes, propertiesRes, apartmentsRes] = await Promise.all([
       supabase
         .from('vihem_short_stay_units')
         .select('*, property:vihem_properties(*), apartment:vihem_apartments(*)')
@@ -575,6 +597,11 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
         .eq('organisation_id', organisationId)
         .gte('due_date', toDateKey(addDays(new Date(), -30)))
         .order('due_date'),
+      supabase
+        .from('vihem_short_stay_common_cleaning_rules')
+        .select('*')
+        .eq('organisation_id', organisationId)
+        .order('title'),
       supabase
         .from('vihem_properties')
         .select('*')
@@ -595,10 +622,16 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
       setCommonCleanings(commonCleaningsRes.error && isMissingSchemaError(commonCleaningsRes.error)
         ? []
         : (commonCleaningsRes.data || []) as CommonCleaning[]);
+      setCommonCleaningRules(rulesRes.error && isMissingSchemaError(rulesRes.error)
+        ? []
+        : (rulesRes.data || []) as CommonCleaningRule[]);
       setProperties((propertiesRes.data || []) as Property[]);
       setApartments((apartmentsRes.data || []) as Apartment[]);
       if (commonCleaningsRes.error && !isMissingSchemaError(commonCleaningsRes.error)) {
         setError(commonCleaningsRes.error.message || 'Kunde inte ladda gemensamma städytor.');
+      }
+      if (rulesRes.error && !isMissingSchemaError(rulesRes.error)) {
+        setError(rulesRes.error.message || 'Kunde inte ladda städregler.');
       }
     }
     setLoading(false);
@@ -717,7 +750,6 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   function openCreateCommonCleaning() {
     setCommonCleaningForm({
       ...defaultCommonCleaningForm,
-      due_date: todayKey(),
       required_unit_ids: [],
     });
     setFormError('');
@@ -863,6 +895,13 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     }
 
     setBookingModalOpen(false);
+    if (organisationId) {
+      await supabase.rpc('vihem_generate_short_stay_common_cleanings', {
+        p_organisation_id: organisationId,
+        p_from: toDateKey(addDays(new Date(), -3)),
+        p_to: toDateKey(addDays(new Date(), 370)),
+      });
+    }
     await fetchData();
   }
 
@@ -877,17 +916,21 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
       setFormError('Välj minst ett rum/lägenhet som villkor.');
       return;
     }
+    if (commonCleaningForm.weekdays.length === 0) {
+      setFormError('Välj minst en veckodag.');
+      return;
+    }
 
     setSaving(true);
     const { error: insertError } = await supabase
-      .from('vihem_short_stay_common_cleanings')
+      .from('vihem_short_stay_common_cleaning_rules')
       .insert({
         organisation_id: organisationId,
         title: commonCleaningForm.title.trim(),
         description: commonCleaningForm.description.trim(),
-        due_date: commonCleaningForm.due_date || todayKey(),
         required_unit_ids: commonCleaningForm.required_unit_ids,
-        cleaning_status: 'dirty',
+        weekdays: commonCleaningForm.weekdays,
+        active: true,
         created_by: user.id,
         updated_at: new Date().toISOString(),
       });
@@ -901,6 +944,11 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     }
 
     setCommonCleaningModalOpen(false);
+    await supabase.rpc('vihem_generate_short_stay_common_cleanings', {
+      p_organisation_id: organisationId,
+      p_from: toDateKey(addDays(new Date(), -3)),
+      p_to: toDateKey(addDays(new Date(), 370)),
+    });
     await fetchData();
   }
 
@@ -1240,6 +1288,19 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
                   })
                 )}
               </div>
+              {commonCleaningRules.length > 0 && (
+                <div className="mt-5 border-t border-slate-100 pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Aktiva städregler</p>
+                  <div className="mt-2 grid gap-2">
+                    {commonCleaningRules.map(rule => (
+                      <div key={rule.id} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                        <p className="font-medium text-slate-800">{rule.title}</p>
+                        <p className="text-xs text-slate-500">{rule.required_unit_ids.length} valda rum · {rule.weekdays.map(day => weekdayOptions.find(option => option.value === day)?.label.slice(0, 3)).join(', ')}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </Card>
 
             <Card className="p-5">
@@ -1283,6 +1344,12 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
                 </Button>
               )}
             </div>
+            {commonCleaningRules.length > 0 && (
+              <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">
+                <p className="font-semibold">Automatiska regler</p>
+                <p className="mt-1 text-xs text-blue-800">{commonCleaningRules.length} regel/regler skapar städning när valda rum är bebodda.</p>
+              </div>
+            )}
           </Card>
           <div className="grid gap-3">
             {stats.cleaningItems.length === 0 ? (
@@ -1910,22 +1977,14 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
         </div>
       </Modal>
 
-      <Modal open={commonCleaningModalOpen} onClose={() => setCommonCleaningModalOpen(false)} title="Ny städning av gemensam yta" size="lg">
+      <Modal open={commonCleaningModalOpen} onClose={() => setCommonCleaningModalOpen(false)} title="Automatisk städning av gemensam yta" size="lg">
         <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Input
-              label="Gemensam yta"
-              value={commonCleaningForm.title}
-              onChange={e => setCommonCleaningForm({ ...commonCleaningForm, title: e.target.value })}
-              placeholder="T.ex. kök, korridor, badrum"
-            />
-            <Input
-              label="Datum"
-              type="date"
-              value={commonCleaningForm.due_date}
-              onChange={e => setCommonCleaningForm({ ...commonCleaningForm, due_date: e.target.value })}
-            />
-          </div>
+          <Input
+            label="Gemensam yta"
+            value={commonCleaningForm.title}
+            onChange={e => setCommonCleaningForm({ ...commonCleaningForm, title: e.target.value })}
+            placeholder="T.ex. kök, korridor, badrum"
+          />
           <Textarea
             label="Instruktion"
             rows={3}
@@ -1933,6 +1992,31 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
             onChange={e => setCommonCleaningForm({ ...commonCleaningForm, description: e.target.value })}
             placeholder="Vad ska kontrolleras eller städas?"
           />
+          <div className="rounded-lg border border-slate-200 p-3">
+            <p className="text-sm font-semibold text-slate-900">Dagar då villkoret gäller</p>
+            <p className="mt-1 text-xs text-slate-500">En städning skapas automatiskt varje vald dag när minst ett valt rum har en aktiv gäst.</p>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {weekdayOptions.map(day => {
+                const checked = commonCleaningForm.weekdays.includes(day.value);
+                return (
+                  <label key={day.value} className="flex items-center gap-2 rounded-lg border border-slate-200 p-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={event => setCommonCleaningForm(current => ({
+                        ...current,
+                        weekdays: event.target.checked
+                          ? [...current.weekdays, day.value].sort((a, b) => a - b)
+                          : current.weekdays.filter(value => value !== day.value),
+                      }))}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    {day.label}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
           <div className="rounded-lg border border-slate-200 p-3">
             <p className="text-sm font-semibold text-slate-900">Rum/lägenheter som ingår i villkoret</p>
             <p className="mt-1 text-xs text-slate-500">Välj de rum eller lägenheter som ska omfattas för att städningen ska vara uppfylld.</p>
@@ -1967,7 +2051,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setCommonCleaningModalOpen(false)}>Avbryt</Button>
             <Button onClick={saveCommonCleaning} loading={saving}>
-              <ClipboardCheck className="w-4 h-4" /> Skapa städning
+              <ClipboardCheck className="w-4 h-4" /> Spara automatisk regel
             </Button>
           </div>
         </div>

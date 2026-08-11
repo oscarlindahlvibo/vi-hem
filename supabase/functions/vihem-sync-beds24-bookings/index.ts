@@ -187,6 +187,15 @@ async function syncOrganisation(serviceClient: any, organisationId: string, opti
     })
     .eq("id", connection.id);
 
+  const { error: commonCleaningError } = await serviceClient.rpc("vihem_generate_short_stay_common_cleanings", {
+    p_organisation_id: organisationId,
+    p_from: toDateKey(addDays(new Date(), -3)),
+    p_to: toDateKey(addDays(new Date(), 370)),
+  });
+  if (commonCleaningError) {
+    console.error("Could not generate common area cleanings:", commonCleaningError.message);
+  }
+
   await serviceClient.rpc("vihem_archive_stale_short_stay_cleaning_orders");
 
   return { ok: true, imported: importedTotal, results: allResults };
