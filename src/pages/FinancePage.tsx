@@ -11,7 +11,7 @@ interface FinancePageProps {
   onNavigate: (page: string) => void;
 }
 
-type FinanceTab = 'overview' | 'companies' | 'customers' | 'invoices' | 'payments' | 'email' | 'rent' | 'project-basis' | 'suppliers' | 'supplier-invoices' | 'number-series' | 'integrations' | 'ocr-usage' | 'audit';
+type FinanceTab = 'overview' | 'companies' | 'customers' | 'invoices' | 'payments' | 'email' | 'rent' | 'project-basis' | 'suppliers' | 'supplier-invoices' | 'receipts' | 'number-series' | 'integrations' | 'ocr-usage' | 'audit';
 
 const customerTypeOptions = [
   { value: 'company', label: 'Företag' },
@@ -1306,13 +1306,15 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       .from('vihem_documents')
       .insert({
         organisation_id: organisationId,
-        title: `Leverantörsfaktura ${supplierInvoice.supplier_invoice_number || supplierInvoice.id.slice(0, 8)}`,
+        title: supplierInvoice.document_kind === 'receipt'
+          ? `Kvitto ${supplierInvoice.supplier_invoice_number || supplierInvoice.id.slice(0, 8)}`
+          : `Leverantörsfaktura ${supplierInvoice.supplier_invoice_number || supplierInvoice.id.slice(0, 8)}`,
         file_url: '',
         file_name: file.name,
         file_size: file.size,
         document_type: 'invoice',
         company_id: supplierInvoice.company_id,
-        document_category: 'supplier_invoice',
+        document_category: supplierInvoice.document_kind === 'receipt' ? 'receipt' : 'supplier_invoice',
         contract_status: 'not_applicable',
         visibility: 'admin',
         tenant_id: null,
@@ -1320,7 +1322,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         apartment_id: null,
         storage_bucket: 'vihem-documents',
         storage_path: storagePath,
-        description: 'Bilaga till leverantörsfaktura',
+        description: supplierInvoice.document_kind === 'receipt' ? 'Bilaga till kvitto' : 'Bilaga till leverantörsfaktura',
         created_by: user?.id ?? null,
       })
       .select('id')
@@ -1377,13 +1379,17 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         supplier_id: supplierInvoiceForm.supplier_id || null,
         supplier_invoice_number: supplierInvoiceForm.supplier_invoice_number.trim(),
         invoice_date: supplierInvoiceForm.invoice_date,
-        due_date: supplierInvoiceForm.due_date || addDays(supplierInvoiceForm.invoice_date, 30),
+        due_date: supplierInvoiceForm.document_kind === 'receipt'
+          ? null
+          : supplierInvoiceForm.due_date || addDays(supplierInvoiceForm.invoice_date, 30),
         document_kind: supplierInvoiceForm.document_kind,
         status: 'needs_review',
         approval_status: 'pending',
+        payment_status: supplierInvoiceForm.document_kind === 'receipt' ? 'paid' : 'unpaid',
         subtotal_amount: subtotal,
         vat_amount: vat,
         total_amount: total,
+        paid_amount: supplierInvoiceForm.document_kind === 'receipt' ? total : 0,
         notes: supplierInvoiceForm.notes.trim(),
         created_by: user?.id ?? null,
       })
@@ -1459,7 +1465,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       supplier_id: supplierInvoice.supplier_id ?? '',
       supplier_invoice_number: supplierInvoice.supplier_invoice_number,
       invoice_date: supplierInvoice.invoice_date,
-      due_date: supplierInvoice.due_date,
+      due_date: supplierInvoice.due_date || '',
       description: '',
       quantity: '1',
       unit_price: '0',
@@ -1497,7 +1503,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         supplier_id: supplierInvoiceReviewForm.supplier_id || null,
         supplier_invoice_number: supplierInvoiceReviewForm.supplier_invoice_number.trim(),
         invoice_date: supplierInvoiceReviewForm.invoice_date,
-        due_date: supplierInvoiceReviewForm.due_date || addDays(supplierInvoiceReviewForm.invoice_date, 30),
+        due_date: supplierInvoiceReviewForm.document_kind === 'receipt'
+          ? null
+          : supplierInvoiceReviewForm.due_date || addDays(supplierInvoiceReviewForm.invoice_date, 30),
         subtotal_amount: subtotal,
         vat_amount: vat,
         total_amount: total,
@@ -3269,6 +3277,10 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   if (loading) return <LoadingPage />;
 
   const overdueInvoiceCount = invoices.filter(invoice => invoice.status === 'overdue').length;
+  const showingReceipts = activeTab === 'receipts';
+  const visibleSupplierInvoices = supplierInvoices.filter(invoice =>
+    showingReceipts ? invoice.document_kind === 'receipt' : invoice.document_kind !== 'receipt'
+  );
 
   const tabs: { key: FinanceTab; label: string }[] = [
     { key: 'overview', label: 'Översikt' },
@@ -3281,6 +3293,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     { key: 'project-basis', label: 'Projektunderlag' },
     { key: 'suppliers', label: 'Leverantörer' },
     { key: 'supplier-invoices', label: 'Leverantörsfakturor' },
+    { key: 'receipts', label: 'Kvitton' },
     { key: 'number-series', label: 'Nummerserier' },
     { key: 'integrations', label: 'Bokföring' },
     { key: 'ocr-usage', label: 'OCR-logg' },
@@ -4084,15 +4097,19 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         </Card>
       )}
 
-      {activeTab === 'supplier-invoices' && (
+      {(activeTab === 'supplier-invoices' || activeTab === 'receipts') && (
         <Card className="overflow-hidden">
           <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-lg font-bold text-slate-950">Leverantörsfakturor</h2>
-              <p className="text-sm text-slate-500">Granska, attestera och förbered inkommande fakturor för OCR och bokföring.</p>
+              <h2 className="text-lg font-bold text-slate-950">{showingReceipts ? 'Kvitton' : 'Leverantörsfakturor'}</h2>
+              <p className="text-sm text-slate-500">
+                {showingReceipts
+                  ? 'Granska registrerade kvitton som betalda underlag. Kvitton har inget förfallodatum och går inte till betalningskö.'
+                  : 'Granska, attestera och förbered inkommande fakturor för OCR och bokföring.'}
+              </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button
+              {showingReceipts && <Button
                 variant="secondary"
                 onClick={() => {
                   resetSupplierInvoiceForm();
@@ -4103,17 +4120,17 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               >
                 <Camera className="h-4 w-4" />
                 Scanna kvitto
-              </Button>
+              </Button>}
               <Button
                 variant="secondary"
                 onClick={processSupplierInvoiceOcrQueue}
                 loading={saving}
-                disabled={!supplierInvoices.some(invoice => ['queued', 'uploaded', 'failed'].includes(invoice.ocr_status) && invoice.document_id)}
+                disabled={!visibleSupplierInvoices.some(invoice => ['queued', 'uploaded', 'failed'].includes(invoice.ocr_status) && invoice.document_id)}
               >
                 <Sparkles className="h-4 w-4" />
-                Tolka kö ({supplierInvoices.filter(invoice => ['queued', 'uploaded', 'failed'].includes(invoice.ocr_status) && invoice.document_id).length})
+                Tolka kö ({visibleSupplierInvoices.filter(invoice => ['queued', 'uploaded', 'failed'].includes(invoice.ocr_status) && invoice.document_id).length})
               </Button>
-              <Button
+              {!showingReceipts && <Button
                 variant="secondary"
                 onClick={() => exportSupplierPayments('csv')}
                 loading={saving}
@@ -4121,8 +4138,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               >
                 <Upload className="h-4 w-4" />
                 Exportera betalningar CSV
-              </Button>
-              <Button
+              </Button>}
+              {!showingReceipts && <Button
                 variant="secondary"
                 onClick={() => exportSupplierPayments('bankgirot')}
                 loading={saving}
@@ -4130,7 +4147,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               >
                 <Landmark className="h-4 w-4" />
                 Bankgirot-underlag
-              </Button>
+              </Button>}
             </div>
           </div>
           {supplierPaymentExportResult && (
@@ -4138,11 +4155,14 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               {supplierPaymentExportResult}
             </div>
           )}
-          {supplierInvoices.length === 0 ? (
-            <EmptyState title="Inga leverantörsfakturor ännu" description="Registrera inkommande fakturor manuellt nu, OCR och e-postimport kopplas på i nästa lager." />
+          {visibleSupplierInvoices.length === 0 ? (
+            <EmptyState
+              title={showingReceipts ? 'Inga kvitton ännu' : 'Inga leverantörsfakturor ännu'}
+              description={showingReceipts ? 'Skanna eller ladda upp ett kvitto för att lägga det i granskningskön.' : 'Registrera inkommande fakturor eller ladda upp en bilaga för OCR-granskning.'}
+            />
           ) : (
             <div className="divide-y divide-slate-100">
-              {supplierInvoices.map(invoice => (
+              {visibleSupplierInvoices.map(invoice => (
                 <div key={invoice.id} className="grid gap-3 p-4 lg:grid-cols-[1.1fr_1fr_0.7fr_0.8fr_auto_auto_auto_auto_auto] lg:items-center">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -4154,14 +4174,14 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                     <p className="text-sm text-slate-500">{invoice.supplier_invoice_number || 'Fakturanummer saknas'}</p>
                   </div>
                   <p className="text-sm text-slate-600">{invoice.company?.name || 'Bolag saknas'}</p>
-                  <p className="text-sm text-slate-600">Förfaller {invoice.due_date}</p>
+                  <p className="text-sm text-slate-600">{invoice.document_kind === 'receipt' ? `Datum ${invoice.invoice_date}` : `Förfaller ${invoice.due_date || 'saknas'}`}</p>
                   <p className="font-semibold text-slate-950">{formatCurrency(Number(invoice.total_amount), invoice.currency)}</p>
                   <Badge className={invoice.approval_status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
-                    {invoice.approval_status === 'approved' ? 'Godkänd' : 'Väntar attest'}
+                    {invoice.document_kind === 'receipt' ? 'Granskas' : invoice.approval_status === 'approved' ? 'Godkänd' : 'Väntar attest'}
                   </Badge>
-                  <Badge className={invoice.payment_status === 'paid' ? 'bg-emerald-50 text-emerald-700' : invoice.payment_status === 'scheduled' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-700'}>
+                  {invoice.document_kind !== 'receipt' && <Badge className={invoice.payment_status === 'paid' ? 'bg-emerald-50 text-emerald-700' : invoice.payment_status === 'scheduled' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-700'}>
                     {invoice.payment_status === 'paid' ? 'Betald' : invoice.payment_status === 'scheduled' ? 'Betalning planerad' : 'Obetald'}
-                  </Badge>
+                  </Badge>}
                   <div className="flex flex-wrap gap-2">
                     {invoice.document_id && <Badge className="bg-blue-50 text-blue-700">Bilaga</Badge>}
                     {invoice.payment_exported_at && <Badge className="bg-emerald-50 text-emerald-700">Exporterad</Badge>}
@@ -4182,17 +4202,17 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   <Button variant="secondary" size="sm" onClick={() => openSupplierInvoiceDetail(invoice)}>
                     Öppna
                   </Button>
-                  {invoice.approval_status !== 'approved' && (
+                  {invoice.document_kind !== 'receipt' && invoice.approval_status !== 'approved' && (
                     <Button variant="secondary" size="sm" loading={saving} onClick={() => approveSupplierInvoice(invoice.id)}>
                       Attestera
                     </Button>
                   )}
-                  {invoice.approval_status === 'approved' && invoice.payment_status === 'unpaid' && (
+                  {invoice.document_kind !== 'receipt' && invoice.approval_status === 'approved' && invoice.payment_status === 'unpaid' && (
                     <Button variant="secondary" size="sm" loading={saving} onClick={() => scheduleSupplierInvoicePayment(invoice.id)}>
                       Planera betalning
                     </Button>
                   )}
-                  {invoice.approval_status === 'approved' && invoice.payment_status !== 'paid' && (
+                  {invoice.document_kind !== 'receipt' && invoice.approval_status === 'approved' && invoice.payment_status !== 'paid' && (
                     <Button variant="secondary" size="sm" loading={saving} onClick={() => markSupplierInvoicePaid(invoice.id)}>
                       Markera betald
                     </Button>
@@ -5249,7 +5269,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         onClose={() => {
           setSupplierInvoiceModalOpen(false);
         }}
-        title="Ny leverantörsfaktura"
+        title={supplierInvoiceForm.document_kind === 'receipt' ? 'Nytt kvitto' : 'Ny leverantörsfaktura'}
         size="lg"
       >
         <div className="grid gap-4 md:grid-cols-2">
@@ -5264,9 +5284,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           />
           <Select label="Bolag" value={supplierInvoiceForm.company_id} options={companyOptions} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, company_id: e.target.value, supplier_id: '', vat_code: '', account_code: '' }))} />
           <Select label="Leverantör" value={supplierInvoiceForm.supplier_id} options={supplierOptions} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, supplier_id: e.target.value }))} />
-          <Input label="Leverantörens fakturanummer" value={supplierInvoiceForm.supplier_invoice_number} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, supplier_invoice_number: e.target.value }))} />
+          <Input label={supplierInvoiceForm.document_kind === 'receipt' ? 'Kvittonummer (valfritt)' : 'Leverantörens fakturanummer'} value={supplierInvoiceForm.supplier_invoice_number} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, supplier_invoice_number: e.target.value }))} />
           <Input label="Fakturadatum" type="date" value={supplierInvoiceForm.invoice_date} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, invoice_date: e.target.value }))} />
-          <Input label="Förfallodatum" type="date" value={supplierInvoiceForm.due_date} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, due_date: e.target.value }))} />
+          {supplierInvoiceForm.document_kind !== 'receipt' && <Input label="Förfallodatum" type="date" value={supplierInvoiceForm.due_date} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, due_date: e.target.value }))} />}
           <Select
             label="Konto"
             value={supplierInvoiceForm.account_code}
@@ -5312,7 +5332,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         </div>
       </Modal>
 
-      <Modal open={supplierInvoiceDetailOpen} onClose={() => setSupplierInvoiceDetailOpen(false)} title="Granska leverantörsfaktura" size="xl">
+      <Modal open={supplierInvoiceDetailOpen} onClose={() => setSupplierInvoiceDetailOpen(false)} title={selectedSupplierInvoice?.document_kind === 'receipt' ? 'Granska kvitto' : 'Granska leverantörsfaktura'} size="xl">
         {selectedSupplierInvoice && (
           <div className="space-y-5">
             <div className="grid gap-4 md:grid-cols-4">
@@ -5338,12 +5358,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   {formatCurrency(Number(selectedSupplierInvoice.total_amount), selectedSupplierInvoice.currency)}
                 </p>
               </Card>
-              <Card className="p-4">
+              {selectedSupplierInvoice.document_kind !== 'receipt' && <Card className="p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Betalning</p>
                 <p className="mt-2 text-lg font-bold text-slate-950">
                   {selectedSupplierInvoice.payment_status === 'paid' ? 'Betald' : selectedSupplierInvoice.payment_status === 'scheduled' ? 'Planerad' : 'Obetald'}
                 </p>
-              </Card>
+              </Card>}
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -5368,7 +5388,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 onChange={e => setSupplierInvoiceReviewForm(prev => ({ ...prev, supplier_id: e.target.value }))}
               />
               <Input
-                label="Leverantörens fakturanummer"
+                label={selectedSupplierInvoice.document_kind === 'receipt' ? 'Kvittonummer' : 'Leverantörens fakturanummer'}
                 value={supplierInvoiceReviewForm.supplier_invoice_number}
                 onChange={e => setSupplierInvoiceReviewForm(prev => ({ ...prev, supplier_invoice_number: e.target.value }))}
               />
@@ -5378,12 +5398,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 value={supplierInvoiceReviewForm.invoice_date}
                 onChange={e => setSupplierInvoiceReviewForm(prev => ({ ...prev, invoice_date: e.target.value }))}
               />
-              <Input
+              {selectedSupplierInvoice.document_kind !== 'receipt' && <Input
                 label="Förfallodatum"
                 type="date"
                 value={supplierInvoiceReviewForm.due_date}
                 onChange={e => setSupplierInvoiceReviewForm(prev => ({ ...prev, due_date: e.target.value }))}
-              />
+              />}
               <Textarea
                 className="md:col-span-2"
                 label="Intern anteckning"
@@ -5450,7 +5470,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   ))}
                 </div>
               )}
-              {selectedSupplierInvoice.approval_status !== 'approved' && (
+              {selectedSupplierInvoice.document_kind !== 'receipt' && selectedSupplierInvoice.approval_status !== 'approved' && (
                 <div className="border-t border-slate-100 bg-slate-50 p-4">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <h4 className="font-bold text-slate-900">{selectedSupplierInvoiceLine ? 'Redigera rad' : 'Lägg till rad'}</h4>
@@ -5648,12 +5668,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   Attestera
                 </Button>
               )}
-              {selectedSupplierInvoice.approval_status === 'approved' && selectedSupplierInvoice.payment_status === 'unpaid' && (
+              {selectedSupplierInvoice.document_kind !== 'receipt' && selectedSupplierInvoice.approval_status === 'approved' && selectedSupplierInvoice.payment_status === 'unpaid' && (
                 <Button variant="secondary" onClick={() => scheduleSupplierInvoicePayment(selectedSupplierInvoice.id)} loading={saving}>
                   Planera betalning
                 </Button>
               )}
-              {selectedSupplierInvoice.approval_status === 'approved' && (
+              {selectedSupplierInvoice.document_kind !== 'receipt' && selectedSupplierInvoice.approval_status === 'approved' && (
                 <Button
                   variant="secondary"
                   onClick={() => queueSupplierInvoiceAccountingSync(selectedSupplierInvoice.id)}

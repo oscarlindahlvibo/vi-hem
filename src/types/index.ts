@@ -1665,7 +1665,7 @@ export interface SupplierInvoice {
   supplier_id: string | null;
   supplier_invoice_number: string;
   invoice_date: string;
-  due_date: string;
+  due_date: string | null;
   currency: string;
   document_kind?: SupplierInvoiceDocumentKind;
   status: SupplierInvoiceStatus;

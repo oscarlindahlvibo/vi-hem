@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Card, Badge, StatCard, LoadingPage } from '../components/ui';
 import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, TIME_CATEGORY_LABELS } from '../lib/utils';
 import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News, Profile, ShortStayBooking, CustomerProject } from '../types';
-import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, MessageCircle, Users, Square, Repeat2, Coffee, BedDouble, Briefcase } from 'lucide-react';
+import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, Square, Repeat2, Coffee, BedDouble, Briefcase } from 'lucide-react';
 
 interface StaffDashboardProps {
   onNavigate: (page: string) => void;
@@ -310,57 +310,38 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   ];
   const shortStayAttentionCount = shortStayEvents.length;
   const attentionCount = attentionWorkOrdersCount + shortStayAttentionCount + ongoingCustomerProjects.length;
-  const quickTiles = [
-    {
-      label: 'Nyheter',
-      count: null,
-      icon: <Newspaper className="h-6 w-6" />,
-      className: 'bg-blue-50 text-blue-600',
-      page: 'news',
-    },
+  const quickLinks = [
     {
       label: 'Arbetsordrar',
       count: attentionWorkOrdersCount,
       icon: <ClipboardList className="h-6 w-6" />,
-      className: 'bg-orange-50 text-orange-500',
+      className: 'bg-[#173b73] text-white hover:bg-[#102d59]',
       page: 'workorders',
     },
     {
-      label: 'Stämpelklocka',
-      count: null,
-      icon: <Timer className="h-6 w-6" />,
-      className: 'bg-sky-50 text-sky-600',
-      page: 'timetracking',
-    },
-    {
-      label: 'Chatt',
-      count: null,
-      icon: <MessageCircle className="h-6 w-6" />,
-      className: 'bg-rose-50 text-rose-500',
-      page: 'chat',
-    },
-    {
-      label: 'Personal',
-      count: user?.role === 'admin' ? clockedInEntries.length : null,
-      icon: <Users className="h-6 w-6" />,
-      className: 'bg-violet-50 text-violet-500',
-      page: user?.role === 'admin' ? 'admin-staff' : 'timetracking',
+      label: 'Kundprojekt',
+      count: ongoingCustomerProjects.length,
+      icon: <Briefcase className="h-6 w-6" />,
+      className: 'bg-[#2d9cff] text-white hover:bg-[#1687e8]',
+      page: 'customer-projects',
     },
   ];
 
   return (
     <div className="min-w-0 max-w-full space-y-3 overflow-hidden sm:space-y-6">
-      <section className="rounded-2xl bg-white px-4 pb-4 pt-5 shadow-sm ring-1 ring-slate-200/70 sm:px-6">
-        <div className="flex items-center justify-between gap-4">
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 bg-slate-50/80 px-4 py-4 sm:px-6">
+          <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-500 to-violet-500 text-base font-black text-white shadow-sm sm:h-12 sm:w-12">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#173b73] text-base font-black text-white shadow-sm sm:h-11 sm:w-11">
               {user?.name?.charAt(0) || 'V'}
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-xl font-black text-slate-950 sm:text-2xl">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-blue-700">VI-HEM · Dagens översikt</p>
+              <h1 className="truncate text-xl font-bold text-slate-900 sm:text-2xl">
                 {getGreeting()}, {firstName}
               </h1>
-              <p className="mt-0.5 truncate text-sm font-medium text-slate-500">
+              <p className="mt-0.5 truncate text-sm text-slate-500">
                 {user?.role === 'admin' ? 'Överblick över dagens drift' : 'Din arbetsdag i VI-HEM'}
               </p>
             </div>
@@ -370,28 +351,27 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
             className="relative rounded-2xl p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
             aria-label="Notiser"
           >
-            <AlertCircle className="h-6 w-6" />
+            <AlertCircle className="h-5 w-5" />
             {attentionCount > 0 && (
               <span className="absolute -right-0.5 -top-0.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-rose-500 px-1 text-xs font-bold text-white">
                 {attentionCount > 99 ? '99+' : attentionCount}
               </span>
             )}
           </button>
+          </div>
         </div>
 
-        <div className="mt-5 grid min-w-0 grid-cols-3 gap-3 sm:flex sm:overflow-x-auto sm:pb-1 sm:[-ms-overflow-style:none] sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden">
-          {quickTiles.map((tile) => (
+        <div className="grid min-w-0 grid-cols-1 gap-2 p-3 sm:grid-cols-2 sm:p-4">
+          {quickLinks.map((tile) => (
             <button
               key={tile.label}
               onClick={() => onNavigate(tile.page)}
-              className="relative flex min-w-0 flex-col items-center gap-2 rounded-2xl px-1 py-2 text-center transition-transform active:scale-[0.98] sm:min-w-[8.5rem] sm:px-3 sm:py-3"
+              className={`group relative flex min-w-0 items-center justify-center gap-2 rounded-xl px-3 py-3 text-left font-semibold shadow-sm transition-colors ${tile.className}`}
             >
-              <span className={`flex h-14 w-full items-center justify-center rounded-2xl sm:h-16 ${tile.className}`}>
-                {tile.icon}
-              </span>
-              <span className="max-w-full truncate text-xs font-semibold text-slate-700 sm:text-sm">{tile.label}</span>
+              <span className="shrink-0 opacity-80 transition-opacity group-hover:opacity-100">{tile.icon}</span>
+              <span className="min-w-0 truncate text-sm">{tile.label}</span>
               {tile.count !== null && tile.count > 0 && (
-                <span className="absolute right-0 top-0 flex h-6 min-w-6 items-center justify-center rounded-full bg-rose-500 px-1 text-xs font-bold text-white shadow-sm sm:right-2 sm:top-1 sm:h-7 sm:min-w-7 sm:text-sm">
+                <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[11px] font-bold text-white shadow-sm">
                   {tile.count}
                 </span>
               )}
@@ -400,18 +380,21 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
         </div>
       </section>
 
-      <section className="rounded-2xl bg-white px-4 py-5 shadow-sm ring-1 ring-slate-200/70 sm:px-6">
+      <section className="rounded-2xl border border-slate-200 bg-white px-4 py-5 shadow-sm sm:px-6">
         <button
           onClick={() => onNavigate('timetracking')}
           className="mb-4 flex w-full min-w-0 items-center justify-between gap-3 text-left"
         >
-          <h2 className="min-w-0 text-xl font-black text-slate-950">Stämpelklocka</h2>
+          <span className="min-w-0">
+            <span className="block text-[11px] font-bold uppercase tracking-[0.16em] text-blue-700">Tidrapportering</span>
+            <span className="mt-1 block text-xl font-bold text-slate-900">Stämpelklocka</span>
+          </span>
           <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
         </button>
         {activeTimeEntry ? (
           <div className="space-y-3">
-            <div className={`rounded-2xl px-4 py-3 ${
-              activeTimeEntry.entry_type === 'break' ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'
+            <div className={`rounded-xl border px-4 py-3 ${
+              activeTimeEntry.entry_type === 'break' ? 'border-amber-200 bg-amber-50/70 text-amber-900' : 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
             }`}>
               <p className="text-xs font-bold uppercase tracking-wide">
                 {activeTimeEntry.entry_type === 'break' ? 'Aktiv rast' : 'Instämplad just nu'}
@@ -427,14 +410,14 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <button
                 onClick={() => onNavigate('timetracking/clockout')}
-                className="inline-flex min-w-0 items-center justify-center gap-2 rounded-full bg-rose-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-rose-500/20 transition-transform hover:bg-rose-600 active:scale-[0.99]"
+                className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100"
               >
                 <Square className="h-4 w-4 shrink-0" />
                 <span className="truncate">Stämpla ut</span>
               </button>
               <button
                 onClick={() => onNavigate('timetracking/switch')}
-                className="inline-flex min-w-0 items-center justify-center gap-2 rounded-full bg-blue-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-blue-500/20 transition-transform hover:bg-blue-600 active:scale-[0.99]"
+                className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-700 transition-colors hover:bg-blue-100"
               >
                 <Repeat2 className="h-4 w-4 shrink-0" />
                 <span className="truncate">Byt jobb</span>
@@ -442,7 +425,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
               {activeTimeEntry.entry_type === 'break' ? (
                 <button
                   onClick={() => onNavigate('timetracking/break')}
-                  className="inline-flex min-w-0 items-center justify-center gap-2 rounded-full bg-emerald-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition-transform hover:bg-emerald-600 active:scale-[0.99]"
+                  className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100"
                 >
                   <Timer className="h-4 w-4 shrink-0" />
                   <span className="truncate">Återgå till jobb</span>
@@ -450,22 +433,38 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
               ) : (
                 <button
                   onClick={() => onNavigate('timetracking/break')}
-                  className="inline-flex min-w-0 items-center justify-center gap-2 rounded-full bg-amber-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-amber-500/20 transition-transform hover:bg-amber-600 active:scale-[0.99]"
+                  className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-700 transition-colors hover:bg-amber-100"
                 >
                   <Coffee className="h-4 w-4 shrink-0" />
                   <span className="truncate">Gå på rast</span>
                 </button>
               )}
             </div>
+            <button
+              onClick={() => onNavigate('timetracking')}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
+            >
+              Öppna tidsregistrering
+              <ArrowRight className="h-4 w-4" />
+            </button>
           </div>
         ) : (
-          <button
-            onClick={() => onNavigate('timetracking')}
-            className="flex w-full min-w-0 items-center justify-center gap-3 rounded-full bg-[#2d9cff] px-4 py-4 text-base font-bold text-white shadow-lg shadow-blue-500/25 transition-transform hover:bg-blue-600 active:scale-[0.99]"
-          >
-            <Timer className="h-6 w-6 shrink-0" />
-            <span className="truncate">Stämpla in</span>
-          </button>
+          <div>
+            <button
+              onClick={() => onNavigate('timetracking')}
+              className="flex w-full min-w-0 items-center justify-center gap-3 rounded-xl bg-[#173b73] px-4 py-3 text-base font-bold text-white shadow-sm transition-colors hover:bg-[#102d59]"
+            >
+              <Timer className="h-6 w-6 shrink-0" />
+              <span className="truncate">Stämpla in</span>
+            </button>
+            <button
+              onClick={() => onNavigate('timetracking')}
+              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100"
+            >
+              Öppna tidsregistrering
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
         )}
       </section>
 
