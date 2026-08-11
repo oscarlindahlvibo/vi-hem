@@ -12,6 +12,7 @@ export type ModuleKey =
   | 'purchasing'
   | 'customer_projects'
   | 'short_stay'
+  | 'rental_management'
   | 'staff_ledger'
   | 'year_planning'
   | 'meetings'

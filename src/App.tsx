@@ -39,6 +39,7 @@ import { GuestLaundryPage } from './pages/GuestLaundryPage';
 import { FinancePage } from './pages/FinancePage';
 import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { StaffDocumentScannerPage } from './pages/StaffDocumentScannerPage';
+import { RentalPage } from './pages/RentalPage';
 import type { ModuleKey } from './types';
 
 type ModuleState = Partial<Record<ModuleKey, boolean>>;
@@ -49,6 +50,7 @@ const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
   'year_planning',
   'meetings',
   'finance',
+  'rental_management',
 ];
 
 const DEFAULT_MODULE_STATE: ModuleState = {
@@ -348,6 +350,10 @@ function AppInner() {
       case 'short-stay':
         if (!isStaff || !enabledModules.short_stay) return renderDashboard();
         return <ShortStayPage onNavigate={navigate} />;
+
+      case 'rental':
+        if (!isStaff || !enabledModules.rental_management) return renderDashboard();
+        return <RentalPage onNavigate={navigate} />;
 
       case 'termination':
         if (!isTenant) return renderDashboard();
