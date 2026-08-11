@@ -27,6 +27,7 @@ export function DocumentCapture({ documentKind, file, onFileChange, resetKey }: 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
   const imagePreviewRef = useRef<HTMLImageElement | null>(null);
+  const magnifierCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cameraPreviewRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanIntervalRef = useRef<number | null>(null);
@@ -143,40 +144,86 @@ export function DocumentCapture({ documentKind, file, onFileChange, resetKey }: 
       bottom: Math.min(height - 3, Math.round(height * ((scannerFrame.top + scannerFrame.height + 5) / 100))),
     };
 
-    const hits: Array<{ x: number; y: number }> = [];
+    const border = [
+      ...Array.from({ length: width }, (_, x) => luminance(x, 1)),
+      ...Array.from({ length: width }, (_, x) => luminance(x, height - 2)),
+      ...Array.from({ length: height }, (_, y) => luminance(1, y)),
+      ...Array.from({ length: height }, (_, y) => luminance(width - 2, y)),
+    ].sort((a, b) => a - b);
+    const backgroundLight = border[Math.floor(border.length * 0.5)] ?? 120;
+    const threshold = Math.min(225, Math.max(145, backgroundLight + 18));
+    const mask = new Uint8Array(width * height);
     for (let y = search.top; y <= search.bottom; y += 1) {
       for (let x = search.left; x <= search.right; x += 1) {
-        const center = luminance(x, y);
-        const gradient = Math.abs(center - luminance(x + 1, y)) + Math.abs(center - luminance(x - 1, y)) +
-          Math.abs(center - luminance(x, y + 1)) + Math.abs(center - luminance(x, y - 1));
-        if (gradient > 42 && center > 65 && center < 248) hits.push({ x, y });
+        const index = (y * width + x) * 4;
+        const red = pixels[index];
+        const green = pixels[index + 1];
+        const blue = pixels[index + 2];
+        const paperLike = Math.min(red, green, blue) >= threshold - 18 &&
+          Math.max(red, green, blue) - Math.min(red, green, blue) < 125;
+        if (paperLike) mask[y * width + x] = 1;
       }
     }
 
-    if (hits.length < 40) return null;
+    let best: { area: number; minX: number; maxX: number; minY: number; maxY: number; topLeft: { x: number; y: number }; topRight: { x: number; y: number }; bottomRight: { x: number; y: number }; bottomLeft: { x: number; y: number } } | null = null;
+    const queue: Array<[number, number]> = [];
+    for (let y = search.top; y <= search.bottom; y += 1) {
+      for (let x = search.left; x <= search.right; x += 1) {
+        if (!mask[y * width + x]) continue;
+        mask[y * width + x] = 0;
+        queue.push([x, y]);
+        let area = 0;
+        let minX = x;
+        let maxX = x;
+        let minY = y;
+        let maxY = y;
+        let topLeft = { x, y };
+        let topRight = { x, y };
+        let bottomRight = { x, y };
+        let bottomLeft = { x, y };
+        while (queue.length) {
+          const [currentX, currentY] = queue.pop()!;
+          area += 1;
+          minX = Math.min(minX, currentX);
+          maxX = Math.max(maxX, currentX);
+          minY = Math.min(minY, currentY);
+          maxY = Math.max(maxY, currentY);
+          if (currentX + currentY < topLeft.x + topLeft.y) topLeft = { x: currentX, y: currentY };
+          if (currentX - currentY > topRight.x - topRight.y) topRight = { x: currentX, y: currentY };
+          if (currentX + currentY > bottomRight.x + bottomRight.y) bottomRight = { x: currentX, y: currentY };
+          if (currentX - currentY < bottomLeft.x - bottomLeft.y) bottomLeft = { x: currentX, y: currentY };
+          for (let dy = -1; dy <= 1; dy += 1) {
+            for (let dx = -1; dx <= 1; dx += 1) {
+              if (!dx && !dy) continue;
+              const nextX = currentX + dx;
+              const nextY = currentY + dy;
+              if (nextX < search.left || nextX > search.right || nextY < search.top || nextY > search.bottom) continue;
+              const nextIndex = nextY * width + nextX;
+              if (mask[nextIndex]) {
+                mask[nextIndex] = 0;
+                queue.push([nextX, nextY]);
+              }
+            }
+          }
+        }
+        if (area > (best?.area ?? 0)) best = { area, minX, maxX, minY, maxY, topLeft, topRight, bottomRight, bottomLeft };
+      }
+    }
 
-    const xs = hits.map(hit => hit.x).sort((a, b) => a - b);
-    const ys = hits.map(hit => hit.y).sort((a, b) => a - b);
-    const percentile = (values: number[], ratio: number) => values[Math.max(0, Math.min(values.length - 1, Math.floor(values.length * ratio)))];
-    const minX = percentile(xs, 0.03);
-    const maxX = percentile(xs, 0.97);
-    const minY = percentile(ys, 0.03);
-    const maxY = percentile(ys, 0.97);
+    if (!best || best.area < width * height * 0.025 || best.maxX - best.minX < width * 0.2 || best.maxY - best.minY < height * 0.16) return null;
 
-    if (maxX - minX < width * 0.16 || maxY - minY < height * 0.16) return null;
-
-    const padX = width * 0.012;
-    const padY = height * 0.012;
-    const left = Math.max(1, ((minX - padX) / width) * 100);
-    const right = Math.min(99, ((maxX + padX) / width) * 100);
-    const top = Math.max(1, ((minY - padY) / height) * 100);
-    const bottom = Math.min(99, ((maxY + padY) / height) * 100);
+    const padX = width * 0.008;
+    const padY = height * 0.008;
+    const point = (corner: { x: number; y: number }, extraX: number, extraY: number) => ({
+      x: Math.max(1, Math.min(99, ((corner.x + extraX) / width) * 100)),
+      y: Math.max(1, Math.min(99, ((corner.y + extraY) / height) * 100)),
+    });
 
     return {
-      topLeft: { x: left, y: top },
-      topRight: { x: right, y: top },
-      bottomRight: { x: right, y: bottom },
-      bottomLeft: { x: left, y: bottom },
+      topLeft: point(best.topLeft, -padX, -padY),
+      topRight: point(best.topRight, padX, -padY),
+      bottomRight: point(best.bottomRight, padX, padY),
+      bottomLeft: point(best.bottomLeft, -padX, padY),
     };
   }, [scannerFrame]);
 
@@ -254,6 +301,48 @@ export function DocumentCapture({ documentKind, file, onFileChange, resetKey }: 
     activeCornerRef.current = null;
     setActiveCorner(null);
   }, []);
+
+  useEffect(() => {
+    const canvas = magnifierCanvasRef.current;
+    const point = activeCorner && scannerCorners ? scannerCorners[activeCorner] : null;
+    if (!canvas || !point || !scannerImageDataUrl) return;
+
+    const image = new Image();
+    image.onload = () => {
+      const size = 112;
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      canvas.width = size;
+      canvas.height = size;
+      context.fillStyle = '#020617';
+      context.fillRect(0, 0, size, size);
+
+      const sourceSize = Math.min(image.naturalWidth, image.naturalHeight) / 2.2;
+      const centerX = image.naturalWidth * point.x / 100;
+      const centerY = image.naturalHeight * point.y / 100;
+      const sourceLeft = centerX - sourceSize / 2;
+      const sourceTop = centerY - sourceSize / 2;
+      const scale = size / sourceSize;
+      const visibleLeft = Math.max(0, sourceLeft);
+      const visibleTop = Math.max(0, sourceTop);
+      const visibleRight = Math.min(image.naturalWidth, sourceLeft + sourceSize);
+      const visibleBottom = Math.min(image.naturalHeight, sourceTop + sourceSize);
+      if (visibleRight > visibleLeft && visibleBottom > visibleTop) {
+        context.drawImage(
+          image,
+          visibleLeft,
+          visibleTop,
+          visibleRight - visibleLeft,
+          visibleBottom - visibleTop,
+          (visibleLeft - sourceLeft) * scale,
+          (visibleTop - sourceTop) * scale,
+          (visibleRight - visibleLeft) * scale,
+          (visibleBottom - visibleTop) * scale,
+        );
+      }
+    };
+    image.src = scannerImageDataUrl;
+  }, [activeCorner, scannerCorners, scannerImageDataUrl]);
 
   useEffect(() => {
     clearScanPreview();
@@ -508,27 +597,17 @@ export function DocumentCapture({ documentKind, file, onFileChange, resetKey }: 
               />
             ))}
             {activeCorner && scannerCorners[activeCorner] && (
-              (() => {
-                const point = scannerCorners[activeCorner];
-                const zoom = 2.2;
-                const backgroundX = ((point.x / 100 - 0.5) / (zoom - 1)) * 100;
-                const backgroundY = ((point.y / 100 - 0.5) / (zoom - 1)) * 100;
-                return (
               <div
                 className="pointer-events-none absolute h-28 w-28 -translate-x-1/2 -translate-y-[125%] rounded-full border-4 border-white bg-slate-950 shadow-2xl ring-2 ring-blue-500"
                 style={{
                   left: `${scannerCorners[activeCorner].x}%`,
                   top: `${scannerCorners[activeCorner].y}%`,
-                  backgroundImage: `url(${scannerImageDataUrl})`,
-                  backgroundSize: `${zoom * 100}% ${zoom * 100}%`,
-                  backgroundPosition: `${backgroundX}% ${backgroundY}%`,
                 }}
               >
+                <canvas ref={magnifierCanvasRef} className="h-full w-full rounded-full" />
                 <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/80" />
                 <span className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-white/80" />
               </div>
-                );
-              })()
             )}
           </div>
         </div>
