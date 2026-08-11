@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">VI-HEM</string>
+    <string name="title_activity_main">VI-HEM</string>
+    <string name="package_name">se.vihem.app</string>
+    <string name="custom_url_scheme">se.vihem.app</string>
+</resources>

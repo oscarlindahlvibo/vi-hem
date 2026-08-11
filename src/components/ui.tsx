@@ -96,10 +96,11 @@ export function Textarea({ label, error, className = '', id, ...props }: Textare
 interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   label?: string;
   error?: string;
+  hint?: string;
   options: { value: string; label: string }[];
 }
 
-export function Select({ label, error, options, className = '', id, ...props }: SelectProps) {
+export function Select({ label, error, hint, options, className = '', id, ...props }: SelectProps) {
   const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
   return (
     <div className="flex flex-col gap-1.5">
@@ -112,6 +113,7 @@ export function Select({ label, error, options, className = '', id, ...props }: 
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
       {error && <p className="text-xs text-red-600">{error}</p>}
+      {hint && !error && <p className="text-xs text-slate-500">{hint}</p>}
     </div>
   );
 }

@@ -1,5 +1,7 @@
 import type { Invoice, InvoiceLine } from '../types';
 
+/* eslint-disable no-control-regex -- preserve PDF whitespace during sanitisation. */
+
 type InvoicePdfInput = {
   invoice: Invoice;
   lines: InvoiceLine[];

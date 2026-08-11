@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { queueOfflineMutation } from '../lib/offlineQueue';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Card,
@@ -251,41 +252,40 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
 
     try {
       setSubmittingRequest(true);
-      const { data: tenancy, error: tenancyError } = await supabase
-        .from('vihem_tenancies')
-        .select('organisation_id, property_id, apartment_id')
-        .eq('tenant_id', user.id)
-        .eq('status', 'active')
-        .order('start_date', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      let tenancy: { organisation_id: string | null; property_id: string | null; apartment_id: string | null } | null = null;
+      if (navigator.onLine) {
+        const { data: tenancyData, error: tenancyError } = await supabase
+          .from('vihem_tenancies')
+          .select('organisation_id, property_id, apartment_id')
+          .eq('tenant_id', user.id)
+          .eq('status', 'active')
+          .order('start_date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (tenancyError) throw tenancyError;
+        tenancy = tenancyData;
+      }
 
-      if (tenancyError) throw tenancyError;
-
-      const { data, error } = await supabase
-        .from('vihem_maintenance_requests')
-        .insert([
-          {
-            organisation_id: tenancy?.organisation_id || user.organisation_id || null,
-            tenant_id: user.id,
-            property_id: tenancy?.property_id || null,
-            apartment_id: tenancy?.apartment_id || null,
-            title: newRequestForm.title,
-            description: newRequestForm.description,
-            category: newRequestForm.category,
-            priority: newRequestForm.priority,
-            status: 'received',
-            access_permission: newRequestForm.access_permission,
-            preferred_times: newRequestForm.preferred_times,
-            contact_info: {
-              phone: newRequestForm.contact_phone,
-            },
-            internal_notes: '',
-          },
-        ])
-        .select();
-
-      if (error) throw error;
+      const requestPayload = {
+        organisation_id: tenancy?.organisation_id || user.organisation_id || null,
+        tenant_id: user.id,
+        property_id: tenancy?.property_id || null,
+        apartment_id: tenancy?.apartment_id || null,
+        title: newRequestForm.title,
+        description: newRequestForm.description,
+        category: newRequestForm.category,
+        priority: newRequestForm.priority,
+        status: 'received',
+        access_permission: newRequestForm.access_permission,
+        preferred_times: newRequestForm.preferred_times,
+        contact_info: { phone: newRequestForm.contact_phone },
+        internal_notes: '',
+      };
+      if (!navigator.onLine) await queueOfflineMutation('maintenance_request_insert', requestPayload, `maintenance:${user.id}:${newRequestForm.title}`);
+      else {
+        const { error } = await supabase.from('vihem_maintenance_requests').insert([requestPayload]).select();
+        if (error) throw error;
+      }
 
       // Reset form and close modal
       setNewRequestForm({

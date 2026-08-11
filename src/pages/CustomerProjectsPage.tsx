@@ -400,10 +400,10 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         supabase.from('vihem_profiles').select('*').eq('organisation_id', user.organisation_id).in('role', ['admin', 'staff']).eq('active', true).order('name'),
       ]);
 
-      const projectData = (projectRes.data || []) as CustomerProject[];
+      const projectData = (projectRes.data || []) as unknown as CustomerProject[];
       const projectIds = projectData.map(project => project.id);
       setProjects(projectData);
-      setCustomers((customerRes.data || []) as ProjectCustomer[]);
+      setCustomers((customerRes.data || []) as unknown as ProjectCustomer[]);
       setStaff((staffRes.data || []) as Profile[]);
 
       if (projectIds.length === 0) {
@@ -445,9 +445,9 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       ]);
 
       setAssignments((assignmentRes.data || []) as ProjectAssignment[]);
-      setTimeEntries((timeRes.data || []) as TimeEntry[]);
-      setMaterials((materialRes.data || []) as ProjectMaterialEntry[]);
-      setChangeOrders((changeRes.data || []) as ProjectChangeOrder[]);
+      setTimeEntries((timeRes.data || []) as unknown as TimeEntry[]);
+      setMaterials((materialRes.data || []) as unknown as ProjectMaterialEntry[]);
+      setChangeOrders((changeRes.data || []) as unknown as ProjectChangeOrder[]);
       setQuotes((quoteRes.data || []) as ProjectQuoteVersion[]);
       setSelfCheckTemplates((templateRes.data || []) as ProjectSelfCheckTemplate[]);
       setSelfChecks((selfCheckRes.data || []) as ProjectSelfCheck[]);
@@ -1213,7 +1213,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                       ] : []),
                       ['Intern referens', selectedProject.internal_reference || '—'],
                       ['Extern referens', selectedProject.external_reference || '—'],
-                    ]} />
+                    ] as [string, string][]} />
                     <div>
                       <h3 className="mb-3 text-sm font-semibold text-slate-800">Tilldelad personal</h3>
                       <div className="flex flex-wrap gap-2">

@@ -107,7 +107,7 @@ function workOrderAssigneeLabel(order: WorkOrder, staffMembers: Pick<Profile, 'i
 
   const names = ids
     .map((id) => staffMembers.find((staff) => staff.id === id)?.name)
-    .filter(Boolean);
+    .filter((name): name is string => Boolean(name));
 
   if (names.length > 0) return useInitials ? names.map(nameInitials).filter(Boolean).join(' ') : names.join(', ');
   if (order.assigned?.name) return useInitials ? nameInitials(order.assigned.name) : order.assigned.name;

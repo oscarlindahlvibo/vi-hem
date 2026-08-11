@@ -658,6 +658,7 @@ export interface ProjectQuoteVersion {
   terms: string;
   payment_terms: string;
   total_amount: number;
+  balance_due?: number;
   vat_amount: number;
   created_by: string | null;
   created_at: string;
@@ -1443,6 +1444,7 @@ export interface Invoice {
   subtotal_amount: number;
   vat_amount: number;
   total_amount: number;
+  balance_due?: number;
   paid_amount: number;
   sent_at: string | null;
   paid_at: string | null;
@@ -1539,6 +1541,7 @@ export interface AccountingIntegration {
   company_id: string;
   provider: 'none' | 'spiris' | 'accounted' | 'fortnox' | 'sie' | 'manual';
   status: 'not_configured' | 'active' | 'paused' | 'error';
+  enabled?: boolean;
   config: Record<string, unknown>;
   last_sync_at: string | null;
   has_secret?: boolean;

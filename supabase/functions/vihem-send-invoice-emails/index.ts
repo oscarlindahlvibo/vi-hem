@@ -47,7 +47,7 @@ Deno.serve(async (req: Request) => {
     const isCron = Boolean(cronSecret && req.headers.get("X-Cron-Secret") === cronSecret);
 
     let organisationId = typeof body.organisation_id === "string" ? body.organisation_id : "";
-    let targetEmailId = typeof body.email_id === "string" ? body.email_id : "";
+    const targetEmailId = typeof body.email_id === "string" ? body.email_id : "";
 
     if (!isCron) {
       if (!authHeader) return json({ error: "Unauthorized" }, 401);

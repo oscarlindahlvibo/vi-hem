@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { ModuleKey, Role } from '../types';
 import { AppLogo } from './AppLogo';
+import { OfflineStatus } from './OfflineStatus';
 import { Button, Input, Modal } from './ui';
 import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
@@ -140,6 +141,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
 
   return (
     <div className="min-h-screen flex bg-[var(--vihem-canvas)] text-slate-900">
+      <OfflineStatus />
       {/* Desktop sidebar */}
       <aside className="fixed left-0 top-0 z-30 hidden h-full w-[17rem] flex-col border-r border-slate-200/80 bg-white/95 shadow-[8px_0_34px_rgba(15,23,42,0.045)] backdrop-blur-xl lg:flex">
         <div className="border-b border-slate-200/80 px-5 py-5">

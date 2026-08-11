@@ -21,3 +21,8 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Native production signing material must never be committed.
+android/keystore.properties
+android/*.jks
+android/*.keystore

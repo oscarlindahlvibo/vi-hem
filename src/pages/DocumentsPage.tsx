@@ -164,7 +164,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
     setSavingDocument(true);
 
     try {
-      let fileUrl = newFileUrl || null;
+      const fileUrl = newFileUrl || null;
       let fileName = newFileUrl ? newFileUrl.split('/').pop() || newTitle : null;
       let fileSize = 0;
       let storageBucket: string | null = null;

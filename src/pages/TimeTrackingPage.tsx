@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { queueOfflineMutation } from '../lib/offlineQueue';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Card,
@@ -334,6 +335,14 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
 
   async function finishOpenEntries() {
     const end = new Date().toISOString();
+    if (!navigator.onLine && currentEntry) {
+      const breakMinutes = currentEntry.entry_type === 'break' ? 0 : currentEntry.break_minutes;
+      await queueOfflineMutation('time_entry_update', {
+        id: currentEntry.id,
+        data: { end_time: end, total_minutes: calcMinutes(currentEntry.start_time, end, breakMinutes), status: 'submitted' },
+      }, `time-entry:${currentEntry.id}`);
+      return;
+    }
     const { data: openEntries, error } = await supabase
       .from('vihem_time_entries')
       .select('*')
@@ -371,7 +380,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
   async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope: TimeEntry['project_billing_scope'] = 'included_in_quote') {
     const project = getCustomerProject(customerProjectId);
     await finishOpenEntries();
-    await supabase.from('vihem_time_entries').insert({
+    const payload = {
       user_id: user.id, work_order_id: workOrderId || null, category,
       organisation_id: user.organisation_id || null,
       entry_type: 'work',
@@ -380,7 +389,12 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       project_billing_scope: category === 'customer_project' ? projectBillingScope : 'internal',
       start_time: new Date().toISOString(), end_time: null,
       break_minutes: 0, total_minutes: 0, comment: comment || '', status: 'draft',
-    });
+    };
+    if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', payload, `time-entry-open:${user.id}`);
+    else {
+      const { error } = await supabase.from('vihem_time_entries').insert(payload);
+      if (error) throw error;
+    }
     setShowStampModal(false);
     fetchData();
   }
@@ -389,7 +403,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     if (!currentEntry) return;
     const project = getCustomerProject(customerProjectId);
     await finishOpenEntries();
-    await supabase.from('vihem_time_entries').insert({
+    const payload = {
       user_id: user.id,
       organisation_id: user.organisation_id || null,
       work_order_id: workOrderId || null,
@@ -404,7 +418,12 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       total_minutes: 0,
       comment: comment || '',
       status: 'draft',
-    });
+    };
+    if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', payload, `time-entry-open:${user.id}`);
+    else {
+      const { error } = await supabase.from('vihem_time_entries').insert(payload);
+      if (error) throw error;
+    }
     setShowStampModal(false);
     fetchData();
   }
@@ -412,7 +431,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
   async function handleStartBreak() {
     if (!currentEntry) return;
     await finishOpenEntries();
-    await supabase.from('vihem_time_entries').insert({
+    const payload = {
       user_id: user.id,
       organisation_id: user.organisation_id || null,
       category: 'general',
@@ -423,7 +442,12 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       total_minutes: 0,
       comment: 'Rast',
       status: 'draft',
-    });
+    };
+    if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', payload, `time-entry-open:${user.id}`);
+    else {
+      const { error } = await supabase.from('vihem_time_entries').insert(payload);
+      if (error) throw error;
+    }
     fetchData();
   }
 
@@ -449,7 +473,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     }
 
     await finishOpenEntries();
-    await supabase.from('vihem_time_entries').insert({
+    const payload = {
       user_id: user.id,
       organisation_id: user.organisation_id || null,
       work_order_id: previous.work_order_id || null,
@@ -464,7 +488,12 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       total_minutes: 0,
       comment: previous.comment || '',
       status: 'draft',
-    });
+    };
+    if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', payload, `time-entry-open:${user.id}`);
+    else {
+      const { error: insertError } = await supabase.from('vihem_time_entries').insert(payload);
+      if (insertError) throw insertError;
+    }
     fetchData();
   }
 
@@ -500,9 +529,18 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       status,
     };
     if (isNew) {
-      await supabase.from('vihem_time_entries').insert(data);
+      if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', data, `time-entry:${user.id}:${data.start_time}`);
+      else {
+        const { error } = await supabase.from('vihem_time_entries').insert(data);
+        if (error) throw error;
+      }
     } else {
-      await supabase.from('vihem_time_entries').update({ ...data, user_id: undefined }).eq('id', entryId!);
+      const updateData = { ...data, user_id: undefined };
+      if (!navigator.onLine) await queueOfflineMutation('time_entry_update', { id: entryId!, data: updateData }, `time-entry:${entryId}`);
+      else {
+        const { error } = await supabase.from('vihem_time_entries').update(updateData).eq('id', entryId!);
+        if (error) throw error;
+      }
     }
     setShowManualModal(false);
     setShowEditModal(false);
@@ -518,12 +556,16 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     end_time?: string | null;
     comment: string;
   }) {
-    const { error } = await supabase.from('vihem_staff_absence_requests').insert({
+    const absenceData = {
       ...payload,
       user_id: user.id,
       organisation_id: user.organisation_id || null,
       status: 'submitted',
-    });
+    };
+    const error = navigator.onLine
+      ? (await supabase.from('vihem_staff_absence_requests').insert(absenceData)).error
+      : null;
+    if (!navigator.onLine) await queueOfflineMutation('absence_insert', absenceData, `absence:${user.id}:${payload.start_date}:${payload.absence_type}`);
     if (error) {
       setAbsenceError(absenceDbErrorMessage(error));
       return;

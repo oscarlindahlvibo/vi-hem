@@ -3748,7 +3748,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   type="month"
                   value={rentAdjustmentForm.end_period}
                   onChange={event => setRentAdjustmentForm(prev => ({ ...prev, end_period: event.target.value }))}
-                  helperText="Lämna tom för tills vidare"
+                  hint="Lämna tom för tills vidare"
                 />
               )}
               <Input
@@ -4522,7 +4522,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                     <p className="text-slate-600">{run.reminders_queued} påminnelser</p>
                     <div>
                       <p className="font-semibold text-slate-700">{run.emails_processed} mejl behandlade</p>
-                      {run.details?.rent_billing && typeof run.details.rent_billing === 'object' && (
+                      {Boolean(run.details?.rent_billing && typeof run.details.rent_billing === 'object') && (
                         <p className="mt-1 text-xs font-semibold text-slate-500">
                           Hyra: {Number((run.details.rent_billing as Record<string, unknown>).created_items || 0)} rader,
                           {' '}{Number((run.details.rent_billing as Record<string, unknown>).generated_invoices || 0)} utkast
@@ -5314,7 +5314,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           <Textarea label="Intern anteckning" value={supplierInvoiceForm.notes} onChange={e => setSupplierInvoiceForm(prev => ({ ...prev, notes: e.target.value }))} />
           <div className="md:col-span-2">
             <DocumentCapture
-              documentKind={supplierInvoiceForm.document_kind}
+              documentKind={supplierInvoiceForm.document_kind as 'supplier_invoice' | 'receipt'}
               file={supplierInvoiceFile}
               onFileChange={setSupplierInvoiceFile}
             />
@@ -5598,7 +5598,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                     </ul>
                   </div>
                 )}
-                {selectedSupplierInvoice.ocr_status === 'failed' && selectedSupplierInvoice.ocr_data?.error && (
+                {selectedSupplierInvoice.ocr_status === 'failed' && Boolean(selectedSupplierInvoice.ocr_data?.error) && (
                   <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                     <p className="font-bold">Tolkningen misslyckades</p>
                     <p className="mt-1">{String(selectedSupplierInvoice.ocr_data.error)}</p>
@@ -6412,7 +6412,7 @@ function financeTableLabel(tableName: string) {
     vihem_finance_automation_settings: 'Automationsinställning',
     vihem_finance_reminder_settings: 'Påminnelseregel',
   };
-  return labels[tableName] || tableName.replace(/^vihem_/, '').replaceAll('_', ' ');
+  return labels[tableName] || tableName.replace(/^vihem_/, '').replace(/_/g, ' ');
 }
 
 function MetricCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {

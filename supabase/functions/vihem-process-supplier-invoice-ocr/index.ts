@@ -1,6 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+/* eslint-disable no-control-regex -- preserve PDF whitespace during sanitisation. */
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -289,7 +291,7 @@ async function processInvoice(serviceClient: any, invoice: any, options: { force
 
     await updateInvoiceStatus(serviceClient, invoice.id, "ai_processing");
     const context = await loadBusinessContext(serviceClient, invoice);
-    let extracted = await structureWithAi(text, context, invoice.document_kind || "supplier_invoice", false, undefined, options.settings);
+    const extracted = await structureWithAi(text, context, invoice.document_kind || "supplier_invoice", false, undefined, options.settings);
     usage.ai_model = extracted.model;
     usage.ai_call_count += extracted.aiCalls;
     usage.input_tokens += extracted.inputTokens;
@@ -947,8 +949,8 @@ function regexExtraction(text: string, documentKind: string): ExtractedDocument 
   const bg = normalized.match(/\b(?:BG|Bankgiro)[:\s]*([0-9]{3,4}[-\s]?[0-9]{4})\b/i);
   const pg = normalized.match(/\b(?:PG|Plusgiro)[:\s]*([0-9]{2,8}[-\s]?[0-9]{1,4})\b/i);
   const iban = normalized.match(/\b(SE[0-9A-Z]{22}|[A-Z]{2}[0-9A-Z]{13,32})\b/i);
-  const totals = [...normalized.matchAll(/(?:total|att betala|summa)[^\d]{0,20}([0-9][0-9\s.]*[,\.][0-9]{2})/gi)].map(m => parseAmount(m[1]));
-  const moms = [...normalized.matchAll(/(?:moms|vat)[^\d]{0,20}([0-9][0-9\s.]*[,\.][0-9]{2})/gi)].map(m => parseAmount(m[1]));
+  const totals = [...normalized.matchAll(/(?:total|att betala|summa)[^\d]{0,20}([0-9][0-9\s.]*[,.][0-9]{2})/gi)].map(m => parseAmount(m[1]));
+  const moms = [...normalized.matchAll(/(?:moms|vat)[^\d]{0,20}([0-9][0-9\s.]*[,.][0-9]{2})/gi)].map(m => parseAmount(m[1]));
   const gross = totals.filter(n => n > 0).sort((a, b) => b - a)[0] || 0;
   const vat = moms.filter(n => n > 0 && (!gross || n < gross)).sort((a, b) => b - a)[0] || 0;
   return {
