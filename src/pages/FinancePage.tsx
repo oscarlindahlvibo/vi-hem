@@ -2995,17 +2995,52 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     }
   };
 
+  const downloadInvoiceDocument = async (storagePath: string, fileName: string) => {
+    const { data, error } = await supabase.storage
+      .from('vihem-documents')
+      .createSignedUrl(storagePath, 60 * 10, { download: fileName });
+
+    if (error || !data?.signedUrl) {
+      setError(error?.message || 'Kunde inte skapa en publik länk till faktura-PDF:en.');
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = data.signedUrl;
+    link.download = fileName;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.click();
+  };
+
   const renderInvoiceDocument = async (invoice: Invoice, lines: InvoiceLine[]) => {
     const { data, error: renderError } = await supabase.functions.invoke('vihem-render-invoice-pdf', {
       body: { invoice_id: invoice.id },
     });
 
     if (!renderError && !data?.error) {
-      if (data?.signed_url) {
-        const link = document.createElement('a');
-        link.href = data.signed_url;
-        link.download = `${safePathPart(`Faktura ${invoice.invoice_number || invoice.id.slice(0, 8)}`)}.pdf`;
-        link.click();
+      if (data?.storage_path) {
+        await downloadInvoiceDocument(
+          data.storage_path,
+          `${safePathPart(`Faktura ${invoice.invoice_number || invoice.id.slice(0, 8)}`)}.pdf`,
+        );
+      } else if (data?.signed_url) {
+        // Backwards compatibility with an older deployed function. Never expose
+        // the internal Docker hostname to the browser when one is returned.
+        try {
+          const legacyUrl = new URL(data.signed_url);
+          const publicUrl = new URL(import.meta.env.VITE_SUPABASE_URL);
+          legacyUrl.protocol = publicUrl.protocol;
+          legacyUrl.host = publicUrl.host;
+          const link = document.createElement('a');
+          link.href = legacyUrl.toString();
+          link.download = `${safePathPart(`Faktura ${invoice.invoice_number || invoice.id.slice(0, 8)}`)}.pdf`;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.click();
+        } catch {
+          setError('Kunde inte skapa en giltig länk till faktura-PDF:en.');
+        }
       }
       return;
     }

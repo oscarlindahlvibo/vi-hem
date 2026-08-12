@@ -134,15 +134,10 @@ Deno.serve(async (req: Request) => {
 
     if (updateError) throw updateError;
 
-    const { data: signedData } = await serviceClient.storage
-      .from("vihem-documents")
-      .createSignedUrl(storagePath, 60 * 10, { download: fileName });
-
     return json({
       ok: true,
       document_id: documentRow.id,
       storage_path: storagePath,
-      signed_url: signedData?.signedUrl || null,
     });
   } catch (error) {
     console.error(error);
