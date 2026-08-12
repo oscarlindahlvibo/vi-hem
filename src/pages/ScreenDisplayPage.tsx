@@ -1661,9 +1661,14 @@ function WorkOrderScreen({ workOrders, customerProjects, staffMembers, screenHei
   const availableHeight = Math.max(screenHeight - 54, 420);
   const allItemsCount = workOrders.length + customerProjects.length;
   const visibleCount = Math.max(4, Math.min(allItemsCount, Math.floor(availableHeight / 94)));
-  const visibleOrders = workOrders.slice(0, visibleCount);
-  const remainingSlots = Math.max(0, visibleCount - visibleOrders.length);
-  const visibleProjects = customerProjects.slice(0, remainingSlots);
+  // Reserve space for both work orders and projects so projects do not disappear
+  // whenever the work-order list fills the available screen height.
+  const projectSlots = customerProjects.length > 0 && workOrders.length > 0
+    ? Math.max(1, Math.min(customerProjects.length, Math.floor(visibleCount / 3)))
+    : customerProjects.length > 0 ? visibleCount : 0;
+  const orderSlots = Math.max(0, visibleCount - projectSlots);
+  const visibleOrders = workOrders.slice(0, orderSlots);
+  const visibleProjects = customerProjects.slice(0, projectSlots);
 
   return (
     <div className="grid gap-2 overflow-hidden" style={{ height: availableHeight }}>
