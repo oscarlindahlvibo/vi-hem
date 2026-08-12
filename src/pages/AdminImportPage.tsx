@@ -12,7 +12,7 @@ type ImportResult = { row: number; status: 'created' | 'skipped' | 'error'; mess
 
 const columns: Record<ImportKind, string[]> = {
   properties: ['name', 'address', 'city', 'zip', 'description'],
-  apartments: ['property_name', 'property_address', 'apartment_number', 'size', 'rooms', 'rent', 'floor', 'status'],
+  apartments: ['property_name', 'property_address', 'apartment_number', 'size', 'rooms', 'rent', 'floor', 'storage', 'parking', 'balcony', 'balcony_size', 'status', 'storage_id', 'parking_spot_id', 'cellar_id', 'mailbox_id', 'lock_cylinder_id', 'door_code', 'key_ids', 'network_outlet_ids', 'electricity_fuse_box', 'electricity_meter_id', 'water_meter_id', 'heat_meter_id', 'ventilation_unit_id', 'last_renovation_year', 'technical_notes'],
   tenants: ['name', 'email', 'phone', 'property_name', 'apartment_number', 'start_date', 'monthly_rent'],
   inventory_locations: ['name', 'type', 'code', 'parent_location', 'description'],
   inventory_items: ['article_number', 'name', 'description', 'category', 'manufacturer', 'supplier', 'supplier_article_number', 'barcode', 'unit', 'purchase_price', 'minimum_stock', 'target_stock', 'reorder_quantity', 'initial_location', 'initial_quantity', 'notes'],
@@ -23,7 +23,7 @@ const columns: Record<ImportKind, string[]> = {
 
 const labels: Record<ImportKind, { title: string; description: string; icon: typeof Building2 }> = {
   properties: { title: 'Fastigheter', description: 'name, address, city och zip krävs.', icon: Building2 },
-  apartments: { title: 'Lägenheter', description: 'property_name och apartment_number krävs. Fastigheten måste redan finnas.', icon: Home },
+  apartments: { title: 'Lägenheter', description: 'Importera även storlek, hyra, förråd, parkering, lås, mätare, nätuttag, renoveringsår och tekniska anteckningar.', icon: Home },
   tenants: { title: 'Hyresgäster', description: 'name och email krävs. Lägenhet och hyresförhållande är valfria.', icon: Users },
   inventory_locations: { title: 'Lagerplatser', description: 'name och type krävs. Lägg överordnade platser före underordnade.', icon: MapPin },
   inventory_items: { title: 'Lagerartiklar', description: 'article_number och name krävs. initial_location och initial_quantity kan användas för startsaldo.', icon: Package },
@@ -34,7 +34,7 @@ const labels: Record<ImportKind, { title: string; description: string; icon: typ
 
 const templateRows: Record<ImportKind, ImportRow[]> = {
   properties: [{ name: 'Ekängsvägen 1', address: 'Ekängsvägen 1', city: 'Virserum', zip: '57771', description: 'Exempelrad - ta bort före import' }],
-  apartments: [{ property_name: 'Ekängsvägen 1', property_address: 'Ekängsvägen 1', apartment_number: '1001', size: '72', rooms: '3', rent: '8500', floor: '1', status: 'vacant' }],
+  apartments: [{ property_name: 'Ekängsvägen 1', property_address: 'Ekängsvägen 1', apartment_number: '1001', size: '72', rooms: '3', rent: '8500', floor: '1', storage: 'Förråd 1001', parking: 'P-12', balcony: 'true', balcony_size: '8', status: 'vacant', storage_id: '', parking_spot_id: 'P-12', cellar_id: '', mailbox_id: '', lock_cylinder_id: '', door_code: '', key_ids: '[]', network_outlet_ids: '[]', electricity_fuse_box: '', electricity_meter_id: '', water_meter_id: '', heat_meter_id: '', ventilation_unit_id: '', last_renovation_year: '2020', technical_notes: '' }],
   tenants: [{ name: 'Anna Andersson', email: 'anna@example.com', phone: '070-1234567', property_name: 'Ekängsvägen 1', apartment_number: '1001', start_date: '2026-09-01', monthly_rent: '8500' }],
   inventory_locations: [{ name: 'Stora lagret', type: 'warehouse', code: 'EK-LAGER', parent_location: '', description: '' }],
   inventory_items: [{ article_number: 'SKR-000145', name: 'Trallskruv 4,8x55 C4', description: '', category: 'Bygg', manufacturer: '', supplier: 'Ahlsell', supplier_article_number: '', barcode: '', unit: 'st', purchase_price: '1.25', minimum_stock: '500', target_stock: '2000', reorder_quantity: '1500', initial_location: 'EK-LAGER', initial_quantity: '1240', notes: '' }],
@@ -104,7 +104,9 @@ export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page
           const property = (properties.data || []).find(item => item.name.toLowerCase() === clean(row.property_name).toLowerCase() && (!clean(row.property_address) || item.address.toLowerCase() === clean(row.property_address).toLowerCase()));
           if (!property) { output.push({ row: index + 2, status: 'error', message: `Hittar inte fastigheten "${row.property_name}".` }); continue; }
           if ((apartments.data || []).some(item => item.property_id === property.id && String(item.apartment_number) === clean(row.apartment_number))) { output.push({ row: index + 2, status: 'skipped', message: 'Lägenheten finns redan på fastigheten.' }); continue; }
-          const result = await supabase.from('vihem_apartments').insert({ organisation_id: user.organisation_id, property_id: property.id, apartment_number: clean(row.apartment_number), size: Number(row.size) || 0, rooms: Number(row.rooms) || 0, rent: Number(row.rent) || 0, floor: Number(row.floor) || 0, status: clean(row.status) || 'vacant' });
+          let keyIds: unknown[] = []; let networkOutletIds: unknown[] = [];
+          try { if (clean(row.key_ids)) keyIds = JSON.parse(row.key_ids); if (clean(row.network_outlet_ids)) networkOutletIds = JSON.parse(row.network_outlet_ids); } catch { output.push({ row: index + 2, status: 'error', message: 'key_ids och network_outlet_ids måste vara giltig JSON, exempelvis [] eller ["K1"].' }); continue; }
+          const result = await supabase.from('vihem_apartments').insert({ organisation_id: user.organisation_id, property_id: property.id, apartment_number: clean(row.apartment_number), size: Number(row.size) || 0, rooms: Number(row.rooms) || 0, rent: Number(row.rent) || 0, floor: Number(row.floor) || 0, storage: clean(row.storage), parking: clean(row.parking), balcony: ['true', '1', 'ja', 'yes'].includes(clean(row.balcony).toLowerCase()), balcony_size: Number(row.balcony_size) || 0, status: clean(row.status) || 'vacant', storage_id: clean(row.storage_id), parking_spot_id: clean(row.parking_spot_id), cellar_id: clean(row.cellar_id), mailbox_id: clean(row.mailbox_id), lock_cylinder_id: clean(row.lock_cylinder_id), door_code: clean(row.door_code), key_ids: keyIds, network_outlet_ids: networkOutletIds, electricity_fuse_box: clean(row.electricity_fuse_box), electricity_meter_id: clean(row.electricity_meter_id), water_meter_id: clean(row.water_meter_id), heat_meter_id: clean(row.heat_meter_id), ventilation_unit_id: clean(row.ventilation_unit_id), last_renovation_year: clean(row.last_renovation_year) ? Number(row.last_renovation_year) : null, technical_notes: clean(row.technical_notes) });
           output.push(result.error ? { row: index + 2, status: 'error', message: result.error.message } : { row: index + 2, status: 'created', message: 'Lägenhet skapad.' });
         }
       } else if (kind === 'inventory_locations') {
