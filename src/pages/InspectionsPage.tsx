@@ -15,7 +15,7 @@ import {
   SearchInput,
 } from '../components/ui';
 import { formatDate } from '../lib/utils';
-import { buildGeneratedDocument } from '../lib/generatedDocuments';
+import { buildGeneratedDocumentWithImages } from '../lib/generatedDocuments';
 import {
   ClipboardCheck,
   Plus,
@@ -580,7 +580,11 @@ Foton bifogade i systemet: ${photoCount}
     const apt = apartment || tenancy?.apartment as any;
     const prop = property || tenancy?.property as any;
     const title = `${INSPECTION_TYPE_LABELS[inspection.inspection_type] || 'Besiktning'} - ${tenant?.name || 'Hyresgast'}`;
-    const documentPayload = buildGeneratedDocument({
+    const photoUrls = [
+      ...(Array.isArray(inspection.photo_urls) ? inspection.photo_urls : []),
+      ...(Array.isArray(inspection.rooms) ? inspection.rooms.flatMap((room: any) => Array.isArray(room.photos) ? room.photos : []) : []),
+    ];
+    const documentPayload = await buildGeneratedDocumentWithImages({
       title,
       fileName: `besiktning-${apt?.apartment_number || inspection.id}.pdf`,
       documentType: 'inspection',
@@ -591,7 +595,7 @@ Foton bifogade i systemet: ${photoCount}
       propertyId: inspection.property_id || tenancy?.property_id,
       apartmentId: inspection.apartment_id || tenancy?.apartment_id,
       createdBy: user?.id,
-    });
+    }, photoUrls);
 
     if (inspection.document_id) {
       const { error } = await supabase.from('vihem_documents').update(documentPayload).eq('id', inspection.document_id);
