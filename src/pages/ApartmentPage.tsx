@@ -249,7 +249,7 @@ Signeringsmetod: Handskriven signatur`,
     setSigningContract(contract);
     setSignMethod('name');
     setSignature('');
-    setSignatureName('');
+    setSignatureName(user?.name || '');
     setShowSignModal(true);
   };
 
@@ -621,6 +621,8 @@ Signeringsmetod: Handskriven signatur`,
                   />
                 </div>
                 <p className="text-xs text-slate-500">Genom att rita din signatur och skriva namnförtydligandet bekräftar du att du har läst och godkänner avtalet.</p>
+                {!signature && <p className="text-xs font-medium text-amber-700">Rita din signatur i rutan ovan för att fortsätta.</p>}
+                {signature && !signatureName.trim() && <p className="text-xs font-medium text-amber-700">Fyll i namnförtydligande för att fortsätta.</p>}
               </div>
             )}
 
