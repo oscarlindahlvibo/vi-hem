@@ -23,17 +23,24 @@ type EmbeddedImage = {
 
 const normalizePdfText = (value: string) =>
   value
-    .replace(/[åÅ]/g, 'a')
-    .replace(/[äÄ]/g, 'a')
-    .replace(/[öÖ]/g, 'o')
-    .replace(/[éÉ]/g, 'e')
     .replace(/[–—]/g, '-')
     .replace(/[“”]/g, '"')
-    .replace(/[’]/g, "'")
-    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, '');
+    .replace(/[’]/g, "'");
+
+// PDF's built-in Helvetica uses WinAnsiEncoding. Encoding text as hex bytes
+// keeps Swedish characters intact without bundling a large font file.
+const winAnsiByte = (character: string) => {
+  const special: Record<string, number> = {
+    '€': 0x80, 'é': 0xe9, 'É': 0xc9, 'å': 0xe5, 'Å': 0xc5,
+    'ä': 0xe4, 'Ä': 0xc4, 'ö': 0xf6, 'Ö': 0xd6, 'ü': 0xfc, 'Ü': 0xdc,
+  };
+  if (special[character] !== undefined) return special[character];
+  const code = character.charCodeAt(0);
+  return code >= 0x20 && code <= 0xff ? code : 0x3f;
+};
 
 const escapePdfText = (value: string) =>
-  normalizePdfText(value).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+  `<${Array.from(normalizePdfText(value), character => winAnsiByte(character).toString(16).padStart(2, '0')).join('')}>`;
 
 function makePdfDataUrl(title: string, body: string) {
   const lines = normalizePdfText(`${title}\n\n${body}`)
@@ -59,7 +66,7 @@ function makePdfDataUrl(title: string, body: string) {
     '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
     '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
     '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
-    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
+    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n',
     `5 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}\nendstream\nendobj\n`,
   ];
 
@@ -162,7 +169,7 @@ function makePdfWithImagesDataUrl(title: string, body: string, images: EmbeddedI
 
   const catalogId = reserveObject();
   const pagesId = reserveObject();
-  const fontId = addObject(ascii('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'));
+  const fontId = addObject(ascii('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'));
   const text = ['BT', `/F1 10 Tf`, '50 790 Td', '14 TL', ...textLines.map((line) => `(${escapePdfText(line)}) Tj T*`), 'ET'].join('\n');
   const textContentId = addObject(ascii(`<< /Length ${text.length} >>\nstream\n${text}\nendstream`));
   const pageIds: number[] = [addObject(ascii('PLACEHOLDER_TEXT_PAGE'))];

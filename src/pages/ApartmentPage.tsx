@@ -29,7 +29,7 @@ import {
 } from '../components/ui';
 import { formatDate, formatCurrency } from '../lib/utils';
 import { BANKID_ENABLED } from '../lib/bankid';
-import { buildGeneratedDocument } from '../lib/generatedDocuments';
+import { buildGeneratedDocumentWithImages } from '../lib/generatedDocuments';
 import { Tenancy, Apartment, Property } from '../types';
 
 interface ContactInfo {
@@ -203,7 +203,7 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
       let generatedDocumentId = signingContract.document_id || null;
 
       if (!signingContract.document_id && tenancy && apartment) {
-        const documentPayload = buildGeneratedDocument({
+        const documentPayload = await buildGeneratedDocumentWithImages({
           title: `Signerat hyresavtal - ${user?.name || 'Hyresgast'}`,
           fileName: `signerat-hyresavtal-${apartment.apartment_number || signingContract.id}.pdf`,
           documentType: 'contract',
@@ -219,7 +219,7 @@ Signeringsmetod: Handskriven signatur`,
           propertyId: apartment.property_id,
           apartmentId: apartment.id,
           createdBy: user?.id,
-        });
+        }, [signature]);
         const { data: documentData, error: documentError } = await supabase.from('vihem_documents').insert(documentPayload).select('id').single();
         if (documentError) throw documentError;
         generatedDocumentId = documentData.id;
