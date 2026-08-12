@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "test:rental": "node scripts/rental-pricing-check.mjs",
+    "test:inventory": "node scripts/inventory-invariants-check.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "release:check": "node scripts/check-release.mjs",
