@@ -126,6 +126,7 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
   const [tenancy, setTenancy] = useState<Tenancy | null>(null);
   const [apartment, setApartment] = useState<Apartment | null>(null);
   const [property, setProperty] = useState<Property | null>(null);
+  const [organisationLogo, setOrganisationLogo] = useState('');
   const [inspections, setInspections] = useState<any[]>([]);
   const [contracts, setContracts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,6 +149,15 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
     }
     try {
       setLoading(true);
+
+      if (user.organisation_id) {
+        const { data: organisation } = await supabase
+          .from('vihem_organisations')
+          .select('logo_url')
+          .eq('id', user.organisation_id)
+          .maybeSingle();
+        setOrganisationLogo(organisation?.logo_url || '');
+      }
 
       const { data: tenancyData } = await supabase
         .from('vihem_tenancies')
@@ -219,6 +229,7 @@ Signeringsmetod: Handskriven signatur`,
           propertyId: apartment.property_id,
           apartmentId: apartment.id,
           createdBy: user?.id,
+          logoUrl: organisationLogo,
         }, [signature]);
         const { data: documentData, error: documentError } = await supabase.from('vihem_documents').insert(documentPayload).select('id').single();
         if (documentError) throw documentError;

@@ -13,6 +13,7 @@ type GeneratedDocumentInput = {
   propertyId?: string | null;
   apartmentId?: string | null;
   createdBy?: string | null;
+  logoUrl?: string | null;
 };
 
 type EmbeddedImage = {
@@ -58,7 +59,7 @@ function makePdfDataUrl(title: string, body: string) {
     '/F1 10 Tf',
     '50 790 Td',
     '14 TL',
-    ...lines.map((line) => `(${escapePdfText(line)}) Tj T*`),
+    ...lines.map((line) => `${escapePdfText(line)} Tj T*`),
     'ET',
   ].join('\n');
 
@@ -124,6 +125,9 @@ async function loadEmbeddedImage(url: string): Promise<EmbeddedImage | null> {
     canvas.height = Math.max(1, Math.round(source.height * scale));
     const context = canvas.getContext('2d');
     if (!context) return null;
+    // Flatten transparent PNG signatures/logos onto white before JPEG export.
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(source, 0, 0, canvas.width, canvas.height);
     source.close();
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.86));
@@ -149,7 +153,7 @@ function ascii(value: string) {
   return new TextEncoder().encode(value);
 }
 
-function makePdfWithImagesDataUrl(title: string, body: string, images: EmbeddedImage[]) {
+function makePdfWithImagesDataUrl(title: string, body: string, images: EmbeddedImage[], logo: EmbeddedImage | null) {
   const textLines = normalizePdfText(`${title}\n\n${body}`).split(/\r?\n/).flatMap((line) => {
     if (line.length <= 95) return [line];
     const chunks: string[] = [];
@@ -170,7 +174,15 @@ function makePdfWithImagesDataUrl(title: string, body: string, images: EmbeddedI
   const catalogId = reserveObject();
   const pagesId = reserveObject();
   const fontId = addObject(ascii('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'));
-  const text = ['BT', `/F1 10 Tf`, '50 790 Td', '14 TL', ...textLines.map((line) => `(${escapePdfText(line)}) Tj T*`), 'ET'].join('\n');
+  const logoWidth = logo?.width || 1;
+  const logoHeight = logo?.height || 1;
+  const logoObjectId = logo ? addObject(concatBytes([
+    ascii(`<< /Type /XObject /Subtype /Image /Width ${logo.width} /Height ${logo.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logo.bytes.length} >>\nstream\n`),
+    logo.bytes,
+    ascii('\nendstream'),
+  ])) : null;
+  const logoCommands = logoObjectId ? `q\n120 0 0 ${Math.round(120 * logoHeight / logoWidth)} 425 748 cm\n/Logo Do\nQ\n` : '';
+  const text = [logoCommands, 'BT', `/F1 10 Tf`, logoObjectId ? '50 725 Td' : '50 790 Td', '14 TL', ...textLines.map((line) => `${escapePdfText(line)} Tj T*`), 'ET'].join('\n');
   const textContentId = addObject(ascii(`<< /Length ${text.length} >>\nstream\n${text}\nendstream`));
   const pageIds: number[] = [addObject(ascii('PLACEHOLDER_TEXT_PAGE'))];
   const imageObjectIds: number[] = [];
@@ -187,7 +199,10 @@ function makePdfWithImagesDataUrl(title: string, body: string, images: EmbeddedI
     pageIds.push(addObject(ascii('PLACEHOLDER_IMAGE_PAGE')));
   });
 
-  objects[pageIds[0] - 1] = ascii(pdfObject(pageIds[0], `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${textContentId} 0 R >>`));
+  const textResources = logoObjectId
+    ? `/Font << /F1 ${fontId} 0 R >> /XObject << /Logo ${logoObjectId} 0 R >>`
+    : `/Font << /F1 ${fontId} 0 R >>`;
+  objects[pageIds[0] - 1] = ascii(pdfObject(pageIds[0], `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << ${textResources} >> /Contents ${textContentId} 0 R >>`));
   images.forEach((image, index) => {
     const pageId = pageIds[index + 1];
     objects[pageId - 1] = ascii(pdfObject(pageId, `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im${imageObjectIds[index]} ${imageObjectIds[index]} 0 R >> >> /Contents ${imageContentIds[index]} 0 R >>`));
@@ -214,8 +229,12 @@ function makePdfWithImagesDataUrl(title: string, body: string, images: EmbeddedI
 }
 
 export async function buildGeneratedDocumentWithImages(input: GeneratedDocumentInput, imageUrls: string[]) {
-  const images = (await Promise.all(imageUrls.filter(Boolean).map(loadEmbeddedImage))).filter((image): image is EmbeddedImage => Boolean(image));
-  const fileUrl = makePdfWithImagesDataUrl(input.title, input.body, images);
+  const [logo, ...loadedImages] = await Promise.all([
+    input.logoUrl ? loadEmbeddedImage(input.logoUrl) : Promise.resolve(null),
+    ...imageUrls.filter(Boolean).map(loadEmbeddedImage),
+  ]);
+  const images = loadedImages.filter((image): image is EmbeddedImage => Boolean(image));
+  const fileUrl = makePdfWithImagesDataUrl(input.title, input.body, images, logo);
   return { ...buildGeneratedDocument(input), file_url: fileUrl, file_size: fileUrl.length };
 }
 
