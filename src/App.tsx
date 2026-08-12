@@ -40,6 +40,7 @@ import { FinancePage } from './pages/FinancePage';
 import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { StaffDocumentScannerPage } from './pages/StaffDocumentScannerPage';
 import { RentalPage } from './pages/RentalPage';
+import { InventoryPage } from './pages/InventoryPage';
 import type { ModuleKey } from './types';
 
 type ModuleState = Partial<Record<ModuleKey, boolean>>;
@@ -51,6 +52,7 @@ const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
   'meetings',
   'finance',
   'rental_management',
+  'inventory_management',
 ];
 
 const DEFAULT_MODULE_STATE: ModuleState = {
@@ -65,6 +67,7 @@ const DEFAULT_MODULE_STATE: ModuleState = {
   purchasing: true,
   inspections: true,
   finance: false,
+  inventory_management: false,
 };
 
 function normalizeAppPath(path: string) {
@@ -375,6 +378,10 @@ function AppInner() {
       case 'rental':
         if (!isStaff || !enabledModules.rental_management) return renderDashboard();
         return <RentalPage onNavigate={navigate} />;
+
+      case 'inventory':
+        if (!isStaff || !enabledModules.inventory_management) return renderDashboard();
+        return <InventoryPage onNavigate={navigate} />;
 
       case 'termination':
         if (!isTenant) return renderDashboard();

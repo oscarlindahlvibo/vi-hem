@@ -19,6 +19,7 @@ export type ModuleKey =
   | 'inspections'
   | 'finance'
   | 'inventory'
+  | 'inventory_management'
   | 'crm'
   | 'ai';
 

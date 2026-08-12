@@ -10,7 +10,7 @@ import {
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
   ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase,
   BedDouble, CalendarDays, Landmark, MessageSquareText, Monitor, ScanLine, SlidersHorizontal,
-  Truck,
+  Truck, Package,
 } from 'lucide-react';
 
 interface NavItem {
@@ -56,6 +56,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     { label: 'Tidrapportering', icon: <Clock className="w-5 h-5" />, page: 'timetracking', roles: ['staff', 'admin'] },
     { label: 'Kalender', icon: <CalendarDays className="w-5 h-5" />, page: 'calendar', roles: ['staff', 'admin'] },
     { label: 'Inköpslista', icon: <ShoppingCart className="w-5 h-5" />, page: 'purchases', roles: ['staff', 'admin'] },
+    { label: 'Lager', icon: <Package className="w-5 h-5" />, page: 'inventory', roles: ['staff', 'admin'], module: 'inventory_management' },
     { label: 'Scanna underlag', icon: <ScanLine className="w-5 h-5" />, page: 'document-scanner', roles: ['staff', 'admin'], module: 'finance' },
     { label: 'Årsplanering', icon: <CalendarDays className="w-5 h-5" />, page: 'year-planning', roles: ['staff', 'admin'], module: 'year_planning' },
     { label: 'Möten & Uppföljning', icon: <MessageSquareText className="w-5 h-5" />, page: 'meetings', roles: ['staff', 'admin'], module: 'meetings' },

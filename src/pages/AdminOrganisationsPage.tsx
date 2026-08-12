@@ -63,6 +63,7 @@ interface OrgFormData {
   meetings_enabled: boolean;
   finance_enabled: boolean;
   rental_management_enabled: boolean;
+  inventory_management_enabled: boolean;
   active: boolean;
 }
 
@@ -91,6 +92,7 @@ const defaultForm: OrgFormData = {
   meetings_enabled: false,
   finance_enabled: false,
   rental_management_enabled: false,
+  inventory_management_enabled: false,
   active: true,
 };
 
@@ -234,7 +236,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       const { data: moduleRows } = await supabase
         .from('vihem_organisation_modules')
         .select('organisation_id, module_key, enabled')
-        .in('module_key', ['customer_projects', 'short_stay', 'year_planning', 'meetings', 'finance', 'rental_management']);
+        .in('module_key', ['customer_projects', 'short_stay', 'year_planning', 'meetings', 'finance', 'rental_management', 'inventory_management']);
 
       const nextOrgModules = (moduleRows || []).reduce((acc, row: any) => {
         const organisationId = row.organisation_id as string;
@@ -408,6 +410,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             enabled: form.rental_management_enabled,
             limits: {},
           },
+          {
+            module_key: 'inventory_management',
+            enabled: form.inventory_management_enabled,
+            limits: {},
+          },
         ]);
       } else {
         const { data: createdOrg, error } = await supabase
@@ -448,6 +455,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             {
               module_key: 'rental_management',
               enabled: form.rental_management_enabled,
+              limits: {},
+            },
+            {
+              module_key: 'inventory_management',
+              enabled: form.inventory_management_enabled,
               limits: {},
             },
           ]);
@@ -497,6 +509,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       meetings_enabled: Boolean(moduleState.meetings),
       finance_enabled: Boolean(moduleState.finance),
       rental_management_enabled: Boolean(moduleState.rental_management),
+      inventory_management_enabled: Boolean(moduleState.inventory_management),
       active: org.active,
     });
     setEditingOrg(org);
@@ -508,7 +521,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       .from('vihem_organisation_modules')
       .select('module_key, enabled')
       .eq('organisation_id', org.id)
-      .in('module_key', ['year_planning', 'meetings', 'finance', 'rental_management']);
+      .in('module_key', ['year_planning', 'meetings', 'finance', 'rental_management', 'inventory_management']);
 
     if (!error) {
       const rows = (data || []) as Array<{ module_key: ModuleKey; enabled: boolean }>;
@@ -518,6 +531,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         meetings_enabled: Boolean(rows.find(row => row.module_key === 'meetings')?.enabled),
         finance_enabled: Boolean(rows.find(row => row.module_key === 'finance')?.enabled),
         rental_management_enabled: Boolean(rows.find(row => row.module_key === 'rental_management')?.enabled),
+        inventory_management_enabled: Boolean(rows.find(row => row.module_key === 'inventory_management')?.enabled),
       }));
     }
   };
@@ -1224,6 +1238,21 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
               <span>
                 <span className="block text-sm font-semibold text-slate-800">Aktivera Uthyrning</span>
                 <span className="block text-xs text-slate-500">Visar ViboRents uthyrningsmodul med produkter, assets, priser, bokningar och interna spärrar.</span>
+              </span>
+            </label>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.inventory_management_enabled}
+                onChange={e => setForm({ ...form, inventory_management_enabled: e.target.checked })}
+                className="mt-1 w-4 h-4 rounded border-slate-300"
+              />
+              <span>
+                <span className="block text-sm font-semibold text-slate-800">Aktivera Lager</span>
+                <span className="block text-xs text-slate-500">Ger organisationen artiklar, lagerplatser, scanning, materialuttag, inventering och saldovarningar.</span>
               </span>
             </label>
           </div>
