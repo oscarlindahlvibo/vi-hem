@@ -710,7 +710,7 @@ export function ScreenDisplayPage() {
       {view === 'short-stay' ? (
         <ShortStayScreen units={units} bookings={bookings} days={days} screenHeight={screenSize.height} />
       ) : view === 'work-orders' ? (
-        <WorkOrderScreen workOrders={workOrders} staffMembers={staffMembers} screenHeight={screenSize.height} />
+        <WorkOrderScreen workOrders={workOrders} customerProjects={customerProjects} staffMembers={staffMembers} screenHeight={screenSize.height} />
       ) : view === 'meeting' ? (
         <MeetingScreen
           screen={selectedScreenConfig}
@@ -1653,14 +1653,17 @@ function LaundryScreen({
   );
 }
 
-function WorkOrderScreen({ workOrders, staffMembers, screenHeight }: { workOrders: WorkOrder[]; staffMembers: Pick<Profile, 'id' | 'name'>[]; screenHeight: number }) {
-  if (workOrders.length === 0) {
-    return <div className="rounded-2xl bg-white p-12 text-center text-2xl font-black text-slate-700">Inga aktiva arbetsordrar.</div>;
+function WorkOrderScreen({ workOrders, customerProjects, staffMembers, screenHeight }: { workOrders: WorkOrder[]; customerProjects: CustomerProject[]; staffMembers: Pick<Profile, 'id' | 'name'>[]; screenHeight: number }) {
+  if (workOrders.length === 0 && customerProjects.length === 0) {
+    return <div className="rounded-2xl bg-white p-12 text-center text-2xl font-black text-slate-700">Inga aktiva arbetsordrar eller kundprojekt.</div>;
   }
 
   const availableHeight = Math.max(screenHeight - 54, 420);
-  const visibleCount = Math.max(4, Math.min(workOrders.length, Math.floor(availableHeight / 94)));
+  const allItemsCount = workOrders.length + customerProjects.length;
+  const visibleCount = Math.max(4, Math.min(allItemsCount, Math.floor(availableHeight / 94)));
   const visibleOrders = workOrders.slice(0, visibleCount);
+  const remainingSlots = Math.max(0, visibleCount - visibleOrders.length);
+  const visibleProjects = customerProjects.slice(0, remainingSlots);
 
   return (
     <div className="grid gap-2 overflow-hidden" style={{ height: availableHeight }}>
@@ -1683,9 +1686,26 @@ function WorkOrderScreen({ workOrders, staffMembers, screenHeight }: { workOrder
           </div>
         </div>
       ))}
-      {workOrders.length > visibleOrders.length && (
+      {visibleProjects.map(project => (
+        <div key={`project-${project.id}`} className="grid grid-cols-[1fr_auto] gap-4 rounded-xl bg-blue-50 px-4 py-3 text-slate-950 ring-1 ring-blue-200">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-blue-600 px-3 py-1 text-sm font-black text-white">Kundprojekt</span>
+              <h2 className="truncate text-lg font-black">{project.title || project.name || 'Kundprojekt'}</h2>
+              <span className="rounded-full bg-white px-3 py-1 text-sm font-bold text-blue-700">{PROJECT_STATUS_LABELS[project.status] || project.status}</span>
+            </div>
+            <p className="mt-1 line-clamp-1 text-sm text-slate-600">{project.customer_name || project.project_address || 'Ingen kund/plats angiven'}</p>
+            <p className="mt-2 text-sm font-semibold text-slate-500">{project.project_manager_id ? workOrderAssigneeLabel({ assigned_to_ids: [project.project_manager_id] } as WorkOrder, staffMembers) : 'Ingen projektledare angiven'}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Planerat klart</p>
+            <p className="mt-1 text-lg font-black text-slate-900">{project.planned_end_date ? formatDate(project.planned_end_date) : 'Ej satt'}</p>
+          </div>
+        </div>
+      ))}
+      {allItemsCount > visibleOrders.length + visibleProjects.length && (
         <div className="rounded-2xl bg-white/10 px-5 py-3 text-center text-sm font-bold text-slate-200">
-          +{workOrders.length - visibleOrders.length} fler arbetsordrar visas inte på den här skärmen
+          +{allItemsCount - visibleOrders.length - visibleProjects.length} fler arbetsordrar eller kundprojekt visas inte på den här skärmen
         </div>
       )}
     </div>
