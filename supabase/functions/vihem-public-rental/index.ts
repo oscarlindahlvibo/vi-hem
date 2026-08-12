@@ -94,6 +94,33 @@ Deno.serve(async (request) => {
       return json({ product, available: (data || []).length > 0, assets: data || [] });
     }
 
+    if (request.method === 'GET' && action === 'availability-calendar') {
+      const slug = text(url.searchParams.get('slug'));
+      const from = text(url.searchParams.get('from'));
+      const to = text(url.searchParams.get('to'));
+      if (!slug || !from || !to) return json({ error: 'slug, from och to krävs.' }, 400);
+      const { data: product, error: productError } = await client.from('vihem_rental_products')
+        .select('id,name,slug').eq('organisation_id', organisationId).eq('slug', slug)
+        .eq('active', true).eq('visible_publicly', true).maybeSingle();
+      if (productError) throw productError;
+      if (!product) return json({ error: 'Produkten hittades inte.' }, 404);
+
+      const { data: items, error: itemsError } = await client.from('vihem_rental_booking_items')
+        .select('booking_id').eq('organisation_id', organisationId).eq('product_id', product.id);
+      if (itemsError) throw itemsError;
+      const bookingIds = [...new Set((items || []).map((item: any) => item.booking_id).filter(Boolean))];
+      const [bookingResult, blockResult] = await Promise.all([
+        bookingIds.length
+          ? client.from('vihem_rental_bookings').select('id,start_at,end_at,status').eq('organisation_id', organisationId).in('id', bookingIds).lt('start_at', to).gt('end_at', from)
+          : Promise.resolve({ data: [], error: null }),
+        client.from('vihem_rental_blocks').select('start_at,end_at,block_type,reason').eq('organisation_id', organisationId).eq('product_id', product.id).lt('start_at', to).gt('end_at', from),
+      ]);
+      if (bookingResult.error) throw bookingResult.error;
+      if (blockResult.error) throw blockResult.error;
+      const bookings = (bookingResult.data || []).filter((booking: any) => !['cancelled', 'completed'].includes(booking.status));
+      return json({ product, bookings, blocks: blockResult.data || [] });
+    }
+
     if (action === 'quote') {
       const slug = text(body.slug);
       const { data: product, error: productError } = await client.from('vihem_rental_products').select('id,name,slug').eq('organisation_id', organisationId).eq('slug', slug).eq('active', true).eq('visible_publicly', true).maybeSingle();
