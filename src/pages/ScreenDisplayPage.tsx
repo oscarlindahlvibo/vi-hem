@@ -33,6 +33,7 @@ const SCREEN_APP_VERSION = '2026-08-07-tv-layout-11';
 const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
 const SCREEN_SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const SCREEN_SESSION_REFRESH_MARGIN_SECONDS = 15 * 60;
+const SCREEN_DEVICE_SESSION_KEY = 'vihem.screen.device-session';
 
 const addDays = (date: Date, days: number) => {
   const next = new Date(date);
@@ -180,6 +181,20 @@ export function ScreenDisplayPage() {
   const dayCount = screenSize.width < 1400 ? 8 : screenSize.width < 1700 ? 9 : 10;
   const days = useMemo(() => Array.from({ length: dayCount }, (_, index) => dateKey(addDays(today(), index))), [dayCount]);
 
+  useEffect(() => {
+    if (loading || user || localStorage.getItem(SCREEN_DEVICE_SESSION_KEY) !== 'true') return;
+
+    // A sleeping TV can emit SIGNED_OUT before the persisted refresh token has
+    // had a chance to renew. Give the session one recovery attempt first.
+    const recoverSession = window.setTimeout(() => {
+      supabase.auth.refreshSession().catch(() => {
+        localStorage.removeItem(SCREEN_DEVICE_SESSION_KEY);
+      });
+    }, 250);
+
+    return () => window.clearTimeout(recoverSession);
+  }, [loading, user]);
+
   async function ensureScreenSession() {
     if (screenSessionRefreshRef.current) return screenSessionRefreshRef.current;
 
@@ -305,6 +320,7 @@ export function ScreenDisplayPage() {
       setLoginError(result.error);
       return;
     }
+    localStorage.setItem(SCREEN_DEVICE_SESSION_KEY, 'true');
     setShowViewChooser(true);
   }
 
@@ -610,7 +626,15 @@ export function ScreenDisplayPage() {
           <Monitor className="mx-auto mb-4 h-12 w-12 text-slate-400" />
           <h1 className="text-2xl font-black">Kontot saknar skärmbehörighet</h1>
           <p className="mt-2 text-slate-500">Logga in med ett TV-skärmskonto för organisationen.</p>
-          <Button onClick={signOut} className="mt-6">Logga ut</Button>
+          <Button
+            onClick={() => {
+              localStorage.removeItem(SCREEN_DEVICE_SESSION_KEY);
+              void signOut();
+            }}
+            className="mt-6"
+          >
+            Logga ut
+          </Button>
         </div>
       </div>
     );

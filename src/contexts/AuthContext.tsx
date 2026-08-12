@@ -136,7 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (event === 'PASSWORD_RECOVERY') {
         setPasswordRecovery(true);
         setLoading(false);
-      } else if (event === 'SIGNED_IN' && session?.user) {
+      } else if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
         (async () => {
           try {
             const profile = await fetchProfile(session.user.id);
