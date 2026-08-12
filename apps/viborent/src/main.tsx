@@ -535,8 +535,12 @@ function BookingPanel({
   product: Product;
   site: SiteConfig | null;
 }) {
-  const [start, setStart] = useState("");
-  const [end, setEnd] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [startHour, setStartHour] = useState("09");
+  const [endHour, setEndHour] = useState("17");
+  const start = startDate ? `${startDate}T${startHour}:00` : "";
+  const end = endDate ? `${endDate}T${endHour}:00` : "";
   const [quote, setQuote] = useState<any>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -549,11 +553,11 @@ function BookingPanel({
   const [checkout, setCheckout] = useState(false);
   const selectDate = (date: Date) => {
     const pad = (value: number) => String(value).padStart(2, "0");
-    const value = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T09:00`;
+    const value = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
     if (!start || end) {
-      setStart(value);
-      setEnd("");
-    } else setEnd(value);
+      setStartDate(value);
+      setEndDate("");
+    } else setEndDate(value);
     setQuote(undefined);
     setMessage("");
   };
@@ -630,22 +634,64 @@ function BookingPanel({
         </p>
         <div className="date-grid">
           <label>
-            Från
+            Startdatum
             <input
-              type="datetime-local"
-              step="3600"
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
+              type="date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setQuote(undefined);
+              }}
             />
           </label>
           <label>
-            Till
+            Slutdatum
             <input
-              type="datetime-local"
-              step="3600"
-              value={end}
-              onChange={(e) => setEnd(e.target.value)}
+              type="date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setQuote(undefined);
+              }}
             />
+          </label>
+        </div>
+        <div className="date-grid hour-grid">
+          <label>
+            Starttid
+            <select
+              value={startHour}
+              onChange={(e) => {
+                setStartHour(e.target.value);
+                setQuote(undefined);
+              }}
+            >
+              {Array.from({ length: 24 }, (_, hour) =>
+                String(hour).padStart(2, "0"),
+              ).map((hour) => (
+                <option key={hour} value={hour}>
+                  {hour}:00
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Sluttid
+            <select
+              value={endHour}
+              onChange={(e) => {
+                setEndHour(e.target.value);
+                setQuote(undefined);
+              }}
+            >
+              {Array.from({ length: 24 }, (_, hour) =>
+                String(hour).padStart(2, "0"),
+              ).map((hour) => (
+                <option key={hour} value={hour}>
+                  {hour}:00
+                </option>
+              ))}
+            </select>
           </label>
         </div>
         <button

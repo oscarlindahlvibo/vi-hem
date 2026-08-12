@@ -284,6 +284,7 @@ main {
 }
 .filters input,
 .date-grid input,
+.date-grid select,
 .checkout input {
   width: 100%;
   border: 1px solid #cfe1e5;
