@@ -25,17 +25,21 @@ async function resolveOrganisation(client: any, request: Request, body: any) {
     if (data?.organisation_id) return data.organisation_id;
 
     // Keep the initial ViboRent deployment usable if the domain seed migration
-    // has not reached the shared database yet. This fallback is deliberately
-    // limited to the known owning organisation and still requires the module
-    // to be enabled below.
+    // has not reached the shared database yet. Only an active organisation
+    // with the rental module enabled is eligible for this fallback.
     if (hostname === 'viborent.se') {
-      const { data: organisation } = await client.from('vihem_organisations')
-        .select('id')
-        .or('slug.ilike.vibogruppen%,name.ilike.Vibogruppen%')
-        .eq('active', true)
-        .limit(1)
-        .maybeSingle();
-      if (organisation?.id) return organisation.id;
+      const { data: moduleRows } = await client.from('vihem_organisation_modules')
+        .select('organisation_id')
+        .eq('module_key', 'rental_management')
+        .eq('enabled', true);
+      const organisationIds = [...new Set((moduleRows || []).map((row: any) => row.organisation_id).filter(Boolean))];
+      if (organisationIds.length) {
+        const { data: organisations } = await client.from('vihem_organisations')
+          .select('id')
+          .in('id', organisationIds)
+          .eq('active', true);
+        if ((organisations || []).length === 1) return organisations[0].id;
+      }
     }
   }
   if (slug) {
