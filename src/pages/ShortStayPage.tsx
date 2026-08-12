@@ -22,7 +22,38 @@ interface ShortStayPageProps {
   onNavigate: (page: string) => void;
 }
 
-type Tab = 'overview' | 'calendar' | 'cleaning' | 'bookings' | 'receipts' | 'settings';
+type Tab = 'overview' | 'calendar' | 'cleaning' | 'bookings' | 'key_boxes' | 'receipts' | 'settings';
+
+interface KeyBox {
+  id: string;
+  organisation_id: string;
+  unit_id: string;
+  name: string;
+  code: string;
+  location: string;
+  notes: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+interface KeyBoxForm {
+  unit_id: string;
+  name: string;
+  code: string;
+  location: string;
+  notes: string;
+  active: boolean;
+}
+
+const defaultKeyBoxForm: KeyBoxForm = {
+  unit_id: '',
+  name: 'Nyckelbox',
+  code: '',
+  location: '',
+  notes: '',
+  active: true,
+};
 
 interface UnitForm {
   name: string;
@@ -474,6 +505,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const [bookings, setBookings] = useState<ShortStayBooking[]>([]);
   const [commonCleanings, setCommonCleanings] = useState<CommonCleaning[]>([]);
   const [commonCleaningRules, setCommonCleaningRules] = useState<CommonCleaningRule[]>([]);
+  const [keyBoxes, setKeyBoxes] = useState<KeyBox[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [apartments, setApartments] = useState<Apartment[]>([]);
   const [financeCompanies, setFinanceCompanies] = useState<FinanceCompany[]>([]);
@@ -483,12 +515,15 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const [unitModalOpen, setUnitModalOpen] = useState(false);
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [commonCleaningModalOpen, setCommonCleaningModalOpen] = useState(false);
+  const [keyBoxModalOpen, setKeyBoxModalOpen] = useState(false);
   const [editingUnit, setEditingUnit] = useState<ShortStayUnit | null>(null);
   const [editingBooking, setEditingBooking] = useState<ShortStayBooking | null>(null);
   const [editingCommonCleaningRule, setEditingCommonCleaningRule] = useState<CommonCleaningRule | null>(null);
+  const [editingKeyBox, setEditingKeyBox] = useState<KeyBox | null>(null);
   const [unitForm, setUnitForm] = useState<UnitForm>(defaultUnitForm);
   const [bookingForm, setBookingForm] = useState<BookingForm>(defaultBookingForm);
   const [commonCleaningForm, setCommonCleaningForm] = useState<CommonCleaningForm>(defaultCommonCleaningForm);
+  const [keyBoxForm, setKeyBoxForm] = useState<KeyBoxForm>(defaultKeyBoxForm);
   const [saving, setSaving] = useState(false);
   const [syncingUnitId, setSyncingUnitId] = useState<string | null>(null);
   const [formError, setFormError] = useState('');
@@ -509,6 +544,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const [creatingReceiptId, setCreatingReceiptId] = useState<string | null>(null);
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
   const [receiptForm, setReceiptForm] = useState<ReceiptForm>(defaultReceiptForm);
+  const [visibleKeyBoxId, setVisibleKeyBoxId] = useState<string | null>(null);
 
   const isAdmin = user?.role === 'admin';
   const organisationId = user?.organisation_id;
@@ -621,7 +657,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     setLoading(true);
     setError('');
 
-    const [unitsRes, bookingsRes, commonCleaningsRes, rulesRes, propertiesRes, apartmentsRes] = await Promise.all([
+    const [unitsRes, bookingsRes, commonCleaningsRes, rulesRes, propertiesRes, apartmentsRes, keyBoxesRes] = await Promise.all([
       supabase
         .from('vihem_short_stay_units')
         .select('*, property:vihem_properties(*), apartment:vihem_apartments(*)')
@@ -655,6 +691,11 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
         .select('*, property:vihem_properties(*)')
         .eq('organisation_id', organisationId)
         .order('apartment_number'),
+      supabase
+        .from('vihem_short_stay_key_boxes')
+        .select('*')
+        .eq('organisation_id', organisationId)
+        .order('name'),
     ]);
 
     if (unitsRes.error || bookingsRes.error) {
@@ -668,6 +709,9 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
       setCommonCleaningRules(rulesRes.error && isMissingSchemaError(rulesRes.error)
         ? []
         : (rulesRes.data || []) as CommonCleaningRule[]);
+      setKeyBoxes(keyBoxesRes.error && isMissingSchemaError(keyBoxesRes.error)
+        ? []
+        : ((keyBoxesRes.data || []) as KeyBox[]).filter(keyBox => isAdmin || keyBox.active));
       setProperties((propertiesRes.data || []) as Property[]);
       setApartments((apartmentsRes.data || []) as Apartment[]);
       if (commonCleaningsRes.error && !isMissingSchemaError(commonCleaningsRes.error)) {
@@ -675,6 +719,9 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
       }
       if (rulesRes.error && !isMissingSchemaError(rulesRes.error)) {
         setError(rulesRes.error.message || 'Kunde inte ladda städregler.');
+      }
+      if (keyBoxesRes.error && !isMissingSchemaError(keyBoxesRes.error)) {
+        setError(keyBoxesRes.error.message || 'Kunde inte ladda nyckelboxar.');
       }
     }
     setLoading(false);
@@ -904,6 +951,81 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     }
 
     setUnitModalOpen(false);
+    await fetchData();
+  }
+
+  function openCreateKeyBox() {
+    setEditingKeyBox(null);
+    setKeyBoxForm({ ...defaultKeyBoxForm, unit_id: units[0]?.id || '' });
+    setFormError('');
+    setKeyBoxModalOpen(true);
+  }
+
+  function openEditKeyBox(keyBox: KeyBox) {
+    setEditingKeyBox(keyBox);
+    setKeyBoxForm({
+      unit_id: keyBox.unit_id,
+      name: keyBox.name,
+      code: keyBox.code,
+      location: keyBox.location || '',
+      notes: keyBox.notes || '',
+      active: keyBox.active,
+    });
+    setFormError('');
+    setKeyBoxModalOpen(true);
+  }
+
+  async function saveKeyBox() {
+    if (!organisationId || !user || !isAdmin) return;
+    setFormError('');
+    if (!keyBoxForm.unit_id) {
+      setFormError('Välj vilket rum eller vilken lägenhet nyckelboxen hör till.');
+      return;
+    }
+    if (!keyBoxForm.name.trim() || !keyBoxForm.code.trim()) {
+      setFormError('Ange både namn och kod för nyckelboxen.');
+      return;
+    }
+
+    setSaving(true);
+    const payload = {
+      organisation_id: organisationId,
+      unit_id: keyBoxForm.unit_id,
+      name: keyBoxForm.name.trim(),
+      code: keyBoxForm.code.trim(),
+      location: keyBoxForm.location.trim(),
+      notes: keyBoxForm.notes.trim(),
+      active: keyBoxForm.active,
+      created_by: user.id,
+      updated_at: new Date().toISOString(),
+    };
+    const result = editingKeyBox
+      ? await supabase.from('vihem_short_stay_key_boxes').update(payload).eq('id', editingKeyBox.id)
+      : await supabase.from('vihem_short_stay_key_boxes').insert(payload);
+    setSaving(false);
+    if (result.error) {
+      setFormError(isMissingSchemaError(result.error)
+        ? 'Databasen behöver uppdateras med senaste migrationen innan nyckelboxar kan sparas.'
+        : result.error.message);
+      return;
+    }
+    setKeyBoxModalOpen(false);
+    await fetchData();
+  }
+
+  async function deleteKeyBox(keyBox: KeyBox) {
+    if (!isAdmin || !window.confirm(`Ta bort nyckelboxen "${keyBox.name}"?`)) return;
+    const { error: deleteError } = await supabase
+      .from('vihem_short_stay_key_boxes')
+      .delete()
+      .eq('id', keyBox.id);
+    if (deleteError) {
+      setError(isMissingSchemaError(deleteError)
+        ? 'Databasen behöver uppdateras med senaste migrationen innan nyckelboxar kan tas bort.'
+        : deleteError.message || 'Kunde inte ta bort nyckelboxen.');
+      return;
+    }
+    if (visibleKeyBoxId === keyBox.id) setVisibleKeyBoxId(null);
     await fetchData();
   }
 
@@ -1333,6 +1455,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
           ['calendar', 'Kalender'],
           ['cleaning', 'Städning'],
           ['bookings', 'Bokningar'],
+          ['key_boxes', 'Nyckelboxar'],
           ['receipts', 'Kvitton'],
           ...(isAdmin ? [['settings', 'Inställningar']] : []),
         ].map(([value, label]) => (
@@ -1723,6 +1846,64 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
               );
             })}
           </div>
+        </div>
+      ) : tab === 'key_boxes' ? (
+        <div className="space-y-4">
+          <Card className="p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Nyckelboxar</h2>
+                <p className="mt-1 text-sm text-slate-500">Koder för korttidsuthyrningens rum och lägenheter. Koder visas bara för personal och administratörer i organisationen.</p>
+              </div>
+              {isAdmin && (
+                <Button onClick={openCreateKeyBox}>
+                  <Plus className="h-4 w-4" /> Ny nyckelbox
+                </Button>
+              )}
+            </div>
+          </Card>
+          {keyBoxes.length === 0 ? (
+            <Card className="p-8">
+              <EmptyState
+                icon={<DoorOpen className="h-12 w-12" />}
+                title="Inga nyckelboxar ännu"
+                description={isAdmin ? 'Lägg till en kod och koppla den till ett rum eller en lägenhet.' : 'Be en administratör lägga in nyckelboxarna.'}
+                action={isAdmin && <Button onClick={openCreateKeyBox}><Plus className="h-4 w-4" /> Lägg till nyckelbox</Button>}
+              />
+            </Card>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              {keyBoxes.map((keyBox) => {
+                const unit = units.find(item => item.id === keyBox.unit_id);
+                return (
+                  <Card key={keyBox.id} className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-900">{unit?.name || 'Okänd enhet'}</p>
+                        <p className="text-sm text-slate-500">{keyBox.name}{keyBox.location ? ` · ${keyBox.location}` : ''}</p>
+                      </div>
+                      <DoorOpen className="h-5 w-5 shrink-0 text-blue-600" />
+                    </div>
+                    <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
+                      <code className="text-lg font-semibold tracking-widest text-slate-900">
+                        {visibleKeyBoxId === keyBox.id ? keyBox.code : '••••••'}
+                      </code>
+                      <Button variant="outline" size="sm" onClick={() => setVisibleKeyBoxId(visibleKeyBoxId === keyBox.id ? null : keyBox.id)}>
+                        {visibleKeyBoxId === keyBox.id ? 'Dölj kod' : 'Visa kod'}
+                      </Button>
+                    </div>
+                    {keyBox.notes && <p className="mt-3 text-sm text-slate-600">{keyBox.notes}</p>}
+                    {isAdmin && (
+                      <div className="mt-4 flex gap-2 border-t border-slate-100 pt-3">
+                        <Button variant="outline" size="sm" onClick={() => openEditKeyBox(keyBox)}><Edit2 className="h-4 w-4" /> Redigera</Button>
+                        <Button variant="outline" size="sm" onClick={() => deleteKeyBox(keyBox)}><Trash2 className="h-4 w-4" /> Ta bort</Button>
+                      </div>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
+          )}
         </div>
       ) : tab === 'receipts' ? (
         <div className="space-y-4">
@@ -2151,6 +2332,30 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setUnitModalOpen(false)}>Avbryt</Button>
             <Button onClick={saveUnit} loading={saving}>{editingUnit ? 'Spara' : 'Skapa'}</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={keyBoxModalOpen} onClose={() => setKeyBoxModalOpen(false)} title={editingKeyBox ? 'Redigera nyckelbox' : 'Ny nyckelbox'}>
+        <div className="space-y-4">
+          <Select
+            label="Rum/lägenhet"
+            value={keyBoxForm.unit_id}
+            onChange={event => setKeyBoxForm({ ...keyBoxForm, unit_id: event.target.value })}
+            options={units.map(unit => ({ value: unit.id, label: unit.name }))}
+          />
+          <Input label="Namn på boxen" value={keyBoxForm.name} onChange={event => setKeyBoxForm({ ...keyBoxForm, name: event.target.value })} placeholder="T.ex. Box vid entrén" />
+          <Input label="Kod" value={keyBoxForm.code} onChange={event => setKeyBoxForm({ ...keyBoxForm, code: event.target.value })} placeholder="T.ex. 4821" />
+          <Input label="Placering" value={keyBoxForm.location} onChange={event => setKeyBoxForm({ ...keyBoxForm, location: event.target.value })} placeholder="T.ex. Vid huvudentrén" />
+          <Textarea label="Anteckning" rows={3} value={keyBoxForm.notes} onChange={event => setKeyBoxForm({ ...keyBoxForm, notes: event.target.value })} placeholder="Valfri information till personalen" />
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={keyBoxForm.active} onChange={event => setKeyBoxForm({ ...keyBoxForm, active: event.target.checked })} className="h-4 w-4 rounded border-slate-300" />
+            Aktiv nyckelbox
+          </label>
+          {formError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{formError}</div>}
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => setKeyBoxModalOpen(false)}>Avbryt</Button>
+            <Button onClick={saveKeyBox} loading={saving}>{editingKeyBox ? 'Spara' : 'Skapa'}</Button>
           </div>
         </div>
       </Modal>
