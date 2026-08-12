@@ -22,7 +22,7 @@ function App() {
 }
 
 function Shell({ children, site, onNavigate = () => {} }: { children: React.ReactNode; site: SiteConfig | null; onNavigate?: (to: string) => void }) {
-  return <><header className="topbar"><button className="brand" onClick={() => onNavigate('/')}><span className="brand-mark">V</span><span>ViboRent</span></button><nav><button onClick={() => onNavigate('/hyra')}>Hyr</button><a href="#how">Så fungerar det</a><a href="#contact">Kontakt</a></nav></header><main>{children}</main><footer id="contact"><div><strong>ViboRent</strong><p>Smidig uthyrning av släp, maskiner och utrustning.</p></div><div><strong>{site?.organisation_name || 'ViboRent'}</strong><p>{site?.customer_support_email || 'Kontakta oss för hjälp med din bokning.'}</p></div></footer></>;
+  return <><header className="topbar"><button className="brand" onClick={() => onNavigate('/')} aria-label="ViboRent startsida"><img className="brand-logo" src="/viborent-logo.jpg" alt="ViboRent" /></button><nav><button onClick={() => onNavigate('/hyra')}>Hyr</button><a href="#how">Så fungerar det</a><a href="#contact">Kontakt</a></nav></header><main>{children}</main><footer id="contact"><div><img className="footer-logo" src="/viborent-logo.jpg" alt="ViboRent" /><p>Smidig uthyrning av släp, maskiner och utrustning.</p></div><div><strong>{site?.organisation_name || 'ViboRent'}</strong><p>{site?.customer_support_email || 'Kontakta oss för hjälp med din bokning.'}</p></div></footer></>;
 }
 
 function Home({ products, site, onNavigate }: { products: Product[]; site: SiteConfig | null; onNavigate: (to: string) => void }) {
