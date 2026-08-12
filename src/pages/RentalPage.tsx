@@ -7,7 +7,7 @@ import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader,
 type Tab = 'overview' | 'calendar' | 'bookings' | 'products' | 'customers' | 'blocks' | 'settings';
 type Product = { id: string; name: string; slug: string; description: string; category: string; images: string[]; active: boolean; visible_publicly: boolean; vat_rate: number | null; deposit: number; location: string };
 type Asset = { id: string; product_id: string; name: string; internal_identifier: string; registration_number: string; serial_number: string; images: string[]; status: string; location: string; active: boolean };
-type PriceRule = { id: string; product_id: string; rule_type: string; price: number; currency: string; priority: number; active: boolean };
+type PriceRule = { id: string; product_id: string; asset_id: string | null; rule_type: string; price: number; currency: string; priority: number; active: boolean; valid_from: string | null; valid_until: string | null };
 type Booking = { id: string; public_reference: string; product_id: string | null; status: string; start_at: string; end_at: string; total: number; customer_id: string | null };
 type Block = { id: string; product_id: string; asset_id: string | null; start_at: string; end_at: string; block_type: string; reason: string };
 type RentalCustomer = { id: string; first_name: string; last_name: string; company_name: string; email: string; phone: string; city: string; created_at: string };
@@ -26,6 +26,20 @@ function money(value: number) {
 
 function dateTime(value: string) {
   return value ? new Date(value).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' }) : '-';
+}
+
+function priceRuleLabel(ruleType: string) {
+  return ({ hourly: 'Timme', daily: 'Dygn', weekend: 'Helg', weekly: 'Vecka', fixed_period: 'Specialperiod', custom: 'Anpassat' } as Record<string, string>)[ruleType] || ruleType;
+}
+
+function ProductOverview({ products, assets, prices, onEditProduct, onEditAsset, onEditPrice, onNewAsset, onNewPrice }: { products: Product[]; assets: Asset[]; prices: PriceRule[]; onEditProduct: (product: Product) => void; onEditAsset: (asset: Asset) => void; onEditPrice: (price: PriceRule) => void; onNewAsset: (productId: string) => void; onNewPrice: (productId: string) => void }) {
+  const [productId, setProductId] = useState(products[0]?.id || '');
+  useEffect(() => { if (!products.some(product => product.id === productId)) setProductId(products[0]?.id || ''); }, [products, productId]);
+  const product = products.find(item => item.id === productId);
+  if (!product) return null;
+  const productAssets = assets.filter(asset => asset.product_id === product.id);
+  const productPrices = prices.filter(price => price.product_id === product.id);
+  return <Card className="border-blue-100 bg-blue-50/30 p-5"><div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Produktöversikt</p><h2 className="mt-1 text-xl font-semibold text-slate-900">Pris och uthyrningsobjekt</h2><p className="mt-1 text-sm text-slate-500">Välj en produkt för att se och justera dess prisnivåer och fysiska exemplar.</p></div><div className="flex flex-wrap gap-2"><Select label="Produkt" value={product.id} onChange={event => setProductId(event.target.value)} options={products.map(item => ({ value: item.id, label: item.name }))} /><Button size="sm" variant="secondary" onClick={() => onEditProduct(product)}><Edit2 className="h-4 w-4" /> Redigera produkt</Button></div></div><div className="mt-5 grid gap-4 xl:grid-cols-2"><Card className="p-4"><div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Priser</h3><p className="text-sm text-slate-500">Debiteringsnivåer som används av prisberäkningen.</p></div><Button size="sm" onClick={() => onNewPrice(product.id)}><Plus className="h-4 w-4" /> Lägg till</Button></div>{productPrices.length === 0 ? <p className="mt-4 text-sm text-slate-500">Inga prisregler upplagda.</p> : <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-2 pr-4">Nivå</th><th className="py-2 pr-4">Pris</th><th className="py-2 pr-4">Gäller</th><th className="py-2 text-right"> </th></tr></thead><tbody className="divide-y divide-slate-100">{productPrices.map(price => <tr key={price.id}><td className="py-3 pr-4 font-medium">{priceRuleLabel(price.rule_type)}</td><td className="py-3 pr-4 font-semibold">{money(price.price)} <span className="font-normal text-slate-500">/{price.rule_type === 'hourly' ? 'tim' : price.rule_type === 'weekly' ? 'vecka' : price.rule_type === 'weekend' ? 'helg' : 'dygn'}</span></td><td className="py-3 pr-4 text-slate-500">{price.valid_from || price.valid_until ? `${price.valid_from || '–'} – ${price.valid_until || '–'}` : 'Alltid'}</td><td className="py-3 text-right"><Button size="sm" variant="ghost" onClick={() => onEditPrice(price)} aria-label={`Redigera ${priceRuleLabel(price.rule_type)}`}><Edit2 className="h-4 w-4" /></Button></td></tr>)}</tbody></table></div>}</Card><Card className="p-4"><div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Fysiska exemplar ({productAssets.length})</h3><p className="text-sm text-slate-500">Registreringsnummer, serienummer och aktuell placering.</p></div><Button size="sm" onClick={() => onNewAsset(product.id)}><Plus className="h-4 w-4" /> Lägg till</Button></div>{productAssets.length === 0 ? <p className="mt-4 text-sm text-slate-500">Inga assets upplagda för produkten.</p> : <div className="mt-3 divide-y divide-slate-100">{productAssets.map(asset => <div key={asset.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><p className="font-medium text-slate-900">{asset.name}</p><p className="truncate text-sm text-slate-500">{asset.registration_number || asset.serial_number || asset.internal_identifier || 'Saknar identifierare'} · {asset.location || 'Ingen plats'}</p></div><div className="flex items-center gap-2"><Badge className={asset.status === 'available' ? 'bg-emerald-100 text-emerald-700' : asset.status === 'maintenance' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'}>{asset.status === 'available' ? 'Tillgänglig' : asset.status === 'maintenance' ? 'Service' : asset.status}</Badge><Button size="sm" variant="ghost" onClick={() => onEditAsset(asset)} aria-label={`Redigera ${asset.name}`}><Edit2 className="h-4 w-4" /></Button></div></div>)}</div>}</Card></div></Card>;
 }
 
 export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
@@ -48,6 +62,8 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
   const [bookingModal, setBookingModal] = useState(false);
   const [customerModal, setCustomerModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [editingPrice, setEditingPrice] = useState<PriceRule | null>(null);
   const [productForm, setProductForm] = useState(emptyProduct);
   const [assetForm, setAssetForm] = useState(emptyAsset);
   const [productImages, setProductImages] = useState<File[]>([]);
@@ -88,6 +104,10 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
   useEffect(() => { void fetchData(); }, [organisationId]);
 
   function openNewProduct() { setEditingProduct(null); setProductForm(emptyProduct); setProductImages([]); setProductModal(true); }
+  function openNewAsset(productId = products[0]?.id || '') { setEditingAsset(null); setAssetForm({ ...emptyAsset, product_id: productId }); setAssetImages([]); setAssetModal(true); }
+  function openEditAsset(asset: Asset) { setEditingAsset(asset); setAssetForm({ product_id: asset.product_id, name: asset.name, internal_identifier: asset.internal_identifier || '', registration_number: asset.registration_number || '', serial_number: asset.serial_number || '', status: asset.status, location: asset.location || '' }); setAssetImages([]); setAssetModal(true); }
+  function openNewPrice(productId = products[0]?.id || '') { setEditingPrice(null); setPriceForm({ ...emptyPrice, product_id: productId }); setPriceModal(true); }
+  function openEditPrice(price: PriceRule) { setEditingPrice(price); setPriceForm({ product_id: price.product_id, rule_type: price.rule_type, price: String(price.price), priority: String(price.priority || 0) }); setPriceModal(true); }
   function openEditProduct(product: Product) {
     setEditingProduct(product);
     setProductImages([]);
@@ -131,23 +151,28 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
   async function saveAsset() {
     if (!organisationId || !assetForm.product_id || !assetForm.name.trim()) return;
     setSaving(true);
-    const result = await supabase.from('vihem_rental_assets').insert({ ...assetForm, organisation_id: organisationId, name: assetForm.name.trim() }).select('id').single();
+    const result = editingAsset
+      ? await supabase.from('vihem_rental_assets').update({ ...assetForm, name: assetForm.name.trim(), updated_at: new Date().toISOString() }).eq('id', editingAsset.id).select('id').single()
+      : await supabase.from('vihem_rental_assets').insert({ ...assetForm, organisation_id: organisationId, name: assetForm.name.trim() }).select('id').single();
     setSaving(false);
     if (result.error) setError(result.error.message); else {
       if (assetImages.length && result.data?.id) {
         const urls = await uploadImages(assetImages, result.data.id);
         if (urls.length) await supabase.from('vihem_rental_assets').update({ images: urls }).eq('id', result.data.id);
       }
-      setAssetModal(false); setAssetForm(emptyAsset); setAssetImages([]); await fetchData();
+      setAssetModal(false); setAssetForm(emptyAsset); setAssetImages([]); setEditingAsset(null); await fetchData();
     }
   }
 
   async function savePrice() {
     if (!organisationId || !priceForm.product_id || !priceForm.price) return;
     setSaving(true);
-    const result = await supabase.from('vihem_rental_pricing_rules').insert({ ...priceForm, organisation_id: organisationId, price: Number(priceForm.price) || 0, priority: Number(priceForm.priority) || 0, currency: 'SEK', duration: 1, duration_unit: priceForm.rule_type === 'hourly' ? 'hour' : priceForm.rule_type === 'weekly' ? 'week' : 'day' });
+    const payload = { ...priceForm, price: Number(priceForm.price) || 0, priority: Number(priceForm.priority) || 0, currency: 'SEK', duration: 1, duration_unit: priceForm.rule_type === 'hourly' ? 'hour' : priceForm.rule_type === 'weekly' ? 'week' : 'day', updated_at: new Date().toISOString() };
+    const result = editingPrice
+      ? await supabase.from('vihem_rental_pricing_rules').update(payload).eq('id', editingPrice.id).select('id').single()
+      : await supabase.from('vihem_rental_pricing_rules').insert({ ...payload, organisation_id: organisationId }).select('id').single();
     setSaving(false);
-    if (result.error) setError(result.error.message); else { setPriceModal(false); setPriceForm(emptyPrice); await fetchData(); }
+    if (result.error) setError(result.error.message); else { setPriceModal(false); setPriceForm(emptyPrice); setEditingPrice(null); await fetchData(); }
   }
 
   async function saveBlock() {
@@ -202,6 +227,7 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
     <div className="space-y-5">
       <PageHeader title="Uthyrning" subtitle="Hantera ViboRents produkter, priser, assets, kunder, bokningar och interna spärrar." icon={BedDouble} />
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+      {tab === 'products' && <ProductOverview products={products} assets={assets} prices={prices} onEditProduct={openEditProduct} onEditAsset={openEditAsset} onEditPrice={openEditPrice} onNewAsset={openNewAsset} onNewPrice={openNewPrice} />}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
         {([['overview', 'Översikt'], ['calendar', 'Kalender'], ['bookings', 'Bokningar'], ['products', 'Produkter & assets'], ['customers', 'Kunder'], ['blocks', 'Spärrar'], ...(user?.role === 'admin' ? [['settings', 'Inställningar'] as [Tab, string]] : [])] as [Tab, string][]).map(([value, label]) => <Button key={value} size="sm" variant={tab === value ? 'primary' : 'secondary'} onClick={() => setTab(value)}>{label}</Button>)}
       </div>
