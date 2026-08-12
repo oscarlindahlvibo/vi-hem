@@ -13,12 +13,30 @@ function text(value: unknown, max = 200) {
   return String(value ?? '').trim().slice(0, max);
 }
 
+function normaliseHostname(value: unknown) {
+  return text(value).toLowerCase().replace(/^www\./, '').split(':')[0];
+}
+
 async function resolveOrganisation(client: any, request: Request, body: any) {
-  const hostname = text(body.hostname || new URL(request.url).searchParams.get('hostname') || request.headers.get('origin')?.replace(/^https?:\/\//, '').split('/')[0]);
+  const hostname = normaliseHostname(body.hostname || new URL(request.url).searchParams.get('hostname') || request.headers.get('origin')?.replace(/^https?:\/\//, '').split('/')[0]);
   const slug = text(body.organisation_slug || new URL(request.url).searchParams.get('organisation_slug'));
   if (hostname) {
     const { data } = await client.from('vihem_rental_domains').select('organisation_id').eq('hostname', hostname).eq('active', true).maybeSingle();
     if (data?.organisation_id) return data.organisation_id;
+
+    // Keep the initial ViboRent deployment usable if the domain seed migration
+    // has not reached the shared database yet. This fallback is deliberately
+    // limited to the known owning organisation and still requires the module
+    // to be enabled below.
+    if (hostname === 'viborent.se') {
+      const { data: organisation } = await client.from('vihem_organisations')
+        .select('id')
+        .or('slug.ilike.vibogruppen%,name.ilike.Vibogruppen%')
+        .eq('active', true)
+        .limit(1)
+        .maybeSingle();
+      if (organisation?.id) return organisation.id;
+    }
   }
   if (slug) {
     const { data } = await client.from('vihem_organisations').select('id').eq('slug', slug).eq('active', true).maybeSingle();
