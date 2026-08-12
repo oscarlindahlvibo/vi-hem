@@ -23,6 +23,7 @@ import { TerminationPage } from './pages/TerminationPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { AdminPropertiesPage } from './pages/AdminPropertiesPage';
 import { AdminTenantsPage } from './pages/AdminTenantsPage';
+import { AdminImportPage } from './pages/AdminImportPage';
 import { AdminStaffPage } from './pages/AdminStaffPage';
 import { AdminPayrollPage } from './pages/AdminPayrollPage';
 import { AdminTerminationsPage } from './pages/AdminTerminationsPage';
@@ -397,6 +398,10 @@ function AppInner() {
       case 'admin-tenants':
         if (!isAdmin) return renderDashboard();
         return <AdminTenantsPage onNavigate={navigate} />;
+
+      case 'admin-import':
+        if (!isAdmin) return renderDashboard();
+        return <AdminImportPage onNavigate={navigate} />;
 
       case 'admin-staff':
         if (!isAdmin) return renderDashboard();

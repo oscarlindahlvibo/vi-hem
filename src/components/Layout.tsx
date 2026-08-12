@@ -10,7 +10,7 @@ import {
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
   ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase,
   BedDouble, CalendarDays, Landmark, MessageSquareText, Monitor, ScanLine, SlidersHorizontal,
-  Truck, Package,
+  Truck, Package, FileSpreadsheet,
 } from 'lucide-react';
 
 interface NavItem {
@@ -67,6 +67,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     // ── Admin ──────────────────────────────────────────────────────────────
     { label: 'Fastigheter', icon: <Building2 className="w-5 h-5" />, page: 'admin-properties', roles: ['admin'] },
     { label: 'Hyresgäster', icon: <Users className="w-5 h-5" />, page: 'admin-tenants', roles: ['admin'] },
+    { label: 'Importera data', icon: <FileSpreadsheet className="w-5 h-5" />, page: 'admin-import', roles: ['admin'] },
     { label: 'Personal', icon: <Settings className="w-5 h-5" />, page: 'admin-staff', roles: ['admin'] },
     { label: 'TV-skärm', icon: <Monitor className="w-5 h-5" />, page: 'screen-settings', roles: ['admin'] },
     { label: 'Inställningar', icon: <SlidersHorizontal className="w-5 h-5" />, page: 'admin-settings', roles: ['admin'] },
