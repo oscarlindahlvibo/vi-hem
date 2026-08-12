@@ -233,7 +233,22 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
         }
       }
       if (doc.file_url) {
-        window.open(doc.file_url, '_blank');
+        if (doc.file_url.startsWith('data:')) {
+          // iOS/Safari may render a data: PDF as a blank page. Convert it to
+          // a Blob URL first so generated inspection and contract documents
+          // open like regular files.
+          const response = await fetch(doc.file_url);
+          if (!response.ok) throw new Error('Dokumentet kunde inte läsas.');
+          const blobUrl = URL.createObjectURL(await response.blob());
+          const link = document.createElement('a');
+          link.href = blobUrl;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.click();
+          window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+        } else {
+          window.open(doc.file_url, '_blank');
+        }
       }
     } catch (error) {
       console.error('Error opening document:', error);
