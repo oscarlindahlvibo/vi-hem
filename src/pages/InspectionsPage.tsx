@@ -29,6 +29,11 @@ import {
   Image,
   Building2,
   Home,
+  WalletCards,
+  SlidersHorizontal,
+  ListChecks,
+  Users,
+  ChevronRight,
 } from 'lucide-react';
 
 interface InspectionsPageProps { onNavigate: (page: string) => void; }
@@ -221,6 +226,8 @@ const DEFAULT_APARTMENT_CONTRACT: Record<string, any> = {
   smoking_allowed: false,
   subletting_allowed: false,
   index_clause: false,
+  rent_adjustment_method: 'negotiated',
+  rent_adjustment_text: 'Hyran följer inte automatiskt index. Eventuell ändring av hyran hanteras genom förhandling enligt gällande regler och meddelas skriftligen.',
   deposit_months: 1,
   deposit_amount: '',
   renovated_on_entry: false,
@@ -238,6 +245,8 @@ const DEFAULT_PREMISES_CONTRACT: Record<string, any> = {
   vat_rate: 25,
   index_clause: true,
   index_type: 'KPI',
+  rent_adjustment_method: 'indexed',
+  rent_adjustment_text: '',
   heat_included: false,
   electricity_included: false,
   water_included: false,
@@ -255,11 +264,20 @@ const DEFAULT_PREMISES_CONTRACT: Record<string, any> = {
   special_terms: '',
 };
 
+const CONTRACT_BUILDER_SECTIONS = [
+  { key: 'basics', label: 'Grunduppgifter', description: 'Avtalstyp, hyresgäst och giltighet', icon: FileText },
+  { key: 'economy', label: 'Hyra & deposition', description: 'Hyra, uppsägning och deposition', icon: WalletCards },
+  { key: 'adjustment', label: 'Hyresjustering', description: 'Förhandling, index eller fast hyra', icon: SlidersHorizontal },
+  { key: 'included', label: 'Det som ingår', description: 'Drift, service och tillval', icon: ListChecks },
+  { key: 'rules', label: 'Regler & ansvar', description: 'Nyttjande och särskilda villkor', icon: Users },
+];
+
 function generateApartmentContractText(data: Record<string, any>, tenancy: any): string {
   const tenant = tenancy?.tenant as any;
   const apt = tenancy?.apartment as any;
   const prop = tenancy?.property as any;
   const today = new Date().toLocaleDateString('sv-SE');
+  const adjustmentMethod = data.rent_adjustment_method || (data.index_clause ? 'indexed' : 'fixed');
 
   const included = [
     data.heat_included && 'värme',
@@ -303,8 +321,12 @@ ${data.electricity_own_subscription ? 'El: Hyresgästen tecknar eget elavtal.' :
 ${data.internet_own_subscription ? 'Internet: Hyresgästen tecknar eget bredbandsavtal.' : ''}
 ${data.parking_fee ? `Parkering debiteras separat: ${data.parking_fee} kr/mån.` : ''}
 
-§6 INDEXKLAUSUL
-${data.index_clause ? 'Hyran justeras årligen enligt konsumentprisindex (KPI).' : 'Hyran är fast och justeras inte automatiskt.'}
+§6 HYRESJUSTERING
+${adjustmentMethod === 'negotiated'
+    ? (data.rent_adjustment_text || 'Hyran följer inte automatiskt index. Eventuell ändring av hyran hanteras genom förhandling enligt gällande regler och meddelas skriftligen.')
+    : adjustmentMethod === 'indexed'
+      ? `Hyran justeras årligen enligt ${data.index_type || 'konsumentprisindex (KPI)'}.`
+      : 'Hyran är fast och justeras inte automatiskt under avtalsperioden.'}
 
 §7 SKICK VID TILLTRÄDE
 ${data.renovated_on_entry ? 'Lägenheten överlämnas nyrenoverad.' : 'Lägenheten överlämnas i befintligt skick (se bifogat besiktningsprotokoll).'}
@@ -337,6 +359,7 @@ function generatePremisesContractText(data: Record<string, any>, tenancy: any): 
   const apt = tenancy?.apartment as any;
   const prop = tenancy?.property as any;
   const today = new Date().toLocaleDateString('sv-SE');
+  const adjustmentMethod = data.rent_adjustment_method || (data.index_clause ? 'indexed' : 'fixed');
 
   return `HYRESAVTAL FÖR LOKAL
 (enligt Jordabalken 12 kap)
@@ -365,8 +388,12 @@ Månadshyra: ${tenancy?.monthly_rent || '___'} kr ${data.vat_included ? `+ moms 
 Hyran betalas senast den sista dagen i månaden före hyresmånaden.
 Deposition: ${data.deposit_amount ? `${data.deposit_amount} kr` : `${data.deposit_months} månaders hyra`}.
 
-§5 INDEXKLAUSUL
-${data.index_clause ? `Hyran justeras årligen den 1 januari enligt ${data.index_type}. Basår är avtalets startår.` : 'Hyran är fast under avtalsperioden.'}
+§5 HYRESJUSTERING
+${adjustmentMethod === 'negotiated'
+    ? (data.rent_adjustment_text || 'Hyran följer inte automatiskt index. Eventuell ändring av hyran ska förhandlas mellan parterna och meddelas skriftligen.')
+    : adjustmentMethod === 'indexed'
+      ? `Hyran justeras årligen den 1 januari enligt ${data.index_type || 'KPI'}. Basår är avtalets startår.`
+      : 'Hyran är fast under avtalsperioden.'}
 
 §6 DRIFT OCH KOSTNADER
 ${data.heat_included ? 'Värme ingår i hyran.' : 'Värme debiteras separat efter förbrukning.'}
@@ -446,6 +473,7 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
   const [contractData, setContractData] = useState<Record<string, any>>(DEFAULT_APARTMENT_CONTRACT);
   const [savingContract, setSavingContract] = useState(false);
   const [previewContract, setPreviewContract] = useState(false);
+  const [activeContractSection, setActiveContractSection] = useState('basics');
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -753,6 +781,7 @@ Foton bifogade i systemet: ${photoCount}
     setContractType('apartment');
     setSelectedContract(null);
     setPreviewContract(false);
+    setActiveContractSection('basics');
   };
 
   const openEditContract = (contract: any) => {
@@ -766,6 +795,7 @@ Foton bifogade i systemet: ${photoCount}
       notice_months: contract.contract_data?.notice_months || (ct === 'apartment' ? 3 : 6),
     });
     setShowContractModal(true);
+    setActiveContractSection('basics');
   };
 
   const sendContractForSigning = async (contract: any) => {
@@ -785,6 +815,7 @@ Foton bifogade i systemet: ${photoCount}
   const handleContractTypeChange = (ct: 'apartment' | 'premises') => {
     setContractType(ct);
     setContractData(ct === 'apartment' ? DEFAULT_APARTMENT_CONTRACT : DEFAULT_PREMISES_CONTRACT);
+    setActiveContractSection('basics');
   };
 
   const cd = contractData;
@@ -1186,7 +1217,43 @@ Foton bifogade i systemet: ${photoCount}
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Bygg avtalet i moduler</p>
+                  <p className="mt-1 text-xs text-slate-500">Fyll i de delar som ska ingå. Du kan hoppa mellan modulerna utan att förlora dina ändringar.</p>
+                </div>
+                <Badge className="shrink-0 bg-blue-100 text-blue-700">{CONTRACT_BUILDER_SECTIONS.length} delar</Badge>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {CONTRACT_BUILDER_SECTIONS.map(({ key, label, description, icon: Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      setActiveContractSection(key);
+                      document.getElementById(`contract-section-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                    className={`group flex items-center gap-3 rounded-xl border px-3 py-3 text-left transition ${activeContractSection === key ? 'border-blue-400 bg-white shadow-sm ring-1 ring-blue-100' : 'border-slate-200 bg-white/70 hover:border-blue-300'}`}
+                  >
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${activeContractSection === key ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}><Icon className="h-4 w-4" /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-slate-800">{label}</span>
+                      <span className="block truncate text-xs text-slate-500">{description}</span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:translate-x-0.5" />
+                  </button>
+                ))}
+              </div>
+              {contractType === 'apartment' && (
+                <div className="mt-3 flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5 text-xs text-blue-800">
+                  <SlidersHorizontal className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span><strong>Privat bostad:</strong> hyresjustering är inställd på förhandling som standard. Index används bara när du väljer det uttryckligen.</span>
+                </div>
+              )}
+            </div>
+
+            <div id="contract-section-basics" className="scroll-mt-4 grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-2">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Hyresgäst</label>
                 <select value={contractForm.tenancy_id} onChange={(e) => setContractForm({ ...contractForm, tenancy_id: e.target.value })} disabled={!!selectedContract} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-50">
@@ -1200,7 +1267,7 @@ Foton bifogade i systemet: ${photoCount}
             {/* ── Apartment contract form ── */}
             {contractType === 'apartment' && (
               <div className="space-y-4">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2">Hyresvillkor</p>
+                <p id="contract-section-economy" className="scroll-mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-200 pb-2">Hyra, uppsägning & deposition</p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   <div>
@@ -1217,7 +1284,7 @@ Foton bifogade i systemet: ${photoCount}
                   </div>
                 </div>
 
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2 pt-1">Ingår i hyran</p>
+                <p id="contract-section-included" className="scroll-mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-200 pb-2 pt-1">Det som ingår i hyran</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {[
                     { key: 'heat_included', label: 'Värme' },
@@ -1252,10 +1319,22 @@ Foton bifogade i systemet: ${photoCount}
                   <Input label="Parkeringsavgift (kr/mån)" value={cd.parking_fee} onChange={e => setcd('parking_fee', e.target.value)} placeholder="T.ex. 500" />
                 )}
 
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2 pt-1">Regler & villkor</p>
+                <p id="contract-section-adjustment" className="scroll-mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-200 pb-2 pt-1">Hyresjustering</p>
+                <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+                  <label className="block text-sm font-semibold text-slate-800">Hur ska hyran kunna ändras?</label>
+                  <p className="mt-1 text-xs text-slate-600">För privata lägenheter används normalt förhandling och inte automatisk indexuppräkning.</p>
+                  <select value={cd.rent_adjustment_method || (cd.index_clause ? 'indexed' : 'negotiated')} onChange={e => { const method = e.target.value; setcd('rent_adjustment_method', method); setcd('index_clause', method === 'indexed'); }} className="mt-3 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="negotiated">Förhandlad hyresjustering</option>
+                    <option value="indexed">Indexjustering (KPI)</option>
+                    <option value="fixed">Fast hyra under avtalsperioden</option>
+                  </select>
+                  {cd.rent_adjustment_method === 'indexed' && <Input className="mt-3" label="Index (t.ex. KPI)" value={cd.index_type || 'KPI'} onChange={e => setcd('index_type', e.target.value)} />}
+                  {cd.rent_adjustment_method === 'negotiated' && <Textarea className="mt-3" label="Förtydligande i avtalet" value={cd.rent_adjustment_text || ''} onChange={e => setcd('rent_adjustment_text', e.target.value)} rows={3} />}
+                </div>
+
+                <p id="contract-section-rules" className="scroll-mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-200 pb-2 pt-1">Regler & villkor</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {[
-                    { key: 'index_clause', label: 'KPI-indexklausul' },
                     { key: 'pets_allowed', label: 'Husdjur tillåtna' },
                     { key: 'smoking_allowed', label: 'Rökning tillåten' },
                     { key: 'subletting_allowed', label: 'Andrahand tillåten' },
@@ -1276,7 +1355,7 @@ Foton bifogade i systemet: ${photoCount}
             {/* ── Premises contract form ── */}
             {contractType === 'premises' && (
               <div className="space-y-4">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2">Hyresvillkor</p>
+                <p id="contract-section-economy" className="scroll-mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-200 pb-2">Hyra, uppsägning & deposition</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Uppsägningstid (mån)</label>
@@ -1302,12 +1381,17 @@ Foton bifogade i systemet: ${photoCount}
                 </div>
                 <Input label="Öppettider/nyttjandetid (valfritt)" value={cd.operating_hours} onChange={e => setcd('operating_hours', e.target.value)} placeholder="T.ex. mån–fre 07–22, lör–sön 09–18" />
 
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2 pt-1">Indexklausul</p>
+                <p id="contract-section-adjustment" className="scroll-mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-200 pb-2 pt-1">Hyresjustering</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={!!cd.index_clause} onChange={e => setcd('index_clause', e.target.checked)} className="w-4 h-4 rounded border-slate-300" />
-                    <span className="text-sm text-slate-700">Indexklausul (KPI)</span>
-                  </label>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Metod</label>
+                    <select value={cd.rent_adjustment_method || (cd.index_clause ? 'indexed' : 'fixed')} onChange={e => { const method = e.target.value; setcd('rent_adjustment_method', method); setcd('index_clause', method === 'indexed'); }} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="indexed">Indexjustering</option>
+                      <option value="negotiated">Förhandlad justering</option>
+                      <option value="fixed">Fast hyra</option>
+                    </select>
+                  </div>
+                  {cd.rent_adjustment_method === 'negotiated' ? <Textarea label="Förtydligande i avtalet" value={cd.rent_adjustment_text || ''} onChange={e => setcd('rent_adjustment_text', e.target.value)} rows={3} /> : <Input label="Index (t.ex. KPI)" value={cd.index_type || 'KPI'} onChange={e => setcd('index_type', e.target.value)} />}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={!!cd.vat_included} onChange={e => setcd('vat_included', e.target.checked)} className="w-4 h-4 rounded border-slate-300" />
                     <span className="text-sm text-slate-700">Moms tillkommer</span>
@@ -1320,7 +1404,7 @@ Foton bifogade i systemet: ${photoCount}
                   )}
                 </div>
 
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2 pt-1">Ingår i hyran</p>
+                <p id="contract-section-included" className="scroll-mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-200 pb-2 pt-1">Det som ingår i hyran</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {[
                     { key: 'heat_included', label: 'Värme' },
@@ -1339,7 +1423,7 @@ Foton bifogade i systemet: ${photoCount}
                   <Input label="Antal parkeringsplatser / beskrivning" value={cd.parking_spots} onChange={e => setcd('parking_spots', e.target.value)} placeholder="T.ex. 2 platser, nummer 14 och 15" />
                 )}
 
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-2 pt-1">Övrigt</p>
+                <p id="contract-section-rules" className="scroll-mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-200 pb-2 pt-1">Regler & ansvar</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {[
                     { key: 'auto_renew', label: 'Automatisk förlängning' },
