@@ -134,6 +134,7 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
   const [signature, setSignature] = useState('');
   const [signatureName, setSignatureName] = useState('');
   const [signing, setSigning] = useState(false);
+  const [signError, setSignError] = useState('');
   const [signMethod, setSignMethod] = useState<'name' | 'bankid'>('name');
 
   useEffect(() => {
@@ -189,6 +190,7 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
     if (!signingContract) return;
     if (signMethod === 'name' && (!signature || !signatureName.trim())) return;
     setSigning(true);
+    setSignError('');
     try {
       if (signMethod === 'bankid') {
         // BankID signing flow — placeholder until Edge Function is deployed.
@@ -227,7 +229,9 @@ Signeringsmetod: Handskriven signatur`,
         tenant_signature: signature,
         tenant_signature_name: signatureName.trim(),
         tenant_signed_at: signedAt,
-        tenant_signature_method: 'handwritten',
+        // Keep the existing database enum/check compatible. The drawn image
+        // is stored in tenant_signature and the readable name separately.
+        tenant_signature_method: 'name',
         status: 'signed',
         document_id: generatedDocumentId,
       }).eq('id', signingContract.id);
@@ -240,6 +244,7 @@ Signeringsmetod: Handskriven signatur`,
       fetchData();
     } catch (error) {
       console.error('Error signing contract:', error);
+      setSignError(error instanceof Error ? error.message : 'Signeringen kunde inte skickas. Försök igen.');
     } finally {
       setSigning(false);
     }
@@ -250,6 +255,7 @@ Signeringsmetod: Handskriven signatur`,
     setSignMethod('name');
     setSignature('');
     setSignatureName(user?.name || '');
+    setSignError('');
     setShowSignModal(true);
   };
 
@@ -559,7 +565,7 @@ Signeringsmetod: Handskriven signatur`,
       </div>
 
       {/* Sign Contract Modal */}
-      <Modal open={showSignModal} onClose={() => { setShowSignModal(false); setSignature(''); setSignatureName(''); setSigningContract(null); }} title="Signera hyresavtal" size="lg">
+      <Modal open={showSignModal} onClose={() => { setShowSignModal(false); setSignature(''); setSignatureName(''); setSignError(''); setSigningContract(null); }} title="Signera hyresavtal" size="lg">
         {signingContract && (
           <div className="space-y-4">
             {signingContract.contract_content && (
@@ -642,8 +648,10 @@ Signeringsmetod: Handskriven signatur`,
               </div>
             )}
 
+            {signError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{signError}</div>}
+
             <div className="flex gap-3 pt-2">
-              <Button variant="secondary" onClick={() => { setShowSignModal(false); setSignature(''); setSignatureName(''); setSigningContract(null); }} className="flex-1">
+              <Button variant="secondary" onClick={() => { setShowSignModal(false); setSignature(''); setSignatureName(''); setSignError(''); setSigningContract(null); }} className="flex-1">
                 Avbryt
               </Button>
               <Button
