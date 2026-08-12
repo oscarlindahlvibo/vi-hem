@@ -522,7 +522,7 @@ function AvailabilityCalendar({
       </div>
       <p className="calendar-note">
         Slutlig tillgänglighet kontrolleras mot vald tid och tillgängligt
-        exemplar.
+        exemplar. Tider bokas på hela timmar.
       </p>
     </div>
   );
@@ -633,6 +633,7 @@ function BookingPanel({
             Från
             <input
               type="datetime-local"
+              step="3600"
               value={start}
               onChange={(e) => setStart(e.target.value)}
             />
@@ -641,6 +642,7 @@ function BookingPanel({
             Till
             <input
               type="datetime-local"
+              step="3600"
               value={end}
               onChange={(e) => setEnd(e.target.value)}
             />
