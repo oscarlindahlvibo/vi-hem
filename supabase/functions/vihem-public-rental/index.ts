@@ -49,6 +49,16 @@ Deno.serve(async (request) => {
       return json({ products: data || [] });
     }
 
+    if (request.method === 'GET' && action === 'site-config') {
+      const [{ data: organisation, error: organisationError }, { data: settings, error: settingsError }] = await Promise.all([
+        client.from('vihem_organisations').select('name,slug').eq('id', organisationId).maybeSingle(),
+        client.from('vihem_rental_settings').select('currency,customer_support_email,customer_support_phone,terms_url,privacy_url,timezone').eq('organisation_id', organisationId).maybeSingle(),
+      ]);
+      if (organisationError) throw organisationError;
+      if (settingsError) throw settingsError;
+      return json({ site: { site_name: 'ViboRent', organisation_name: organisation?.name || 'ViboRent', organisation_slug: organisation?.slug || '', ...settings } });
+    }
+
     if (action === 'availability') {
       const slug = text(body.slug || url.searchParams.get('slug'));
       const startAt = text(body.start_at || url.searchParams.get('start_at'));
@@ -79,7 +89,22 @@ Deno.serve(async (request) => {
       if (!product) return json({ error: 'Produkten hittades inte.' }, 404);
       const { data, error } = await client.rpc('vihem_create_rental_booking', { target_product_id: product.id, target_start_at: body.start_at, target_end_at: body.end_at, target_quantity: Math.max(1, Number(body.quantity) || 1), target_customer: body.customer || {}, target_source: 'viborent.se', target_status: 'pending', target_customer_notes: text(body.customer_notes, 2000) });
       if (error) throw error;
-      return json({ booking: data }, 201);
+      const bookingId = data?.id;
+      const { data: lookup, error: lookupError } = await client.from('vihem_rental_bookings').select('public_lookup_token').eq('id', bookingId).eq('organisation_id', organisationId).maybeSingle();
+      if (lookupError) throw lookupError;
+      return json({ booking: { ...data, public_lookup_token: lookup?.public_lookup_token || null } }, 201);
+    }
+
+    if (request.method === 'GET' && action === 'booking') {
+      const reference = text(url.searchParams.get('reference'));
+      const token = text(url.searchParams.get('token'), 100);
+      if (!reference || !token) return json({ error: 'reference och token krävs.' }, 400);
+      const { data: booking, error: bookingError } = await client.from('vihem_rental_bookings')
+        .select('id,public_reference,status,payment_status,start_at,end_at,subtotal,vat_amount,deposit,total,currency,customer_notes,customer:vihem_rental_customers(first_name,last_name,email,phone),items:vihem_rental_booking_items(quantity,product:vihem_rental_products(name,slug,pickup_instructions,return_instructions,location))')
+        .eq('organisation_id', organisationId).eq('public_reference', reference).eq('public_lookup_token', token).maybeSingle();
+      if (bookingError) throw bookingError;
+      if (!booking) return json({ error: 'Bokningen hittades inte.' }, 404);
+      return json({ booking });
     }
 
     return json({ error: 'Okänd uthyrningsåtgärd.' }, 404);

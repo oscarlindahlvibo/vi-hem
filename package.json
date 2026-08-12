@@ -15,6 +15,9 @@
     "mobile:sync": "npm run build && npx cap sync",
     "mobile:ios": "npx cap open ios",
     "mobile:android": "npx cap open android"
+    ,"viborent:dev": "vite --config apps/viborent/vite.config.ts"
+    ,"viborent:build": "vite build --config apps/viborent/vite.config.ts"
+    ,"viborent:preview": "vite preview --config apps/viborent/vite.config.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
