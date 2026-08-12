@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Home,
   Building2,
@@ -39,6 +39,88 @@ interface ContactInfo {
 }
 
 interface ApartmentPageProps { onNavigate: (page: string) => void; }
+
+function SignaturePad({ value, onChange, onClear }: { value: string; onChange: (value: string) => void; onClear: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawingRef = useRef(false);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    context.lineWidth = 3;
+    context.strokeStyle = '#172554';
+    if (!value) return;
+    const image = new Image();
+    image.onload = () => context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    image.src = value;
+  }, [value]);
+
+  const point = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return { x: ((event.clientX - rect.left) / rect.width) * canvas.width, y: ((event.clientY - rect.top) / rect.height) * canvas.height };
+  };
+
+  const start = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext('2d');
+    if (!canvas || !context) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const { x, y } = point(event);
+    drawingRef.current = true;
+    context.beginPath();
+    context.moveTo(x, y);
+  };
+
+  const draw = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return;
+    const context = canvasRef.current?.getContext('2d');
+    if (!context) return;
+    const { x, y } = point(event);
+    context.lineTo(x, y);
+    context.stroke();
+  };
+
+  const finish = () => {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    const canvas = canvasRef.current;
+    if (canvas) onChange(canvas.toDataURL('image/png'));
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Rita din signatur</label>
+          <p className="mt-1 text-xs text-slate-500">Använd finger, penna eller mus i rutan.</p>
+        </div>
+        <button type="button" onClick={onClear} className="text-xs font-semibold text-blue-700 hover:text-blue-800">Rensa</button>
+      </div>
+      <div className="overflow-hidden rounded-xl border-2 border-dashed border-slate-300 bg-white shadow-inner">
+        <canvas
+          ref={canvasRef}
+          width={900}
+          height={260}
+          onPointerDown={start}
+          onPointerMove={draw}
+          onPointerUp={finish}
+          onPointerCancel={finish}
+          onPointerLeave={finish}
+          className="block h-36 w-full touch-none cursor-crosshair sm:h-44"
+          aria-label="Ruta för handskriven signatur"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
   const { user } = useAuth();
   const [tenancy, setTenancy] = useState<Tenancy | null>(null);
@@ -50,6 +132,7 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
   const [showSignModal, setShowSignModal] = useState(false);
   const [signingContract, setSigningContract] = useState<any>(null);
   const [signature, setSignature] = useState('');
+  const [signatureName, setSignatureName] = useState('');
   const [signing, setSigning] = useState(false);
   const [signMethod, setSignMethod] = useState<'name' | 'bankid'>('name');
 
@@ -104,7 +187,7 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
 
   const handleSignContract = async () => {
     if (!signingContract) return;
-    if (signMethod === 'name' && !signature.trim()) return;
+    if (signMethod === 'name' && (!signature || !signatureName.trim())) return;
     setSigning(true);
     try {
       if (signMethod === 'bankid') {
@@ -126,9 +209,9 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
           body: `${signingContract.contract_content || ''}
 
 SIGNERING
-Hyresgast: ${signature}
+Namnförtydligande: ${signatureName}
 Signerat: ${new Date(signedAt).toLocaleString('sv-SE')}
-Signeringsmetod: Namnunderskrift`,
+Signeringsmetod: Handskriven signatur`,
           organisationId: user?.organisation_id,
           tenantId: user?.id,
           propertyId: apartment.property_id,
@@ -142,8 +225,9 @@ Signeringsmetod: Namnunderskrift`,
 
       const { error: contractError } = await supabase.from('vihem_contract_signatures').update({
         tenant_signature: signature,
+        tenant_signature_name: signatureName.trim(),
         tenant_signed_at: signedAt,
-        tenant_signature_method: 'name',
+        tenant_signature_method: 'handwritten',
         status: 'signed',
         document_id: generatedDocumentId,
       }).eq('id', signingContract.id);
@@ -151,6 +235,7 @@ Signeringsmetod: Namnunderskrift`,
       if (contractError) throw contractError;
       setShowSignModal(false);
       setSignature('');
+      setSignatureName('');
       setSigningContract(null);
       fetchData();
     } catch (error) {
@@ -164,6 +249,7 @@ Signeringsmetod: Namnunderskrift`,
     setSigningContract(contract);
     setSignMethod('name');
     setSignature('');
+    setSignatureName('');
     setShowSignModal(true);
   };
 
@@ -473,7 +559,7 @@ Signeringsmetod: Namnunderskrift`,
       </div>
 
       {/* Sign Contract Modal */}
-      <Modal open={showSignModal} onClose={() => { setShowSignModal(false); setSignature(''); setSigningContract(null); }} title="Signera hyresavtal" size="lg">
+      <Modal open={showSignModal} onClose={() => { setShowSignModal(false); setSignature(''); setSignatureName(''); setSigningContract(null); }} title="Signera hyresavtal" size="lg">
         {signingContract && (
           <div className="space-y-4">
             {signingContract.contract_content && (
@@ -522,18 +608,19 @@ Signeringsmetod: Namnunderskrift`,
             </div>
 
             {signMethod === 'name' && (
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Skriv ditt fullständiga namn som signatur
-                </label>
-                <input
-                  type="text"
-                  value={signature}
-                  onChange={(e) => setSignature(e.target.value)}
-                  placeholder="Ditt fullständiga namn"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <p className="text-xs text-slate-400 mt-1">Genom att skriva ditt namn bekräftar du att du läst och godkänner avtalet.</p>
+              <div className="space-y-4">
+                <SignaturePad value={signature} onChange={setSignature} onClear={() => setSignature('')} />
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Namnförtydligande</label>
+                  <input
+                    type="text"
+                    value={signatureName}
+                    onChange={(e) => setSignatureName(e.target.value)}
+                    placeholder="Skriv ditt fullständiga namn"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <p className="text-xs text-slate-500">Genom att rita din signatur och skriva namnförtydligandet bekräftar du att du har läst och godkänner avtalet.</p>
               </div>
             )}
 
@@ -554,13 +641,13 @@ Signeringsmetod: Namnunderskrift`,
             )}
 
             <div className="flex gap-3 pt-2">
-              <Button variant="secondary" onClick={() => { setShowSignModal(false); setSignature(''); setSigningContract(null); }} className="flex-1">
+              <Button variant="secondary" onClick={() => { setShowSignModal(false); setSignature(''); setSignatureName(''); setSigningContract(null); }} className="flex-1">
                 Avbryt
               </Button>
               <Button
                 variant="primary"
                 onClick={handleSignContract}
-                disabled={(signMethod === 'name' && !signature.trim()) || (signMethod === 'bankid' && !BANKID_ENABLED) || signing}
+                disabled={(signMethod === 'name' && (!signature || !signatureName.trim())) || (signMethod === 'bankid' && !BANKID_ENABLED) || signing}
                 loading={signing}
                 className="flex-1 gap-1"
               >
