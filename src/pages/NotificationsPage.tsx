@@ -50,10 +50,21 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
   const fetchNotifications = async () => {
     try {
       setLoading(true);
+      const notificationSince = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+      // Retention is enforced in the database as well, but this removes older
+      // rows for users who have not received a new notification recently.
+      await supabase
+        .from('vihem_notifications')
+        .delete()
+        .eq('user_id', user?.id)
+        .lt('created_at', notificationSince);
+
       const { data, error } = await supabase
         .from('vihem_notifications')
         .select('*')
         .eq('user_id', user?.id)
+        .gte('created_at', notificationSince)
         .order('created_at', { ascending: false });
 
       if (error) throw error;

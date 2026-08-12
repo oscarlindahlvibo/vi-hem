@@ -91,6 +91,7 @@ function AppInner() {
   const isGuestLaundryPath = isGuestLaundryRoute();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [notificationCount, setNotificationCount] = useState(0);
+  const [chatNotificationCount, setChatNotificationCount] = useState(0);
   const [enabledModules, setEnabledModules] = useState<ModuleState>(DEFAULT_MODULE_STATE);
 
   const loadOrganisationModules = useCallback(async () => {
@@ -160,12 +161,14 @@ function AppInner() {
     if (!user) {
       setCurrentPage('dashboard');
       setNotificationCount(0);
+      setChatNotificationCount(0);
       setEnabledModules(DEFAULT_MODULE_STATE);
       return;
     }
 
     setCurrentPage(user.role === 'superadmin' ? 'admin-organisations' : 'dashboard');
     setNotificationCount(0);
+    setChatNotificationCount(0);
     requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
   }, [user?.id, user?.role]);
 
@@ -211,22 +214,39 @@ function AppInner() {
   useEffect(() => {
     if (!user) return;
     void registerNativePush(user.id, user.organisation_id);
-    supabase
-      .from('vihem_notifications')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .is('read_at', null)
-      .then(({ count }) => setNotificationCount(count ?? 0));
+    const notificationSince = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const refreshNotificationCounts = async () => {
+      const [allUnread, chatUnread] = await Promise.all([
+        supabase
+          .from('vihem_notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .gte('created_at', notificationSince)
+          .is('read_at', null),
+        supabase
+          .from('vihem_notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .gte('created_at', notificationSince)
+          .is('read_at', null)
+          .in('type', ['chat', 'message', 'chat_message']),
+      ]);
+
+      setNotificationCount(allUnread.count ?? 0);
+      setChatNotificationCount(chatUnread.count ?? 0);
+    };
+
+    void refreshNotificationCounts();
 
     const channel = supabase
       .channel('vihem_notifications')
       .on('postgres_changes', {
-        event: 'INSERT',
+        event: '*',
         schema: 'public',
         table: 'vihem_notifications',
         filter: `user_id=eq.${user.id}`,
       }, () => {
-        setNotificationCount(c => c + 1);
+        void refreshNotificationCounts();
       })
       .subscribe();
 
@@ -255,6 +275,7 @@ function AppInner() {
   const navigate = (page: string) => {
     setCurrentPage(page);
     if (page === 'notifications') setNotificationCount(0);
+    if (page === 'chat') setChatNotificationCount(0);
     window.scrollTo(0, 0);
   };
 
@@ -408,6 +429,7 @@ function AppInner() {
       currentPage={currentPage}
       onNavigate={navigate}
       notificationCount={notificationCount}
+      chatNotificationCount={chatNotificationCount}
       enabledModules={enabledModules}
     >
       {renderPage()}

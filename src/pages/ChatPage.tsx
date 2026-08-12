@@ -159,6 +159,15 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
         .eq('thread_id', threadId)
         .neq('sender_id', user?.id)
         .is('read_at', null);
+
+      // Chat notifications are a compact inbox badge. Opening chat marks the
+      // corresponding notification stream as seen as well.
+      await supabase
+        .from('vihem_notifications')
+        .update({ read_at: new Date().toISOString() })
+        .eq('user_id', user?.id)
+        .in('type', ['chat', 'message', 'chat_message'])
+        .is('read_at', null);
     } catch (error) {
       console.error('Error marking thread as read:', error);
     }

@@ -27,10 +27,11 @@ interface LayoutProps {
   currentPage: string;
   onNavigate: (page: string) => void;
   notificationCount?: number;
+  chatNotificationCount?: number;
   enabledModules?: Partial<Record<ModuleKey, boolean>>;
 }
 
-export function Layout({ children, currentPage, onNavigate, notificationCount = 0, enabledModules = {} }: LayoutProps) {
+export function Layout({ children, currentPage, onNavigate, notificationCount = 0, chatNotificationCount = 0, enabledModules = {} }: LayoutProps) {
   const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
@@ -309,9 +310,9 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
               >
                 <span className={item.active ? 'text-blue-600' : 'text-slate-400'}>{item.icon}</span>
                 <span className="truncate">{item.label}</span>
-                {item.label === 'Chatt' && notificationCount > 0 && (
+                {item.label === 'Chatt' && chatNotificationCount > 0 && (
                   <span className="absolute right-3 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
-                    {notificationCount > 9 ? '9+' : notificationCount}
+                    {chatNotificationCount > 9 ? '9+' : chatNotificationCount}
                   </span>
                 )}
               </button>
