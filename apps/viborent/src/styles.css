@@ -23,6 +23,21 @@
 body {
   margin: 0;
 }
+.portal-shell { min-height: 100vh; padding: 48px 24px; max-width: 1180px; margin: 0 auto; }
+.portal-card, .portal-panel { background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 28px; box-shadow: 0 12px 30px #17333d0d; }
+.portal-card { max-width: 520px; margin: 8vh auto; }
+.portal-header { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 24px; }
+.portal-header h1, .portal-card h1 { margin: 8px 0; color: var(--ink); }
+.portal-grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 24px; }
+.portal-form { display: grid; gap: 14px; margin-top: 20px; }
+.portal-form label { display: grid; gap: 6px; font-weight: 800; color: var(--ink); }
+.portal-form input, .portal-form select, .portal-form textarea { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: #fff; }
+.portal-booking, .portal-request { display: flex; justify-content: space-between; gap: 16px; border-top: 1px solid var(--line); padding: 16px 0; }
+.portal-booking p, .portal-request p { margin: 6px 0 0; color: var(--muted); }
+.portal-status { display: inline-block; background: var(--soft); color: var(--teal-dark); border-radius: 999px; padding: 5px 9px; margin: 0 4px 4px 0; font-size: 12px; font-weight: 800; }
+.portal-message { color: var(--teal-dark); font-weight: 700; }
+.text-link { border: 0; background: transparent; color: var(--teal-dark); font-weight: 800; margin-top: 14px; }
+@media (max-width: 760px) { .portal-grid { grid-template-columns: 1fr; } .portal-header, .portal-booking { align-items: flex-start; flex-direction: column; } }
 button,
 input {
   font: inherit;

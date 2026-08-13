@@ -8,6 +8,7 @@ import {
   SiteConfig,
 } from "./api";
 import "./styles.css";
+import { CustomerPortal } from "./customerPortal";
 
 const money = (value: number | string, currency = "SEK") =>
   new Intl.NumberFormat("sv-SE", { style: "currency", currency }).format(
@@ -49,7 +50,7 @@ function loadCart(): CartState {
   }
 }
 
-function App() {
+function RentalApp() {
   const [site, setSite] = useState<SiteConfig | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [path, setPath] = useState(window.location.pathname);
@@ -167,6 +168,7 @@ function Shell({
           <button className="cart-nav" onClick={() => onNavigate("/varukorg")}>
             Varukorg {cartCount > 0 ? `(${cartCount})` : ""}
           </button>
+          <button onClick={() => onNavigate("/kundportal")}>Kundportal</button>
           <a href="#how">Så fungerar det</a>
           <a href="#contact">Kontakt</a>
         </nav>
@@ -991,6 +993,13 @@ function BookingPage({ reference }: { reference: string }) {
       </p>
     </section>
   );
+}
+
+function App() {
+  const path = window.location.pathname;
+  if (path === "/kundportal" || path === "/kundportal/") return <CustomerPortal />;
+  if (path === "/kundportal/reset-password") return <CustomerPortal reset />;
+  return <RentalApp />;
 }
 
 createRoot(document.getElementById("root")!).render(

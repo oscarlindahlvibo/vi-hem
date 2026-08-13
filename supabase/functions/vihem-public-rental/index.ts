@@ -54,7 +54,7 @@ async function ensurePortalInvite(client: any, organisationId: string, customerI
       customer.email,
       {
         data: { vihem_portal: true, organisation_id: organisationId, customer_id: customerId },
-        redirectTo: Deno.env.get("VIBOFAST_PORTAL_URL") || "https://vibofast.se",
+        redirectTo: Deno.env.get("VIBORENT_PORTAL_URL") || "https://viborent.se/kundportal",
       },
     );
     if (!inviteError && invited?.user?.id) authUserId = invited.user.id;

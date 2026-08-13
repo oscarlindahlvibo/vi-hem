@@ -105,7 +105,7 @@ Deno.serve(async (request) => {
       let authUserId = customer.auth_user_id;
       let invited = false;
       if (!authUserId) {
-        const { data: invitedUser, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(customer.email, { data: { vihem_portal: true, organisation_id: organisationId, customer_id: customerId }, redirectTo: Deno.env.get("VIBOFAST_PORTAL_URL") || "https://vibofast.se" });
+        const { data: invitedUser, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(customer.email, { data: { vihem_portal: true, organisation_id: organisationId, customer_id: customerId }, redirectTo: Deno.env.get("VIBORENT_PORTAL_URL") || "https://viborent.se/kundportal" });
         if (inviteError) {
           const { data: listed } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
           const existing = listed?.users?.find((candidate: any) => candidate.email?.toLowerCase() === customer.email.toLowerCase());

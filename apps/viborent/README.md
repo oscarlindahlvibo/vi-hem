@@ -32,9 +32,13 @@ VITE_RENTAL_SITE_HOSTNAME=viborent.se
 - `/hyra` product catalogue
 - `/hyra/:slug` product details, availability, quote and checkout
 - `/bokning/:reference` secure booking confirmation (requires the token in the URL)
+- `/kundportal` customer login, bookings, payment status and requests
+- `/kundportal/reset-password` customer password reset
 
 ## Deployment
 
 Build independently with `npm run build` in `apps/viborent`. Publish the resulting `dist/` to the ViboRent web root and configure `viborent.se` and `www.viborent.se` according to the shared reverse proxy/hosting setup. Configure the production environment variables at deploy time; no Supabase service-role or payment secret belongs in this frontend.
 
 The public rental Edge Function resolves the tenant from `vihem_rental_domains`. Configure `viborent.se` there before production use and apply the migration `20260812200000_viborent_public_lookup.sql` so public booking confirmations can use a non-guessable token.
+
+Customer invitations and password-reset links use `https://viborent.se/kundportal` by default. Set the server-side secret `VIBORENT_PORTAL_URL` when using a staging domain; never put service-role credentials in this frontend.

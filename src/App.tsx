@@ -415,6 +415,10 @@ function AppInner() {
         if (!isAdmin) return renderDashboard();
         return <PlatformSettingsPage />;
 
+      case 'admin-cellsynth':
+        if (!isAdmin) return renderDashboard();
+        return <PlatformSettingsPage initialSection="cellsynth" />;
+
       case 'finance':
         if (!isAdmin || !enabledModules.finance) return renderDashboard();
         return <FinancePage onNavigate={navigate} />;

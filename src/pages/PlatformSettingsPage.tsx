@@ -46,9 +46,9 @@ const emptyBankIdForm = {
 
 const emptySmsForm = { enabled: false, sender: '' };
 
-export function PlatformSettingsPage() {
+export function PlatformSettingsPage({ initialSection = 'ai' }: { initialSection?: 'ai' | 'bankid' | 'cellsynth' | 'services' } = {}) {
   const { user } = useAuth();
-  const [activeSection, setActiveSection] = useState<'ai' | 'bankid' | 'cellsynth' | 'services'>('ai');
+  const [activeSection, setActiveSection] = useState<'ai' | 'bankid' | 'cellsynth' | 'services'>(initialSection);
   const [ocrSettings, setOcrSettings] = useState<OcrProviderSettings | null>(null);
   const [ocrSettingsForm, setOcrSettingsForm] = useState(emptyOcrSettingsForm);
   const [ocrSettingsMessage, setOcrSettingsMessage] = useState('');
