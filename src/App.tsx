@@ -325,13 +325,6 @@ function AppInner() {
         if (!isStaff) return <MaintenancePage onNavigate={navigate} />;
         return <WorkOrdersPage onNavigate={navigate} />;
 
-      default:
-        if (currentPage.startsWith('workorder/')) {
-          if (!isStaff) return renderDashboard();
-          return <WorkOrdersPage onNavigate={navigate} initialWorkOrderId={currentPage.split('/')[1]} />;
-        }
-        return renderDashboard();
-
       case 'timetracking':
         if (!isStaff) return renderDashboard();
         return <TimeTrackingPage onNavigate={navigate} />;
@@ -434,6 +427,13 @@ function AppInner() {
       case 'inspections':
         if (!isStaff) return renderDashboard();
         return <InspectionsPage onNavigate={navigate} />;
+
+      default:
+        if (currentPage.startsWith('workorder/')) {
+          if (!isStaff) return renderDashboard();
+          return <WorkOrdersPage onNavigate={navigate} initialWorkOrderId={currentPage.split('/')[1]} />;
+        }
+        return renderDashboard();
 
     }
   }
