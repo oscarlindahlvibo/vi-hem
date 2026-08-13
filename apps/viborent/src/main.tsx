@@ -168,7 +168,7 @@ function Shell({
           <button className="cart-nav" onClick={() => onNavigate("/varukorg")}>
             Varukorg {cartCount > 0 ? `(${cartCount})` : ""}
           </button>
-          <button onClick={() => onNavigate("/kundportal")}>Kundportal</button>
+          <a href="/kundportal">Kundportal</a>
           <a href="#how">Så fungerar det</a>
           <a href="#contact">Kontakt</a>
         </nav>
