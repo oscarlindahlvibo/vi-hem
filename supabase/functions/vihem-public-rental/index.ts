@@ -301,10 +301,7 @@ Deno.serve(async (request) => {
 
     if (request.method === "POST" && action === "quote-cart") {
       const items = Array.isArray(body.items) ? body.items : [];
-      const startAt = text(body.start_at);
-      const endAt = text(body.end_at);
-      if (!items.length || !wholeHourRange(startAt, endAt))
-        return json({ error: "Varukorgen och en giltig heltimmeperiod krävs." }, 400);
+      if (!items.length) return json({ error: "Varukorgen är tom." }, 400);
       const lines: any[] = [];
       let subtotal = 0;
       let vatAmount = 0;
@@ -313,6 +310,10 @@ Deno.serve(async (request) => {
       for (const item of items) {
         const productId = text(item.product_id, 80);
         const quantity = Math.max(1, Number(item.quantity) || 1);
+        const startAt = text(item.start_at || body.start_at);
+        const endAt = text(item.end_at || body.end_at);
+        if (!wholeHourRange(startAt, endAt))
+          return json({ error: "Alla produkter måste ha en giltig period med hela timmar." }, 400);
         const { data: product, error: productError } = await client
           .from("vihem_rental_products")
           .select("id,name,slug")
@@ -334,29 +335,28 @@ Deno.serve(async (request) => {
         vatAmount += Number(quote.vat_amount || 0);
         deposit += Number(quote.deposit || 0);
         currency = quote.currency || currency;
-        lines.push({ product_id: product.id, product_name: product.name, quantity, quote });
+        lines.push({ product_id: product.id, product_name: product.name, quantity, start_at: startAt, end_at: endAt, quote });
       }
       return json({ quote: { subtotal, vat_amount: vatAmount, deposit, total: subtotal + vatAmount, currency, lines } });
     }
 
     if (request.method === "POST" && action === "bookings") {
       if (Array.isArray(body.items)) {
-        const startAt = text(body.start_at);
-        const endAt = text(body.end_at);
-        if (!wholeHourRange(startAt, endAt))
-          return json({ error: "Bokningar måste börja och sluta på hela timmar." }, 400);
         const items = body.items.map((item: any) => ({
           product_id: text(item.product_id, 80),
           quantity: Math.max(1, Number(item.quantity) || 1),
+          start_at: text(item.start_at || body.start_at),
+          end_at: text(item.end_at || body.end_at),
         }));
+        if (!items.length || items.some((item: any) => !wholeHourRange(item.start_at, item.end_at)))
+          return json({ error: "Alla produkter måste ha en giltig period med hela timmar." }, 400);
         const { data, error } = await client.rpc("vihem_create_rental_booking_multi", {
           target_items: items,
-          target_start_at: startAt,
-          target_end_at: endAt,
           target_customer: body.customer || {},
           target_source: "viborent.se",
           target_status: "pending",
           target_customer_notes: text(body.customer_notes, 2000),
+          target_additional_terms: text(body.additional_terms, 5000),
         });
         if (error) throw error;
         const { data: lookup, error: lookupError } = await client
@@ -457,7 +457,7 @@ Deno.serve(async (request) => {
       const { data: booking, error: bookingError } = await client
         .from("vihem_rental_bookings")
         .select(
-          "id,public_reference,status,payment_status,contract_status,contract_signer_name,contract_signed_at,start_at,end_at,subtotal,vat_amount,deposit,total,currency,customer_notes,customer:vihem_rental_customers(first_name,last_name,email,phone),items:vihem_rental_booking_items(quantity,product:vihem_rental_products(name,slug,pickup_instructions,return_instructions,location))",
+          "id,public_reference,status,payment_status,contract_status,contract_signer_name,contract_signed_at,contract_terms_snapshot,start_at,end_at,subtotal,vat_amount,deposit,total,currency,customer_notes,customer:vihem_rental_customers(first_name,last_name,email,phone),items:vihem_rental_booking_items(quantity,start_at,end_at,product:vihem_rental_products(name,slug,pickup_instructions,return_instructions,location))",
         )
         .eq("organisation_id", organisationId)
         .eq("public_reference", reference)

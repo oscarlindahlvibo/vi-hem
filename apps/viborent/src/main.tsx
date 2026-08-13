@@ -28,13 +28,22 @@ type RentalPeriod = {
   startHour: string;
   endHour: string;
 };
-type CartItem = { product: Product; quantity: number };
-type CartState = { period: RentalPeriod | null; items: CartItem[] };
+type CartItem = { product: Product; quantity: number; period: RentalPeriod };
+type CartState = { period?: RentalPeriod | null; items: CartItem[] };
 const emptyCart: CartState = { period: null, items: [] };
+
+const cartLineKey = (item: CartItem) =>
+  `${item.product.id}:${item.period.startDate}:${item.period.startHour}:${item.period.endDate}:${item.period.endHour}`;
 
 function loadCart(): CartState {
   try {
-    return JSON.parse(localStorage.getItem("viborent-cart") || "null") || emptyCart;
+    const stored = JSON.parse(localStorage.getItem("viborent-cart") || "null");
+    if (!stored || !Array.isArray(stored.items)) return emptyCart;
+    const legacyPeriod = stored.period || null;
+    const items = stored.items
+      .map((item: any) => ({ ...item, period: item.period || legacyPeriod }))
+      .filter((item: any) => item.period?.startDate && item.period?.endDate);
+    return { items };
   } catch {
     return emptyCart;
   }
@@ -70,23 +79,22 @@ function App() {
     window.scrollTo(0, 0);
   };
   const addToCart = (product: Product, period: RentalPeriod, quantity = 1) => {
-    if (cart.period && JSON.stringify(cart.period) !== JSON.stringify(period))
-      throw new Error("Alla produkter i samma bokning måste ha samma period.");
     setCart((current) => {
-      const existing = current.items.find((item) => item.product.id === product.id);
+      const existing = current.items.find(
+        (item) => item.product.id === product.id && JSON.stringify(item.period) === JSON.stringify(period),
+      );
       return {
-        period: current.period || period,
         items: existing
-          ? current.items.map((item) => item.product.id === product.id ? { ...item, quantity: item.quantity + quantity } : item)
-          : [...current.items, { product, quantity }],
+          ? current.items.map((item) => cartLineKey(item) === cartLineKey(existing) ? { ...item, quantity: item.quantity + quantity } : item)
+          : [...current.items, { product, quantity, period }],
       };
     });
   };
-  const updateQuantity = (productId: string, quantity: number) =>
+  const updateQuantity = (lineKey: string, quantity: number) =>
     setCart((current) => ({
       ...current,
       items: current.items
-        .map((item) => item.product.id === productId ? { ...item, quantity: Math.max(0, quantity) } : item)
+        .map((item) => cartLineKey(item) === lineKey ? { ...item, quantity: Math.max(0, quantity) } : item)
         .filter((item) => item.quantity > 0),
     }));
   const clearCart = () => setCart(emptyCart);
@@ -784,14 +792,14 @@ function CartPage({
   cart: CartState;
   site: SiteConfig | null;
   onNavigate: (to: string) => void;
-  onUpdateQuantity: (productId: string, quantity: number) => void;
+  onUpdateQuantity: (lineKey: string, quantity: number) => void;
 }) {
   if (!cart.items.length)
     return (
       <section className="section cart-page">
         <div className="eyebrow">Din bokning</div>
         <h1>Varukorgen är tom</h1>
-        <p className="lead">Lägg till en eller flera produkter för samma uthyrningsperiod.</p>
+        <p className="lead">Lägg till flera produkter, även med olika uthyrningsperioder.</p>
         <button className="primary" onClick={() => onNavigate("/hyra")}>Se produkter</button>
       </section>
     );
@@ -799,15 +807,14 @@ function CartPage({
     <section className="section cart-page">
       <div className="eyebrow">Din bokning</div>
       <h1>Varukorg</h1>
-      <p className="lead">Alla produkter bokas under samma period.</p>
+      <p className="lead">Varje produkt kan ha sin egen period. Pris och tillgänglighet kontrolleras i kassan.</p>
       <div className="cart-layout">
         <div className="cart-lines">
-          <div className="cart-period"><strong>Vald period</strong><span>{periodLabel(cart.period)}</span></div>
-          {cart.items.map(({ product, quantity }) => (
-            <div className="cart-line" key={product.id}>
+          {cart.items.map(({ product, quantity, period }) => (
+            <div className="cart-line" key={cartLineKey({ product, quantity, period })}>
               <img src={imageFor(product)} alt="" />
-              <div><strong>{product.name}</strong><small>{product.category || "Uthyrning"}</small></div>
-              <label>Antal<input type="number" min="0" value={quantity} onChange={(e) => onUpdateQuantity(product.id, Number(e.target.value) || 0)} /></label>
+              <div><strong>{product.name}</strong><small>{product.category || "Uthyrning"}</small><small>{periodLabel(period)}</small></div>
+              <label>Antal<input type="number" min="0" value={quantity} onChange={(e) => onUpdateQuantity(cartLineKey({ product, quantity, period }), Number(e.target.value) || 0)} /></label>
             </div>
           ))}
         </div>
@@ -866,25 +873,33 @@ function CheckoutPage({
   const [accepted, setAccepted] = useState(false);
   const [signature, setSignature] = useState("");
   const [signerName, setSignerName] = useState("");
+  const [additionalTerms, setAdditionalTerms] = useState("");
   const [customer, setCustomer] = useState({ first_name: "", last_name: "", email: "", phone: "" });
   useEffect(() => {
-    if (!cart.period || !cart.items.length) return;
+    if (!cart.items.length) return;
     rentalApi.quoteCart(
-      cart.items.map((item): RentalCartLine => ({ product_id: item.product.id, quantity: item.quantity })),
-      new Date(`${cart.period.startDate}T${cart.period.startHour}:00`).toISOString(),
-      new Date(`${cart.period.endDate}T${cart.period.endHour}:00`).toISOString(),
+      cart.items.map((item): RentalCartLine => ({
+        product_id: item.product.id,
+        quantity: item.quantity,
+        start_at: new Date(`${item.period.startDate}T${item.period.startHour}:00`).toISOString(),
+        end_at: new Date(`${item.period.endDate}T${item.period.endHour}:00`).toISOString(),
+      })),
     ).then((result) => setQuote(result.quote)).catch((e) => setMessage(e.message));
   }, [cart]);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!cart.period || !quote || !accepted || !signature) { setMessage("Fyll i uppgifter, godkänn villkoren och rita din signatur."); return; }
+    if (!quote || !accepted || !signature) { setMessage("Fyll i uppgifter, godkänn villkoren och rita din signatur."); return; }
     setBusy(true); setMessage("");
     try {
-      const startAt = new Date(`${cart.period.startDate}T${cart.period.startHour}:00`).toISOString();
-      const endAt = new Date(`${cart.period.endDate}T${cart.period.endHour}:00`).toISOString();
-      const result = await rentalApi.createBooking({ items: cart.items.map((item) => ({ product_id: item.product.id, quantity: item.quantity })), start_at: startAt, end_at: endAt, customer, customer_notes: "" });
+      const items = cart.items.map((item) => ({
+        product_id: item.product.id,
+        quantity: item.quantity,
+        start_at: new Date(`${item.period.startDate}T${item.period.startHour}:00`).toISOString(),
+        end_at: new Date(`${item.period.endDate}T${item.period.endHour}:00`).toISOString(),
+      }));
+      const result = await rentalApi.createBooking({ items, customer, customer_notes: "", additional_terms: additionalTerms });
       const booking = result.booking;
-      await rentalApi.signContract({ booking_id: booking.id, public_lookup_token: booking.public_lookup_token, signer_name: signerName, signature, accepted_terms: true });
+      await rentalApi.signContract({ booking_id: booking.id, public_lookup_token: booking.public_lookup_token, signer_name: signerName, signature, accepted_terms: true, additional_terms: additionalTerms });
       const token = booking.public_lookup_token || "";
       const confirmation = `${window.location.origin}/bokning/${booking.public_reference}?token=${encodeURIComponent(token)}`;
       onClearCart();
@@ -895,7 +910,7 @@ function CheckoutPage({
       window.location.href = confirmation;
     } catch (e: any) { setMessage(e.message); } finally { setBusy(false); }
   };
-  if (!cart.items.length || !cart.period) return <section className="section"><div className="notice error">Varukorgen är tom.</div><button className="primary" onClick={() => onNavigate("/hyra")}>Till produkter</button></section>;
+  if (!cart.items.length) return <section className="section"><div className="notice error">Varukorgen är tom.</div><button className="primary" onClick={() => onNavigate("/hyra")}>Till produkter</button></section>;
   return (
     <section className="section checkout-page">
       <div className="eyebrow">Sista steget</div><h1>Kassa och avtal</h1>
@@ -906,13 +921,14 @@ function CheckoutPage({
           <div className="date-grid">{[["first_name", "Förnamn"], ["last_name", "Efternamn"], ["email", "E-post"], ["phone", "Telefon"]].map(([key, label]) => <label key={key}>{label}<input required value={customer[key as keyof typeof customer]} onChange={(e) => setCustomer({ ...customer, [key]: e.target.value })} /></label>)}</div>
           <h2>Signera uthyrningsavtal</h2>
           <p className="booking-hint">Genom signeringen godkänner du uthyrningsvillkoren och bokningsuppgifterna.</p>
+          <label>Avtalskomplettering (valfritt)<textarea value={additionalTerms} onChange={(e) => setAdditionalTerms(e.target.value)} placeholder="Skriv eventuell extra text som ska ingå i avtalet…" /></label>
           <label>Namnförtydligande<input required value={signerName} onChange={(e) => setSignerName(e.target.value)} /></label>
           <SignaturePad value={signature} onChange={setSignature} />
           <label className="check"><input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} /> Jag godkänner uthyrningsvillkoren.</label>
           {message && <div className="inline-error">{message}</div>}
           <button className="primary full" disabled={busy || !quote}>{busy ? "Skapar avtal…" : "Signera och gå till betalning"}</button>
         </form>
-        <aside className="checkout-summary"><h2>Din bokning</h2><p>{periodLabel(cart.period)}</p>{cart.items.map((item) => <div className="summary-row" key={item.product.id}><span>{item.product.name} × {item.quantity}</span><strong>{quote?.lines?.find((line: any) => line.product_id === item.product.id)?.quote?.subtotal ? money(quote.lines.find((line: any) => line.product_id === item.product.id).quote.subtotal, site?.currency) : "…"}</strong></div>)}{quote && <><div className="summary-row"><span>Moms</span><strong>{money(quote.vat_amount, site?.currency)}</strong></div><div className="summary-total">{money(quote.total, site?.currency)}</div></>}</aside>
+        <aside className="checkout-summary"><h2>Din bokning</h2>{cart.items.map((item, index) => { const line = quote?.lines?.[index]; return <div className="summary-row" key={cartLineKey(item)}><span>{item.product.name} × {item.quantity}<small>{periodLabel(item.period)}</small></span><strong>{line?.quote?.subtotal != null ? money(line.quote.subtotal, site?.currency) : "…"}</strong></div>; })}{quote && <><div className="summary-row"><span>Moms</span><strong>{money(quote.vat_amount, site?.currency)}</strong></div><div className="summary-total">{money(quote.total, site?.currency)}</div></>}</aside>
       </div>
     </section>
   );
@@ -961,11 +977,9 @@ function BookingPage({ reference }: { reference: string }) {
       <div className="summary">
         {items.map((item: any, index: number) => {
           const product = Array.isArray(item?.product) ? item.product[0] : item?.product;
-          return <p key={`${product?.slug || "item"}-${index}`}><strong>{product?.name || "Uthyrning"}</strong> × {item.quantity || 1}</p>;
+          return <p key={`${product?.slug || "item"}-${index}`}><strong>{product?.name || "Uthyrning"}</strong> × {item.quantity || 1}{item.start_at && item.end_at ? <><br /><small>{dateTime(item.start_at)} – {dateTime(item.end_at)}</small></> : null}</p>;
         })}
-        <p>
-          {dateTime(booking.start_at)} – {dateTime(booking.end_at)}
-        </p>
+        {booking.contract_terms_snapshot && <p><strong>Avtalsvillkor</strong><br /><small>{booking.contract_terms_snapshot}</small></p>}
         <p className="summary-total">
           {money(booking.total, booking.currency)}
         </p>

@@ -41,6 +41,8 @@ export type AvailabilityCalendar = {
 export type RentalCartLine = {
   product_id: string;
   quantity: number;
+  start_at: string;
+  end_at: string;
 };
 
 export type RentalQuote = {
@@ -109,10 +111,10 @@ export const rentalApi = {
         quantity,
       }),
     }),
-  quoteCart: (items: RentalCartLine[], startAt: string, endAt: string) =>
+  quoteCart: (items: RentalCartLine[]) =>
     request<{ quote: RentalQuote }>("quote-cart", {
       method: "POST",
-      body: JSON.stringify({ items, start_at: startAt, end_at: endAt }),
+      body: JSON.stringify({ items }),
     }),
   createBooking: (payload: unknown) =>
     request<{
@@ -129,6 +131,7 @@ export const rentalApi = {
     signer_name: string;
     signature: string;
     accepted_terms: boolean;
+    additional_terms?: string;
   }) =>
     request<{ booking: { id: string; public_reference: string; contract_status: string } }>(
       "sign-contract",

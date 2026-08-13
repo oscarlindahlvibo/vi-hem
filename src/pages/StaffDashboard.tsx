@@ -472,7 +472,13 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
 
       <section className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
         <button
-          onClick={() => onNavigate(user?.role === 'admin' ? 'timetracking' : 'workorders')}
+          onClick={() => {
+            document.getElementById('staff-dashboard-attention-items')?.scrollIntoView({
+              behavior: 'smooth',
+              block: 'start',
+            });
+          }}
+          aria-label="Visa det som behöver din uppmärksamhet"
           className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-5 text-left sm:px-6"
         >
           <div className="flex min-w-0 items-center gap-3">
@@ -483,7 +489,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           </div>
           <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
         </button>
-        <div className="divide-y divide-slate-100 border-t border-slate-100">
+        <div id="staff-dashboard-attention-items" className="divide-y divide-slate-100 border-t border-slate-100">
           {(user?.role === 'admin' || user?.role === 'staff') && (
             <button
               onClick={() => onNavigate('maintenance')}
