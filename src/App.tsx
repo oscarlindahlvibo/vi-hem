@@ -44,6 +44,42 @@ import { RentalPage } from './pages/RentalPage';
 import { InventoryPage } from './pages/InventoryPage';
 import type { ModuleKey } from './types';
 
+class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('VI-HEM page render error:', error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-[var(--vihem-canvas)] px-4">
+          <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-6 text-center shadow-sm">
+            <h1 className="text-lg font-bold text-slate-900">Sidan kunde inte visas</h1>
+            <p className="mt-2 text-sm text-slate-600">
+              Något gick fel när innehållet skulle laddas. Försök ladda om sidan.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Ladda om sidan
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 type ModuleState = Partial<Record<ModuleKey, boolean>>;
 
 const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
@@ -455,8 +491,10 @@ function AppInner() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AppInner />
-    </AuthProvider>
+    <AppErrorBoundary>
+      <AuthProvider>
+        <AppInner />
+      </AuthProvider>
+    </AppErrorBoundary>
   );
 }
