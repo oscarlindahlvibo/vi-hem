@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vihem-shell-v1';
+const CACHE_NAME = 'vihem-shell-v2';
 const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', event => {
@@ -17,14 +17,20 @@ self.addEventListener('fetch', event => {
 
   if (event.request.mode === 'navigate') {
     event.respondWith(fetch(event.request).then(response => {
+      if (!response.ok) return response;
       const copy = response.clone();
       void caches.open(CACHE_NAME).then(cache => cache.put('/index.html', copy));
       return response;
-    }).catch(() => caches.match('/index.html')));
+    }).catch(() => caches.match('/index.html').then(response => response || caches.match('/'))));
     return;
   }
 
+  // Only cache immutable build assets. Caching API responses and arbitrary
+  // routes can mix releases and leave React with an incompatible chunk set.
+  if (!new URL(event.request.url).pathname.startsWith('/assets/')) return;
+
   event.respondWith(fetch(event.request).then(response => {
+    if (!response.ok) return response;
     const copy = response.clone();
     void caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
     return response;
