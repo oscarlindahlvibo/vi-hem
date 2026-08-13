@@ -40,6 +40,38 @@ function normaliseHostname(value: unknown) {
     .split(":")[0];
 }
 
+async function ensurePortalInvite(client: any, organisationId: string, customerId: string) {
+  const { data: customer, error } = await client
+    .from("vihem_rental_customers")
+    .select("id,email,auth_user_id")
+    .eq("id", customerId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (error || !customer?.email) return false;
+  let authUserId = customer.auth_user_id;
+  if (!authUserId) {
+    const { data: invited, error: inviteError } = await client.auth.admin.inviteUserByEmail(
+      customer.email,
+      {
+        data: { vihem_portal: true, organisation_id: organisationId, customer_id: customerId },
+        redirectTo: Deno.env.get("VIBOFAST_PORTAL_URL") || "https://vibofast.se",
+      },
+    );
+    if (!inviteError && invited?.user?.id) authUserId = invited.user.id;
+    if (!authUserId && inviteError) {
+      const { data: listed } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      authUserId = listed?.users?.find((user: any) => user.email?.toLowerCase() === customer.email.toLowerCase())?.id || null;
+    }
+    if (!authUserId) return false;
+    await client.from("vihem_rental_customers").update({ auth_user_id: authUserId, updated_at: new Date().toISOString() }).eq("id", customerId).eq("organisation_id", organisationId);
+  }
+  const { error: portalError } = await client.from("vihem_rental_portal_users").upsert(
+    { organisation_id: organisationId, customer_id: customerId, auth_user_id: authUserId, status: "invited", invited_at: new Date().toISOString() },
+    { onConflict: "organisation_id,customer_id" },
+  );
+  return !portalError;
+}
+
 async function resolveOrganisation(client: any, request: Request, body: any) {
   const hostname = normaliseHostname(
     body.hostname ||
@@ -366,7 +398,8 @@ Deno.serve(async (request) => {
           .eq("organisation_id", organisationId)
           .maybeSingle();
         if (lookupError) throw lookupError;
-        return json({ booking: { ...data, public_lookup_token: lookup?.public_lookup_token || null } }, 201);
+        const portalInvited = data?.customer_id ? await ensurePortalInvite(client, organisationId, data.customer_id) : false;
+        return json({ booking: { ...data, public_lookup_token: lookup?.public_lookup_token || null }, portal_invited: portalInvited }, 201);
       }
       const slug = text(body.slug);
       if (!wholeHourRange(text(body.start_at), text(body.end_at)))
@@ -403,12 +436,14 @@ Deno.serve(async (request) => {
         .eq("organisation_id", organisationId)
         .maybeSingle();
       if (lookupError) throw lookupError;
+      const portalInvited = data?.customer_id ? await ensurePortalInvite(client, organisationId, data.customer_id) : false;
       return json(
         {
           booking: {
             ...data,
             public_lookup_token: lookup?.public_lookup_token || null,
           },
+          portal_invited: portalInvited,
         },
         201,
       );

@@ -18,6 +18,9 @@
     ,"viborent:dev": "vite --config apps/viborent/vite.config.ts"
     ,"viborent:build": "vite build --config apps/viborent/vite.config.ts"
     ,"viborent:preview": "vite preview --config apps/viborent/vite.config.ts"
+    ,"vibofast:dev": "vite --config apps/vibofast/vite.config.ts"
+    ,"vibofast:build": "vite build --config apps/vibofast/vite.config.ts"
+    ,"vibofast:preview": "vite preview --config apps/vibofast/vite.config.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

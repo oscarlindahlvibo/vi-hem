@@ -44,14 +44,18 @@ const emptyBankIdForm = {
   provider_note: '',
 };
 
+const emptySmsForm = { enabled: false, sender: '' };
+
 export function PlatformSettingsPage() {
   const { user } = useAuth();
-  const [activeSection, setActiveSection] = useState<'ai' | 'bankid' | 'services'>('ai');
+  const [activeSection, setActiveSection] = useState<'ai' | 'bankid' | 'cellsynth' | 'services'>('ai');
   const [ocrSettings, setOcrSettings] = useState<OcrProviderSettings | null>(null);
   const [ocrSettingsForm, setOcrSettingsForm] = useState(emptyOcrSettingsForm);
   const [ocrSettingsMessage, setOcrSettingsMessage] = useState('');
   const [bankIdForm, setBankIdForm] = useState(emptyBankIdForm);
   const [bankIdMessage, setBankIdMessage] = useState('');
+  const [smsForm, setSmsForm] = useState(emptySmsForm);
+  const [smsMessage, setSmsMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -77,6 +81,7 @@ export function PlatformSettingsPage() {
     setLoading(true);
     setOcrSettingsMessage('');
     setBankIdMessage('');
+    setSmsMessage('');
 
     const [ocrResult, organisationResult] = await Promise.all([
       supabase.functions.invoke('vihem-manage-ocr-settings', { body: { action: 'get' } }),
@@ -92,6 +97,10 @@ export function PlatformSettingsPage() {
     } else {
       applyOcrSettings((ocrResult.data?.settings ?? null) as OcrProviderSettings | null);
     }
+
+    const { data: smsSettings, error: smsError } = await supabase.from('vihem_sms_settings').select('enabled,sender').eq('organisation_id', organisationId).maybeSingle();
+    setSmsForm({ enabled: Boolean(smsSettings?.enabled), sender: String(smsSettings?.sender || '') });
+    if (smsError && !smsError.message.includes('schema cache')) setSmsMessage(smsError.message);
 
     if (organisationResult.error) {
       setBankIdMessage(organisationResult.error.message || 'Kunde inte hämta organisationsinställningar.');
@@ -208,6 +217,13 @@ export function PlatformSettingsPage() {
     setBankIdMessage(updateError ? updateError.message : 'BankID-inställningarna är sparade.');
   };
 
+  const saveSmsSettings = async () => {
+    if (!organisationId) return;
+    setSaving(true); setSmsMessage('');
+    const { error } = await supabase.from('vihem_sms_settings').upsert({ organisation_id: organisationId, provider: 'cellsynt', enabled: smsForm.enabled, sender: smsForm.sender.trim(), updated_at: new Date().toISOString() }, { onConflict: 'organisation_id' });
+    setSaving(false); setSmsMessage(error ? error.message : 'Cellsynt-inställningarna är sparade. API-nycklarna läggs som Supabase secrets.');
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[55vh] items-center justify-center">
@@ -230,6 +246,7 @@ export function PlatformSettingsPage() {
         {[
           ['ai', 'AI & OCR'],
           ['bankid', 'BankID'],
+          ['cellsynth', 'Cellsynt SMS'],
           ['services', 'Tilläggstjänster'],
         ].map(([key, label]) => (
           <button
@@ -399,8 +416,26 @@ export function PlatformSettingsPage() {
         </Card>
       )}
 
+      {activeSection === 'cellsynth' && (
+        <Card className="p-5">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">SMS-INTEGRATION</p>
+          <h2 className="mt-2 text-lg font-bold text-slate-950">Cellsynt</h2>
+          <p className="mt-2 max-w-2xl text-sm text-slate-500">Aktivera SMS för organisationen och ange avsändarnamnet. Cellsynts användarnamn och lösenord hanteras som serverhemligheter och visas aldrig i appen.</p>
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <Input label="Avsändare (max 11 tecken)" maxLength={11} value={smsForm.sender} onChange={event => setSmsForm(prev => ({ ...prev, sender: event.target.value }))} />
+            <label className="flex items-center gap-3 self-end rounded-xl border border-slate-200 p-3 text-sm font-semibold"><input type="checkbox" checked={smsForm.enabled} onChange={event => setSmsForm(prev => ({ ...prev, enabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-blue-600" /> Tillåt SMS från VI-HEM</label>
+          </div>
+          <div className="mt-5 flex flex-wrap items-center gap-3"><Button onClick={saveSmsSettings} loading={saving}>Spara Cellsynt</Button>{smsMessage && <span className="text-sm font-semibold text-slate-600">{smsMessage}</span>}</div>
+          <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+            <p className="font-semibold text-slate-800">Serverkonfiguration</p>
+            <p className="mt-1">Sätt <code>CELLSYNT_USERNAME</code>, <code>CELLSYNT_PASSWORD</code> och valfritt <code>CELLSYNT_API_URL</code> som Supabase secrets. SMS skickas via Edge Function <code>vihem-send-sms</code>.</p>
+          </div>
+        </Card>
+      )}
+
       {activeSection === 'services' && (
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-3">
           {[
             ['AI-automationer', 'Gemensam OpenAI-konfiguration för framtida sammanfattningar, mötesprotokoll, dokumenttolkning och förslag.', Sparkles],
             ['OCR och dokument', 'Leverantörsfakturor och kvitton använder samma pipeline och kostnadslogg.', KeyRound],
@@ -412,6 +447,7 @@ export function PlatformSettingsPage() {
               <p className="mt-2 text-sm text-slate-500">{String(description)}</p>
             </Card>
           ))}
+          </div>
         </div>
       )}
     </div>
