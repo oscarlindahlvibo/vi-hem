@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AvailabilityCalendar as AvailabilityCalendarData,
   Product,
   rentalApi,
+  RentalCartLine,
   SiteConfig,
 } from "./api";
 import "./styles.css";
@@ -21,12 +22,31 @@ const imageFor = (product: Product) =>
   product.images?.[0] ||
   "https://images.unsplash.com/photo-1586864387967-d02ef85d93e8?auto=format&fit=crop&w=900&q=80";
 
+type RentalPeriod = {
+  startDate: string;
+  endDate: string;
+  startHour: string;
+  endHour: string;
+};
+type CartItem = { product: Product; quantity: number };
+type CartState = { period: RentalPeriod | null; items: CartItem[] };
+const emptyCart: CartState = { period: null, items: [] };
+
+function loadCart(): CartState {
+  try {
+    return JSON.parse(localStorage.getItem("viborent-cart") || "null") || emptyCart;
+  } catch {
+    return emptyCart;
+  }
+}
+
 function App() {
   const [site, setSite] = useState<SiteConfig | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [path, setPath] = useState(window.location.pathname);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [cart, setCart] = useState<CartState>(loadCart);
   useEffect(() => {
     Promise.all([rentalApi.siteConfig(), rentalApi.products()])
       .then(([config, list]) => {
@@ -37,6 +57,9 @@ function App() {
       .finally(() => setLoading(false));
   }, []);
   useEffect(() => {
+    localStorage.setItem("viborent-cart", JSON.stringify(cart));
+  }, [cart]);
+  useEffect(() => {
     const onPop = () => setPath(window.location.pathname);
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -46,6 +69,27 @@ function App() {
     setPath(to);
     window.scrollTo(0, 0);
   };
+  const addToCart = (product: Product, period: RentalPeriod, quantity = 1) => {
+    if (cart.period && JSON.stringify(cart.period) !== JSON.stringify(period))
+      throw new Error("Alla produkter i samma bokning måste ha samma period.");
+    setCart((current) => {
+      const existing = current.items.find((item) => item.product.id === product.id);
+      return {
+        period: current.period || period,
+        items: existing
+          ? current.items.map((item) => item.product.id === product.id ? { ...item, quantity: item.quantity + quantity } : item)
+          : [...current.items, { product, quantity }],
+      };
+    });
+  };
+  const updateQuantity = (productId: string, quantity: number) =>
+    setCart((current) => ({
+      ...current,
+      items: current.items
+        .map((item) => item.product.id === productId ? { ...item, quantity: Math.max(0, quantity) } : item)
+        .filter((item) => item.quantity > 0),
+    }));
+  const clearCart = () => setCart(emptyCart);
   if (loading)
     return (
       <Shell site={site}>
@@ -64,9 +108,13 @@ function App() {
   const productMatch = path.match(/^\/hyra\/([^/]+)/);
   const bookingMatch = path.match(/^\/bokning\/([^/]+)/);
   return (
-    <Shell site={site} onNavigate={navigate}>
+    <Shell site={site} onNavigate={navigate} cartCount={cart.items.reduce((sum, item) => sum + item.quantity, 0)}>
       {path === "/hyra" ? (
         <ProductList products={products} onNavigate={navigate} />
+      ) : path === "/varukorg" ? (
+        <CartPage cart={cart} site={site} onNavigate={navigate} onUpdateQuantity={updateQuantity} />
+      ) : path === "/kassa" ? (
+        <CheckoutPage cart={cart} site={site} onNavigate={navigate} onClearCart={clearCart} />
       ) : productMatch ? (
         <ProductPage
           product={products.find(
@@ -74,6 +122,7 @@ function App() {
           )}
           site={site}
           onNavigate={navigate}
+          onAddToCart={addToCart}
         />
       ) : bookingMatch ? (
         <BookingPage reference={decodeURIComponent(bookingMatch[1])} />
@@ -88,10 +137,12 @@ function Shell({
   children,
   site,
   onNavigate = () => {},
+  cartCount = 0,
 }: {
   children: React.ReactNode;
   site: SiteConfig | null;
   onNavigate?: (to: string) => void;
+  cartCount?: number;
 }) {
   return (
     <>
@@ -105,6 +156,9 @@ function Shell({
         </button>
         <nav>
           <button onClick={() => onNavigate("/hyra")}>Hyr</button>
+          <button className="cart-nav" onClick={() => onNavigate("/varukorg")}>
+            Varukorg {cartCount > 0 ? `(${cartCount})` : ""}
+          </button>
           <a href="#how">Så fungerar det</a>
           <a href="#contact">Kontakt</a>
         </nav>
@@ -322,10 +376,12 @@ function ProductPage({
   product,
   site,
   onNavigate,
+  onAddToCart,
 }: {
   product?: Product;
   site: SiteConfig | null;
   onNavigate: (to: string) => void;
+  onAddToCart: (product: Product, period: RentalPeriod, quantity?: number) => void;
 }) {
   if (!product)
     return (
@@ -357,7 +413,7 @@ function ProductPage({
               Deposition: {money(product.deposit, site?.currency)}
             </p>
           )}
-          <BookingPanel product={product} site={site} />
+          <BookingPanel product={product} site={site} onAddToCart={onAddToCart} />
         </div>
       </div>
     </section>
@@ -531,9 +587,11 @@ function AvailabilityCalendar({
 function BookingPanel({
   product,
   site,
+  onAddToCart,
 }: {
   product: Product;
   site: SiteConfig | null;
+  onAddToCart: (product: Product, period: RentalPeriod, quantity?: number) => void;
 }) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -551,6 +609,7 @@ function BookingPanel({
     phone: "",
   });
   const [checkout, setCheckout] = useState(false);
+  const [quantity, setQuantity] = useState(1);
   const selectDate = (date: Date) => {
     const pad = (value: number) => String(value).padStart(2, "0");
     const value = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -583,39 +642,6 @@ function BookingPanel({
       setQuote(result.quote);
     } catch (e: any) {
       setQuote(undefined);
-      setMessage(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const create = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    setMessage("");
-    try {
-      const result = await rentalApi.createBooking({
-        slug: product.slug,
-        start_at: new Date(start).toISOString(),
-        end_at: new Date(end).toISOString(),
-        customer,
-        customer_notes: "",
-      });
-      const booking = result.booking;
-      const token = booking.public_lookup_token || "";
-      const confirmation = `${window.location.origin}/bokning/${booking.public_reference}?token=${encodeURIComponent(token)}`;
-      if (window.location.protocol === "https:") {
-        const payment = await rentalApi.startPayment(
-          booking.id,
-          `${confirmation}&paid=1`,
-          `${confirmation}&cancelled=1`,
-        );
-        if (payment.checkout_url) {
-          window.location.href = payment.checkout_url;
-          return;
-        }
-      }
-      window.location.href = confirmation;
-    } catch (e: any) {
       setMessage(e.message);
     } finally {
       setBusy(false);
@@ -701,6 +727,10 @@ function BookingPanel({
         >
           {busy ? "Kontrollerar…" : "Kontrollera pris och tillgänglighet"}
         </button>
+        <label className="quantity-field">
+          Antal
+          <input type="number" min="1" value={quantity} onChange={(e) => setQuantity(Math.max(1, Number(e.target.value) || 1))} />
+        </label>
         {message && <div className="inline-error">{message}</div>}
         {quote && !checkout && (
           <div className="quote">
@@ -720,42 +750,171 @@ function BookingPanel({
               <span>Totalt</span>
               <strong>{money(quote.total, site?.currency)}</strong>
             </div>
-            <button className="primary full" onClick={() => setCheckout(true)}>
-              Fortsätt till bokning
+            <button
+              className="primary full"
+              onClick={() => {
+                try {
+                  onAddToCart(product, { startDate, endDate, startHour, endHour }, quantity);
+                  setMessage("Produkten ligger i varukorgen.");
+                } catch (e: any) {
+                  setMessage(e.message);
+                }
+              }}
+            >
+              Lägg i varukorg
             </button>
           </div>
         )}
-        {quote && checkout && (
-          <form className="checkout" onSubmit={create}>
-            <h3>Dina uppgifter</h3>
-            {[
-              ["first_name", "Förnamn"],
-              ["last_name", "Efternamn"],
-              ["email", "E-post"],
-              ["phone", "Telefon"],
-            ].map(([key, label]) => (
-              <label key={key}>
-                {label}
-                <input
-                  required
-                  value={customer[key as keyof typeof customer]}
-                  onChange={(e) =>
-                    setCustomer({ ...customer, [key]: e.target.value })
-                  }
-                />
-              </label>
-            ))}
-            <label className="check">
-              <input type="checkbox" required /> Jag godkänner
-              uthyrningsvillkoren.
-            </label>
-            <button className="primary full" disabled={busy}>
-              {busy ? "Skapar bokning…" : "Skapa bokning"}
-            </button>
-          </form>
-        )}
       </div>
     </div>
+  );
+}
+
+function periodLabel(period: RentalPeriod | null) {
+  if (!period) return "Ingen period vald";
+  return `${period.startDate} ${period.startHour}:00 – ${period.endDate} ${period.endHour}:00`;
+}
+
+function CartPage({
+  cart,
+  site,
+  onNavigate,
+  onUpdateQuantity,
+}: {
+  cart: CartState;
+  site: SiteConfig | null;
+  onNavigate: (to: string) => void;
+  onUpdateQuantity: (productId: string, quantity: number) => void;
+}) {
+  if (!cart.items.length)
+    return (
+      <section className="section cart-page">
+        <div className="eyebrow">Din bokning</div>
+        <h1>Varukorgen är tom</h1>
+        <p className="lead">Lägg till en eller flera produkter för samma uthyrningsperiod.</p>
+        <button className="primary" onClick={() => onNavigate("/hyra")}>Se produkter</button>
+      </section>
+    );
+  return (
+    <section className="section cart-page">
+      <div className="eyebrow">Din bokning</div>
+      <h1>Varukorg</h1>
+      <p className="lead">Alla produkter bokas under samma period.</p>
+      <div className="cart-layout">
+        <div className="cart-lines">
+          <div className="cart-period"><strong>Vald period</strong><span>{periodLabel(cart.period)}</span></div>
+          {cart.items.map(({ product, quantity }) => (
+            <div className="cart-line" key={product.id}>
+              <img src={imageFor(product)} alt="" />
+              <div><strong>{product.name}</strong><small>{product.category || "Uthyrning"}</small></div>
+              <label>Antal<input type="number" min="0" value={quantity} onChange={(e) => onUpdateQuantity(product.id, Number(e.target.value) || 0)} /></label>
+            </div>
+          ))}
+        </div>
+        <div className="cart-next">
+          <h2>Redo för kassan?</h2>
+          <p>Pris och tillgänglighet kontrolleras igen innan bokningen skapas.</p>
+          <button className="primary full" onClick={() => onNavigate("/kassa")}>Gå till kassan →</button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SignaturePad({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawing = useRef(false);
+  const point = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    return { x: (event.clientX - rect.left) * (canvas.width / rect.width), y: (event.clientY - rect.top) * (canvas.height / rect.height) };
+  };
+  const start = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const p = point(event); if (!p) return;
+    const canvas = canvasRef.current!; const ctx = canvas.getContext("2d")!;
+    drawing.current = true; canvas.setPointerCapture(event.pointerId);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.strokeStyle = "#17333d"; ctx.lineWidth = 3; ctx.lineCap = "round";
+  };
+  const move = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawing.current) return; const p = point(event); if (!p) return;
+    const ctx = canvasRef.current!.getContext("2d")!; ctx.lineTo(p.x, p.y); ctx.stroke();
+    onChange(canvasRef.current!.toDataURL("image/png"));
+  };
+  return (
+    <div className="signature-wrap">
+      <canvas ref={canvasRef} width={700} height={190} onPointerDown={start} onPointerMove={move} onPointerUp={() => { drawing.current = false; }} onPointerCancel={() => { drawing.current = false; }} aria-label="Rita din signatur" />
+      <button type="button" className="text-link" onClick={() => { const canvas = canvasRef.current; if (!canvas) return; canvas.getContext("2d")!.clearRect(0, 0, canvas.width, canvas.height); onChange(""); }}>Rensa signatur</button>
+    </div>
+  );
+}
+
+function CheckoutPage({
+  cart,
+  site,
+  onNavigate,
+  onClearCart,
+}: {
+  cart: CartState;
+  site: SiteConfig | null;
+  onNavigate: (to: string) => void;
+  onClearCart: () => void;
+}) {
+  const [quote, setQuote] = useState<any>();
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [accepted, setAccepted] = useState(false);
+  const [signature, setSignature] = useState("");
+  const [signerName, setSignerName] = useState("");
+  const [customer, setCustomer] = useState({ first_name: "", last_name: "", email: "", phone: "" });
+  useEffect(() => {
+    if (!cart.period || !cart.items.length) return;
+    rentalApi.quoteCart(
+      cart.items.map((item): RentalCartLine => ({ product_id: item.product.id, quantity: item.quantity })),
+      new Date(`${cart.period.startDate}T${cart.period.startHour}:00`).toISOString(),
+      new Date(`${cart.period.endDate}T${cart.period.endHour}:00`).toISOString(),
+    ).then((result) => setQuote(result.quote)).catch((e) => setMessage(e.message));
+  }, [cart]);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!cart.period || !quote || !accepted || !signature) { setMessage("Fyll i uppgifter, godkänn villkoren och rita din signatur."); return; }
+    setBusy(true); setMessage("");
+    try {
+      const startAt = new Date(`${cart.period.startDate}T${cart.period.startHour}:00`).toISOString();
+      const endAt = new Date(`${cart.period.endDate}T${cart.period.endHour}:00`).toISOString();
+      const result = await rentalApi.createBooking({ items: cart.items.map((item) => ({ product_id: item.product.id, quantity: item.quantity })), start_at: startAt, end_at: endAt, customer, customer_notes: "" });
+      const booking = result.booking;
+      await rentalApi.signContract({ booking_id: booking.id, public_lookup_token: booking.public_lookup_token, signer_name: signerName, signature, accepted_terms: true });
+      const token = booking.public_lookup_token || "";
+      const confirmation = `${window.location.origin}/bokning/${booking.public_reference}?token=${encodeURIComponent(token)}`;
+      onClearCart();
+      if (window.location.protocol === "https:") {
+        const payment = await rentalApi.startPayment(booking.id, `${confirmation}&paid=1`, `${confirmation}&cancelled=1`);
+        if (payment.checkout_url) { window.location.href = payment.checkout_url; return; }
+      }
+      window.location.href = confirmation;
+    } catch (e: any) { setMessage(e.message); } finally { setBusy(false); }
+  };
+  if (!cart.items.length || !cart.period) return <section className="section"><div className="notice error">Varukorgen är tom.</div><button className="primary" onClick={() => onNavigate("/hyra")}>Till produkter</button></section>;
+  return (
+    <section className="section checkout-page">
+      <div className="eyebrow">Sista steget</div><h1>Kassa och avtal</h1>
+      <p className="lead">Kontrollera bokningen, fyll i dina uppgifter och signera uthyrningsavtalet med ditt finger eller mus.</p>
+      <div className="checkout-layout">
+        <form className="checkout-form" onSubmit={submit}>
+          <h2>Kunduppgifter</h2>
+          <div className="date-grid">{[["first_name", "Förnamn"], ["last_name", "Efternamn"], ["email", "E-post"], ["phone", "Telefon"]].map(([key, label]) => <label key={key}>{label}<input required value={customer[key as keyof typeof customer]} onChange={(e) => setCustomer({ ...customer, [key]: e.target.value })} /></label>)}</div>
+          <h2>Signera uthyrningsavtal</h2>
+          <p className="booking-hint">Genom signeringen godkänner du uthyrningsvillkoren och bokningsuppgifterna.</p>
+          <label>Namnförtydligande<input required value={signerName} onChange={(e) => setSignerName(e.target.value)} /></label>
+          <SignaturePad value={signature} onChange={setSignature} />
+          <label className="check"><input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} /> Jag godkänner uthyrningsvillkoren.</label>
+          {message && <div className="inline-error">{message}</div>}
+          <button className="primary full" disabled={busy || !quote}>{busy ? "Skapar avtal…" : "Signera och gå till betalning"}</button>
+        </form>
+        <aside className="checkout-summary"><h2>Din bokning</h2><p>{periodLabel(cart.period)}</p>{cart.items.map((item) => <div className="summary-row" key={item.product.id}><span>{item.product.name} × {item.quantity}</span><strong>{quote?.lines?.find((line: any) => line.product_id === item.product.id)?.quote?.subtotal ? money(quote.lines.find((line: any) => line.product_id === item.product.id).quote.subtotal, site?.currency) : "…"}</strong></div>)}{quote && <><div className="summary-row"><span>Moms</span><strong>{money(quote.vat_amount, site?.currency)}</strong></div><div className="summary-total">{money(quote.total, site?.currency)}</div></>}</aside>
+      </div>
+    </section>
   );
 }
 
@@ -786,10 +945,7 @@ function BookingPage({ reference }: { reference: string }) {
         <div className="loading">Hämtar bokning…</div>
       </section>
     );
-  const item = booking.items?.[0];
-  const product = Array.isArray(item?.product)
-    ? item.product[0]
-    : item?.product;
+  const items = booking.items || [];
   return (
     <section className="section confirmation">
       <div className="success-mark">✓</div>
@@ -803,9 +959,10 @@ function BookingPage({ reference }: { reference: string }) {
         .
       </p>
       <div className="summary">
-        <p>
-          <strong>{product?.name || "Uthyrning"}</strong>
-        </p>
+        {items.map((item: any, index: number) => {
+          const product = Array.isArray(item?.product) ? item.product[0] : item?.product;
+          return <p key={`${product?.slug || "item"}-${index}`}><strong>{product?.name || "Uthyrning"}</strong> × {item.quantity || 1}</p>;
+        })}
         <p>
           {dateTime(booking.start_at)} – {dateTime(booking.end_at)}
         </p>
@@ -813,7 +970,7 @@ function BookingPage({ reference }: { reference: string }) {
           {money(booking.total, booking.currency)}
         </p>
       </div>
-      {product?.location && <p>Hämtning: {product.location}</p>}
+      {items[0]?.product?.location && <p>Hämtning: {items[0].product.location}</p>}
       <p>
         Bekräftelsen skickas till{" "}
         {booking.customer?.email || "din e-postadress"}.

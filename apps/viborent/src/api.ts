@@ -38,6 +38,20 @@ export type AvailabilityCalendar = {
   }>;
 };
 
+export type RentalCartLine = {
+  product_id: string;
+  quantity: number;
+};
+
+export type RentalQuote = {
+  subtotal: number;
+  vat_amount: number;
+  deposit: number;
+  total: number;
+  currency: string;
+  lines?: Array<{ product_id: string; quantity: number; quote: Record<string, unknown> }>;
+};
+
 const baseUrl = (
   import.meta.env.VITE_PUBLIC_RENTAL_API_URL ||
   `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/vihem-public-rental`
@@ -85,13 +99,7 @@ export const rentalApi = {
     ),
   quote: (slug: string, startAt: string, endAt: string, quantity = 1) =>
     request<{
-      quote: {
-        subtotal: number;
-        vat_amount: number;
-        deposit: number;
-        total: number;
-        currency: string;
-      };
+      quote: RentalQuote;
     }>("quote", {
       method: "POST",
       body: JSON.stringify({
@@ -100,6 +108,11 @@ export const rentalApi = {
         end_at: endAt,
         quantity,
       }),
+    }),
+  quoteCart: (items: RentalCartLine[], startAt: string, endAt: string) =>
+    request<{ quote: RentalQuote }>("quote-cart", {
+      method: "POST",
+      body: JSON.stringify({ items, start_at: startAt, end_at: endAt }),
     }),
   createBooking: (payload: unknown) =>
     request<{
@@ -110,6 +123,17 @@ export const rentalApi = {
         quote: Record<string, number | string>;
       };
     }>("bookings", { method: "POST", body: JSON.stringify(payload) }),
+  signContract: (payload: {
+    booking_id: string;
+    public_lookup_token: string;
+    signer_name: string;
+    signature: string;
+    accepted_terms: boolean;
+  }) =>
+    request<{ booking: { id: string; public_reference: string; contract_status: string } }>(
+      "sign-contract",
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
   booking: (reference: string, token: string) =>
     request<{ booking: any }>("booking", {}, { reference, token }),
   startPayment: async (

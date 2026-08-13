@@ -299,7 +299,75 @@ Deno.serve(async (request) => {
       return json({ product, quote: data });
     }
 
+    if (request.method === "POST" && action === "quote-cart") {
+      const items = Array.isArray(body.items) ? body.items : [];
+      const startAt = text(body.start_at);
+      const endAt = text(body.end_at);
+      if (!items.length || !wholeHourRange(startAt, endAt))
+        return json({ error: "Varukorgen och en giltig heltimmeperiod krävs." }, 400);
+      const lines: any[] = [];
+      let subtotal = 0;
+      let vatAmount = 0;
+      let deposit = 0;
+      let currency = "SEK";
+      for (const item of items) {
+        const productId = text(item.product_id, 80);
+        const quantity = Math.max(1, Number(item.quantity) || 1);
+        const { data: product, error: productError } = await client
+          .from("vihem_rental_products")
+          .select("id,name,slug")
+          .eq("organisation_id", organisationId)
+          .eq("id", productId)
+          .eq("active", true)
+          .eq("visible_publicly", true)
+          .maybeSingle();
+        if (productError) throw productError;
+        if (!product) return json({ error: "En produkt i varukorgen hittades inte." }, 404);
+        const { data: quote, error: quoteError } = await client.rpc("vihem_rental_quote", {
+          target_product_id: product.id,
+          target_start_at: startAt,
+          target_end_at: endAt,
+          target_quantity: quantity,
+        });
+        if (quoteError) throw quoteError;
+        subtotal += Number(quote.subtotal || 0);
+        vatAmount += Number(quote.vat_amount || 0);
+        deposit += Number(quote.deposit || 0);
+        currency = quote.currency || currency;
+        lines.push({ product_id: product.id, product_name: product.name, quantity, quote });
+      }
+      return json({ quote: { subtotal, vat_amount: vatAmount, deposit, total: subtotal + vatAmount, currency, lines } });
+    }
+
     if (request.method === "POST" && action === "bookings") {
+      if (Array.isArray(body.items)) {
+        const startAt = text(body.start_at);
+        const endAt = text(body.end_at);
+        if (!wholeHourRange(startAt, endAt))
+          return json({ error: "Bokningar måste börja och sluta på hela timmar." }, 400);
+        const items = body.items.map((item: any) => ({
+          product_id: text(item.product_id, 80),
+          quantity: Math.max(1, Number(item.quantity) || 1),
+        }));
+        const { data, error } = await client.rpc("vihem_create_rental_booking_multi", {
+          target_items: items,
+          target_start_at: startAt,
+          target_end_at: endAt,
+          target_customer: body.customer || {},
+          target_source: "viborent.se",
+          target_status: "pending",
+          target_customer_notes: text(body.customer_notes, 2000),
+        });
+        if (error) throw error;
+        const { data: lookup, error: lookupError } = await client
+          .from("vihem_rental_bookings")
+          .select("public_lookup_token")
+          .eq("id", data?.id)
+          .eq("organisation_id", organisationId)
+          .maybeSingle();
+        if (lookupError) throw lookupError;
+        return json({ booking: { ...data, public_lookup_token: lookup?.public_lookup_token || null } }, 201);
+      }
       const slug = text(body.slug);
       if (!wholeHourRange(text(body.start_at), text(body.end_at)))
         return json(
@@ -346,6 +414,41 @@ Deno.serve(async (request) => {
       );
     }
 
+    if (request.method === "POST" && action === "sign-contract") {
+      const bookingId = text(body.booking_id, 80);
+      const token = text(body.public_lookup_token, 100);
+      const signerName = text(body.signer_name, 200);
+      const signature = text(body.signature, 500000);
+      if (!bookingId || !token || !signerName || !signature || body.accepted_terms !== true)
+        return json({ error: "Namn, signatur och godkända villkor krävs." }, 400);
+      const { data: booking, error: bookingError } = await client
+        .from("vihem_rental_bookings")
+        .select("id,public_reference,contract_status")
+        .eq("id", bookingId)
+        .eq("organisation_id", organisationId)
+        .eq("public_lookup_token", token)
+        .maybeSingle();
+      if (bookingError) throw bookingError;
+      if (!booking) return json({ error: "Bokningen hittades inte." }, 404);
+      if (booking.contract_status === "signed") return json({ booking });
+      const { data: updated, error: updateError } = await client
+        .from("vihem_rental_bookings")
+        .update({
+          contract_status: "signed",
+          contract_signed_at: new Date().toISOString(),
+          contract_signature: signature,
+          contract_signer_name: signerName,
+        })
+        .eq("id", booking.id)
+        .eq("organisation_id", organisationId)
+        .eq("contract_status", "pending_signature")
+        .select("id,public_reference,contract_status")
+        .maybeSingle();
+      if (updateError) throw updateError;
+      if (!updated) return json({ error: "Avtalet kunde inte signeras. Försök igen." }, 409);
+      return json({ booking: updated });
+    }
+
     if (request.method === "GET" && action === "booking") {
       const reference = text(url.searchParams.get("reference"));
       const token = text(url.searchParams.get("token"), 100);
@@ -354,7 +457,7 @@ Deno.serve(async (request) => {
       const { data: booking, error: bookingError } = await client
         .from("vihem_rental_bookings")
         .select(
-          "id,public_reference,status,payment_status,start_at,end_at,subtotal,vat_amount,deposit,total,currency,customer_notes,customer:vihem_rental_customers(first_name,last_name,email,phone),items:vihem_rental_booking_items(quantity,product:vihem_rental_products(name,slug,pickup_instructions,return_instructions,location))",
+          "id,public_reference,status,payment_status,contract_status,contract_signer_name,contract_signed_at,start_at,end_at,subtotal,vat_amount,deposit,total,currency,customer_notes,customer:vihem_rental_customers(first_name,last_name,email,phone),items:vihem_rental_booking_items(quantity,product:vihem_rental_products(name,slug,pickup_instructions,return_instructions,location))",
         )
         .eq("organisation_id", organisationId)
         .eq("public_reference", reference)
