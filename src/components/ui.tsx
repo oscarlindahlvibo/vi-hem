@@ -174,8 +174,14 @@ interface EmptyStateProps {
 }
 
 export function EmptyState({ icon, title, description, action }: EmptyStateProps) {
-  const Icon = typeof icon === 'function' ? icon : null;
-  const iconNode = Icon ? <Icon className="w-12 h-12" /> : (icon as React.ReactNode);
+  const isIconElement = React.isValidElement(icon);
+  const isIconComponent = typeof icon === 'function'
+    || (typeof icon === 'object' && icon !== null && '$$typeof' in icon && !isIconElement);
+  const iconNode = isIconElement
+    ? icon
+    : isIconComponent
+      ? React.createElement(icon as React.ElementType, { className: 'w-12 h-12' })
+      : icon as React.ReactNode;
   return (
     <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
       {icon && (
