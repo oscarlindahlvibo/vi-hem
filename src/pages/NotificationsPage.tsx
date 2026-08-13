@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Card, Button, Badge, PageHeader, EmptyState, LoadingPage } from '../components/ui';
+import { Button, Badge, PageHeader, EmptyState, LoadingPage } from '../components/ui';
 import { formatDateTime } from '../lib/utils';
 import { Notification } from '../types';
 import {
@@ -22,9 +22,51 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const fetchNotifications = useCallback(async () => {
+    if (!user?.id) {
+      setNotifications([]);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setErrorMessage(null);
+      const notificationSince = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+      const { data, error } = await supabase
+        .from('vihem_notifications')
+        .select('*')
+        .eq('user_id', user.id)
+        .gte('created_at', notificationSince)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setNotifications(data || []);
+
+      // Retention cleanup is best-effort and never blocks the read.
+      void supabase
+        .from('vihem_notifications')
+        .delete()
+        .eq('user_id', user.id)
+        .lt('created_at', notificationSince)
+        .then(({ error: cleanupError }) => {
+          if (cleanupError) console.warn('Notification retention cleanup skipped:', cleanupError);
+        });
+    } catch (error) {
+      console.error('Error fetching vihem_notifications:', error);
+      setErrorMessage('Aviseringarna kunde inte laddas just nu. Kontrollera anslutningen och försök igen.');
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id]);
 
   useEffect(() => {
-    fetchNotifications();
+    void fetchNotifications();
+    if (!user?.id) return;
+
     // Set up real-time subscription
     const channel = supabase
       .channel('vihem_notifications')
@@ -37,44 +79,15 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
           filter: `user_id=eq.${user?.id}`,
         },
         () => {
-          fetchNotifications();
+          void fetchNotifications();
         }
       )
       .subscribe();
 
     return () => {
-      channel.unsubscribe();
+      void channel.unsubscribe();
     };
-  }, [user?.id]);
-
-  const fetchNotifications = async () => {
-    try {
-      setLoading(true);
-      const notificationSince = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-
-      // Retention is enforced in the database as well, but this removes older
-      // rows for users who have not received a new notification recently.
-      await supabase
-        .from('vihem_notifications')
-        .delete()
-        .eq('user_id', user?.id)
-        .lt('created_at', notificationSince);
-
-      const { data, error } = await supabase
-        .from('vihem_notifications')
-        .select('*')
-        .eq('user_id', user?.id)
-        .gte('created_at', notificationSince)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setNotifications(data || []);
-    } catch (error) {
-      console.error('Error fetching vihem_notifications:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [fetchNotifications, user?.id]);
 
   const markAsRead = async (notificationId: string) => {
     try {
@@ -159,7 +172,17 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
   const unreadCount = notifications.filter((n) => !n.read_at).length;
 
   if (loading && notifications.length === 0) {
-    return <LoadingPage />;
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <PageHeader title="Aviseringar" icon={Bell} />
+        <div className="mx-auto flex max-w-4xl items-center justify-center px-4 py-20">
+          <div className="text-center">
+            <LoadingPage />
+            <p className="-mt-16 text-sm text-gray-500">Laddar dina aviseringar...</p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -182,7 +205,16 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
       />
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {notifications.length === 0 ? (
+        {errorMessage ? (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+            <Bell className="mx-auto h-8 w-8 text-red-500" />
+            <h2 className="mt-3 font-semibold text-red-900">Kunde inte ladda aviseringar</h2>
+            <p className="mt-1 text-sm text-red-700">{errorMessage}</p>
+            <Button className="mt-4" onClick={() => void fetchNotifications()}>
+              Försök igen
+            </Button>
+          </div>
+        ) : notifications.length === 0 ? (
           <EmptyState
             icon={Bell}
             title="Inga aviseringar"
