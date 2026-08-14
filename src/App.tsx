@@ -42,6 +42,7 @@ import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { StaffDocumentScannerPage } from './pages/StaffDocumentScannerPage';
 import { RentalPage } from './pages/RentalPage';
 import { InventoryPage } from './pages/InventoryPage';
+import { MailPage } from './pages/MailPage';
 import type { ModuleKey } from './types';
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasError: boolean }> {
@@ -371,6 +372,10 @@ function AppInner() {
       case 'documents':
         return <DocumentsPage onNavigate={navigate} />;
 
+      case 'mail-search':
+        if (!isStaff) return renderDashboard();
+        return <MailPage onNavigate={navigate} />;
+
       case 'news':
         return <NewsPage onNavigate={navigate} />;
 
@@ -442,11 +447,11 @@ function AppInner() {
 
       case 'admin-settings':
         if (!isAdmin) return renderDashboard();
-        return <PlatformSettingsPage />;
+        return <PlatformSettingsPage onNavigate={navigate} />;
 
       case 'admin-cellsynth':
         if (!isAdmin) return renderDashboard();
-        return <PlatformSettingsPage initialSection="cellsynth" />;
+        return <PlatformSettingsPage initialSection="cellsynth" onNavigate={navigate} />;
 
       case 'finance':
         if (!isAdmin || !enabledModules.finance) return renderDashboard();

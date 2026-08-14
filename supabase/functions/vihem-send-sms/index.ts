@@ -5,7 +5,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const text = (value: unknown, max = 5000) => String(value ?? "").trim().slice(0, max);
 
 function normalisePhone(value: unknown) {
-  const raw = text(value, 40).replace(/[\s()\-]/g, "");
+  const raw = text(value, 40).replace(/[\s()-]/g, "");
   if (raw.startsWith("+")) return `00${raw.slice(1)}`;
   if (raw.startsWith("0")) return `0046${raw.slice(1)}`;
   return raw;

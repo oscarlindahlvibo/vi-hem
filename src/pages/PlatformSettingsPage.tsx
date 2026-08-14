@@ -46,9 +46,9 @@ const emptyBankIdForm = {
 
 const emptySmsForm = { enabled: false, sender: '' };
 
-export function PlatformSettingsPage({ initialSection = 'ai' }: { initialSection?: 'ai' | 'bankid' | 'cellsynth' | 'services' } = {}) {
+export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { initialSection?: 'ai' | 'bankid' | 'cellsynth' | 'services' | 'google'; onNavigate?: (page: string) => void } = {}) {
   const { user } = useAuth();
-  const [activeSection, setActiveSection] = useState<'ai' | 'bankid' | 'cellsynth' | 'services'>(initialSection);
+  const [activeSection, setActiveSection] = useState<'ai' | 'bankid' | 'cellsynth' | 'services' | 'google'>(initialSection);
   const [ocrSettings, setOcrSettings] = useState<OcrProviderSettings | null>(null);
   const [ocrSettingsForm, setOcrSettingsForm] = useState(emptyOcrSettingsForm);
   const [ocrSettingsMessage, setOcrSettingsMessage] = useState('');
@@ -245,6 +245,7 @@ export function PlatformSettingsPage({ initialSection = 'ai' }: { initialSection
       <div className="flex gap-2 overflow-x-auto pb-1">
         {[
           ['ai', 'AI & OCR'],
+          ['google', 'Google Workspace / E-post'],
           ['bankid', 'BankID'],
           ['cellsynth', 'Cellsynt SMS'],
           ['services', 'Tilläggstjänster'],
@@ -368,6 +369,26 @@ export function PlatformSettingsPage({ initialSection = 'ai' }: { initialSection
               </div>
             </div>
           )}
+        </Card>
+      )}
+
+      {activeSection === 'google' && (
+        <Card className="p-5">
+          <div className="flex items-start gap-3">
+            <KeyRound className="mt-0.5 h-5 w-5 text-blue-600" />
+            <div>
+              <h2 className="text-lg font-bold text-slate-950">Google Workspace / E-post</h2>
+              <p className="mt-1 max-w-2xl text-sm text-slate-500">
+                Koppla godkända Workspace-mailboxar för read-only-sökning efter fakturor, kvitton och underlag. Själva service account-nyckeln lagras som Supabase secret och kan aldrig läsas av frontend.
+              </p>
+              <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+                Gmail-integrationen använder endast <code>gmail.readonly</code>. Den kan inte skicka, radera, arkivera eller ändra e-post.
+              </div>
+              <Button className="mt-4" onClick={() => onNavigate?.('mail-search')}>
+                Öppna E-post & underlag
+              </Button>
+            </div>
+          </div>
         </Card>
       )}
 
