@@ -449,6 +449,10 @@ function AppInner() {
         if (!isAdmin) return renderDashboard();
         return <PlatformSettingsPage onNavigate={navigate} />;
 
+      case 'admin-google-workspace':
+        if (!isAdmin) return renderDashboard();
+        return <PlatformSettingsPage initialSection="google" onNavigate={navigate} />;
+
       case 'admin-cellsynth':
         if (!isAdmin) return renderDashboard();
         return <PlatformSettingsPage initialSection="cellsynth" onNavigate={navigate} />;
