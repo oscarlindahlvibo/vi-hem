@@ -29,7 +29,7 @@ export function LoginPage() {
   async function handleBankIDLogin() {
     setError('');
     setBankIDLoading(true);
-    const { error } = await signInWithBankID();
+    const { error } = await signInWithBankID(email);
     if (error) setError(error);
     setBankIDLoading(false);
   }

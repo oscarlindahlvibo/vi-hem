@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { BANKID_ENABLED } from '../lib/bankid';
+import { BANKID_ENABLED, collectBankIDOrder, initiateBankIDAuth, bankIDLaunchUrl } from '../lib/bankid';
 import type { Profile } from '../types';
 
 interface AuthContextType {
@@ -12,7 +12,7 @@ interface AuthContextType {
    * Returns an error string if BankID is not configured or authentication fails.
    * When BANKID_ENABLED is false this always returns a descriptive error.
    */
-  signInWithBankID: () => Promise<{ error: string | null }>;
+  signInWithBankID: (email: string) => Promise<{ error: string | null }>;
   /**
    * Links the current user's account to a BankID personal number.
    * Should be called after a successful BankID auth order resolves.
@@ -202,14 +202,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error: null };
   }
 
-  async function signInWithBankID(): Promise<{ error: string | null }> {
-    if (!BANKID_ENABLED) {
-      return { error: 'BankID-inloggning är inte aktiverat ännu. Kontakta systemadministratören.' };
+  async function signInWithBankID(email: string): Promise<{ error: string | null }> {
+    if (!BANKID_ENABLED) return { error: 'BankID-inloggning är inte aktiverat.' };
+    if (!email.trim()) return { error: 'Ange din e-postadress innan du väljer BankID.' };
+    try {
+      const order = await initiateBankIDAuth({ environment: 'test', edgeFunctionUrl: '' }, '', email.trim());
+      const launchUrl = bankIDLaunchUrl(order);
+      if (launchUrl) window.open(launchUrl, '_blank', 'noopener,noreferrer');
+      if (order.qrImage) window.open(`${order.qrImage}${order.qrImage.includes('?') ? '&' : '?'}t=${Date.now()}`, '_blank', 'noopener,noreferrer');
+      for (let attempt = 0; attempt < 45; attempt += 1) {
+        await new Promise(resolve => window.setTimeout(resolve, 2000));
+        const result = await collectBankIDOrder({ environment: 'test', edgeFunctionUrl: '' }, order.orderRef);
+        if (result.status === 'failed') return { error: result.error || 'BankID-inloggningen misslyckades eller avbröts.' };
+        if (result.status === 'complete') {
+          if (result.magic_link) { window.location.assign(result.magic_link); return { error: null }; }
+          return { error: 'BankID godkändes, men kontot saknar en användbar e-postadress.' };
+        }
+      }
+      return { error: 'BankID-sessionen tog för lång tid. Försök igen.' };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'BankID-inloggningen misslyckades.' };
     }
-    // When BANKID_ENABLED: call Edge Function to initiate BankID auth order,
-    // poll for completion, then use the returned personal number to find or
-    // create a Supabase auth user and sign in via a custom token.
-    return { error: 'BankID är inte konfigurerat.' };
   }
 
   async function linkBankID(personalNumber: string, linkedAt: string): Promise<{ error: string | null }> {

@@ -43,6 +43,9 @@ const emptyBankIdForm = {
   login_enabled: false,
   signing_enabled: false,
   provider_note: '',
+  api_user: '',
+  password: '',
+  company_api_guid: '',
 };
 
 const emptySmsForm = { enabled: false, sender: '' };
@@ -88,7 +91,7 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
     setSmsMessage('');
     setGoogleMessage('');
 
-    const [ocrResult, organisationResult, googleResult] = await Promise.all([
+    const [ocrResult, organisationResult, googleResult, bankIdResult] = await Promise.all([
       supabase.functions.invoke('vihem-manage-ocr-settings', { body: { action: 'get' } }),
       supabase
         .from('vihem_organisations')
@@ -96,6 +99,7 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
         .eq('id', organisationId)
         .maybeSingle(),
       supabase.functions.invoke('vihem-manage-google-workspace-settings', { body: { action: 'get' } }),
+      supabase.functions.invoke('vihem-bankid', { body: { action: 'get_settings' } }),
     ]);
 
     if (ocrResult.error) {
@@ -113,7 +117,12 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
     }
     if (smsError && !smsError.message.includes('schema cache')) setSmsMessage(smsError.message);
 
-    if (organisationResult.error) {
+    if (bankIdResult.error) {
+      setBankIdMessage(bankIdResult.error.message || 'Kunde inte hämta BankID-inställningar.');
+    } else if (bankIdResult.data?.settings) {
+      const settings = bankIdResult.data.settings;
+      setBankIdForm(prev => ({ ...prev, enabled: Boolean(settings.enabled), environment: String(settings.environment || 'test'), login_enabled: Boolean(settings.login_enabled), signing_enabled: Boolean(settings.signing_enabled), provider_note: String(settings.provider_note || '') }));
+    } else if (organisationResult.error) {
       setBankIdMessage(organisationResult.error.message || 'Kunde inte hämta organisationsinställningar.');
     } else {
       const settings = (organisationResult.data?.settings || {}) as Record<string, any>;
@@ -124,6 +133,9 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
         login_enabled: Boolean(bankid.login_enabled),
         signing_enabled: Boolean(bankid.signing_enabled),
         provider_note: String(bankid.provider_note || ''),
+        api_user: '',
+        password: '',
+        company_api_guid: '',
       });
     }
 
@@ -217,37 +229,10 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
     setSaving(true);
     setBankIdMessage('');
 
-    const { data: organisation, error: loadError } = await supabase
-      .from('vihem_organisations')
-      .select('settings')
-      .eq('id', organisationId)
-      .maybeSingle();
-
-    if (loadError) {
-      setBankIdMessage(loadError.message);
-      setSaving(false);
-      return;
-    }
-
-    const nextSettings = {
-      ...((organisation?.settings || {}) as Record<string, unknown>),
-      bankid: {
-        enabled: bankIdForm.enabled,
-        environment: bankIdForm.environment,
-        login_enabled: bankIdForm.login_enabled,
-        signing_enabled: bankIdForm.signing_enabled,
-        provider_note: bankIdForm.provider_note.trim(),
-        updated_at: new Date().toISOString(),
-      },
-    };
-
-    const { error: updateError } = await supabase
-      .from('vihem_organisations')
-      .update({ settings: nextSettings })
-      .eq('id', organisationId);
+    const { error: updateError } = await supabase.functions.invoke('vihem-bankid', { body: { action: 'save_settings', enabled: bankIdForm.enabled, environment: bankIdForm.environment, login_enabled: bankIdForm.login_enabled, signing_enabled: bankIdForm.signing_enabled, provider_note: bankIdForm.provider_note.trim(), api_user: bankIdForm.api_user.trim(), password: bankIdForm.password.trim(), company_api_guid: bankIdForm.company_api_guid.trim() } });
 
     setSaving(false);
-    setBankIdMessage(updateError ? updateError.message : 'BankID-inställningarna är sparade.');
+    setBankIdMessage(updateError ? updateError.message : 'BankID-inställningarna är sparade krypterat.');
   };
 
   const saveSmsSettings = async () => {
@@ -501,10 +486,13 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
               <input type="checkbox" checked={bankIdForm.signing_enabled} onChange={event => setBankIdForm(prev => ({ ...prev, signing_enabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
               Tillåt BankID-signering
             </label>
+            <Input label="BankSignering API-användare" type="text" autoComplete="off" value={bankIdForm.api_user} onChange={event => setBankIdForm(prev => ({ ...prev, api_user: event.target.value }))} placeholder="Klistra in API-användare" />
+            <Input label="BankSignering lösenord" type="password" autoComplete="new-password" value={bankIdForm.password} onChange={event => setBankIdForm(prev => ({ ...prev, password: event.target.value }))} placeholder="Klistra in lösenord" />
+            <Input label="Company API GUID" type="password" autoComplete="new-password" value={bankIdForm.company_api_guid} onChange={event => setBankIdForm(prev => ({ ...prev, company_api_guid: event.target.value }))} placeholder="Klistra in Company API GUID" />
             <Textarea className="lg:col-span-2" label="Anteckning/provider" value={bankIdForm.provider_note} onChange={event => setBankIdForm(prev => ({ ...prev, provider_note: event.target.value }))} rows={3} />
           </div>
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            Det här sparar organisationens val, men BankID kräver fortfarande edge function, RP-certifikat och serverhemligheter innan knapparna kan aktiveras i skarpt flöde.
+            Nycklarna krypteras server-side och visas aldrig igen. Testmiljön använder BankSignerings test-API. Produktion kräver att servern har <code>BANKSIGN_PRODUCTION_SIGN_URL</code> och <code>BANKSIGN_PRODUCTION_COLLECT_URL</code> konfigurerade.
           </div>
           {bankIdMessage && <p className="mt-4 text-sm font-semibold text-slate-700">{bankIdMessage}</p>}
         </Card>
