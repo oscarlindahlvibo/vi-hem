@@ -192,8 +192,53 @@ async function searchMailbox(db: any, organisationId: string, account: MailAccou
 function dayOf(timestamp: number) { return new Date(timestamp).toISOString().slice(0, 10); }
 function addDay(value: string) { const date = new Date(`${value}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + 1); return date.toISOString().slice(0, 10); }
 function scoreText(text: string, query: string, mode: string) { const t = text.toLowerCase(), q = query.toLowerCase(); let score = t.includes(q) ? 50 : 0; for (const word of q.split(/\s+/).filter(Boolean)) if (t.includes(word)) score += 5; if (mode === "invoice" && /(faktura|invoice|kvitto|receipt|ocr|förfall)/i.test(t)) score += 20; return score; }
-function normalizeMessage(m: any) { const headers = Object.fromEntries((m.payload?.headers || []).map((h: any) => [h.name.toLowerCase(), h.value])); return { id: m.id, thread_id: m.threadId, subject: headers.subject || "", from: headers.from || "", to: headers.to || "", date: headers.date || "", snippet: m.snippet || "", body: extractBody(m.payload), attachments: collectAttachments(m.payload) }; }
-function extractBody(part: any): string { if (!part) return ""; if (part.mimeType === "text/plain" && part.body?.data) return decode(part.body.data); return (part.parts || []).map(extractBody).filter(Boolean).join("\n").slice(0, 30000); }
+function normalizeMessage(m: any) {
+  const headers = Object.fromEntries((m.payload?.headers || []).map((h: any) => [h.name.toLowerCase(), h.value]));
+  const bodies = collectBodies(m.payload);
+  const plain = bodies.plain.join("\n").trim();
+  const htmlText = htmlToText(bodies.html.join("\n"));
+  const plainIsHtmlFallback = /please use an email client supporting html email|click this link to view the email online/i.test(plain);
+  return {
+    id: m.id,
+    thread_id: m.threadId,
+    subject: headers.subject || "",
+    from: headers.from || "",
+    to: headers.to || "",
+    date: headers.date || "",
+    snippet: m.snippet || "",
+    // Some Gmail messages are HTML-only. Prefer the sender's plain text when
+    // available, otherwise expose a readable text version of the HTML body.
+    body: ((plain && !plainIsHtmlFallback ? plain : htmlText || plain) || m.snippet || "").slice(0, 30000),
+    attachments: collectAttachments(m.payload),
+  };
+}
+function collectBodies(part: any, out: { plain: string[]; html: string[] } = { plain: [], html: [] }) {
+  if (!part) return out;
+  if (part.mimeType === "text/plain" && part.body?.data) out.plain.push(decode(part.body.data));
+  if (part.mimeType === "text/html" && part.body?.data) out.html.push(decode(part.body.data));
+  for (const child of part.parts || []) collectBodies(child, out);
+  return out;
+}
+function htmlToText(value: string): string {
+  return value
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?\s*>/gi, "\n")
+    .replace(/<\/(p|div|li|tr|h[1-6])\s*>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/(?:&#39;|&apos;)/gi, "'")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 function collectAttachments(part: any, out: any[] = []) { if (!part) return out; if (part.filename && part.body?.attachmentId) out.push({ filename: part.filename, mime_type: part.mimeType, attachment_id: part.body.attachmentId, size: part.body.size || 0 }); for (const child of part.parts || []) collectAttachments(child, out); return out; }
 function decode(s: string) { try { return new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0))); } catch { return ""; } }
 function pem(s: string) { const b = atob(s.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g, "")); return Uint8Array.from(b, c => c.charCodeAt(0)); }
