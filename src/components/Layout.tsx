@@ -86,7 +86,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['admin'] },
       { label: 'E-post & underlag', icon: <Mail className="w-5 h-5" />, page: 'mail-search', roles: ['staff', 'admin'] },
     ] },
-    { label: 'Personal & kommunikation', icon: <Users className="w-5 h-5" />, items: [
+    { label: 'Personal', icon: <Users className="w-5 h-5" />, items: [
       { label: 'Personal', icon: <Settings className="w-5 h-5" />, page: 'admin-staff', roles: ['admin'] },
       { label: 'Chatt', icon: <MessageCircle className="w-5 h-5" />, page: 'chat', roles: ['tenant', 'staff', 'admin'] },
       { label: 'Nyheter', icon: <Newspaper className="w-5 h-5" />, page: 'news', roles: ['tenant', 'staff', 'admin'] },
