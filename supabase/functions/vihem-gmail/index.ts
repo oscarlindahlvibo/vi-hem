@@ -69,7 +69,14 @@ Deno.serve(async (req) => {
         const keywords = parseKeywords(body.keywords);
         const name = String(body.name || "").trim();
         if (!name || keywords.length === 0) return out({ error: "Ange namn och minst ett sökord.", code: "INVALID_WATCH_RULE" }, 400);
-        const values = { name, keywords, match_mode: body.match_mode === "all" ? "all" : "any", enabled: body.enabled !== false, account_ids: Array.isArray(body.account_ids) ? body.account_ids.map(String) : [], updated_by: userId, updated_at: new Date().toISOString() };
+        const accountIds = Array.isArray(body.account_ids) ? [...new Set(body.account_ids.map(String).filter(Boolean))] : [];
+        if (accountIds.length) {
+          const { data: matchedAccounts, error: accountError } = await db.from("vihem_mail_accounts").select("id").eq("organisation_id", profile.organisation_id).in("id", accountIds);
+          if (accountError) return out({ error: accountError.message, code: "ACCOUNT_LOOKUP_FAILED" }, 400);
+          const validIds = new Set((matchedAccounts || []).map((account: { id: string }) => account.id));
+          if (accountIds.some((id) => !validIds.has(id))) return out({ error: "En eller flera valda mailboxar finns inte längre i organisationen. Ladda om sidan och försök igen.", code: "ACCOUNT_NOT_FOUND" }, 400);
+        }
+        const values = { name, keywords, match_mode: body.match_mode === "all" ? "all" : "any", enabled: body.enabled !== false, account_ids: accountIds, updated_by: userId, updated_at: new Date().toISOString() };
         if (action === "create_watch_rule") {
           const { data, error } = await db.from("vihem_mail_watch_rules").insert({ ...values, organisation_id: profile.organisation_id, created_by: userId }).select("id").single();
           if (error) return out({ error: error.message, code: "WATCH_RULE_SAVE_FAILED" }, 400);
