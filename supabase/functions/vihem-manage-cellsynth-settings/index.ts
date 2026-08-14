@@ -34,6 +34,10 @@ Deno.serve(async (req) => {
       encrypted_api_url: apiUrl ? await encrypt(apiUrl, secret) : existing?.encrypted_api_url || "",
       username_hint: username ? hint(username) : existing.username_hint,
       api_url_hint: apiUrl ? hint(apiUrl) : existing?.api_url_hint || "",
+      delivery_report_token: body.regenerate_delivery_token || !existing?.delivery_report_token
+        ? token()
+        : existing.delivery_report_token,
+      delivery_report_enabled: body.delivery_report_enabled !== false,
       updated_at: new Date().toISOString(),
     };
     const { data, error } = await db.from("vihem_sms_settings").upsert(row, { onConflict: "organisation_id" }).select("*").single();
@@ -43,8 +47,9 @@ Deno.serve(async (req) => {
 });
 
 async function getSettings(db: any, organisationId: string) { const { data } = await db.from("vihem_sms_settings").select("*").eq("organisation_id", organisationId).maybeSingle(); return data; }
-function publicSettings(s: any) { return { enabled: Boolean(s?.enabled), sender: s?.sender || "", has_username: Boolean(s?.encrypted_username), username_hint: s?.username_hint || "", has_password: Boolean(s?.encrypted_password), has_api_url: Boolean(s?.encrypted_api_url), api_url_hint: s?.api_url_hint || "", updated_at: s?.updated_at || null }; }
+function publicSettings(s: any) { return { enabled: Boolean(s?.enabled), sender: s?.sender || "", has_username: Boolean(s?.encrypted_username), username_hint: s?.username_hint || "", has_password: Boolean(s?.encrypted_password), has_api_url: Boolean(s?.encrypted_api_url), api_url_hint: s?.api_url_hint || "", delivery_report_token: s?.delivery_report_token || "", delivery_report_enabled: s?.delivery_report_enabled !== false, updated_at: s?.updated_at || null }; }
 function encryptionSecret(serviceKey: string) { return Deno.env.get("VIHEM_CELLSYNT_SECRET_KEY") || Deno.env.get("VIHEM_ACCOUNTING_SECRET_KEY") || serviceKey; }
 async function encrypt(value: string, secret: string) { const enc = new TextEncoder(); const hash = await crypto.subtle.digest("SHA-256", enc.encode(secret)); const key = await crypto.subtle.importKey("raw", hash, "AES-GCM", false, ["encrypt"]); const iv = crypto.getRandomValues(new Uint8Array(12)); const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode(value)); const all = new Uint8Array(iv.length + cipher.byteLength); all.set(iv); all.set(new Uint8Array(cipher), iv.length); return btoa(String.fromCharCode(...all)); }
 function hint(value: string) { return value.length > 8 ? `${value.slice(0, 4)}...${value.slice(-4)}` : "sparad"; }
+function token() { return `${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "")}`; }
 function json(data: Record<string, unknown>, status = 200) { return new Response(JSON.stringify(data), { status, headers: { ...cors, "content-type": "application/json" } }); }

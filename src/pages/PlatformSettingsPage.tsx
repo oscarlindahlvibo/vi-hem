@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bot, KeyRound, ShieldCheck, Sparkles } from 'lucide-react';
+import { Bot, Copy, KeyRound, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Badge, Button, Card, Input, Select, Textarea } from '../components/ui';
@@ -48,7 +48,7 @@ const emptyBankIdForm = {
   company_api_guid: '',
 };
 
-const emptySmsForm = { enabled: false, sender: '', username: '', password: '', api_url: '' };
+const emptySmsForm = { enabled: false, sender: '', username: '', password: '', api_url: '', delivery_report_token: '', delivery_report_enabled: true };
 
 export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { initialSection?: 'ai' | 'bankid' | 'cellsynth' | 'services' | 'google'; onNavigate?: (page: string) => void } = {}) {
   const { user } = useAuth();
@@ -60,6 +60,7 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
   const [bankIdMessage, setBankIdMessage] = useState('');
   const [smsForm, setSmsForm] = useState(emptySmsForm);
   const [smsMessage, setSmsMessage] = useState('');
+  const [smsDeliveryUrl, setSmsDeliveryUrl] = useState('');
   const [googleSettings, setGoogleSettings] = useState<GoogleWorkspaceSettings | null>(null);
   const [googleJson, setGoogleJson] = useState('');
   const [googleMessage, setGoogleMessage] = useState('');
@@ -110,7 +111,8 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
 
     const { data: smsSettings, error: smsError } = await supabase.functions.invoke('vihem-manage-cellsynth-settings', { body: { action: 'get' } });
     const sms = smsSettings?.settings;
-    setSmsForm({ enabled: Boolean(sms?.enabled), sender: String(sms?.sender || ''), username: '', password: '', api_url: '' });
+    setSmsForm({ enabled: Boolean(sms?.enabled), sender: String(sms?.sender || ''), username: '', password: '', api_url: '', delivery_report_token: String(sms?.delivery_report_token || ''), delivery_report_enabled: sms?.delivery_report_enabled !== false });
+    setSmsDeliveryUrl(buildDeliveryReportUrl(String(sms?.delivery_report_token || '')));
     if (!googleResult.error) {
       setGoogleSettings((googleResult.data?.settings ?? null) as GoogleWorkspaceSettings | null);
     } else {
@@ -239,14 +241,35 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
   const saveSmsSettings = async () => {
     if (!organisationId) return;
     setSaving(true); setSmsMessage('');
-    const { error } = await supabase.functions.invoke('vihem-manage-cellsynth-settings', { body: { action: 'save', enabled: smsForm.enabled, sender: smsForm.sender.trim(), username: smsForm.username.trim(), password: smsForm.password.trim(), api_url: smsForm.api_url.trim() } });
+    const { data, error } = await supabase.functions.invoke('vihem-manage-cellsynth-settings', { body: { action: 'save', enabled: smsForm.enabled, sender: smsForm.sender.trim(), username: smsForm.username.trim(), password: smsForm.password.trim(), api_url: smsForm.api_url.trim(), delivery_report_enabled: smsForm.delivery_report_enabled } });
     setSaving(false);
     if (error) {
       setSmsMessage(await getFunctionErrorMessage(error, 'Kunde inte spara Cellsynt-inställningarna.'));
       return;
     }
     setSmsMessage('Cellsynt-inställningarna är sparade krypterat.');
+    const token = String(data?.settings?.delivery_report_token || smsForm.delivery_report_token || '');
+    setSmsForm(prev => ({ ...prev, delivery_report_token: token }));
+    setSmsDeliveryUrl(buildDeliveryReportUrl(token));
     if (!error) setSmsForm(prev => ({ ...prev, username: '', password: '', api_url: '' }));
+  };
+
+  const regenerateSmsDeliveryUrl = async () => {
+    if (!organisationId) return;
+    setSaving(true); setSmsMessage('');
+    const { data, error } = await supabase.functions.invoke('vihem-manage-cellsynth-settings', { body: { action: 'save', enabled: smsForm.enabled, sender: smsForm.sender.trim(), username: smsForm.username.trim(), password: smsForm.password.trim(), api_url: smsForm.api_url.trim(), delivery_report_enabled: smsForm.delivery_report_enabled, regenerate_delivery_token: true } });
+    setSaving(false);
+    if (error) { setSmsMessage(await getFunctionErrorMessage(error, 'Kunde inte generera ny leveransrapportlänk.')); return; }
+    const token = String(data?.settings?.delivery_report_token || '');
+    setSmsForm(prev => ({ ...prev, delivery_report_token: token, username: '', password: '', api_url: '' }));
+    setSmsDeliveryUrl(buildDeliveryReportUrl(token));
+    setSmsMessage('En ny leveransrapportlänk är skapad. Lägg in den hos Cellsynt.');
+  };
+
+  const copySmsDeliveryUrl = async () => {
+    if (!smsDeliveryUrl) return;
+    await navigator.clipboard?.writeText(smsDeliveryUrl);
+    setSmsMessage('Leveransrapportlänken är kopierad.');
   };
 
   if (loading) {
@@ -518,6 +541,23 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
             <label className="flex items-center gap-3 self-end rounded-xl border border-slate-200 p-3 text-sm font-semibold"><input type="checkbox" checked={smsForm.enabled} onChange={event => setSmsForm(prev => ({ ...prev, enabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-blue-600" /> Tillåt SMS från VI-HEM</label>
           </div>
           <div className="mt-5 flex flex-wrap items-center gap-3"><Button onClick={saveSmsSettings} loading={saving}>Spara Cellsynt</Button>{smsMessage && <span className="text-sm font-semibold text-slate-600">{smsMessage}</span>}</div>
+          <div className="mt-6 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="font-semibold text-slate-900">Leveransrapporter</p>
+                <p className="mt-1 text-sm text-slate-600">Cellsynt kan anropa länken när ett SMS är levererat. Då ändras statusen i SMS-historiken från skickat till levererat.</p>
+              </div>
+              <label className="flex shrink-0 items-center gap-2 text-sm font-semibold text-slate-700"><input type="checkbox" checked={smsForm.delivery_report_enabled} onChange={event => setSmsForm(prev => ({ ...prev, delivery_report_enabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-blue-600" /> Aktiv</label>
+            </div>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end">
+              <Input className="min-w-0 flex-1" label="URL för leveransrapporter" value={smsDeliveryUrl} readOnly placeholder="Spara Cellsynt för att skapa länken" />
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={copySmsDeliveryUrl} disabled={!smsDeliveryUrl} title="Kopiera leveransrapportlänk"><Copy className="h-4 w-4" /> Kopiera</Button>
+                <Button variant="secondary" onClick={regenerateSmsDeliveryUrl} loading={saving} title="Generera ny leveransrapportlänk"><RefreshCw className="h-4 w-4" /> Ny länk</Button>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">Klistra in länken i Cellsynts inställning för leveransrapporter. Ändra inte parametrarna som läggs till av Cellsynt.</p>
+          </div>
           <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
             <p className="font-semibold text-slate-800">Serverkonfiguration</p>
             <p className="mt-1">SMS skickas via Edge Function <code>vihem-send-sms</code>. Fälten kan lämnas tomma när en befintlig sparad uppgift ska behållas.</p>
@@ -553,4 +593,9 @@ async function getFunctionErrorMessage(error: unknown, fallback: string) {
     if (payload?.error) return String(payload.error);
   }
   return (error as Error)?.message || fallback;
+}
+
+function buildDeliveryReportUrl(token: string) {
+  const baseUrl = String(import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
+  return token && baseUrl ? `${baseUrl}/functions/v1/vihem-cellsynth-delivery-report?token=${encodeURIComponent(token)}` : '';
 }
