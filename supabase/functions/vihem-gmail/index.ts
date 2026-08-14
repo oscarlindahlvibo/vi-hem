@@ -1,7 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 
 type Profile = { id: string; role: string; organisation_id: string | null };
@@ -35,7 +36,7 @@ Deno.serve(async (req) => {
     }
     if (!profile?.organisation_id) return out({ error: "Organisation saknas.", code: "FORBIDDEN" }, 403);
     const accounts = await loadAccounts(db, profile.organisation_id);
-    if (action === "status") return out({ ok: true, configured: Boolean(await credentials(db, profile.organisation_id)), scope: SCOPE, accounts });
+    if (action === "status") return out({ ok: true, configured: Boolean(await credentials(db, profile.organisation_id)), scope: GMAIL_SCOPE, accounts, drive: await loadDriveSettings(db, profile.organisation_id) });
     if (action === "list_accounts") return out({ ok: true, accounts });
     if (action === "create_account" || action === "update_account" || action === "delete_account") {
       if (profile.role !== "admin") return out({ error: "Endast admin kan hantera mailboxar.", code: "FORBIDDEN" }, 403);
@@ -95,6 +96,16 @@ Deno.serve(async (req) => {
       if (!account) return out({ error: "Mailboxen hittades inte.", code: "ACCOUNT_NOT_FOUND" }, 404);
       try { await gmail(db, profile.organisation_id, account.email, "/profile"); await updateTest(db, account.id, "ok", ""); await audit(db, profile, "connection_tested", account.id, "ok", ""); return out({ ok: true, code: "OK" }); }
       catch (e) { const code = googleCode(e); await updateTest(db, account.id, "failed", code); await audit(db, profile, "connection_tested", account.id, "failed", code); return out({ ok: false, code, error: friendly(code), details: safeGoogleDetails(e) }, 400); }
+    }
+    if (action === "save_drive_settings" || action === "get_drive_settings") {
+      if (profile.role !== "admin") return out({ error: "Endast admin kan hantera Google Drive-kopplingen.", code: "FORBIDDEN" }, 403);
+      if (action === "get_drive_settings") return out({ ok: true, drive: await loadDriveSettings(db, profile.organisation_id) });
+      const folderId = String(body.folder_id || "").trim();
+      if (body.enabled !== false && !folderId) return out({ error: "Ange ID:t för Google Drive-mappen.", code: "DRIVE_FOLDER_REQUIRED" }, 400);
+      const { error } = await db.from("vihem_google_drive_settings").upsert({ organisation_id: profile.organisation_id, folder_id: folderId, enabled: body.enabled === true, auto_import: body.auto_import === true, updated_by: userId, updated_at: new Date().toISOString() }, { onConflict: "organisation_id" });
+      if (error) return out({ error: error.message, code: "DRIVE_SETTINGS_SAVE_FAILED" }, 400);
+      await audit(db, profile, "drive_settings_updated", null, "ok", { enabled: body.enabled === true, auto_import: body.auto_import === true });
+      return out({ ok: true, drive: await loadDriveSettings(db, profile.organisation_id) });
     }
     if (action === "search") {
       const query = String(body.query || "").trim();
@@ -156,6 +167,7 @@ async function runWatchers(db: any) {
           const { data: inserted } = await db.from("vihem_mail_watch_hits").insert({ organisation_id: rule.organisation_id, rule_id: rule.id, mail_account_id: account.id, gmail_message_id: result.id, thread_id: result.thread_id, subject: result.subject, from_address: result.from, message_date: result.timestamp ? new Date(result.timestamp).toISOString() : null, matched_keywords: matched }).select("id").maybeSingle();
           if (!inserted) continue;
           created++; ruleCreated++;
+          await importMailAttachments(db, rule.organisation_id, account, result, inserted.id).catch((error) => console.error("gmail drive import", error));
           const { data: recipients } = await db.from("vihem_profiles").select("id").eq("organisation_id", rule.organisation_id).in("role", ["admin", "staff"]);
           if (recipients?.length) await db.from("vihem_notifications").insert(recipients.map((recipient: { id: string }) => ({ user_id: recipient.id, organisation_id: rule.organisation_id, title: `E-postmatchning: ${rule.name}`, message: `${result.subject} · ${account.display_name || account.email}`, type: "info", link: "mail" })));
         }
@@ -181,11 +193,11 @@ async function credentials(db: any, organisationId: string) {
   if (raw) { try { return JSON.parse(raw.startsWith("{") ? raw : atob(raw)); } catch { throw new Error("GOOGLE_CREDENTIALS_INVALID_JSON"); } }
   return null;
 }
-async function token(db: any, organisationId: string, subject: string) {
+async function token(db: any, organisationId: string, subject: string, scope = GMAIL_SCOPE) {
   const c = await credentials(db, organisationId);
   if (!c?.client_email || !c?.private_key) throw new Error("GOOGLE_CREDENTIALS_MISSING");
   const now = Math.floor(Date.now() / 1000); const enc = (v: unknown) => b64url(new TextEncoder().encode(JSON.stringify(v)));
-  const unsigned = `${enc({ alg: "RS256", typ: "JWT" })}.${enc({ iss: c.client_email, scope: SCOPE, aud: "https://oauth2.googleapis.com/token", sub: subject, iat: now, exp: now + 3600 })}`;
+  const unsigned = `${enc({ alg: "RS256", typ: "JWT" })}.${enc({ iss: c.client_email, scope, aud: "https://oauth2.googleapis.com/token", sub: subject, iat: now, exp: now + 3600 })}`;
   let key: CryptoKey;
   try { key = await crypto.subtle.importKey("pkcs8", pem(c.private_key), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]); } catch { throw new Error("GOOGLE_PRIVATE_KEY_INVALID"); }
   const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(unsigned));
@@ -194,6 +206,17 @@ async function token(db: any, organisationId: string, subject: string) {
   const payload = await response.json(); if (!payload.access_token) throw new Error("GOOGLE_TOKEN_FAILED:missing_token:"); return payload.access_token as string;
 }
 async function gmail(db: any, organisationId: string, user: string, path: string) { const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/${encodeURIComponent(user)}${path}`, { headers: { Authorization: `Bearer ${await token(db, organisationId, user)}` } }); if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(`GOOGLE_GMAIL_FAILED:${response.status}:${payload.error?.status || ""}:${payload.error?.message || ""}`); } return response.json(); }
+async function driveUpload(db: any, organisationId: string, subject: string, folderId: string, filename: string, mimeType: string, bytes: Uint8Array) {
+  const boundary = `vihem_${crypto.randomUUID().replaceAll("-", "")}`;
+  const metadata = JSON.stringify({ name: filename, parents: [folderId], mimeType });
+  const encoder = new TextEncoder();
+  const pre = encoder.encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`);
+  const post = encoder.encode(`\r\n--${boundary}--`);
+  const body = new Uint8Array(pre.length + bytes.length + post.length); body.set(pre); body.set(bytes, pre.length); body.set(post, pre.length + bytes.length);
+  const response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink", { method: "POST", headers: { Authorization: `Bearer ${await token(db, organisationId, subject, DRIVE_SCOPE)}`, "Content-Type": `multipart/related; boundary=${boundary}` }, body });
+  if (!response.ok) { const payload = await response.text(); throw new Error(`GOOGLE_DRIVE_FAILED:${response.status}:${payload.slice(0, 300)}`); }
+  return await response.json();
+}
 async function getAttachment(db: any, organisationId: string, user: string, message: string, attachment: string) { const data = await gmail(db, organisationId, user, `/messages/${encodeURIComponent(message)}/attachments/${encodeURIComponent(attachment)}`); return data.data || ""; }
 async function searchMailbox(db: any, organisationId: string, account: MailAccount, query: string, mode: string, dateFrom = "", dateTo = "", sort = "date_desc") { const dateQuery = `${dateFrom ? ` after:${dateFrom}` : ""}${dateTo ? ` before:${addDay(dateTo)}` : ""}`; const q = `${mode === "invoice" ? `${query} (invoice OR faktura OR kvitto OR receipt)` : query}${dateQuery}`.trim(); const list = await gmail(db, organisationId, account.email, `/messages?q=${encodeURIComponent(q)}&maxResults=50&includeSpamTrash=false`); const messages = await Promise.all((list.messages || []).slice(0, 50).map((m: { id: string }) => gmail(db, organisationId, account.email, `/messages/${m.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date&metadataHeaders=Cc`))); const mapped = messages.map((m: any) => { const headers = Object.fromEntries((m.payload?.headers || []).map((h: any) => [h.name.toLowerCase(), h.value])); const text = `${headers.subject || ""} ${headers.from || ""} ${m.snippet || ""}`; const date = headers.date || ""; const timestamp = Date.parse(date); const score = scoreText(text, query, mode); return { id: m.id, thread_id: m.threadId, subject: headers.subject || "(utan ämne)", from: headers.from || "", to: headers.to || "", date, snippet: m.snippet || "", score, has_attachments: Boolean(m.sizeEstimate && m.sizeEstimate > 0), timestamp }; }).filter((m: any) => (!dateFrom || (m.timestamp && m.timestamp >= Date.parse(`${dateFrom}T00:00:00Z`))) && (!dateTo || (m.timestamp && dayOf(m.timestamp) <= dateTo))).sort((a: any, b: any) => sort === "date_asc" ? a.timestamp - b.timestamp : b.timestamp - a.timestamp); return mapped; }
 function dayOf(timestamp: number) { return new Date(timestamp).toISOString().slice(0, 10); }
@@ -216,9 +239,26 @@ function normalizeMessage(m: any) {
     // Some Gmail messages are HTML-only. Prefer the sender's plain text when
     // available, otherwise expose a readable text version of the HTML body.
     body: ((plain && !plainIsHtmlFallback ? plain : htmlText || plain) || m.snippet || "").slice(0, 30000),
+    body_html: bodies.html.join("\n").slice(0, 100000),
     attachments: collectAttachments(m.payload),
   };
 }
+async function loadDriveSettings(db: any, org: string) { const { data } = await db.from("vihem_google_drive_settings").select("folder_id,enabled,auto_import,updated_at").eq("organisation_id", org).maybeSingle(); return { folder_id: data?.folder_id || "", enabled: Boolean(data?.enabled), auto_import: Boolean(data?.auto_import), updated_at: data?.updated_at || null }; }
+async function importMailAttachments(db: any, org: string, account: MailAccount, result: any, hitId: string) {
+  const settings = await loadDriveSettings(db, org); if (!settings.enabled || !settings.auto_import || !settings.folder_id) return { imported: 0 };
+  const message = await gmail(db, org, account.email, `/messages/${encodeURIComponent(result.id)}?format=full`); const attachments = collectAttachments(message.payload); let imported = 0;
+  const bodies = collectBodies(message.payload); const context = `${result.subject || ""} ${result.from || ""} ${htmlToText(bodies.html.join(" "))} ${bodies.plain.join(" ")}`;
+  for (const attachment of attachments) {
+    const { data: existing } = await db.from("vihem_mail_drive_imports").select("id").eq("mail_account_id", account.id).eq("gmail_message_id", result.id).eq("gmail_attachment_id", attachment.attachment_id).maybeSingle(); if (existing) continue;
+    const stored = buildDriveFilename(context, attachment.filename);
+    try { const encoded = await getAttachment(db, org, account.email, result.id, attachment.attachment_id); const bytes = decodeBytes(encoded); const file = await driveUpload(db, org, account.email, settings.folder_id, stored, attachment.mime_type || "application/octet-stream", bytes); await db.from("vihem_mail_drive_imports").insert({ organisation_id: org, mail_account_id: account.id, watch_hit_id: hitId, gmail_message_id: result.id, gmail_attachment_id: attachment.attachment_id, original_filename: attachment.filename, stored_filename: stored, drive_file_id: file.id, drive_web_url: file.webViewLink || null, status: "uploaded" }); imported++; }
+    catch (error) { await db.from("vihem_mail_drive_imports").insert({ organisation_id: org, mail_account_id: account.id, watch_hit_id: hitId, gmail_message_id: result.id, gmail_attachment_id: attachment.attachment_id, original_filename: attachment.filename, stored_filename: stored, status: "failed", error_message: String(error).slice(0, 500) }); }
+  }
+  return { imported };
+}
+function decodeBytes(value: string) { const normalized = value.replace(/-/g, "+").replace(/_/g, "/"); const binary = atob(normalized); return Uint8Array.from(binary, c => c.charCodeAt(0)); }
+function buildDriveFilename(context: string, original: string) { const company = sanitizeCompany(context.match(/^(.*?)\s*</)?.[1] || context.match(/(?:from|från)\s*:?\s*([^,;\n]+)/i)?.[1] || "leverantor"); const reference = context.match(/(?:faktura|invoice|order(?:bekraftelse|bekräftelse)?|ordernummer|fakturanummer|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{2,})/i)?.[1] || "underlag"; const amountRaw = context.match(/(?:total|summa|belopp|att betala)\D{0,25}(\d[\d\s.,]{1,})(?:\s*(?:kr|sek))?/i)?.[1] || ""; const amount = amountRaw ? amountRaw.replace(/\s/g, "").replace(/,/g, "-") + "kr" : "belopp-okant"; const ext = (original.match(/\.[a-z0-9]+$/i)?.[0] || ".bin").toLowerCase(); return `${company}_${sanitizeCompany(reference)}_${sanitizeCompany(amount)}${ext}`.slice(0, 180); }
+function sanitizeCompany(value: string) { return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 70) || "underlag"; }
 function collectBodies(part: any, out: { plain: string[]; html: string[] } = { plain: [], html: [] }) {
   if (!part) return out;
   if (part.mimeType === "text/plain" && part.body?.data) out.plain.push(decode(part.body.data));
@@ -258,6 +298,6 @@ async function updateTest(db: any, id: string, status: string, code: string) { a
 async function audit(db: any, p: Profile, action: string, account: string | null, result: string, metadata: unknown) { await db.from("vihem_mail_audit_events").insert({ organisation_id: p.organisation_id, user_id: p.id, action, mail_account_id: account || null, result, error_code: typeof metadata === "string" ? metadata : "", metadata: typeof metadata === "object" ? metadata : {} }); }
 function safeAccount(a: MailAccount) { const { id, email, display_name, description, active, search_general, search_invoices, last_tested_at, last_test_status, last_test_error_code } = a; return { id, email, display_name, description, active, search_general, search_invoices, last_tested_at, last_test_status, last_test_error_code }; }
 function googleCode(e: unknown) { const s = String(e); if (s.includes("GOOGLE_CREDENTIALS_MISSING")) return "CREDENTIALS_MISSING"; if (s.includes("GOOGLE_CREDENTIALS_UNREADABLE")) return "CREDENTIALS_UNREADABLE"; if (s.includes("GOOGLE_CREDENTIALS_INVALID_JSON")) return "CREDENTIALS_INVALID_JSON"; if (s.includes("GOOGLE_PRIVATE_KEY_INVALID")) return "PRIVATE_KEY_INVALID"; if (s.includes("invalid_grant")) return "INVALID_GRANT"; if (s.includes("unauthorized_client")) return "UNAUTHORIZED_CLIENT"; if (s.includes("GOOGLE_TOKEN_FAILED")) return "GOOGLE_TOKEN_FAILED"; if (s.includes("GOOGLE_GMAIL_FAILED:401")) return "DELEGATION_OR_CREDENTIALS_INVALID"; if (s.includes("GOOGLE_GMAIL_FAILED:403")) return "SCOPE_OR_API_NOT_AUTHORIZED"; if (s.includes("GOOGLE_GMAIL_FAILED:404")) return "MAILBOX_NOT_FOUND"; return "GOOGLE_API_ERROR"; }
-function friendly(c: string) { const m: Record<string, string> = { CREDENTIALS_MISSING: "Google service account saknas. Lägg in JSON-nyckeln i Inställningar.", CREDENTIALS_UNREADABLE: "Den sparade Google-nyckeln kunde inte dekrypteras. Spara om JSON-nyckeln och testa igen.", CREDENTIALS_INVALID_JSON: "Google-nyckeln är inte giltig JSON.", PRIVATE_KEY_INVALID: "Google private_key kunde inte läsas. Använd hela private_key-värdet från service-account JSON.", INVALID_GRANT: "Google avvisade delegeringen. Kontrollera Domain-Wide Delegation, client ID och att gmail.readonly är tillagt.", UNAUTHORIZED_CLIENT: "Google avvisade servicekontot. Kontrollera att Domain-Wide Delegation är aktiverad för rätt service account.", GOOGLE_TOKEN_FAILED: "Google kunde inte utfärda en åtkomsttoken. Kontrollera service account och Domain-Wide Delegation.", DELEGATION_OR_CREDENTIALS_INVALID: "Service account eller Domain-Wide Delegation kunde inte verifieras.", SCOPE_OR_API_NOT_AUTHORIZED: "Gmail API eller gmail.readonly-scope är inte auktoriserad.", MAILBOX_NOT_FOUND: "Mailboxen kunde inte hittas i Workspace.", GOOGLE_API_ERROR: "Google Gmail API svarade med ett fel." }; return m[c] || "Anslutningen kunde inte verifieras."; }
+function friendly(c: string) { const m: Record<string, string> = { CREDENTIALS_MISSING: "Google service account saknas. Lägg in JSON-nyckeln i Inställningar.", CREDENTIALS_UNREADABLE: "Den sparade Google-nyckeln kunde inte dekrypteras. Spara om JSON-nyckeln och testa igen.", CREDENTIALS_INVALID_JSON: "Google-nyckeln är inte giltig JSON.", PRIVATE_KEY_INVALID: "Google private_key kunde inte läsas. Använd hela private_key-värdet från service-account JSON.", INVALID_GRANT: "Google avvisade delegeringen. Kontrollera Domain-Wide Delegation, client ID och gmail.readonly/drive.file.", UNAUTHORIZED_CLIENT: "Google avvisade servicekontot. Kontrollera att Domain-Wide Delegation är aktiverad för rätt service account.", GOOGLE_TOKEN_FAILED: "Google kunde inte utfärda en åtkomsttoken. Kontrollera service account och Domain-Wide Delegation.", DELEGATION_OR_CREDENTIALS_INVALID: "Service account eller Domain-Wide Delegation kunde inte verifieras.", SCOPE_OR_API_NOT_AUTHORIZED: "Gmail API eller Drive API/scope är inte auktoriserad.", MAILBOX_NOT_FOUND: "Mailboxen kunde inte hittas i Workspace.", GOOGLE_API_ERROR: "Google Gmail API svarade med ett fel." }; return m[c] || "Anslutningen kunde inte verifieras."; }
 function safeGoogleDetails(e: unknown) { const s = String(e); if (s.includes("GOOGLE_TOKEN_FAILED:")) return s.split(":").slice(1).join(":").trim() || undefined; if (s.includes("GOOGLE_GMAIL_FAILED:")) return s.split(":").slice(1).join(":").trim() || undefined; return undefined; }
 function out(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status, headers: { ...cors, "content-type": "application/json" } }); }
