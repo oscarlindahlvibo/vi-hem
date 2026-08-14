@@ -6,21 +6,34 @@ const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers
 
 type Profile = { id: string; role: string; organisation_id: string | null };
 type MailAccount = { id: string; organisation_id: string; email: string; display_name: string; description: string; active: boolean; search_general: boolean; search_invoices: boolean; last_tested_at: string | null; last_test_status: string; last_test_error_code: string };
+type WatchRule = { id: string; organisation_id: string; name: string; keywords: string[]; match_mode: "any" | "all"; enabled: boolean; account_ids: string[]; last_run_at: string | null };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   try {
-    const auth = req.headers.get("Authorization");
-    if (!auth) return out({ error: "Unauthorized", code: "UNAUTHORIZED" }, 401);
     const url = Deno.env.get("SUPABASE_URL")!, anon = Deno.env.get("SUPABASE_ANON_KEY")!, service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const userClient = createClient(url, anon, { global: { headers: { Authorization: auth } } });
     const db = createClient(url, service);
-    const { data: { user } } = await userClient.auth.getUser();
-    if (!user) return out({ error: "Unauthorized", code: "UNAUTHORIZED" }, 401);
-    const { data: profile } = await db.from("vihem_profiles").select("id,role,organisation_id").eq("id", user.id).maybeSingle() as { data: Profile | null };
-    if (!profile || !profile.organisation_id || !["staff", "admin"].includes(profile.role)) return out({ error: "Saknar behörighet till e-postintegrationen.", code: "FORBIDDEN" }, 403);
+    const scheduled = await isScheduledWatchRequest(req, db);
+    const auth = req.headers.get("Authorization");
+    let userId = "";
+    let profile: Profile | null = null;
+    if (!scheduled) {
+      if (!auth) return out({ error: "Unauthorized", code: "UNAUTHORIZED" }, 401);
+      const userClient = createClient(url, anon, { global: { headers: { Authorization: auth } } });
+      const { data: { user } } = await userClient.auth.getUser();
+      if (!user) return out({ error: "Unauthorized", code: "UNAUTHORIZED" }, 401);
+      userId = user.id;
+      const result = await db.from("vihem_profiles").select("id,role,organisation_id").eq("id", user.id).maybeSingle();
+      profile = result.data as Profile | null;
+      if (!profile || !profile.organisation_id || !["staff", "admin"].includes(profile.role)) return out({ error: "Saknar behörighet till e-postintegrationen.", code: "FORBIDDEN" }, 403);
+    }
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || "status");
+    if (action === "run_watchers") {
+      if (!scheduled && profile?.role !== "admin") return out({ error: "Endast admin eller schemalagd körning får starta bevakningen.", code: "FORBIDDEN" }, 403);
+      return out({ ok: true, ...(await runWatchers(db)) });
+    }
+    if (!profile?.organisation_id) return out({ error: "Organisation saknas.", code: "FORBIDDEN" }, 403);
     const accounts = await loadAccounts(db, profile.organisation_id);
     if (action === "status") return out({ ok: true, configured: Boolean(await credentials(db, profile.organisation_id)), scope: SCOPE, accounts });
     if (action === "list_accounts") return out({ ok: true, accounts });
@@ -33,9 +46,9 @@ Deno.serve(async (req) => {
       } else {
         const email = String(body.email || "").trim().toLowerCase();
         if (!/^\S+@\S+\.\S+$/.test(email)) return out({ error: "Ange en giltig Workspace-adress.", code: "INVALID_EMAIL" }, 400);
-        const values = { email, display_name: String(body.display_name || "").trim(), description: String(body.description || "").trim(), active: body.active !== false, search_general: body.search_general !== false, search_invoices: body.search_invoices !== false, updated_by: user.id, updated_at: new Date().toISOString() };
+        const values = { email, display_name: String(body.display_name || "").trim(), description: String(body.description || "").trim(), active: body.active !== false, search_general: body.search_general !== false, search_invoices: body.search_invoices !== false, updated_by: userId, updated_at: new Date().toISOString() };
         if (action === "create_account") {
-          const { data, error } = await db.from("vihem_mail_accounts").insert({ ...values, organisation_id: profile.organisation_id, created_by: user.id }).select().single();
+          const { data, error } = await db.from("vihem_mail_accounts").insert({ ...values, organisation_id: profile.organisation_id, created_by: userId }).select().single();
           if (error) return out({ error: error.message, code: "ACCOUNT_SAVE_FAILED" }, 400); accountId = data.id;
         } else {
           const { error } = await db.from("vihem_mail_accounts").update(values).eq("id", accountId).eq("organisation_id", profile.organisation_id);
@@ -44,6 +57,30 @@ Deno.serve(async (req) => {
         await audit(db, profile, action === "create_account" ? "account_created" : "account_updated", accountId, "ok", "");
       }
       return out({ ok: true, accounts: await loadAccounts(db, profile.organisation_id) });
+    }
+    if (["list_watch_rules", "create_watch_rule", "update_watch_rule", "delete_watch_rule"].includes(action)) {
+      if (profile.role !== "admin") return out({ error: "Endast admin kan hantera e-postbevakningar.", code: "FORBIDDEN" }, 403);
+      if (action === "list_watch_rules") return out({ ok: true, rules: await loadWatchRules(db, profile.organisation_id), hits: await loadWatchHits(db, profile.organisation_id) });
+      const ruleId = String(body.id || "");
+      if (action === "delete_watch_rule") {
+        await db.from("vihem_mail_watch_rules").delete().eq("id", ruleId).eq("organisation_id", profile.organisation_id);
+        await audit(db, profile, "watch_rule_deleted", null, "ok", { rule_id: ruleId });
+      } else {
+        const keywords = parseKeywords(body.keywords);
+        const name = String(body.name || "").trim();
+        if (!name || keywords.length === 0) return out({ error: "Ange namn och minst ett sökord.", code: "INVALID_WATCH_RULE" }, 400);
+        const values = { name, keywords, match_mode: body.match_mode === "all" ? "all" : "any", enabled: body.enabled !== false, account_ids: Array.isArray(body.account_ids) ? body.account_ids.map(String) : [], updated_by: userId, updated_at: new Date().toISOString() };
+        if (action === "create_watch_rule") {
+          const { data, error } = await db.from("vihem_mail_watch_rules").insert({ ...values, organisation_id: profile.organisation_id, created_by: userId }).select("id").single();
+          if (error) return out({ error: error.message, code: "WATCH_RULE_SAVE_FAILED" }, 400);
+          await audit(db, profile, "watch_rule_created", null, "ok", { rule_id: data.id });
+        } else {
+          const { error } = await db.from("vihem_mail_watch_rules").update(values).eq("id", ruleId).eq("organisation_id", profile.organisation_id);
+          if (error) return out({ error: error.message, code: "WATCH_RULE_SAVE_FAILED" }, 400);
+          await audit(db, profile, "watch_rule_updated", null, "ok", { rule_id: ruleId });
+        }
+      }
+      return out({ ok: true, rules: await loadWatchRules(db, profile.organisation_id), hits: await loadWatchHits(db, profile.organisation_id) });
     }
     if (action === "test") {
       if (profile.role !== "admin") return out({ error: "Endast admin kan testa Gmail-kopplingen.", code: "FORBIDDEN" }, 403);
@@ -71,6 +108,61 @@ Deno.serve(async (req) => {
     return out({ error: "Okänd åtgärd.", code: "UNKNOWN_ACTION" }, 400);
   } catch (e) { console.error("vihem-gmail", e); return out({ error: e instanceof Error ? e.message : "Internt fel", code: "INTERNAL_ERROR" }, 500); }
 });
+
+async function isScheduledWatchRequest(req: Request, db: any) {
+  const supplied = req.headers.get("x-vihem-gmail-watch-secret") || "";
+  if (!supplied) return false;
+  const { data } = await db.from("vihem_system_settings").select("value").eq("key", "gmail_watch_scheduled").maybeSingle();
+  return Boolean(data?.value?.enabled && data?.value?.secret && supplied === data.value.secret);
+}
+
+function parseKeywords(value: unknown) {
+  const values = Array.isArray(value) ? value : String(value || "").split(/[\n,;]/);
+  return [...new Set(values.map(v => String(v).trim()).filter(Boolean).slice(0, 30))];
+}
+
+async function loadWatchRules(db: any, org: string) {
+  const { data } = await db.from("vihem_mail_watch_rules").select("id,organisation_id,name,keywords,match_mode,enabled,account_ids,last_run_at,created_at,updated_at").eq("organisation_id", org).order("name");
+  return data || [];
+}
+
+async function loadWatchHits(db: any, org: string) {
+  const { data } = await db.from("vihem_mail_watch_hits").select("id,rule_id,mail_account_id,gmail_message_id,thread_id,subject,from_address,message_date,matched_keywords,status,created_at").eq("organisation_id", org).order("created_at", { ascending: false }).limit(100);
+  return data || [];
+}
+
+async function runWatchers(db: any) {
+  const { data: rules } = await db.from("vihem_mail_watch_rules").select("*").eq("enabled", true);
+  let scanned = 0, created = 0, failed = 0;
+  for (const rule of (rules || []) as WatchRule[]) {
+    const { data: rawAccounts } = await db.from("vihem_mail_accounts").select("*").eq("organisation_id", rule.organisation_id).eq("active", true);
+    const accounts = (rawAccounts || []).filter((a: MailAccount) => !rule.account_ids?.length || rule.account_ids.includes(a.id));
+    const from = rule.last_run_at ? dayOf(Date.parse(rule.last_run_at)) : dayOf(Date.now() - 2 * 86400000);
+    const query = rule.keywords.map(k => `"${k.replace(/"/g, "")}"`).join(" OR ");
+    let ruleCreated = 0, ruleFailed = false;
+    try {
+      for (const account of accounts) {
+        const results = await searchMailbox(db, rule.organisation_id, account, query, "general", from, dayOf(Date.now()), "date_desc");
+        scanned += results.length;
+        const matches = results.map(result => ({ result, matched: rule.keywords.filter(k => `${result.subject} ${result.from} ${result.snippet}`.toLowerCase().includes(k.toLowerCase())) })).filter(({ matched }) => rule.match_mode === "all" ? matched.length === rule.keywords.length : matched.length > 0);
+        for (const { result, matched } of matches) {
+          const { data: inserted } = await db.from("vihem_mail_watch_hits").insert({ organisation_id: rule.organisation_id, rule_id: rule.id, mail_account_id: account.id, gmail_message_id: result.id, thread_id: result.thread_id, subject: result.subject, from_address: result.from, message_date: result.timestamp ? new Date(result.timestamp).toISOString() : null, matched_keywords: matched }).select("id").maybeSingle();
+          if (!inserted) continue;
+          created++; ruleCreated++;
+          const { data: recipients } = await db.from("vihem_profiles").select("id").eq("organisation_id", rule.organisation_id).in("role", ["admin", "staff"]);
+          if (recipients?.length) await db.from("vihem_notifications").insert(recipients.map((recipient: { id: string }) => ({ user_id: recipient.id, organisation_id: rule.organisation_id, title: `E-postmatchning: ${rule.name}`, message: `${result.subject} · ${account.display_name || account.email}`, type: "info", link: "mail" })));
+        }
+      }
+      await db.from("vihem_mail_watch_rules").update({ last_run_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", rule.id);
+    } catch (error) {
+      failed++;
+      ruleFailed = true;
+      console.error("gmail watcher", rule.id, error);
+    }
+    await db.from("vihem_mail_audit_events").insert({ organisation_id: rule.organisation_id, user_id: null, action: "watch_run", mail_account_id: null, result: ruleFailed ? "failed" : "ok", error_code: "", metadata: { rule_id: rule.id, created: ruleCreated } });
+  }
+  return { scanned, created, failed };
+}
 
 async function credentials(db: any, organisationId: string) {
   // Organisationens sparade nyckel ska vinna över en eventuell global fallback-secret.
@@ -112,7 +204,7 @@ async function loadAccounts(db: any, org: string) { const { data } = await db.fr
 async function allowedAccount(db: any, org: string, id: string) { const { data } = await db.from("vihem_mail_accounts").select("*").eq("organisation_id", org).eq("id", id).maybeSingle(); return data as MailAccount | null; }
 async function updateTest(db: any, id: string, status: string, code: string) { await db.from("vihem_mail_accounts").update({ last_tested_at: new Date().toISOString(), last_test_status: status, last_test_error_code: code }).eq("id", id); }
 async function audit(db: any, p: Profile, action: string, account: string | null, result: string, metadata: unknown) { await db.from("vihem_mail_audit_events").insert({ organisation_id: p.organisation_id, user_id: p.id, action, mail_account_id: account || null, result, error_code: typeof metadata === "string" ? metadata : "", metadata: typeof metadata === "object" ? metadata : {} }); }
-function safeAccount(a: MailAccount) { const { id, email, display_name, description, last_tested_at, last_test_status, last_test_error_code } = a; return { id, email, display_name, description, last_tested_at, last_test_status, last_test_error_code }; }
+function safeAccount(a: MailAccount) { const { id, email, display_name, description, active, search_general, search_invoices, last_tested_at, last_test_status, last_test_error_code } = a; return { id, email, display_name, description, active, search_general, search_invoices, last_tested_at, last_test_status, last_test_error_code }; }
 function googleCode(e: unknown) { const s = String(e); if (s.includes("GOOGLE_CREDENTIALS_MISSING")) return "CREDENTIALS_MISSING"; if (s.includes("GOOGLE_CREDENTIALS_UNREADABLE")) return "CREDENTIALS_UNREADABLE"; if (s.includes("GOOGLE_CREDENTIALS_INVALID_JSON")) return "CREDENTIALS_INVALID_JSON"; if (s.includes("GOOGLE_PRIVATE_KEY_INVALID")) return "PRIVATE_KEY_INVALID"; if (s.includes("invalid_grant")) return "INVALID_GRANT"; if (s.includes("unauthorized_client")) return "UNAUTHORIZED_CLIENT"; if (s.includes("GOOGLE_TOKEN_FAILED")) return "GOOGLE_TOKEN_FAILED"; if (s.includes("GOOGLE_GMAIL_FAILED:401")) return "DELEGATION_OR_CREDENTIALS_INVALID"; if (s.includes("GOOGLE_GMAIL_FAILED:403")) return "SCOPE_OR_API_NOT_AUTHORIZED"; if (s.includes("GOOGLE_GMAIL_FAILED:404")) return "MAILBOX_NOT_FOUND"; return "GOOGLE_API_ERROR"; }
 function friendly(c: string) { const m: Record<string, string> = { CREDENTIALS_MISSING: "Google service account saknas. Lägg in JSON-nyckeln i Inställningar.", CREDENTIALS_UNREADABLE: "Den sparade Google-nyckeln kunde inte dekrypteras. Spara om JSON-nyckeln och testa igen.", CREDENTIALS_INVALID_JSON: "Google-nyckeln är inte giltig JSON.", PRIVATE_KEY_INVALID: "Google private_key kunde inte läsas. Använd hela private_key-värdet från service-account JSON.", INVALID_GRANT: "Google avvisade delegeringen. Kontrollera Domain-Wide Delegation, client ID och att gmail.readonly är tillagt.", UNAUTHORIZED_CLIENT: "Google avvisade servicekontot. Kontrollera att Domain-Wide Delegation är aktiverad för rätt service account.", GOOGLE_TOKEN_FAILED: "Google kunde inte utfärda en åtkomsttoken. Kontrollera service account och Domain-Wide Delegation.", DELEGATION_OR_CREDENTIALS_INVALID: "Service account eller Domain-Wide Delegation kunde inte verifieras.", SCOPE_OR_API_NOT_AUTHORIZED: "Gmail API eller gmail.readonly-scope är inte auktoriserad.", MAILBOX_NOT_FOUND: "Mailboxen kunde inte hittas i Workspace.", GOOGLE_API_ERROR: "Google Gmail API svarade med ett fel." }; return m[c] || "Anslutningen kunde inte verifieras."; }
 function safeGoogleDetails(e: unknown) { const s = String(e); if (s.includes("GOOGLE_TOKEN_FAILED:")) return s.split(":").slice(1).join(":").trim() || undefined; if (s.includes("GOOGLE_GMAIL_FAILED:")) return s.split(":").slice(1).join(":").trim() || undefined; return undefined; }
