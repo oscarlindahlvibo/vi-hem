@@ -27,7 +27,7 @@ export function SmsPage() {
     setLoading(true); setFeedback('');
     const { error } = await supabase.functions.invoke('vihem-send-sms', { body: { organisation_id: user.organisation_id, recipient, message } });
     setLoading(false);
-    setFeedback(error ? error.message : 'SMS skickat.');
+    setFeedback(error ? await getFunctionErrorMessage(error, 'SMS-utskicket misslyckades.') : 'SMS skickat.');
     if (!error) { setRecipient(''); setMessage(''); await loadHistory(); }
   };
 
@@ -36,4 +36,13 @@ export function SmsPage() {
     <Card className="p-5"><div className="flex items-center gap-2"><MessageSquareText className="h-5 w-5 text-blue-600" /><h2 className="text-lg font-bold text-slate-950">Nytt SMS</h2></div><div className="mt-5 grid gap-4"><Input label="Mottagare" placeholder="0701234567" value={recipient} onChange={e => setRecipient(e.target.value)} /><Textarea label="Meddelande" rows={4} value={message} onChange={e => setMessage(e.target.value)} placeholder="Skriv meddelande..." /><div className="flex flex-wrap items-center gap-3"><Button onClick={sendSms} loading={loading} disabled={!recipient.trim() || !message.trim()}><Send className="h-4 w-4" /> Skicka SMS</Button>{feedback && <span className="text-sm font-semibold text-slate-600">{feedback}</span>}</div></div></Card>
     <Card className="p-5"><h2 className="text-lg font-bold text-slate-950">Senaste SMS</h2><div className="mt-4 divide-y divide-slate-100">{history.length === 0 ? <p className="py-6 text-sm text-slate-500">Inga SMS skickade ännu.</p> : history.map(item => <div key={item.id} className="flex flex-col gap-2 py-4 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-semibold text-slate-900">{item.recipient}</p><p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{item.message}</p><p className="mt-1 text-xs text-slate-400">{new Date(item.created_at).toLocaleString('sv-SE')}</p></div><Badge className={item.status === 'sent' ? 'bg-emerald-50 text-emerald-700' : item.status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}>{item.status === 'sent' ? 'Skickat' : item.status === 'failed' ? 'Misslyckat' : 'Pågår'}</Badge></div>)}</div></Card>
   </div>;
+}
+
+async function getFunctionErrorMessage(error: unknown, fallback: string) {
+  const context = (error as { context?: Response })?.context;
+  if (context) {
+    const payload = await context.clone().json().catch(() => null);
+    if (payload?.error) return String(payload.error);
+  }
+  return (error as Error)?.message || fallback;
 }
