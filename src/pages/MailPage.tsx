@@ -8,7 +8,13 @@ type SearchResult = { id: string; thread_id: string; subject: string; from: stri
 
 async function invoke(body: Record<string, unknown>) {
   const { data, error } = await supabase.functions.invoke('vihem-gmail', { body });
-  if (error) throw new Error(data?.error || error.message || 'Gmail-integrationen svarade inte.');
+  if (error) {
+    const context = (error as { context?: Response }).context;
+    const payload = context ? await context.clone().json().catch(() => null) : data;
+    const detail = payload?.details ? ` (${payload.details})` : '';
+    throw new Error(`${payload?.error || error.message || 'Gmail-integrationen svarade inte.'}${detail}`);
+  }
+  if (data?.ok === false) throw new Error(`${data.error || 'Anslutningen kunde inte verifieras.'}${data.details ? ` (${data.details})` : ''}`);
   return data;
 }
 
