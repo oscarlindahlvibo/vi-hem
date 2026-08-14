@@ -23,7 +23,16 @@ type OcrProviderSettings = {
   last_test_openai?: { ok?: boolean; message?: string } | null;
   last_test_google_vision?: { ok?: boolean; message?: string } | null;
 };
-type GoogleWorkspaceSettings = { has_service_account: boolean; service_account_hint: string; rotated_at: string | null };
+type GoogleWorkspaceSettings = {
+  has_service_account: boolean;
+  service_account_hint: string;
+  rotated_at: string | null;
+  drive_root_folder_id?: string;
+  drive_shared_drive_id?: string;
+  drive_delegated_user?: string;
+  drive_storage_enabled?: boolean;
+  drive_fallback_enabled?: boolean;
+};
 
 const emptyOcrSettingsForm = {
   provider: 'google_vision' as 'google_vision' | 'none',
@@ -64,6 +73,11 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
   const [googleSettings, setGoogleSettings] = useState<GoogleWorkspaceSettings | null>(null);
   const [googleJson, setGoogleJson] = useState('');
   const [googleMessage, setGoogleMessage] = useState('');
+  const [driveRootFolderId, setDriveRootFolderId] = useState('');
+  const [driveSharedDriveId, setDriveSharedDriveId] = useState('');
+  const [driveDelegatedUser, setDriveDelegatedUser] = useState('');
+  const [driveStorageEnabled, setDriveStorageEnabled] = useState(false);
+  const [driveFallbackEnabled, setDriveFallbackEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -114,7 +128,13 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
     setSmsForm({ enabled: Boolean(sms?.enabled), sender: String(sms?.sender || ''), username: '', password: '', api_url: '', delivery_report_token: String(sms?.delivery_report_token || ''), delivery_report_enabled: sms?.delivery_report_enabled !== false });
     setSmsDeliveryUrl(buildDeliveryReportUrl(String(sms?.delivery_report_token || '')));
     if (!googleResult.error) {
-      setGoogleSettings((googleResult.data?.settings ?? null) as GoogleWorkspaceSettings | null);
+      const settings = (googleResult.data?.settings ?? null) as GoogleWorkspaceSettings | null;
+      setGoogleSettings(settings);
+      setDriveRootFolderId(settings?.drive_root_folder_id || '');
+      setDriveSharedDriveId(settings?.drive_shared_drive_id || '');
+      setDriveDelegatedUser(settings?.drive_delegated_user || '');
+      setDriveStorageEnabled(Boolean(settings?.drive_storage_enabled));
+      setDriveFallbackEnabled(settings?.drive_fallback_enabled !== false);
     } else {
       setGoogleMessage(googleResult.error.message || 'Kunde inte hämta Google Workspace-inställningar.');
     }
@@ -158,6 +178,22 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
     const { error } = await supabase.functions.invoke('vihem-manage-google-workspace-settings', { body: { action: 'delete' } });
     setSaving(false); setGoogleMessage(error ? error.message : 'Google-kopplingen är borttagen.');
     if (!error) setGoogleSettings(null);
+  };
+
+  const saveDriveStorage = async () => {
+    setSaving(true); setGoogleMessage('');
+    const { data, error } = await supabase.functions.invoke('vihem-manage-google-workspace-settings', { body: {
+      action: 'save_drive_storage',
+      drive_root_folder_id: driveRootFolderId.trim(),
+      drive_shared_drive_id: driveSharedDriveId.trim(),
+      drive_delegated_user: driveDelegatedUser.trim(),
+      drive_storage_enabled: driveStorageEnabled,
+      drive_fallback_enabled: driveFallbackEnabled,
+    } });
+    setSaving(false);
+    if (error) { setGoogleMessage(data?.error || error.message || 'Kunde inte spara Drive-lagringen.'); return; }
+    setGoogleSettings(prev => ({ ...(prev || { has_service_account: false, service_account_hint: '', rotated_at: null }), ...(data?.settings || {}) }));
+    setGoogleMessage('Google Drive-lagringen är sparad.');
   };
 
   useEffect(() => {
@@ -463,7 +499,21 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
                 Koppla godkända Workspace-mailboxar för read-only-sökning efter fakturor, kvitton och underlag. JSON-nyckeln krypteras och lagras server-side och visas aldrig igen i frontend.
               </p>
               <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-                Gmail-integrationen använder endast <code>gmail.readonly</code>. Den kan inte skicka, radera, arkivera eller ändra e-post.
+                Gmail-integrationen använder endast <code>gmail.readonly</code>. Drive-lagring använder <code>drive.file</code> och kan bara skapa/läsa filer som VI-HEM själv hanterar.
+              </div>
+              <div className="mt-4 rounded-xl border border-slate-200 p-4">
+                <p className="font-semibold text-slate-900">Google Drive för dokument och bilder</p>
+                <p className="mt-1 text-sm text-slate-500">Använd helst en Shared Drive. Mappen blir rot för organisationens dokument, avtal, bilder och bilagor.</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <Input label="Rotmappens Drive-ID" value={driveRootFolderId} onChange={e => setDriveRootFolderId(e.target.value)} placeholder="Exempel: 1AbC..." />
+                  <Input label="Shared Drive-ID (valfritt)" value={driveSharedDriveId} onChange={e => setDriveSharedDriveId(e.target.value)} placeholder="Används för organisationsägd lagring" />
+                  <Input label="Delegerad Workspace-användare (valfritt)" value={driveDelegatedUser} onChange={e => setDriveDelegatedUser(e.target.value)} placeholder="admin@dindomän.se" />
+                </div>
+                <div className="mt-3 grid gap-2 text-sm text-slate-700">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={driveStorageEnabled} onChange={e => setDriveStorageEnabled(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" /> Använd Google Drive för nya filer</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={driveFallbackEnabled} onChange={e => setDriveFallbackEnabled(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" /> Behåll Supabase som fallback om Drive inte svarar</label>
+                </div>
+                <Button className="mt-3" onClick={saveDriveStorage} loading={saving}>Spara Drive-lagring</Button>
               </div>
               <div className="mt-4 rounded-xl border border-slate-200 p-4">
                 <p className="font-semibold text-slate-900">Service account</p>

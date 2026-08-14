@@ -3,6 +3,7 @@ import { ArrowRightLeft, Camera, Check, History, MapPin, Package, Plus, QrCode, 
 import QRCode from 'qrcode';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../components/ui';
 
 type Item = { id: string; article_number: string; name: string; category: string; supplier: string; barcode: string; qr_identifier: string; unit: string; purchase_price: number; minimum_stock: number; target_stock: number; reorder_quantity: number; notes: string; image_url: string; active: boolean };
@@ -173,6 +174,11 @@ export function InventoryPage({ onNavigate }: { onNavigate: (page: string) => vo
     const upload = await supabase.storage.from('vihem-inventory-images').upload(path, file, { upsert: false, contentType: file.type });
     if (upload.error) { setError(upload.error.message); return; }
     const imageUrl = supabase.storage.from('vihem-inventory-images').getPublicUrl(path).data.publicUrl;
+    try {
+      await archiveFileInGoogleDrive({ file, folder: 'Lager/Artiklar', organisation_id: user.organisation_id, source_type: 'inventory_item_image', source_key: path, created_by: user.id });
+    } catch (driveError) {
+      console.warn('Kunde inte arkivera lagerbilden i Google Drive:', driveError);
+    }
     setForm(current => ({ ...current, image_url: imageUrl })); setMessage('Artikelbild uppladdad. Spara artikeln för att koppla bilden.');
   }
   async function saveLocation() {

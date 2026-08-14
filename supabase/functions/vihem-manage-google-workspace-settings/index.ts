@@ -21,6 +21,26 @@ Deno.serve(async (req) => {
     const action = String(body.action || "get");
     const settings = await getSettings(db, profile.organisation_id);
     if (action === "get") return json({ ok: true, settings: publicSettings(settings) });
+    if (action === "save_drive_storage") {
+      const rootFolderId = String(body.drive_root_folder_id || "").trim();
+      const sharedDriveId = String(body.drive_shared_drive_id || "").trim();
+      const delegatedUser = String(body.drive_delegated_user || "").trim();
+      const driveStorageEnabled = Boolean(body.drive_storage_enabled);
+      const driveFallbackEnabled = body.drive_fallback_enabled !== false;
+      if (driveStorageEnabled && !rootFolderId) return json({ error: "Ange en Google Drive-mapp innan Drive-lagring aktiveras." }, 400);
+      const { data, error } = await db.from("vihem_google_workspace_settings").upsert({
+        organisation_id: profile.organisation_id,
+        drive_root_folder_id: rootFolderId,
+        drive_shared_drive_id: sharedDriveId,
+        drive_delegated_user: delegatedUser,
+        drive_storage_enabled: driveStorageEnabled,
+        drive_fallback_enabled: driveFallbackEnabled,
+        updated_by: user.id,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "organisation_id" }).select("drive_root_folder_id,drive_shared_drive_id,drive_delegated_user,drive_storage_enabled,drive_fallback_enabled").single();
+      if (error) throw error;
+      return json({ ok: true, settings: { ...publicSettings(settings), ...publicDriveSettings(data) } });
+    }
     if (action === "delete") {
       const { error } = await db.from("vihem_google_workspace_settings").upsert({ organisation_id: profile.organisation_id, encrypted_service_account_json: "", service_account_hint: "", rotated_at: null, updated_by: user.id, updated_at: new Date().toISOString() }, { onConflict: "organisation_id" });
       if (error) throw error;
@@ -50,7 +70,8 @@ Deno.serve(async (req) => {
 
 async function getSettings(db: any, organisationId: string) { const { data } = await db.from("vihem_google_workspace_settings").select("*").eq("organisation_id", organisationId).maybeSingle(); return data; }
 async function decryptSettings(settings: any, secret: string) { if (!settings?.encrypted_service_account_json) return ""; return decryptSecret(settings.encrypted_service_account_json, secret); }
-function publicSettings(settings: any) { return { has_service_account: Boolean(settings?.encrypted_service_account_json), service_account_hint: settings?.service_account_hint || "", rotated_at: settings?.rotated_at || null, updated_at: settings?.updated_at || null }; }
+function publicSettings(settings: any) { return { has_service_account: Boolean(settings?.encrypted_service_account_json), service_account_hint: settings?.service_account_hint || "", rotated_at: settings?.rotated_at || null, updated_at: settings?.updated_at || null, ...publicDriveSettings(settings) }; }
+function publicDriveSettings(settings: any) { return { drive_root_folder_id: settings?.drive_root_folder_id || "", drive_shared_drive_id: settings?.drive_shared_drive_id || "", drive_delegated_user: settings?.drive_delegated_user || "", drive_storage_enabled: Boolean(settings?.drive_storage_enabled), drive_fallback_enabled: settings?.drive_fallback_enabled !== false }; }
 async function encryptSecret(value: string, secret: string) { const enc = new TextEncoder(); const hash = await crypto.subtle.digest("SHA-256", enc.encode(secret)); const key = await crypto.subtle.importKey("raw", hash, "AES-GCM", false, ["encrypt"]); const iv = crypto.getRandomValues(new Uint8Array(12)); const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode(value)); const all = new Uint8Array(iv.length + cipher.byteLength); all.set(iv); all.set(new Uint8Array(cipher), iv.length); return btoa(String.fromCharCode(...all)); }
 async function decryptSecret(value: string, secret: string) { const dec = new TextDecoder(); const enc = new TextEncoder(); const bytes = Uint8Array.from(atob(value), c => c.charCodeAt(0)); const iv = bytes.slice(0, 12); const cipher = bytes.slice(12); const hash = await crypto.subtle.digest("SHA-256", enc.encode(secret)); const key = await crypto.subtle.importKey("raw", hash, "AES-GCM", false, ["decrypt"]); return dec.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher)); }
 function getEncryptionSecret(serviceKey: string) { return Deno.env.get("VIHEM_GOOGLE_WORKSPACE_SECRET_KEY") || Deno.env.get("VIHEM_OCR_SECRET_KEY") || Deno.env.get("VIHEM_ACCOUNTING_SECRET_KEY") || serviceKey; }

@@ -1043,6 +1043,11 @@ export interface Document {
   contract_status: 'not_applicable' | 'draft' | 'pending_signature' | 'signed' | 'cancelled' | 'archived';
   storage_bucket: string | null;
   storage_path: string | null;
+  storage_provider?: 'supabase' | 'google_drive';
+  drive_file_id?: string | null;
+  drive_web_url?: string | null;
+  drive_folder_id?: string | null;
+  drive_synced_at?: string | null;
   visibility: 'public' | 'tenant' | 'staff' | 'admin';
   tenant_id: string | null;
   property_id: string | null;

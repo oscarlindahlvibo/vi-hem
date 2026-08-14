@@ -109,6 +109,38 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
       .replace(/^-+|-+$/g, '')
       .toLowerCase();
 
+  const fileToBase64 = async (file: File) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    }
+    return btoa(binary);
+  };
+
+  const uploadToGoogleDrive = async (file: File, folder: string) => {
+    const { data: settingsData, error: settingsError } = await supabase.functions.invoke('vihem-google-drive-storage', {
+      body: { action: 'settings' },
+    });
+    if (settingsError) throw settingsError;
+    const settings = settingsData?.settings;
+    if (!settings?.enabled) return { enabled: false as const };
+
+    const { data, error } = await supabase.functions.invoke('vihem-google-drive-storage', {
+      body: {
+        action: 'upload',
+        filename: file.name,
+        mime_type: file.type || 'application/octet-stream',
+        content_base64: await fileToBase64(file),
+        folder,
+      },
+    });
+    if (error) throw new Error(data?.error || error.message || 'Google Drive-uppladdningen misslyckades.');
+    if (!data?.ok || !data?.id) throw new Error(data?.error || 'Google Drive returnerade inget fil-ID.');
+    return { enabled: true as const, data };
+  };
+
   const fetchDocuments = async () => {
     try {
       setLoading(true);
@@ -169,24 +201,50 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
       let fileSize = 0;
       let storageBucket: string | null = null;
       let storagePath: string | null = null;
+      let storageProvider = 'supabase';
+      let driveFileId: string | null = null;
+      let driveWebUrl: string | null = null;
+      let driveFolderId: string | null = null;
 
       if (newFile) {
         const organisationPath = user?.organisation_id || 'platform';
         const timestamp = Date.now();
         const path = `${organisationPath}/${user?.id || 'unknown'}/${timestamp}-${safePathPart(newFile.name)}`;
-        const { error: uploadError } = await supabase.storage
-          .from('vihem-documents')
-          .upload(path, newFile, { upsert: false });
-
-        if (uploadError) {
-          if (uploadError.message.toLowerCase().includes('bucket')) {
-            throw new Error('Storage-bucketen vihem-documents saknas. Kör senaste Supabase-migrationerna först.');
+        let driveError: unknown = null;
+        try {
+          const driveUpload = await uploadToGoogleDrive(newFile, `Dokument/${newCategory}`);
+          if (driveUpload.enabled) {
+            storageProvider = 'google_drive';
+            driveFileId = driveUpload.data.id;
+            driveWebUrl = driveUpload.data.webViewLink || null;
+            driveFolderId = driveUpload.data.folder_id || null;
           }
-          throw uploadError;
+        } catch (error) {
+          driveError = error;
         }
 
-        storageBucket = 'vihem-documents';
-        storagePath = path;
+        if (storageProvider !== 'google_drive') {
+          if (driveError) {
+            const { data: driveSettings } = await supabase.functions.invoke('vihem-google-drive-storage', { body: { action: 'settings' } });
+            if (driveSettings?.settings?.enabled && driveSettings?.settings?.fallback_enabled === false) {
+              throw driveError;
+            }
+          }
+
+          const { error: uploadError } = await supabase.storage
+            .from('vihem-documents')
+            .upload(path, newFile, { upsert: false });
+
+          if (uploadError) {
+            if (uploadError.message.toLowerCase().includes('bucket')) {
+              throw new Error('Storage-bucketen vihem-documents saknas. Kör senaste Supabase-migrationerna först.');
+            }
+            throw uploadError;
+          }
+
+          storageBucket = 'vihem-documents';
+          storagePath = path;
+        }
         fileName = newFile.name;
         fileSize = newFile.size;
       }
@@ -204,6 +262,11 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
         file_size: fileSize,
         storage_bucket: storageBucket,
         storage_path: storagePath,
+        storage_provider: storageProvider,
+        drive_file_id: driveFileId,
+        drive_web_url: driveWebUrl,
+        drive_folder_id: driveFolderId,
+        drive_synced_at: storageProvider === 'google_drive' ? new Date().toISOString() : null,
         tenant_id: newTenantId || null,
         property_id: newPropertyId || null,
         created_by: user?.id,
@@ -222,6 +285,10 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
 
   const downloadDocument = async (doc: Document) => {
     try {
+      if ((doc as Document & { drive_web_url?: string }).drive_web_url) {
+        window.open((doc as Document & { drive_web_url: string }).drive_web_url, '_blank', 'noopener,noreferrer');
+        return;
+      }
       if (doc.storage_bucket && doc.storage_path) {
         const { data, error } = await supabase.storage
           .from(doc.storage_bucket)

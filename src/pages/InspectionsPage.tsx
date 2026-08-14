@@ -16,6 +16,7 @@ import {
 } from '../components/ui';
 import { formatDate } from '../lib/utils';
 import { buildGeneratedDocumentWithImages } from '../lib/generatedDocuments';
+import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
 import {
   ClipboardCheck,
   Plus,
@@ -534,6 +535,13 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
         const { error } = await supabase.storage.from('vihem-inspection-photos').upload(path, file, { upsert: false });
         if (error) throw error;
         const { data: urlData } = supabase.storage.from('vihem-inspection-photos').getPublicUrl(path);
+        if (user?.organisation_id) {
+          try {
+            await archiveFileInGoogleDrive({ file, folder: 'Besiktningar/Foton', organisation_id: user.organisation_id, source_type: 'inspection_photo', source_key: path, created_by: user.id });
+          } catch (driveError) {
+            console.warn('Kunde inte arkivera besiktningsfotot i Google Drive:', driveError);
+          }
+        }
         return urlData.publicUrl;
       }));
 

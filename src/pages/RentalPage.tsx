@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BedDouble, CalendarDays, Edit2, Plus, ShieldAlert, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
 import { useAuth } from '../contexts/AuthContext';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../components/ui';
 
@@ -147,13 +148,13 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
     if (result.error) { setError(result.error.message); return; }
     const productId = editingProduct?.id || result.data?.id;
     if (productId && productImages.length) {
-      const urls = await uploadImages(productImages, productId);
+      const urls = await uploadImages(productImages, productId, 'rental_product_image');
       if (urls.length) await supabase.from('vihem_rental_products').update({ images: [...(editingProduct?.images || []), ...urls], updated_at: new Date().toISOString() }).eq('id', productId);
     }
     setProductModal(false); await fetchData();
   }
 
-  async function uploadImages(files: File[], entityId: string) {
+  async function uploadImages(files: File[], entityId: string, sourceType: string) {
     if (!organisationId) return [];
     const urls: string[] = [];
     for (const file of files) {
@@ -161,6 +162,11 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
       const upload = await supabase.storage.from('vihem-rental-images').upload(path, file, { upsert: false, contentType: file.type });
       if (upload.error) { setError(upload.error.message); continue; }
       urls.push(supabase.storage.from('vihem-rental-images').getPublicUrl(path).data.publicUrl);
+      try {
+        await archiveFileInGoogleDrive({ file, folder: `Uthyrning/${sourceType}`, organisation_id: organisationId, source_type: sourceType, source_id: entityId, source_key: path, created_by: user?.id });
+      } catch (driveError) {
+        console.warn('Kunde inte arkivera uthyrningsbilden i Google Drive:', driveError);
+      }
     }
     return urls;
   }
@@ -180,7 +186,7 @@ export function RentalPage({ onNavigate: _onNavigate }: { onNavigate: (page: str
     setSaving(false);
     if (result.error) setError(result.error.message); else {
       if (assetImages.length && result.data?.id) {
-        const urls = await uploadImages(assetImages, result.data.id);
+        const urls = await uploadImages(assetImages, result.data.id, 'rental_asset_image');
         if (urls.length) await supabase.from('vihem_rental_assets').update({ images: urls }).eq('id', result.data.id);
       }
       setAssetModal(false); setAssetForm(emptyAsset); setAssetImages([]); setEditingAsset(null); await fetchData();

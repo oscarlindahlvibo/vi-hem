@@ -57,6 +57,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { TIME_CATEGORY_LABELS } from '../lib/utils';
+import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
 import type { TimeCategory } from '../types';
 
 type FilterView = 'all' | 'mine' | 'unassigned';
@@ -422,6 +423,13 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         uploaded_at: new Date().toISOString(),
         uploaded_by: userId,
       });
+      if (user?.organisation_id) {
+        try {
+          await archiveFileInGoogleDrive({ file, folder: 'Arbetsorder', organisation_id: user.organisation_id, source_type: 'work_order_attachment', source_id: workOrderId, source_key: path, created_by: userId });
+        } catch (driveError) {
+          console.warn('Kunde inte arkivera arbetsorderbilagan i Google Drive:', driveError);
+        }
+      }
     }
     return uploaded;
   }
