@@ -351,7 +351,8 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           <button
             onClick={() => onNavigate('notifications')}
             className="relative rounded-2xl p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
-            aria-label="Notiser"
+            aria-label="Öppna aviseringar"
+            title="Öppna aviseringar"
           >
             <AlertCircle className="h-5 w-5" />
             {attentionCount > 0 && (

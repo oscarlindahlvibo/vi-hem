@@ -86,6 +86,7 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
     setOcrSettingsMessage('');
     setBankIdMessage('');
     setSmsMessage('');
+    setGoogleMessage('');
 
     const [ocrResult, organisationResult, googleResult] = await Promise.all([
       supabase.functions.invoke('vihem-manage-ocr-settings', { body: { action: 'get' } }),
@@ -105,7 +106,11 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
 
     const { data: smsSettings, error: smsError } = await supabase.from('vihem_sms_settings').select('enabled,sender').eq('organisation_id', organisationId).maybeSingle();
     setSmsForm({ enabled: Boolean(smsSettings?.enabled), sender: String(smsSettings?.sender || '') });
-    if (!googleResult.error) setGoogleSettings((googleResult.data?.settings ?? null) as GoogleWorkspaceSettings | null);
+    if (!googleResult.error) {
+      setGoogleSettings((googleResult.data?.settings ?? null) as GoogleWorkspaceSettings | null);
+    } else {
+      setGoogleMessage(googleResult.error.message || 'Kunde inte hämta Google Workspace-inställningar.');
+    }
     if (smsError && !smsError.message.includes('schema cache')) setSmsMessage(smsError.message);
 
     if (organisationResult.error) {
@@ -143,6 +148,13 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  // The settings route is reused when a user switches between the admin
+  // shortcut and a specific integration shortcut. Keep the selected tab in
+  // sync with the route instead of only reading it during the first mount.
+  useEffect(() => {
+    setActiveSection(initialSection);
+  }, [initialSection]);
 
   const saveOcrSettings = async () => {
     setSaving(true);
@@ -285,6 +297,39 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
         ))}
       </div>
 
+      <div className="grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => setActiveSection('google')}
+          className="flex min-w-0 items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40"
+        >
+          <span className="min-w-0">
+            <span className="block text-sm font-bold text-slate-950">Google Workspace / E-post</span>
+            <span className="mt-1 block truncate text-xs text-slate-500">
+              {googleSettings?.has_service_account ? `Ansluten (${googleSettings.service_account_hint})` : 'Ingen koppling sparad'}
+            </span>
+          </span>
+          <Badge className={googleSettings?.has_service_account ? 'shrink-0 bg-emerald-50 text-emerald-700' : 'shrink-0 bg-amber-50 text-amber-700'}>
+            {googleSettings?.has_service_account ? 'Aktiv' : 'Saknas'}
+          </Badge>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSection('cellsynth')}
+          className="flex min-w-0 items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40"
+        >
+          <span className="min-w-0">
+            <span className="block text-sm font-bold text-slate-950">Cellsynt SMS</span>
+            <span className="mt-1 block truncate text-xs text-slate-500">
+              {smsForm.sender ? `Avsändare: ${smsForm.sender}` : 'Ingen avsändare konfigurerad'}
+            </span>
+          </span>
+          <Badge className={smsForm.enabled ? 'shrink-0 bg-emerald-50 text-emerald-700' : 'shrink-0 bg-slate-100 text-slate-600'}>
+            {smsForm.enabled ? 'Aktiv' : 'Avstängd'}
+          </Badge>
+        </button>
+      </div>
+
       {activeSection === 'ai' && (
         <Card className="p-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -400,7 +445,7 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
             <div>
               <h2 className="text-lg font-bold text-slate-950">Google Workspace / E-post</h2>
               <p className="mt-1 max-w-2xl text-sm text-slate-500">
-                Koppla godkända Workspace-mailboxar för read-only-sökning efter fakturor, kvitton och underlag. Själva service account-nyckeln lagras som Supabase secret och kan aldrig läsas av frontend.
+                Koppla godkända Workspace-mailboxar för read-only-sökning efter fakturor, kvitton och underlag. JSON-nyckeln krypteras och lagras server-side och visas aldrig igen i frontend.
               </p>
               <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
                 Gmail-integrationen använder endast <code>gmail.readonly</code>. Den kan inte skicka, radera, arkivera eller ändra e-post.
