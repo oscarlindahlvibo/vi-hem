@@ -38,12 +38,13 @@ Deno.serve(async (request) => {
     const recipient = normalisePhone(body.recipient);
     const message = text(body.message, 4000);
     if (!organisationId || !recipient || !message) return json({ error: "organisation_id, recipient och message krävs." }, 400);
-    const { data: settings } = await supabase.from("vihem_sms_settings").select("enabled,sender").eq("organisation_id", organisationId).maybeSingle();
+    const { data: settings } = await supabase.from("vihem_sms_settings").select("enabled,sender,encrypted_username,encrypted_password,encrypted_api_url").eq("organisation_id", organisationId).maybeSingle();
     if (settings && !settings.enabled) return json({ error: "SMS är inte aktiverat för organisationen." }, 409);
     const sender = text(settings?.sender || Deno.env.get("CELLSYNT_SENDER"), 11);
-    const username = Deno.env.get("CELLSYNT_USERNAME");
-    const password = Deno.env.get("CELLSYNT_PASSWORD");
-    const endpoint = Deno.env.get("CELLSYNT_API_URL") || "https://se-1.cellsynt.net/sms.php";
+    const secret = encryptionSecret();
+    const username = settings?.encrypted_username ? await decrypt(settings.encrypted_username, secret) : Deno.env.get("CELLSYNT_USERNAME");
+    const password = settings?.encrypted_password ? await decrypt(settings.encrypted_password, secret) : Deno.env.get("CELLSYNT_PASSWORD");
+    const endpoint = settings?.encrypted_api_url ? await decrypt(settings.encrypted_api_url, secret) : (Deno.env.get("CELLSYNT_API_URL") || "https://se-1.cellsynt.net/sms.php");
     if (!username || !password || !sender) return json({ error: "Cellsynt är inte komplett konfigurerat på servern." }, 503);
     const { data: log, error: logError } = await supabase.from("vihem_sms_messages").insert({ organisation_id: organisationId, provider: "cellsynt", recipient, message, status: "sending", related_type: text(body.related_type, 80), related_id: uuidOrNull(body.related_id), created_by: actor.profile.id }).select("id").single();
     if (logError) throw logError;
@@ -65,3 +66,6 @@ Deno.serve(async (request) => {
     return json({ error: message }, 502);
   }
 });
+
+function encryptionSecret() { return Deno.env.get("VIHEM_CELLSYNT_SECRET_KEY") || Deno.env.get("VIHEM_ACCOUNTING_SECRET_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""; }
+async function decrypt(value: string, secret: string) { const dec = new TextDecoder(); const enc = new TextEncoder(); const bytes = Uint8Array.from(atob(value), c => c.charCodeAt(0)); const iv = bytes.slice(0, 12); const cipher = bytes.slice(12); const hash = await crypto.subtle.digest("SHA-256", enc.encode(secret)); const key = await crypto.subtle.importKey("raw", hash, "AES-GCM", false, ["decrypt"]); return dec.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher)); }

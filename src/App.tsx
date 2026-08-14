@@ -43,6 +43,7 @@ import { StaffDocumentScannerPage } from './pages/StaffDocumentScannerPage';
 import { RentalPage } from './pages/RentalPage';
 import { InventoryPage } from './pages/InventoryPage';
 import { MailPage } from './pages/MailPage';
+import { SmsPage } from './pages/SmsPage';
 import type { ModuleKey } from './types';
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasError: boolean }> {
@@ -455,7 +456,7 @@ function AppInner() {
 
       case 'admin-cellsynth':
         if (!isAdmin) return renderDashboard();
-        return <PlatformSettingsPage initialSection="cellsynth" onNavigate={navigate} />;
+        return <SmsPage />;
 
       case 'finance':
         if (!isAdmin || !enabledModules.finance) return renderDashboard();
