@@ -23,6 +23,7 @@ type OcrProviderSettings = {
   last_test_openai?: { ok?: boolean; message?: string } | null;
   last_test_google_vision?: { ok?: boolean; message?: string } | null;
 };
+type GoogleWorkspaceSettings = { has_service_account: boolean; service_account_hint: string; rotated_at: string | null };
 
 const emptyOcrSettingsForm = {
   provider: 'google_vision' as 'google_vision' | 'none',
@@ -56,6 +57,9 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
   const [bankIdMessage, setBankIdMessage] = useState('');
   const [smsForm, setSmsForm] = useState(emptySmsForm);
   const [smsMessage, setSmsMessage] = useState('');
+  const [googleSettings, setGoogleSettings] = useState<GoogleWorkspaceSettings | null>(null);
+  const [googleJson, setGoogleJson] = useState('');
+  const [googleMessage, setGoogleMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -83,13 +87,14 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
     setBankIdMessage('');
     setSmsMessage('');
 
-    const [ocrResult, organisationResult] = await Promise.all([
+    const [ocrResult, organisationResult, googleResult] = await Promise.all([
       supabase.functions.invoke('vihem-manage-ocr-settings', { body: { action: 'get' } }),
       supabase
         .from('vihem_organisations')
         .select('settings')
         .eq('id', organisationId)
         .maybeSingle(),
+      supabase.functions.invoke('vihem-manage-google-workspace-settings', { body: { action: 'get' } }),
     ]);
 
     if (ocrResult.error) {
@@ -100,6 +105,7 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
 
     const { data: smsSettings, error: smsError } = await supabase.from('vihem_sms_settings').select('enabled,sender').eq('organisation_id', organisationId).maybeSingle();
     setSmsForm({ enabled: Boolean(smsSettings?.enabled), sender: String(smsSettings?.sender || '') });
+    if (!googleResult.error) setGoogleSettings((googleResult.data?.settings ?? null) as GoogleWorkspaceSettings | null);
     if (smsError && !smsError.message.includes('schema cache')) setSmsMessage(smsError.message);
 
     if (organisationResult.error) {
@@ -118,6 +124,21 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
 
     setLoading(false);
   }, [applyOcrSettings, organisationId]);
+
+  const saveGoogleSettings = async () => {
+    setSaving(true); setGoogleMessage('');
+    const { data, error } = await supabase.functions.invoke('vihem-manage-google-workspace-settings', { body: { action: 'save', service_account_json: googleJson } });
+    setSaving(false);
+    if (error) { setGoogleMessage(data?.error || error.message || 'Kunde inte spara Google-kopplingen.'); return; }
+    setGoogleSettings((data?.settings ?? null) as GoogleWorkspaceSettings | null); setGoogleJson(''); setGoogleMessage('Google service account är sparad krypterat.');
+  };
+
+  const deleteGoogleSettings = async () => {
+    setSaving(true); setGoogleMessage('');
+    const { error } = await supabase.functions.invoke('vihem-manage-google-workspace-settings', { body: { action: 'delete' } });
+    setSaving(false); setGoogleMessage(error ? error.message : 'Google-kopplingen är borttagen.');
+    if (!error) setGoogleSettings(null);
+  };
 
   useEffect(() => {
     void loadSettings();
@@ -383,6 +404,13 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
               </p>
               <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
                 Gmail-integrationen använder endast <code>gmail.readonly</code>. Den kan inte skicka, radera, arkivera eller ändra e-post.
+              </div>
+              <div className="mt-4 rounded-xl border border-slate-200 p-4">
+                <p className="font-semibold text-slate-900">Service account</p>
+                <p className="mt-1 text-sm text-slate-500">{googleSettings?.has_service_account ? `Sparad: ${googleSettings.service_account_hint}` : 'Ingen service account är sparad ännu.'}</p>
+                <Textarea className="mt-3" label="Service account-JSON" value={googleJson} onChange={e => setGoogleJson(e.target.value)} placeholder="Klistra in hela JSON-filen från Google Cloud" />
+                <div className="mt-3 flex flex-wrap gap-2"><Button onClick={saveGoogleSettings} loading={saving}>Spara krypterat</Button>{googleSettings?.has_service_account && <Button variant="secondary" onClick={deleteGoogleSettings} loading={saving}>Ta bort koppling</Button>}</div>
+                {googleMessage && <p className="mt-3 text-sm font-semibold text-slate-700">{googleMessage}</p>}
               </div>
               <Button className="mt-4" onClick={() => onNavigate?.('mail-search')}>
                 Öppna E-post & underlag
