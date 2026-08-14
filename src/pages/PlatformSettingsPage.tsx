@@ -116,7 +116,7 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
     } else {
       setGoogleMessage(googleResult.error.message || 'Kunde inte hämta Google Workspace-inställningar.');
     }
-    if (smsError) setSmsMessage(smsError.message || 'Kunde inte hämta Cellsynt-inställningar.');
+    if (smsError) setSmsMessage(await getFunctionErrorMessage(smsError, 'Kunde inte hämta Cellsynt-inställningar.'));
 
     if (bankIdResult.error) {
       setBankIdMessage(bankIdResult.error.message || 'Kunde inte hämta BankID-inställningar.');
@@ -240,7 +240,12 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
     if (!organisationId) return;
     setSaving(true); setSmsMessage('');
     const { error } = await supabase.functions.invoke('vihem-manage-cellsynth-settings', { body: { action: 'save', enabled: smsForm.enabled, sender: smsForm.sender.trim(), username: smsForm.username.trim(), password: smsForm.password.trim(), api_url: smsForm.api_url.trim() } });
-    setSaving(false); setSmsMessage(error ? error.message : 'Cellsynt-inställningarna är sparade krypterat.');
+    setSaving(false);
+    if (error) {
+      setSmsMessage(await getFunctionErrorMessage(error, 'Kunde inte spara Cellsynt-inställningarna.'));
+      return;
+    }
+    setSmsMessage('Cellsynt-inställningarna är sparade krypterat.');
     if (!error) setSmsForm(prev => ({ ...prev, username: '', password: '', api_url: '' }));
   };
 
