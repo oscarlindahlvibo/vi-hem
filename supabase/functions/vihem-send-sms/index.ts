@@ -50,10 +50,13 @@ Deno.serve(async (request) => {
     if (logError) throw logError;
     logId = log.id;
     const params = new URLSearchParams({ username, password, destination: recipient, type: "text", charset: "UTF-8", text: message, originatortype: "alpha", originator: sender });
-    const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params });
-    const result = await response.text();
-    if (!response.ok || !result.trim().startsWith("OK:")) throw new Error(result.trim() || `Cellsynt svarade med HTTP ${response.status}.`);
-    const externalId = result.trim().replace(/^OK:\s*/i, "").slice(0, 200);
+    const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "text/plain" }, body: params });
+    const result = (await response.text()).trim();
+    const providerMessage = result || `Cellsynt svarade med HTTP ${response.status}.`;
+    // Cellsynt returns a tracking id as `OK: ...`; keep the full provider
+    // response in the error so admins can correct credentials/settings.
+    if (!response.ok || !/^OK:\s*/i.test(result)) throw new Error(`Cellsynt (${response.status}): ${providerMessage}`);
+    const externalId = result.replace(/^OK:\s*/i, "").slice(0, 200);
     await supabase.from("vihem_sms_messages").update({ status: "sent", external_id: externalId, sent_at: new Date().toISOString() }).eq("id", logId);
     return json({ ok: true, message_id: logId, external_id: externalId });
   } catch (error) {
