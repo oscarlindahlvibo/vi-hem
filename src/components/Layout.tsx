@@ -22,6 +22,12 @@ interface NavItem {
   module?: ModuleKey;
 }
 
+interface NavGroup {
+  label: string;
+  icon: React.ReactNode;
+  items: NavItem[];
+}
+
 interface LayoutProps {
   children: React.ReactNode;
   currentPage: string;
@@ -41,51 +47,66 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
   const [passwordError, setPasswordError] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState('');
 
-  const navItems: NavItem[] = [
-    // ── Tenant ────────────────────────────────────────────────────────────
-    { label: 'Hem', icon: <Home className="w-5 h-5" />, page: 'dashboard', roles: ['tenant', 'staff', 'admin'] },
-    { label: 'Min lägenhet', icon: <Building2 className="w-5 h-5" />, page: 'apartment', roles: ['tenant'] },
-    { label: 'Felanmälan', icon: <Wrench className="w-5 h-5" />, page: 'maintenance', roles: ['tenant', 'staff', 'admin'] },
-    { label: 'Tvättbokning', icon: <WashingMachine className="w-5 h-5" />, page: 'laundry', roles: ['tenant', 'staff', 'admin'] },
-    { label: 'Dokument', icon: <FileText className="w-5 h-5" />, page: 'documents', roles: ['tenant', 'staff', 'admin'] },
-    { label: 'E-post & underlag', icon: <Mail className="w-5 h-5" />, page: 'mail-search', roles: ['staff', 'admin'] },
-    { label: 'Nyheter', icon: <Newspaper className="w-5 h-5" />, page: 'news', roles: ['tenant', 'staff', 'admin'] },
-    { label: 'Chatt', icon: <MessageCircle className="w-5 h-5" />, page: 'chat', roles: ['tenant', 'staff', 'admin'] },
-    { label: 'Uppsägning', icon: <FileX className="w-5 h-5" />, page: 'termination', roles: ['tenant'] },
-    // ── Staff / Admin ──────────────────────────────────────────────────────
-    { label: 'Arbetsordrar', icon: <ClipboardList className="w-5 h-5" />, page: 'workorders', roles: ['staff', 'admin'] },
-    { label: 'Tidrapportering', icon: <Clock className="w-5 h-5" />, page: 'timetracking', roles: ['staff', 'admin'] },
-    { label: 'Kalender', icon: <CalendarDays className="w-5 h-5" />, page: 'calendar', roles: ['staff', 'admin'] },
-    { label: 'Inköpslista', icon: <ShoppingCart className="w-5 h-5" />, page: 'purchases', roles: ['staff', 'admin'] },
-    { label: 'Lager', icon: <Package className="w-5 h-5" />, page: 'inventory', roles: ['staff', 'admin'], module: 'inventory_management' },
-    { label: 'Scanna underlag', icon: <ScanLine className="w-5 h-5" />, page: 'document-scanner', roles: ['staff', 'admin'], module: 'finance' },
-    { label: 'Årsplanering', icon: <CalendarDays className="w-5 h-5" />, page: 'year-planning', roles: ['staff', 'admin'], module: 'year_planning' },
-    { label: 'Möten & Uppföljning', icon: <MessageSquareText className="w-5 h-5" />, page: 'meetings', roles: ['staff', 'admin'], module: 'meetings' },
-    { label: 'Kundprojekt', icon: <Briefcase className="w-5 h-5" />, page: 'customer-projects', roles: ['staff', 'admin'], module: 'customer_projects' },
-    { label: 'Korttidsuthyrning', icon: <BedDouble className="w-5 h-5" />, page: 'short-stay', roles: ['staff', 'admin'], module: 'short_stay' },
-    { label: 'Uthyrning', icon: <Truck className="w-5 h-5" />, page: 'rental', roles: ['staff', 'admin'], module: 'rental_management' },
-    { label: 'Besiktningar & Avtal', icon: <ClipboardCheck className="w-5 h-5" />, page: 'inspections', roles: ['staff', 'admin'] },
-    // ── Admin ──────────────────────────────────────────────────────────────
-    { label: 'Fastigheter', icon: <Building2 className="w-5 h-5" />, page: 'admin-properties', roles: ['admin'] },
-    { label: 'Hyresgäster', icon: <Users className="w-5 h-5" />, page: 'admin-tenants', roles: ['admin'] },
-    { label: 'Importera data', icon: <FileSpreadsheet className="w-5 h-5" />, page: 'admin-import', roles: ['admin'] },
-    { label: 'Personal', icon: <Settings className="w-5 h-5" />, page: 'admin-staff', roles: ['admin'] },
-    { label: 'TV-skärm', icon: <Monitor className="w-5 h-5" />, page: 'screen-settings', roles: ['admin'] },
-    { label: 'Inställningar', icon: <SlidersHorizontal className="w-5 h-5" />, page: 'admin-settings', roles: ['admin'] },
-    { label: 'Google Workspace', icon: <Mail className="w-5 h-5" />, page: 'admin-google-workspace', roles: ['admin'] },
-    { label: 'Cellsynt SMS', icon: <MessageSquareText className="w-5 h-5" />, page: 'admin-cellsynth', roles: ['admin'] },
-    { label: 'Ekonomi', icon: <Landmark className="w-5 h-5" />, page: 'finance', roles: ['admin'], module: 'finance' },
-    { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['admin'] },
-    { label: 'Uppsägningar', icon: <FileX className="w-5 h-5" />, page: 'admin-terminations', roles: ['admin'] },
-    // ── Superadmin ─────────────────────────────────────────────────────────
-    { label: 'Organisationer', icon: <Globe className="w-5 h-5" />, page: 'admin-organisations', roles: ['superadmin'] },
+  const navGroups: NavGroup[] = [
+    { label: 'Hem', icon: <Home className="w-5 h-5" />, items: [
+      { label: 'Översikt', icon: <Home className="w-5 h-5" />, page: 'dashboard', roles: ['tenant', 'staff', 'admin'] },
+      { label: 'Min lägenhet', icon: <Building2 className="w-5 h-5" />, page: 'apartment', roles: ['tenant'] },
+    ] },
+    { label: 'Arbete & projekt', icon: <Wrench className="w-5 h-5" />, items: [
+      { label: 'Arbetsordrar', icon: <ClipboardList className="w-5 h-5" />, page: 'workorders', roles: ['staff', 'admin'] },
+      { label: 'Tidrapportering', icon: <Clock className="w-5 h-5" />, page: 'timetracking', roles: ['staff', 'admin'] },
+      { label: 'Kalender', icon: <CalendarDays className="w-5 h-5" />, page: 'calendar', roles: ['staff', 'admin'] },
+      { label: 'Kundprojekt', icon: <Briefcase className="w-5 h-5" />, page: 'customer-projects', roles: ['staff', 'admin'], module: 'customer_projects' },
+      { label: 'Årsplanering', icon: <CalendarDays className="w-5 h-5" />, page: 'year-planning', roles: ['staff', 'admin'], module: 'year_planning' },
+      { label: 'Möten & Uppföljning', icon: <MessageSquareText className="w-5 h-5" />, page: 'meetings', roles: ['staff', 'admin'], module: 'meetings' },
+    ] },
+    { label: 'Fastigheter & boende', icon: <Building2 className="w-5 h-5" />, items: [
+      { label: 'Felanmälan', icon: <Wrench className="w-5 h-5" />, page: 'maintenance', roles: ['tenant', 'staff', 'admin'] },
+      { label: 'Fastigheter', icon: <Building2 className="w-5 h-5" />, page: 'admin-properties', roles: ['admin'] },
+      { label: 'Hyresgäster', icon: <Users className="w-5 h-5" />, page: 'admin-tenants', roles: ['admin'] },
+      { label: 'Besiktningar & Avtal', icon: <ClipboardCheck className="w-5 h-5" />, page: 'inspections', roles: ['staff', 'admin'] },
+      { label: 'Tvättbokning', icon: <WashingMachine className="w-5 h-5" />, page: 'laundry', roles: ['tenant', 'staff', 'admin'] },
+      { label: 'Dokument', icon: <FileText className="w-5 h-5" />, page: 'documents', roles: ['tenant', 'staff', 'admin'] },
+      { label: 'Uppsägningar', icon: <FileX className="w-5 h-5" />, page: 'admin-terminations', roles: ['admin'] },
+      { label: 'Uppsägning', icon: <FileX className="w-5 h-5" />, page: 'termination', roles: ['tenant'] },
+    ] },
+    { label: 'Korttidsuthyrning', icon: <BedDouble className="w-5 h-5" />, items: [
+      { label: 'Korttidsuthyrning', icon: <BedDouble className="w-5 h-5" />, page: 'short-stay', roles: ['staff', 'admin'], module: 'short_stay' },
+    ] },
+    { label: 'Uthyrning', icon: <Truck className="w-5 h-5" />, items: [
+      { label: 'Översikt', icon: <Truck className="w-5 h-5" />, page: 'rental', roles: ['staff', 'admin'], module: 'rental_management' },
+    ] },
+    { label: 'Inköp & lager', icon: <Package className="w-5 h-5" />, items: [
+      { label: 'Inköpslista', icon: <ShoppingCart className="w-5 h-5" />, page: 'purchases', roles: ['staff', 'admin'] },
+      { label: 'Lager', icon: <Package className="w-5 h-5" />, page: 'inventory', roles: ['staff', 'admin'], module: 'inventory_management' },
+      { label: 'Scanna underlag', icon: <ScanLine className="w-5 h-5" />, page: 'document-scanner', roles: ['staff', 'admin'], module: 'finance' },
+    ] },
+    { label: 'Ekonomi', icon: <Landmark className="w-5 h-5" />, items: [
+      { label: 'Ekonomi', icon: <Landmark className="w-5 h-5" />, page: 'finance', roles: ['admin'], module: 'finance' },
+      { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['admin'] },
+      { label: 'E-post & underlag', icon: <Mail className="w-5 h-5" />, page: 'mail-search', roles: ['staff', 'admin'] },
+    ] },
+    { label: 'Personal & kommunikation', icon: <Users className="w-5 h-5" />, items: [
+      { label: 'Personal', icon: <Settings className="w-5 h-5" />, page: 'admin-staff', roles: ['admin'] },
+      { label: 'Chatt', icon: <MessageCircle className="w-5 h-5" />, page: 'chat', roles: ['tenant', 'staff', 'admin'] },
+      { label: 'Nyheter', icon: <Newspaper className="w-5 h-5" />, page: 'news', roles: ['tenant', 'staff', 'admin'] },
+    ] },
+    { label: 'Administration', icon: <Settings className="w-5 h-5" />, items: [
+      { label: 'Inställningar', icon: <SlidersHorizontal className="w-5 h-5" />, page: 'admin-settings', roles: ['admin'] },
+      { label: 'Google Workspace', icon: <Mail className="w-5 h-5" />, page: 'admin-google-workspace', roles: ['admin'] },
+      { label: 'Cellsynt SMS', icon: <MessageSquareText className="w-5 h-5" />, page: 'admin-cellsynth', roles: ['admin'] },
+      { label: 'TV-skärm', icon: <Monitor className="w-5 h-5" />, page: 'screen-settings', roles: ['admin'] },
+      { label: 'Importera data', icon: <FileSpreadsheet className="w-5 h-5" />, page: 'admin-import', roles: ['admin'] },
+      { label: 'Organisationer', icon: <Globe className="w-5 h-5" />, page: 'admin-organisations', roles: ['superadmin'] },
+    ] },
   ];
 
-  const visibleItems = navItems.filter(item => {
-    if (!user || !item.roles.includes(user.role)) return false;
-    if (item.module) return Boolean(enabledModules[item.module]);
-    return true;
-  });
+  const isVisible = (item: NavItem) => Boolean(user && item.roles.includes(user.role) && (!item.module || enabledModules[item.module]));
+  const visibleGroups = navGroups.map(group => ({ ...group, items: group.items.filter(isVisible) })).filter(group => group.items.length > 0);
+  const currentGroup = visibleGroups.find(group => group.items.some(item => currentPage === item.page || currentPage.startsWith(`${item.page}/`)))?.label;
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const toggleGroup = (label: string) => setOpenGroups(groups => ({ ...groups, [label]: !(groups[label] ?? label === currentGroup) }));
+  const groupOpen = (label: string) => openGroups[label] ?? label === currentGroup;
 
   const bottomItems = user ? [
     { label: 'Hem', icon: <Home className="h-5 w-5" />, action: () => navigate('dashboard'), active: currentPage === 'dashboard' },
@@ -164,25 +185,17 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
           </div>
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-          {visibleItems.map(item => (
-            <button
-              key={item.page}
-              onClick={() => navigate(item.page)}
-              className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all ${
-                currentPage === item.page
-                  ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-100 shadow-sm shadow-blue-600/5'
-                  : 'text-slate-600 hover:bg-slate-100/90 hover:text-slate-950'
-              }`}
-            >
-              <span className={currentPage === item.page ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-700'}>
-                {item.icon}
-              </span>
-              {item.label}
-              {item.badge ? (
-                <span className="ml-auto bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">{item.badge}</span>
-              ) : null}
-            </button>
-          ))}
+          {visibleGroups.map(group => {
+            const active = group.items.some(item => currentPage === item.page || currentPage.startsWith(`${item.page}/`));
+            if (group.items.length === 1) {
+              const item = group.items[0];
+              return <button key={group.label} onClick={() => navigate(item.page)} className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all ${active ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-100 shadow-sm' : 'text-slate-600 hover:bg-slate-100/90 hover:text-slate-950'}`}><span className={active ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-700'}>{group.icon}</span>{group.label}</button>;
+            }
+            return <div key={group.label} className="space-y-1">
+              <button type="button" onClick={() => toggleGroup(group.label)} className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition-colors ${active ? 'text-slate-950' : 'text-slate-600 hover:bg-slate-100/90 hover:text-slate-950'}`}><span className={active ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-700'}>{group.icon}</span>{group.label}<ChevronRight className={`ml-auto h-4 w-4 text-slate-300 transition-transform ${groupOpen(group.label) ? 'rotate-90' : ''}`} /></button>
+              {groupOpen(group.label) && <div className="ml-3 space-y-0.5 border-l border-slate-200 pl-3">{group.items.map(item => { const itemActive = currentPage === item.page || currentPage.startsWith(`${item.page}/`); return <button key={item.page} onClick={() => navigate(item.page)} className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${itemActive ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-950'}`}><span className={itemActive ? 'text-blue-600' : 'text-slate-400'}>{item.icon}</span>{item.label}</button>; })}</div>}
+            </div>;
+          })}
         </nav>
         <div className="border-t border-slate-200/80 px-3 py-4">
           <div className="mb-2 flex items-center gap-3 rounded-xl bg-slate-50/90 px-3 py-3 ring-1 ring-slate-200">
@@ -261,19 +274,11 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
               </div>
             </div>
             <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-0.5">
-              {visibleItems.map(item => (
-                <button
-                  key={item.page}
-                  onClick={() => navigate(item.page)}
-                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition-all ${
-                    currentPage === item.page ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-100 shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
-                  }`}
-                >
-                  <span className={currentPage === item.page ? 'text-blue-600' : 'text-slate-400'}>{item.icon}</span>
-                  {item.label}
-                  <ChevronRight className="w-4 h-4 ml-auto text-slate-300" />
-                </button>
-              ))}
+              {visibleGroups.map(group => {
+                const active = group.items.some(item => currentPage === item.page || currentPage.startsWith(`${item.page}/`));
+                if (group.items.length === 1) { const item = group.items[0]; return <button key={group.label} onClick={() => navigate(item.page)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold ${active ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-100' : 'text-slate-600 hover:bg-slate-100'}`}><span className={active ? 'text-blue-600' : 'text-slate-400'}>{group.icon}</span>{group.label}<ChevronRight className="ml-auto h-4 w-4 text-slate-300" /></button>; }
+                return <div key={group.label} className="space-y-0.5"><button type="button" onClick={() => toggleGroup(group.label)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold ${active ? 'text-slate-950' : 'text-slate-600 hover:bg-slate-100'}`}><span className={active ? 'text-blue-600' : 'text-slate-400'}>{group.icon}</span>{group.label}<ChevronRight className={`ml-auto h-4 w-4 text-slate-300 transition-transform ${groupOpen(group.label) ? 'rotate-90' : ''}`} /></button>{groupOpen(group.label) && <div className="ml-3 space-y-0.5 border-l border-slate-200 pl-3">{group.items.map(item => { const itemActive = currentPage === item.page || currentPage.startsWith(`${item.page}/`); return <button key={item.page} onClick={() => navigate(item.page)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold ${itemActive ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-100'}`}><span className={itemActive ? 'text-blue-600' : 'text-slate-400'}>{item.icon}</span>{item.label}</button>; })}</div>}</div>;
+              })}
             </nav>
             <div className="px-3 py-4 border-t border-slate-200">
               <button
