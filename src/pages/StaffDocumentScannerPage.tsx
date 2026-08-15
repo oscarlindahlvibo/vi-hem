@@ -104,7 +104,6 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
         if (archived) {
           if (data.document_id) {
             await supabase.from('vihem_documents').update({
-              storage_provider: 'google_drive',
               drive_file_id: archived.id,
               drive_web_url: archived.webViewLink || null,
               drive_folder_id: archived.folder_id || null,
