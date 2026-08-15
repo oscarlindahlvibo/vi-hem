@@ -17,11 +17,27 @@ Deno.serve(async (req) => {
     const { data: profile } = await db.from("vihem_profiles").select("id,role,organisation_id").eq("id", user.id).maybeSingle();
     if (!profile?.organisation_id || !["staff", "admin", "superadmin"].includes(profile.role)) return json({ error: "Endast personal kan använda dokumentlagringen." }, 403);
     const settings = await getSettings(db, profile.organisation_id);
-    const action = String((await req.clone().json().catch(() => ({}))).action || "settings");
+    const body = await req.json().catch(() => ({}));
+    const action = String(body.action || "settings");
     if (action === "settings") return json({ ok: true, settings: publicSettings(settings) });
+    if (action === "rename") {
+      if (!settings?.drive_storage_enabled || !settings.drive_root_folder_id) {
+        return json({ ok: false, error_code: "DRIVE_DISABLED", settings: publicSettings(settings) }, 409);
+      }
+      const fileId = String(body.file_id || "");
+      if (!fileId) return json({ error: "Drive-filen saknar id." }, 400);
+      const credentials = await decryptSettings(settings, getEncryptionSecret(serviceKey));
+      if (!credentials) return json({ ok: false, error_code: "GOOGLE_CREDENTIALS_MISSING", error: "Google service account saknas." }, 400);
+      const parsed = JSON.parse(credentials);
+      const delegatedUser = String(body.delegated_user || settings.drive_delegated_user || parsed.client_email || "");
+      const accessToken = await token(parsed, delegatedUser);
+      const filename = sanitizeFilename(String(body.filename || "dokument"));
+      const params = new URLSearchParams({ fields: "id,name,webViewLink", supportsAllDrives: "true" });
+      const updated = await driveFetch(`/drive/v3/files/${encodeURIComponent(fileId)}?${params}`, accessToken, "PATCH", { name: filename });
+      return json({ ok: true, storage_provider: "google_drive", ...updated });
+    }
     if (action !== "upload") return json({ error: "Okänd åtgärd." }, 400);
     if (!settings?.drive_storage_enabled || !settings.drive_root_folder_id) return json({ ok: false, error_code: "DRIVE_DISABLED", settings: publicSettings(settings) }, 409);
-    const body = await req.json();
     const filename = sanitizeFilename(String(body.filename || "dokument"));
     const mimeType = String(body.mime_type || "application/octet-stream");
     const encoded = String(body.content_base64 || "");

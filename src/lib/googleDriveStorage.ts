@@ -7,6 +7,8 @@ export type DriveUploadResult = {
   folder_id?: string | null;
 };
 
+export type DriveRenameResult = DriveUploadResult;
+
 async function fileToBase64(file: File) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = '';
@@ -79,4 +81,45 @@ export async function archiveFileInGoogleDrive(args: {
     created_by: args.created_by,
   });
   return uploaded;
+}
+
+export async function renameGoogleDriveFile(args: {
+  organisation_id: string;
+  source_type: string;
+  source_key: string;
+  drive_file_id: string;
+  filename: string;
+}) {
+  const { data, error } = await supabase.functions.invoke('vihem-google-drive-storage', {
+    body: {
+      action: 'rename',
+      file_id: args.drive_file_id,
+      filename: args.filename,
+    },
+  });
+  if (error) throw error;
+  if (!data?.ok || !data.id) throw new Error(data?.error || 'Google Drive-filen kunde inte döpas om.');
+
+  const { error: registryError } = await supabase
+    .from('vihem_google_drive_files')
+    .update({ filename: data.name || args.filename, drive_web_url: data.webViewLink || null })
+    .eq('organisation_id', args.organisation_id)
+    .eq('source_type', args.source_type)
+    .eq('source_key', args.source_key);
+  if (registryError) throw registryError;
+  return data as DriveRenameResult;
+}
+
+export function buildDocumentArchiveFilename(input: {
+  date?: string | null;
+  company?: string | null;
+  amount?: number | string | null;
+  originalName?: string | null;
+}) {
+  const date = String(input.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const company = String(input.company || 'okant-foretag').trim() || 'okant-foretag';
+  const amount = Number(input.amount);
+  const amountPart = Number.isFinite(amount) ? amount.toFixed(2) : 'belopp-okant';
+  const extension = String(input.originalName || '').match(/\.[a-z0-9]{2,5}$/i)?.[0].toLowerCase() || '.pdf';
+  return `${date}_${company}_${amountPart}_SEK${extension}`;
 }

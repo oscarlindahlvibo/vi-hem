@@ -3,6 +3,7 @@ import { AlertTriangle, Building2, CalendarDays, Camera, CheckCircle2, CircleDol
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { buildInvoicePdfBlob } from '../lib/invoicePdf';
+import { buildDocumentArchiveFilename, renameGoogleDriveFile } from '../lib/googleDriveStorage';
 import { DocumentCapture } from '../components/DocumentCapture';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, Select, Textarea } from '../components/ui';
 import type { AccountingAccount, AccountingIntegration, AccountingSyncQueueItem, CustomerProject, DirectDebitMandate, FinanceAuditLog, FinanceAutomationRun, FinanceAutomationSettings, FinanceCompany, FinanceCustomer, FinanceReminderSettings, FinanceSupplier, Invoice, InvoiceEmailOutbox, InvoiceLine, InvoiceNumberSeries, OcrUsageLog, Payment, ProjectInvoiceBasis, RentAdjustment, RentBillingItem, RentBillingRun, SupplierInvoice, SupplierInvoiceLine, Tenancy, VatCode } from '../types';
@@ -12,6 +13,41 @@ interface FinancePageProps {
 }
 
 type FinanceTab = 'overview' | 'companies' | 'customers' | 'invoices' | 'payments' | 'email' | 'rent' | 'project-basis' | 'suppliers' | 'supplier-invoices' | 'receipts' | 'number-series' | 'integrations' | 'ocr-usage' | 'audit';
+
+async function renameSupplierInvoiceDriveCopy(invoice: SupplierInvoice, companies: FinanceCompany[]) {
+  const { data: driveFile } = await supabase
+    .from('vihem_google_drive_files')
+    .select('drive_file_id')
+    .eq('organisation_id', invoice.organisation_id)
+    .eq('source_type', 'supplier_invoice_attachment')
+    .eq('source_key', invoice.id)
+    .maybeSingle();
+  if (!driveFile?.drive_file_id) return;
+
+  const extracted = (invoice.ocr_data?.extracted || {}) as Record<string, unknown>;
+  const supplier = (invoice as SupplierInvoice & { supplier?: { name?: string } | null }).supplier?.name;
+  const company = companies.find(item => item.id === invoice.company_id)?.name || supplier || 'okänt företag';
+  const filename = buildDocumentArchiveFilename({
+    date: String(extracted.invoice_date || invoice.invoice_date || new Date().toISOString().slice(0, 10)),
+    company,
+    amount: typeof extracted.gross_amount === 'number' || typeof extracted.gross_amount === 'string'
+      ? extracted.gross_amount
+      : invoice.total_amount,
+    originalName: String(invoice.ocr_data?.file_name || invoice.ocr_data?.source_file_name || 'underlag.pdf'),
+  });
+
+  try {
+    await renameGoogleDriveFile({
+      organisation_id: invoice.organisation_id,
+      source_type: 'supplier_invoice_attachment',
+      source_key: invoice.id,
+      drive_file_id: driveFile.drive_file_id,
+      filename,
+    });
+  } catch (error) {
+    console.warn('Kunde inte döpa om Drive-kopian', error);
+  }
+}
 
 const customerTypeOptions = [
   { value: 'company', label: 'Företag' },
@@ -1562,6 +1598,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     }
 
     setSelectedSupplierInvoice(updatedInvoice as SupplierInvoice);
+    await renameSupplierInvoiceDriveCopy(updatedInvoice as SupplierInvoice, companies);
     setSupplierInvoiceFile(null);
     await openSupplierInvoiceDetail(updatedInvoice as SupplierInvoice);
     await loadFinance();
@@ -1850,7 +1887,10 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     }
 
     const refreshed = await refreshSupplierInvoice(supplierInvoiceId);
-    if (refreshed) await openSupplierInvoiceDetail(refreshed);
+    if (refreshed) {
+      await renameSupplierInvoiceDriveCopy(refreshed, companies);
+      await openSupplierInvoiceDetail(refreshed);
+    }
     setSaving(false);
     await loadFinance();
   };

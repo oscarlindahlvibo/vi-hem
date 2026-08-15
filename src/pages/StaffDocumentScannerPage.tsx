@@ -3,6 +3,7 @@ import { Camera, CheckCircle2, FileCheck2, ReceiptText, Send } from 'lucide-reac
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { DocumentCapture, type DocumentCaptureKind } from '../components/DocumentCapture';
+import { archiveFileInGoogleDrive, buildDocumentArchiveFilename } from '../lib/googleDriveStorage';
 import { Badge, Button, Card, EmptyState, Select, Textarea } from '../components/ui';
 import type { FinanceCompany } from '../types';
 
@@ -84,7 +85,41 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
       return;
     }
 
-    setSuccess('Underlaget är inskickat till OCR och admin-granskning.');
+    let driveMessage = '';
+    if (data?.supplier_invoice_id && user?.organisation_id) {
+      try {
+        const archiveFile = new File([file], buildDocumentArchiveFilename({
+          company: selectedCompany?.name,
+          originalName: file.name,
+        }), { type: file.type });
+        const archived = await archiveFileInGoogleDrive({
+          file: archiveFile,
+          folder: 'Ekonomi/Underlag',
+          organisation_id: user.organisation_id,
+          source_type: 'supplier_invoice_attachment',
+          source_id: data.supplier_invoice_id,
+          source_key: data.supplier_invoice_id,
+          created_by: user.id,
+        });
+        if (archived) {
+          if (data.document_id) {
+            await supabase.from('vihem_documents').update({
+              storage_provider: 'google_drive',
+              drive_file_id: archived.id,
+              drive_web_url: archived.webViewLink || null,
+              drive_folder_id: archived.folder_id || null,
+              drive_synced_at: new Date().toISOString(),
+            }).eq('id', data.document_id);
+          }
+          driveMessage = ' En kopia har sparats på Google Drive.';
+        }
+      } catch (archiveError) {
+        console.warn('Google Drive-arkivering misslyckades', archiveError);
+        driveMessage = ' Underlaget är inskickat, men Drive-kopian kunde inte skapas just nu.';
+      }
+    }
+
+    setSuccess(`Underlaget är inskickat till OCR och admin-granskning.${driveMessage}`);
     setFile(null);
     setNotes('');
     setScanResetKey(prev => prev + 1);
@@ -100,19 +135,26 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
   }
 
   return (
-    <div className="space-y-6 pb-24">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mx-auto max-w-6xl space-y-5 pb-24">
+      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-5 shadow-sm sm:px-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">Underlag</p>
-          <h1 className="mt-2 text-3xl font-bold text-slate-950">Scanna underlag</h1>
-          <p className="mt-2 max-w-2xl text-slate-600">
-            Personal kan scanna kvitton och leverantörsfakturor hit. Underlaget hamnar i ekonomins granskningskö utan att öppna ekonomifliken.
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-blue-50 p-2.5 text-blue-600"><Camera className="h-5 w-5" /></div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Underlag</p>
+              <h1 className="mt-1 text-2xl font-bold text-slate-950 sm:text-3xl">Scanna underlag</h1>
+            </div>
+          </div>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
+            Scanna kvitton och leverantörsfakturor utan att öppna ekonomin. Admin granskar alltid innan något bokförs.
           </p>
         </div>
         <Badge className="bg-emerald-50 text-emerald-700">
           <FileCheck2 className="h-4 w-4" />
           Till admin-granskning
         </Badge>
+        </div>
       </div>
 
       {error && (
@@ -137,9 +179,13 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
           />
         </Card>
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
           <div className="space-y-4">
-            <Card>
+            <Card className="p-4 sm:p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-bold text-slate-950">Vad vill du skicka in?</h2>
+                <span className="text-xs font-medium text-slate-500">Steg 1 av 3</span>
+              </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <Select
                   label="Typ av underlag"
@@ -159,9 +205,19 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
               </div>
             </Card>
 
-            <DocumentCapture documentKind={documentKind} file={file} onFileChange={setFile} resetKey={scanResetKey} />
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-bold text-slate-950">Steg 2: fotografera eller välj fil</h2>
+                <span className="text-xs font-medium text-slate-500">{file ? 'Klar' : 'Ej klar'}</span>
+              </div>
+              <DocumentCapture documentKind={documentKind} file={file} onFileChange={setFile} resetKey={scanResetKey} />
+            </div>
 
-            <Card>
+            <Card className="p-4 sm:p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-bold text-slate-950">Steg 3: skicka till granskning</h2>
+                <span className="text-xs font-medium text-slate-500">Admin granskar</span>
+              </div>
               <Textarea
                 label="Kort kommentar till admin"
                 value={notes}
@@ -177,7 +233,7 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
             </Card>
           </div>
 
-          <Card>
+          <Card className="h-fit p-4 sm:p-5">
             <div className="flex items-start gap-3">
               <div className="rounded-2xl bg-blue-50 p-3 text-blue-600">
                 <ReceiptText className="h-6 w-6" />
