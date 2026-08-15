@@ -25,8 +25,10 @@ async function renameSupplierInvoiceDriveCopy(invoice: SupplierInvoice, companie
   if (!driveFile?.drive_file_id) return;
 
   const extracted = (invoice.ocr_data?.extracted || {}) as Record<string, unknown>;
-  const supplier = (invoice as SupplierInvoice & { supplier?: { name?: string } | null }).supplier?.name;
-  const company = companies.find(item => item.id === invoice.company_id)?.name || supplier || 'okänt företag';
+  const supplier = (invoice as SupplierInvoice & { supplier?: { name?: string } | null }).supplier?.name
+    || (typeof extracted.supplier_name === 'string' ? extracted.supplier_name : undefined)
+    || (typeof extracted.company === 'string' ? extracted.company : undefined);
+  const company = supplier || companies.find(item => item.id === invoice.company_id)?.name || 'okänt företag';
   const filename = buildDocumentArchiveFilename({
     date: String(extracted.invoice_date || invoice.invoice_date || new Date().toISOString().slice(0, 10)),
     company,
