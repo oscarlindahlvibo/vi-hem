@@ -2,6 +2,38 @@
 
 [![Open in Bolt](https://bolt.new/static/open-in-bolt.svg)](https://bolt.new/~/sb1-p8dzksdr)
 
+## Deployordning för self-hosted server
+
+Deployscriptet måste hämta aktuell kod från GitHub innan det söker efter eller kör
+SQL-migrationer. Om migrationerna körs först kan servern använda en gammal lokal
+migrationsfil och stoppa deployen innan `git pull` nås.
+
+Rekommenderad ordning per repository:
+
+```sh
+set -e
+cd /home/vibo/vi-hem
+git pull --ff-only origin main
+npm ci
+
+# Kör därefter migrationer från den nu hämtade supabase/migrations/-mappen.
+# Kopiera Edge Functions först efter git pull och avbryt vid kopieringsfel.
+npm run build
+```
+
+För flera appar ska samtliga repositories uppdateras före den gemensamma
+migrationsloopen. Kör inte migrationer från en lokal checkout och gör sedan
+`git pull` i samma repository. Kontrollera gärna den kritiska filen innan
+migrationssteget:
+
+```sh
+grep -n "vihem_get_my_role\|vihem_get_my_org_id" \
+  supabase/migrations/20260814151000_google_drive_file_registry.sql
+```
+
+Om kontrollen inte hittar dessa funktionsnamn är checkouten gammal och scriptet
+ska avslutas utan att försöka applicera migrationerna.
+
 ## Lösenordsåterställning via Postfix
 
 Appens "Glömt lösenord?" använder Supabase Auths recovery-mejl. Om användaren får felet `Error sending recovery email` betyder det normalt att Supabase Auth inte har en fungerande SMTP-konfiguration.
