@@ -79,6 +79,8 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     { label: 'Inköp & lager', icon: <Package className="w-5 h-5" />, items: [
       { label: 'Inköpslista', icon: <ShoppingCart className="w-5 h-5" />, page: 'purchases', roles: ['staff', 'admin'] },
       { label: 'Lager', icon: <Package className="w-5 h-5" />, page: 'inventory', roles: ['staff', 'admin'], module: 'inventory_management' },
+    ] },
+    { label: 'Scanna underlag', icon: <ScanLine className="w-5 h-5" />, items: [
       { label: 'Scanna underlag', icon: <ScanLine className="w-5 h-5" />, page: 'document-scanner', roles: ['staff', 'admin'], module: 'finance' },
     ] },
     { label: 'Ekonomi', icon: <Landmark className="w-5 h-5" />, items: [
