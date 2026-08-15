@@ -22,11 +22,17 @@ alter table public.vihem_google_drive_files enable row level security;
 drop policy if exists "VIHEM Drive files staff read" on public.vihem_google_drive_files;
 create policy "VIHEM Drive files staff read"
   on public.vihem_google_drive_files for select
-  using (public.vihem_is_staff_or_admin() and organisation_id = public.vihem_current_organisation_id());
+  using (
+    public.vihem_get_my_role() IN ('staff', 'admin', 'superadmin')
+    AND (public.vihem_get_my_role() = 'superadmin' OR organisation_id = public.vihem_get_my_org_id())
+  );
 
 drop policy if exists "VIHEM Drive files staff insert" on public.vihem_google_drive_files;
 create policy "VIHEM Drive files staff insert"
   on public.vihem_google_drive_files for insert
-  with check (public.vihem_is_staff_or_admin() and organisation_id = public.vihem_current_organisation_id());
+  with check (
+    public.vihem_get_my_role() IN ('staff', 'admin', 'superadmin')
+    AND (public.vihem_get_my_role() = 'superadmin' OR organisation_id = public.vihem_get_my_org_id())
+  );
 
 comment on table public.vihem_google_drive_files is 'Metadata registry for VI-HEM files copied to an organisation Google Drive.';
