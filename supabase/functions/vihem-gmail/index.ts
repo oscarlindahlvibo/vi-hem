@@ -38,6 +38,22 @@ Deno.serve(async (req) => {
     const accounts = await loadAccounts(db, profile.organisation_id);
     if (action === "status") return out({ ok: true, configured: Boolean(await credentials(db, profile.organisation_id)), scope: GMAIL_SCOPE, accounts, drive: await loadDriveSettings(db, profile.organisation_id) });
     if (action === "list_accounts") return out({ ok: true, accounts });
+    if (action === "update_watch_hit") {
+      if (profile.role !== "admin") return out({ error: "Endast admin kan ändra e-postträffar.", code: "FORBIDDEN" }, 403);
+      const hitId = String(body.id || "");
+      const paymentStatus = body.payment_status === "paid" || body.payment_status === "unpaid" ? body.payment_status : undefined;
+      const visibilityStatus = body.visibility_status === "active" || body.visibility_status === "cleared" ? body.visibility_status : undefined;
+      if (!hitId || (!paymentStatus && !visibilityStatus)) return out({ error: "Ange vilken status som ska ändras.", code: "INVALID_WATCH_HIT_UPDATE" }, 400);
+      const { data: existing } = await db.from("vihem_mail_watch_hits").select("id").eq("id", hitId).eq("organisation_id", profile.organisation_id).maybeSingle();
+      if (!existing) return out({ error: "E-postträffen hittades inte.", code: "WATCH_HIT_NOT_FOUND" }, 404);
+      const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (paymentStatus) { update.payment_status = paymentStatus; update.paid_at = paymentStatus === "paid" ? new Date().toISOString() : null; update.paid_by = paymentStatus === "paid" ? userId : null; }
+      if (visibilityStatus) { update.visibility_status = visibilityStatus; update.cleared_at = visibilityStatus === "cleared" ? new Date().toISOString() : null; update.cleared_by = visibilityStatus === "cleared" ? userId : null; }
+      const { data: hit, error } = await db.from("vihem_mail_watch_hits").update(update).eq("id", hitId).eq("organisation_id", profile.organisation_id).select("id,rule_id,mail_account_id,gmail_message_id,thread_id,subject,from_address,message_date,matched_keywords,status,created_at,payment_status,paid_at,visibility_status,cleared_at,updated_at").single();
+      if (error) return out({ error: error.message, code: "WATCH_HIT_UPDATE_FAILED" }, 400);
+      await audit(db, profile, "watch_hit_updated", null, "ok", { hit_id: hitId, payment_status: paymentStatus || null, visibility_status: visibilityStatus || null });
+      return out({ ok: true, hit });
+    }
     if (action === "create_account" || action === "update_account" || action === "delete_account") {
       if (profile.role !== "admin") return out({ error: "Endast admin kan hantera mailboxar.", code: "FORBIDDEN" }, 403);
       let accountId = String(body.id || "");
@@ -145,7 +161,7 @@ async function loadWatchRules(db: any, org: string) {
 }
 
 async function loadWatchHits(db: any, org: string) {
-  const { data } = await db.from("vihem_mail_watch_hits").select("id,rule_id,mail_account_id,gmail_message_id,thread_id,subject,from_address,message_date,matched_keywords,status,created_at").eq("organisation_id", org).order("created_at", { ascending: false }).limit(100);
+  const { data } = await db.from("vihem_mail_watch_hits").select("id,rule_id,mail_account_id,gmail_message_id,thread_id,subject,from_address,message_date,matched_keywords,status,created_at,payment_status,paid_at,visibility_status,cleared_at,updated_at").eq("organisation_id", org).order("created_at", { ascending: false }).limit(100);
   return data || [];
 }
 
