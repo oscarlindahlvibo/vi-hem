@@ -21,7 +21,8 @@ export type ModuleKey =
   | 'inventory'
   | 'inventory_management'
   | 'crm'
-  | 'ai';
+  | 'ai'
+  | 'skatteverket';
 
 export interface Organisation {
   id: string;

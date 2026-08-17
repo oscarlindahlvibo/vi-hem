@@ -44,6 +44,7 @@ import { RentalPage } from './pages/RentalPage';
 import { InventoryPage } from './pages/InventoryPage';
 import { MailPage } from './pages/MailPage';
 import { SmsPage } from './pages/SmsPage';
+import { SkatteverketPage } from './pages/SkatteverketPage';
 import type { ModuleKey } from './types';
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasError: boolean }> {
@@ -92,6 +93,7 @@ const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
   'finance',
   'rental_management',
   'inventory_management',
+  'skatteverket',
 ];
 
 const DEFAULT_MODULE_STATE: ModuleState = {
@@ -107,6 +109,7 @@ const DEFAULT_MODULE_STATE: ModuleState = {
   inspections: true,
   finance: false,
   inventory_management: false,
+  skatteverket: false,
 };
 
 function normalizeAppPath(path: string) {
@@ -461,6 +464,10 @@ function AppInner() {
       case 'finance':
         if (!isAdmin || !enabledModules.finance) return renderDashboard();
         return <FinancePage onNavigate={navigate} />;
+
+      case 'skatteverket':
+        if (!isAdmin || !enabledModules.skatteverket) return renderDashboard();
+        return <SkatteverketPage onNavigate={navigate} />;
 
       case 'admin-payroll':
         if (!isAdmin) return renderDashboard();

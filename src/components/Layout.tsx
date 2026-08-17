@@ -85,6 +85,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     ] },
     { label: 'Ekonomi', icon: <Landmark className="w-5 h-5" />, items: [
       { label: 'Ekonomi', icon: <Landmark className="w-5 h-5" />, page: 'finance', roles: ['admin'], module: 'finance' },
+      { label: 'Skatteverket', icon: <Landmark className="w-5 h-5" />, page: 'skatteverket', roles: ['admin'], module: 'skatteverket' },
       { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['admin'] },
       { label: 'E-post & underlag', icon: <Mail className="w-5 h-5" />, page: 'mail-search', roles: ['staff', 'admin'] },
     ] },
