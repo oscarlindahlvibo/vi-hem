@@ -3,9 +3,10 @@ import { CheckCircle2, Download, FileUp, Pause, Play, Plus, ReceiptText, Trash2,
 import { supabase } from '../lib/supabase';
 import { allocatePaymentOldestFirst, calculateInstallmentSchedule, deriveInstallmentPlanStatus, subtractCalendarDays } from '../lib/installmentPlans';
 import { buildInstallmentPaymentPdfBlob } from '../lib/installmentPaymentPdf';
+import { buildInvoicePdfBlob } from '../lib/invoicePdf';
 import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
 import { Badge, Button, Card, EmptyState, Input, Select, Textarea } from './ui';
-import type { FinanceCompany, FinanceCustomer, InstallmentPayment, InstallmentPlan, InstallmentPlanDocument, InstallmentPlanInvoice, InstallmentSchedule, Invoice } from '../types';
+import type { FinanceCompany, FinanceCustomer, InstallmentPayment, InstallmentPlan, InstallmentPlanDocument, InstallmentPlanInvoice, InstallmentSchedule, Invoice, InvoiceLine } from '../types';
 
 type Props = {
   organisationId: string;
@@ -291,13 +292,7 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
       setNoticeIsError(true);
       setNotice('Avbetalningsplanen skapades. Ingen kund är kopplad, så inget mejl skickades.');
     } else {
-      const { data: emailResult, error: emailError } = await supabase.functions.invoke('vihem-send-installment-plan-email', { body: { organisation_id: organisationId, plan_id: plan.id } });
-      if (emailError || emailResult?.error) {
-        setNoticeIsError(true);
-        setNotice(`Planen skapades, men e-post kunde inte skickas: ${emailResult?.error ?? emailError?.message ?? 'Okänt fel.'}`);
-      } else {
-        setNotice(`Avbetalningsplanen skapades och skickades till ${emailResult?.sent_to ?? 'kunden'}.`);
-      }
+      setNotice(`Avbetalningsplanen skapades. E-post planeras ${emailLeadDays} dagar före varje förfallodag.`);
     }
     setForm({ ...emptyForm, companyId: companies[0]?.id ?? '' }); setSelectedInvoiceIds([]); setExternalInvoices([]); setShowCreate(false); setSaving(false); await refresh();
   };
@@ -344,6 +339,74 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
     setPaymentAmount(''); setPaymentReference(''); setPaymentNotes(''); setSaving(false); await refresh(); const updated = plans.find(item => item.id === selectedPlan.id); if (updated) await loadPlan({ ...updated, paid_amount: nextPaid, remaining_amount: Math.max(0, Number(updated.total_amount) - nextPaid), status: nextStatus });
   };
 
+  const generateScheduleInvoice = async (row: InstallmentSchedule, reload = true) => {
+    if (!selectedPlan) return null;
+    setSaving(true); setError('');
+    try {
+      const { data, error: invoiceError } = await supabase.rpc('vihem_generate_installment_invoice', { p_schedule_id: row.id });
+      const invoice = Array.isArray(data) ? data[0] : data;
+      if (invoiceError || !invoice?.id) throw new Error(invoiceError?.message ?? 'Kunde inte skapa fakturautkastet.');
+      if (reload) {
+        await refresh();
+        const next = plans.find(item => item.id === selectedPlan.id);
+        if (next) await loadPlan(next);
+      }
+      return invoice.id as string;
+    } catch (invoiceError) {
+      setError(invoiceError instanceof Error ? invoiceError.message : 'Kunde inte skapa fakturautkastet.');
+      return null;
+    } finally { setSaving(false); }
+  };
+
+  const generateAllInvoices = async () => {
+    if (!selectedPlan) return;
+    const pendingRows = schedule.filter(row => !row.invoice_id);
+    if (!pendingRows.length) { setNotice('Alla delar har redan ett fakturautkast.'); return; }
+    setSaving(true); setError('');
+    let created = 0;
+    try {
+      for (const row of pendingRows) {
+        const { data, error: invoiceError } = await supabase.rpc('vihem_generate_installment_invoice', { p_schedule_id: row.id });
+        const invoice = Array.isArray(data) ? data[0] : data;
+        if (invoiceError || !invoice?.id) throw new Error(invoiceError?.message ?? `Kunde inte skapa fakturautkast för del ${row.installment_no}.`);
+        created += 1;
+      }
+      setNotice(`${created} fakturautkast skapades.`);
+      await refresh();
+      const next = plans.find(item => item.id === selectedPlan.id);
+      if (next) await loadPlan(next);
+    } catch (invoiceError) {
+      setNoticeIsError(true); setNotice(invoiceError instanceof Error ? invoiceError.message : 'Kunde inte skapa fakturautkasten.');
+    } finally { setSaving(false); }
+  };
+
+  const downloadScheduleInvoicePdf = async (row: InstallmentSchedule) => {
+    if (!selectedPlan) return;
+    setSaving(true); setError('');
+    try {
+      const invoiceId = row.invoice_id ?? await generateScheduleInvoice(row, false);
+      if (!invoiceId) return;
+      const [{ data: invoice, error: invoiceError }, { data: lines, error: linesError }] = await Promise.all([
+        supabase.from('vihem_invoices').select('*, company:company_id(*), customer:customer_id(*)').eq('id', invoiceId).single(),
+        supabase.from('vihem_invoice_lines').select('*').eq('invoice_id', invoiceId).order('line_no'),
+      ]);
+      if (invoiceError || linesError || !invoice) throw new Error(invoiceError?.message ?? linesError?.message ?? 'Kunde inte läsa fakturaunderlaget.');
+      const blob = buildInvoicePdfBlob({ invoice: invoice as Invoice, lines: (lines ?? []) as InvoiceLine[], formatCurrency: (value, currency = 'SEK') => new Intl.NumberFormat('sv-SE', { style: 'currency', currency }).format(value) });
+      const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
+      anchor.href = url; anchor.download = `${selectedPlan.plan_number}-del-${row.installment_no}.pdf`; anchor.click(); URL.revokeObjectURL(url);
+    } catch (invoiceError) {
+      setError(invoiceError instanceof Error ? invoiceError.message : 'Kunde inte skapa PDF-filen.');
+    } finally { setSaving(false); }
+  };
+
+  const deletePlan = async () => {
+    if (!selectedPlan || !window.confirm(`Radera ${selectedPlan.plan_number} och alla dess delbetalningar? Ursprungsfakturor påverkas inte.`)) return;
+    setSaving(true); setError('');
+    const { error: deleteError } = await supabase.rpc('vihem_delete_installment_plan', { p_plan_id: selectedPlan.id });
+    if (deleteError) { setError(deleteError.message); setSaving(false); return; }
+    setSelectedPlan(null); setSchedule([]); setPlanInvoices([]); setPayments([]); setDocuments([]); setNotice(`${selectedPlan.plan_number} har raderats.`); await refresh(); setSaving(false);
+  };
+
   const changeStatus = async (status: InstallmentPlan['status']) => {
     if (!selectedPlan) return;
     await supabase.from('vihem_installment_plans').update({ status, approved_by: status === 'active' ? userId : selectedPlan.approved_by, approved_at: status === 'active' ? new Date().toISOString() : selectedPlan.approved_at, updated_by: userId }).eq('id', selectedPlan.id);
@@ -356,7 +419,7 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
   return <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
     <div className="space-y-4">
       <Card>
-        <div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-bold text-slate-950">Avbetalningsplaner</h2><p className="mt-1 text-sm text-slate-500">Administrativ uppföljning av skuld. Ingen ny faktura eller bokföringspost skapas.</p></div><Button size="sm" onClick={() => setShowCreate(value => !value)}><Plus className="h-4 w-4" />Ny plan</Button></div>
+        <div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-bold text-slate-950">Avbetalningsplaner</h2><p className="mt-1 text-sm text-slate-500">Administrativ uppföljning av skuld. Fakturautkast skapas först när du väljer det och bokförs inte automatiskt.</p></div><Button size="sm" onClick={() => setShowCreate(value => !value)}><Plus className="h-4 w-4" />Ny plan</Button></div>
         <div className="mt-4 flex flex-wrap gap-2"><Badge className="bg-amber-50 text-amber-800">Ej bokföringsbar</Badge><Badge className="bg-slate-100 text-slate-700">{plans.length} planer</Badge></div>
         <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]"><Input label="Sök plan" placeholder="Plan, bolag eller kund" value={search} onChange={event => setSearch(event.target.value)} /><Select label="Status" value={statusFilter} onChange={event => setStatusFilter(event.target.value as typeof statusFilter)} options={[{ value: 'all', label: 'Alla statusar' }, ...(['draft', 'pending_approval', 'active', 'overdue', 'completed', 'paused', 'cancelled'] as const).map(status => ({ value: status, label: statusLabel(status) }))]} /></div>
       </Card>
@@ -372,9 +435,9 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-900 p-4 text-white"><div><p className="text-xs text-slate-300">Underlag totalt</p><p className="text-xl font-bold">{money(selectedInvoiceIds.reduce((sum, id) => { const invoice = invoices.find(item => item.id === id); return sum + Number(invoice?.balance_due ?? Number(invoice?.total_amount ?? 0) - Number(invoice?.paid_amount ?? 0)); }, 0) + externalInvoices.reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0))}</p></div><Button onClick={createPlan} loading={saving}>Skapa plan för godkännande</Button></div>{error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}</div></Card>}
       {plans.length === 0 ? <Card><EmptyState title="Inga avbetalningsplaner" description="Skapa en plan från befintliga fakturor eller lägg in ett äldre externt underlag." /></Card> : filteredPlans.length === 0 ? <Card><EmptyState title="Inga träffar" description="Ändra sökningen eller statusfiltret." /></Card> : filteredPlans.map(plan => <button type="button" key={plan.id} onClick={() => void loadPlan(plan)} className={`w-full rounded-lg border bg-white p-4 text-left shadow-sm transition hover:border-blue-300 ${selectedPlan?.id === plan.id ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'}`}><div className="flex items-start justify-between gap-3"><div><p className="font-bold text-slate-950">{plan.plan_number}</p><p className="mt-1 text-sm text-slate-500">{plan.company?.name ?? 'Bolag'}{plan.customer ? ` · ${plan.customer.name}` : ''}</p></div><Badge className="bg-slate-100 text-slate-700">{statusLabel(plan.status)}</Badge></div><div className="mt-3 flex justify-between text-sm"><span>{money(Number(plan.remaining_amount))} kvar</span><span>{plan.installment_count} delar</span></div></button>)}
     </div>
-    <Card>{!selectedPlan ? <EmptyState title="Välj en plan" description="Här visas betalningsplan, fördelningar och manuellt registrerade betalningar." /> : <div className="space-y-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold uppercase tracking-wide text-blue-600">{selectedPlan.plan_number}</p><h2 className="mt-1 text-2xl font-bold text-slate-950">{selectedPlan.company?.name ?? 'Avbetalningsplan'}</h2><p className="text-sm text-slate-500">{selectedPlan.customer?.name ?? 'Ingen kund kopplad'}</p></div><div className="flex flex-wrap gap-2">{selectedPlan.status === 'pending_approval' && <Button size="sm" onClick={() => void changeStatus('active')}><CheckCircle2 className="h-4 w-4" />Godkänn</Button>}{selectedPlan.status === 'active' || selectedPlan.status === 'overdue' ? <Button size="sm" variant="secondary" onClick={() => void changeStatus('paused')}><Pause className="h-4 w-4" />Pausa</Button> : selectedPlan.status === 'paused' && <Button size="sm" variant="secondary" onClick={() => void changeStatus('active')}><Play className="h-4 w-4" />Återuppta</Button>}</div></div>
+    <Card>{!selectedPlan ? <EmptyState title="Välj en plan" description="Här visas betalningsplan, fördelningar och manuellt registrerade betalningar." /> : <div className="space-y-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold uppercase tracking-wide text-blue-600">{selectedPlan.plan_number}</p><h2 className="mt-1 text-2xl font-bold text-slate-950">{selectedPlan.company?.name ?? 'Avbetalningsplan'}</h2><p className="text-sm text-slate-500">{selectedPlan.customer?.name ?? 'Ingen kund kopplad'}</p></div><div className="flex flex-wrap gap-2">{selectedPlan.status === 'pending_approval' && <Button size="sm" onClick={() => void changeStatus('active')}><CheckCircle2 className="h-4 w-4" />Godkänn</Button>}{selectedPlan.status === 'active' || selectedPlan.status === 'overdue' ? <Button size="sm" variant="secondary" onClick={() => void changeStatus('paused')}><Pause className="h-4 w-4" />Pausa</Button> : selectedPlan.status === 'paused' && <Button size="sm" variant="secondary" onClick={() => void changeStatus('active')}><Play className="h-4 w-4" />Återuppta</Button>}<Button size="sm" variant="secondary" onClick={() => void generateAllInvoices()} loading={saving} disabled={!schedule.some(row => !row.invoice_id)}><ReceiptText className="h-4 w-4" />Generera fakturor</Button><Button size="sm" variant="secondary" onClick={() => void deletePlan()} loading={saving} className="text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" />Radera plan</Button></div></div>
       <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-500">Totalt</p><p className="mt-1 font-bold">{money(Number(selectedPlan.total_amount))}</p></div><div className="rounded-lg bg-emerald-50 p-3"><p className="text-xs text-emerald-700">Betalt</p><p className="mt-1 font-bold text-emerald-900">{money(Number(selectedPlan.paid_amount))}</p></div><div className="rounded-lg bg-amber-50 p-3"><p className="text-xs text-amber-700">Kvar</p><p className="mt-1 font-bold text-amber-900">{money(Number(selectedPlan.remaining_amount))}</p></div></div>
-      <div><h3 className="mb-2 font-bold text-slate-950">Betalningsplan</h3><div className="overflow-x-auto rounded-lg border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="p-3">Del</th><th className="p-3">Förfallodag</th><th className="p-3">Belopp</th><th className="p-3">Status</th><th className="p-3">E-post</th></tr></thead><tbody className="divide-y divide-slate-100">{schedule.map(row => <tr key={row.id}><td className="p-3">{row.installment_no}</td><td className="p-3">{row.due_date}</td><td className="p-3">{money(Number(row.amount))}</td><td className="p-3"><Badge className="bg-slate-100 text-slate-700">{row.status}</Badge></td><td className="p-3"><Badge className={row.email_status === 'sent' ? 'bg-emerald-50 text-emerald-800' : row.email_status === 'failed' ? 'bg-red-50 text-red-800' : 'bg-slate-100 text-slate-700'}>{emailStatusLabel(row.email_status)}</Badge><span className="mt-1 block text-xs text-slate-500">{row.email_status === 'sent' && row.email_sent_at ? `Skickat ${new Date(row.email_sent_at).toLocaleDateString('sv-SE')}` : row.email_send_date ? `Planerat ${row.email_send_date}` : 'Ej planerat'}</span></td></tr>)}</tbody></table></div></div>
+      <div><h3 className="mb-2 font-bold text-slate-950">Betalningsplan</h3><div className="overflow-x-auto rounded-lg border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="p-3">Del</th><th className="p-3">Förfallodag</th><th className="p-3">Belopp</th><th className="p-3">Status</th><th className="p-3">E-post</th><th className="p-3">Faktura</th></tr></thead><tbody className="divide-y divide-slate-100">{schedule.map(row => <tr key={row.id}><td className="p-3">{row.installment_no}</td><td className="p-3">{row.due_date}</td><td className="p-3">{money(Number(row.amount))}</td><td className="p-3"><Badge className="bg-slate-100 text-slate-700">{row.status}</Badge></td><td className="p-3"><Badge className={row.email_status === 'sent' ? 'bg-emerald-50 text-emerald-800' : row.email_status === 'failed' ? 'bg-red-50 text-red-800' : 'bg-slate-100 text-slate-700'}>{emailStatusLabel(row.email_status)}</Badge><span className="mt-1 block text-xs text-slate-500">{row.email_status === 'sent' && row.email_sent_at ? `Skickat ${new Date(row.email_sent_at).toLocaleDateString('sv-SE')}` : row.email_send_date ? `Planerat ${row.email_send_date}` : 'Ej planerat'}</span></td><td className="p-3">{row.invoice_id ? <Button size="sm" variant="secondary" onClick={() => void downloadScheduleInvoicePdf(row)} loading={saving}><Download className="h-4 w-4" />PDF</Button> : <Button size="sm" variant="secondary" onClick={() => void generateScheduleInvoice(row)} loading={saving}><ReceiptText className="h-4 w-4" />Skapa</Button>}</td></tr>)}</tbody></table></div></div>
       <div><h3 className="mb-2 font-bold text-slate-950">Registrera manuell betalning</h3><div className="grid gap-3 sm:grid-cols-2"><Input label="Belopp" type="number" min="0.01" step="0.01" value={paymentAmount} onChange={event => setPaymentAmount(event.target.value)} /><Input label="Betalningsdatum" type="date" value={paymentDate} onChange={event => setPaymentDate(event.target.value)} /><Select label="Metod" value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} options={[{ value: 'bank_transfer', label: 'Banköverföring' }, { value: 'card', label: 'Kort' }, { value: 'cash', label: 'Kontant' }, { value: 'swish', label: 'Swish' }, { value: 'other', label: 'Annat' }]} /><Input label="Referens" value={paymentReference} onChange={event => setPaymentReference(event.target.value)} /></div><Textarea label="Anteckning" rows={2} value={paymentNotes} onChange={event => setPaymentNotes(event.target.value)} /><Button className="mt-3" onClick={registerPayment} loading={saving} disabled={Number(paymentAmount) <= 0}><WalletCards className="h-4 w-4" />Registrera betalning</Button>{error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}</div>
       <div><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold text-slate-950">Underlag</h3><label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 ring-1 ring-slate-200 hover:bg-slate-50"><FileUp className="h-4 w-4" />Lägg till bilaga<input type="file" className="sr-only" onChange={uploadAttachment} /></label></div><div className="mt-2 space-y-2">{planInvoices.map(row => <div key={row.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3 text-sm"><span>{row.description}</span><span>{money(Number(row.balance_remaining))} kvar</span></div>)}{documents.map(doc => <div key={doc.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-3 text-sm"><div><p className="font-semibold text-slate-900">{doc.title}</p><p className="text-xs text-slate-500">{doc.file_name} · {doc.document_type === 'payment_underlay' ? 'Betalningsunderlag' : 'Bilaga'}{doc.drive_file_id ? ' · Arkiverad i Drive' : ''}</p></div><Button size="sm" variant="secondary" onClick={() => void downloadDocument(doc)}><Download className="h-4 w-4" />Öppna</Button></div>)}</div><p className="mt-3 text-xs text-slate-500">Betalningar och underlag är administrativa. De ändrar inte originalfakturor och exporteras aldrig som bokföring.</p></div>
       <div><h3 className="mb-2 font-bold text-slate-950">Registrerade betalningar</h3>{payments.length === 0 ? <p className="text-sm text-slate-500">Inga betalningar registrerade ännu.</p> : <div className="space-y-2">{payments.map(payment => <div key={payment.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 text-sm"><div><p className="font-semibold text-slate-900">{payment.payment_number} · {money(Number(payment.amount))}</p><p className="text-slate-500">{payment.payment_date} · {payment.payment_method}{payment.reference ? ` · ${payment.reference}` : ''}</p></div><Button size="sm" variant="secondary" onClick={() => void downloadPaymentUnderlay(payment)} loading={saving}><Download className="h-4 w-4" />Betalningsunderlag</Button></div>)}</div>}</div>

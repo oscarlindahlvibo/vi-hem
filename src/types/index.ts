@@ -1536,6 +1536,7 @@ export interface InstallmentSchedule {
   id: string;
   organisation_id: string;
   plan_id: string;
+  invoice_id: string | null;
   installment_no: number;
   due_date: string;
   amount: number;
