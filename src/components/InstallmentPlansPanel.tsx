@@ -77,6 +77,8 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [noticeIsError, setNoticeIsError] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | InstallmentPlan['status']>('all');
@@ -246,11 +248,14 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
 
   const createPlan = async () => {
     setError('');
+    setNotice('');
+    setNoticeIsError(false);
     const linked = invoices.filter(invoice => selectedInvoiceIds.includes(invoice.id));
     const validExternalInvoices = externalInvoices.filter(invoice => Number(invoice.amount) > 0);
     const externalAmount = validExternalInvoices.reduce((sum, invoice) => sum + Number(invoice.amount), 0);
     const total = linked.reduce((sum, invoice) => sum + Number(invoice.balance_due ?? Number(invoice.total_amount) - Number(invoice.paid_amount)), 0) + externalAmount;
     const count = Math.max(1, Number.parseInt(form.installmentCount, 10) || 1);
+    const customerId = form.customerId || '';
     if (!form.companyId || total <= 0) { setError('Välj bolag och minst en faktura eller ett externt underlag.'); return; }
     setSaving(true);
     const planNumber = `AP-${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}`;
@@ -271,7 +276,21 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
     const scheduleRows = calculateInstallmentSchedule({ totalAmount: total, installmentCount: count, firstDueDate: form.firstDueDate, intervalMonths: Number(form.intervalMonths) || 1, dayOfMonth: Number(form.dayOfMonth) || 1 }).map(row => ({ organisation_id: organisationId, plan_id: plan.id, installment_no: row.installmentNo, due_date: row.dueDate, amount: row.amount, paid_amount: 0, status: 'pending' }));
     const scheduleInsert = await supabase.from('vihem_installment_schedule').insert(scheduleRows);
     await supabase.from('vihem_installment_audit_log').insert({ organisation_id: organisationId, plan_id: plan.id, action: 'created', metadata: { source_invoice_count: linked.length, external_invoice_count: validExternalInvoices.length, external_amount: externalAmount }, created_by: userId });
-    if (planRows.error || scheduleInsert.error) setError(planRows.error?.message ?? scheduleInsert.error?.message ?? 'Planen skapades delvis och behöver kontrolleras.');
+    const persistenceError = planRows.error ?? scheduleInsert.error;
+    if (persistenceError) {
+      setError(persistenceError.message ?? 'Planen skapades delvis och behöver kontrolleras.');
+    } else if (!customerId) {
+      setNoticeIsError(true);
+      setNotice('Avbetalningsplanen skapades. Ingen kund är kopplad, så inget mejl skickades.');
+    } else {
+      const { data: emailResult, error: emailError } = await supabase.functions.invoke('vihem-send-installment-plan-email', { body: { organisation_id: organisationId, plan_id: plan.id } });
+      if (emailError || emailResult?.error) {
+        setNoticeIsError(true);
+        setNotice(`Planen skapades, men e-post kunde inte skickas: ${emailResult?.error ?? emailError?.message ?? 'Okänt fel.'}`);
+      } else {
+        setNotice(`Avbetalningsplanen skapades och skickades till ${emailResult?.sent_to ?? 'kunden'}.`);
+      }
+    }
     setForm({ ...emptyForm, companyId: companies[0]?.id ?? '' }); setSelectedInvoiceIds([]); setExternalInvoices([]); setShowCreate(false); setSaving(false); await refresh();
   };
 
@@ -333,6 +352,7 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
         <div className="mt-4 flex flex-wrap gap-2"><Badge className="bg-amber-50 text-amber-800">Ej bokföringsbar</Badge><Badge className="bg-slate-100 text-slate-700">{plans.length} planer</Badge></div>
         <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]"><Input label="Sök plan" placeholder="Plan, bolag eller kund" value={search} onChange={event => setSearch(event.target.value)} /><Select label="Status" value={statusFilter} onChange={event => setStatusFilter(event.target.value as typeof statusFilter)} options={[{ value: 'all', label: 'Alla statusar' }, ...(['draft', 'pending_approval', 'active', 'overdue', 'completed', 'paused', 'cancelled'] as const).map(status => ({ value: status, label: statusLabel(status) }))]} /></div>
       </Card>
+      {notice && <p className={`rounded-xl border p-3 text-sm font-medium ${noticeIsError ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{notice}</p>}
       {showCreate && <Card className="overflow-hidden border-blue-100 p-0 shadow-md"><div className="bg-gradient-to-r from-blue-700 to-indigo-600 px-5 py-5 text-white"><div className="flex items-center gap-3"><div className="rounded-xl bg-white/15 p-2"><ReceiptText className="h-5 w-5" /></div><div><h3 className="text-lg font-bold">Ny avbetalningsplan</h3><p className="mt-0.5 text-sm text-blue-100">Samla flera underlag i en tydlig plan.</p></div></div></div><div className="space-y-6 p-5">
         <section><p className="mb-3 text-xs font-bold uppercase tracking-wider text-blue-700">1. Vem gäller planen?</p><div className="grid gap-3 sm:grid-cols-2"><Select label="Bolag" value={form.companyId} onChange={event => { updateForm('companyId', event.target.value); setSelectedInvoiceIds([]); setCustomerDraft(current => ({ ...current, companyId: event.target.value })); }} options={companies.map(company => ({ value: company.id, label: company.name }))} /><div><Select label="Kund" value={form.customerId} onChange={event => updateForm('customerId', event.target.value)} options={[{ value: '', label: 'Ingen vald kund' }, ...availableCustomers.filter(customer => !form.companyId || customer.company_id === form.companyId).map(customer => ({ value: customer.id, label: customer.name }))]} /><button type="button" onClick={() => setShowNewCustomer(value => !value)} className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-blue-700 hover:text-blue-900"><UserPlus className="h-4 w-4" />{showNewCustomer ? 'Stäng kundskapande' : 'Skapa ny kund här'}</button></div></div>
           {showNewCustomer && <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-4"><p className="mb-3 text-sm font-bold text-slate-900">Ny kund</p><div className="grid gap-3 sm:grid-cols-2"><Input label="Namn" value={customerDraft.name} onChange={event => setCustomerDraft(current => ({ ...current, name: event.target.value }))} /><Select label="Typ" value={customerDraft.customerType} onChange={event => setCustomerDraft(current => ({ ...current, customerType: event.target.value as CustomerDraft['customerType'], organisationNumber: event.target.value === 'private' ? '' : current.organisationNumber }))} options={[{ value: 'company', label: 'Företag' }, { value: 'private', label: 'Privatperson' }, { value: 'brf', label: 'Bostadsrättsförening' }]} />{customerDraft.customerType !== 'private' && <Input label="Organisationsnummer" value={customerDraft.organisationNumber} onChange={event => setCustomerDraft(current => ({ ...current, organisationNumber: event.target.value }))} />}<Input label="E-post" type="email" value={customerDraft.email} onChange={event => setCustomerDraft(current => ({ ...current, email: event.target.value }))} /><Input label="Telefon" value={customerDraft.phone} onChange={event => setCustomerDraft(current => ({ ...current, phone: event.target.value }))} /></div><Button className="mt-3" size="sm" onClick={() => void createInlineCustomer()} loading={saving}><UserPlus className="h-4 w-4" />Spara kund och välj</Button></div>}
