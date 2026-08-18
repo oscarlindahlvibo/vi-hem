@@ -27,7 +27,22 @@ export function MailPage({ onNavigate: _onNavigate }: { onNavigate: (page: strin
   const changeTab = (next: 'search' | 'watchers' | 'settings') => { setMessage(''); setTab(next); };
 
   const load = async () => { try { const data = await invoke({ action: 'status' }); setAccounts(data.accounts || []); setConfigured(Boolean(data.configured)); const nextDrive = data.drive || { folder_id: '', enabled: false, auto_import: false, updated_at: null }; setDrive(nextDrive); setDriveFolderId(nextDrive.folder_id || ''); setDriveEnabled(Boolean(nextDrive.enabled)); setDriveAutoImport(Boolean(nextDrive.auto_import)); } catch (e) { setMessage(e instanceof Error ? e.message : 'Kunde inte läsa Gmail-status.'); } };
-  const loadWatchers = async () => { try { const data = await invoke({ action: 'list_watch_rules' }); setRules(data.rules || []); setHits(data.hits || []); } catch (e) { setMessage(e instanceof Error ? e.message : 'Kunde inte läsa bevakningar.'); } };
+  const loadWatchers = async () => {
+    try {
+      const data = await invoke({ action: 'list_watch_rules' });
+      const normalizedHits: WatchHit[] = (data.hits || []).map((hit: Partial<WatchHit> & { id: string }) => ({
+        ...hit,
+        payment_status: hit.payment_status === 'paid' ? 'paid' : 'unpaid',
+        paid_at: hit.paid_at || null,
+        visibility_status: hit.visibility_status === 'cleared' ? 'cleared' : 'active',
+        cleared_at: hit.cleared_at || null,
+      })) as WatchHit[];
+      setRules(data.rules || []);
+      setHits(normalizedHits);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Kunde inte läsa bevakningar.');
+    }
+  };
   useEffect(() => { void load(); }, []); useEffect(() => { if (tab === 'watchers') void loadWatchers(); }, [tab]);
   const search = async () => { setLoading(true); setMessage(''); setGroups([]); try { const data = await invoke({ action: 'search', query: query.trim(), mode, date_from: dateFrom || undefined, date_to: dateTo || undefined, sort, account_ids: accountId === 'all' ? [] : [accountId] }); setGroups(data.results || []); } catch (e) { setMessage(e instanceof Error ? e.message : 'Sökningen misslyckades.'); } finally { setLoading(false); } };
   const openMessage = async (account: Account, result: SearchResult) => { setLoading(true); try { const data = await invoke({ action: 'message', account_id: account.id, message_id: result.id }); setSelected({ account, ...data.message }); } catch (e) { setMessage(e instanceof Error ? e.message : 'Meddelandet kunde inte öppnas.'); } finally { setLoading(false); } };
