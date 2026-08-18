@@ -1483,6 +1483,100 @@ export interface Invoice {
   lines?: InvoiceLine[];
 }
 
+export type InstallmentPlanStatus = 'draft' | 'pending_approval' | 'active' | 'overdue' | 'completed' | 'paused' | 'cancelled';
+
+export interface InstallmentPlan {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  customer_id: string | null;
+  plan_number: string;
+  status: InstallmentPlanStatus;
+  total_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  installment_count: number;
+  first_due_date: string;
+  interval_months: number;
+  day_of_month: number;
+  payment_amount: number;
+  terms: string;
+  notes: string;
+  pause_reason: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  accounting_exportable: false;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  company?: FinanceCompany | null;
+  customer?: FinanceCustomer | null;
+}
+
+export interface InstallmentPlanInvoice {
+  id: string;
+  organisation_id: string;
+  plan_id: string;
+  invoice_id: string | null;
+  source_type: 'original' | 'external';
+  external_invoice_number: string | null;
+  external_invoice_date: string | null;
+  external_due_date: string | null;
+  description: string;
+  amount: number;
+  balance_remaining: number;
+  created_at: string;
+  invoice?: Invoice | null;
+}
+
+export interface InstallmentSchedule {
+  id: string;
+  organisation_id: string;
+  plan_id: string;
+  installment_no: number;
+  due_date: string;
+  amount: number;
+  paid_amount: number;
+  status: 'pending' | 'partially_paid' | 'paid' | 'overdue' | 'paused' | 'cancelled';
+  payment_reference: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InstallmentPayment {
+  id: string;
+  organisation_id: string;
+  plan_id: string;
+  payment_number: string;
+  payment_date: string;
+  amount: number;
+  payment_method: 'bank_transfer' | 'card' | 'cash' | 'swish' | 'other';
+  reference: string;
+  notes: string;
+  accounting_exportable: false;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface InstallmentPlanDocument {
+  id: string;
+  organisation_id: string;
+  plan_id: string;
+  payment_id: string | null;
+  document_type: 'payment_underlay' | 'attachment';
+  title: string;
+  file_name: string;
+  mime_type: string;
+  storage_bucket: string;
+  storage_path: string;
+  size_bytes: number | null;
+  drive_file_id: string | null;
+  drive_web_url: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
 export interface InvoiceLine {
   id: string;
   organisation_id: string;

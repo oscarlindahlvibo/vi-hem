@@ -100,6 +100,13 @@ Deno.serve(async (req: Request) => {
 
       if (reminderError) throw reminderError;
       remindersQueued = Number(reminderData || 0);
+
+      const { data: installmentReminderData, error: installmentReminderError } = await serviceClient.rpc("vihem_queue_installment_reminders", {
+        target_organisation_id: organisationId,
+        target_before_days: 3,
+      });
+      if (installmentReminderError) throw installmentReminderError;
+      remindersQueued += Number(installmentReminderData || 0);
     }
 
     let rentBillingResult: Record<string, unknown> | null = null;
@@ -140,6 +147,18 @@ Deno.serve(async (req: Request) => {
 
       emailsProcessed = Number(sendPayload.processed || 0);
       emailResults = Array.isArray(sendPayload.results) ? sendPayload.results : [];
+
+      const installmentSendResponse = await fetch(`${supabaseUrl}/functions/v1/vihem-send-installment-reminders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Cron-Secret": cronSecret },
+        body: JSON.stringify({ organisation_id: organisationId, limit: emailLimit }),
+      });
+      const installmentSendPayload = await installmentSendResponse.json().catch(() => ({}));
+      if (!installmentSendResponse.ok || installmentSendPayload.error) {
+        throw new Error(installmentSendPayload.error || "Kunde inte skicka avbetalningspåminnelser.");
+      }
+      emailsProcessed += Number(installmentSendPayload.processed || 0);
+      if (Array.isArray(installmentSendPayload.results)) emailResults.push(...installmentSendPayload.results);
     }
 
     let accountingSyncProcessed = 0;

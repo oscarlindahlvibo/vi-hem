@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { buildInvoicePdfBlob } from '../lib/invoicePdf';
 import { buildDocumentArchiveFilename, renameGoogleDriveFile } from '../lib/googleDriveStorage';
 import { DocumentCapture } from '../components/DocumentCapture';
+import { InstallmentPlansPanel } from '../components/InstallmentPlansPanel';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, Select, Textarea } from '../components/ui';
 import type { AccountingAccount, AccountingIntegration, AccountingSyncQueueItem, CustomerProject, DirectDebitMandate, FinanceAuditLog, FinanceAutomationRun, FinanceAutomationSettings, FinanceCompany, FinanceCustomer, FinanceReminderSettings, FinanceSupplier, Invoice, InvoiceEmailOutbox, InvoiceLine, InvoiceNumberSeries, OcrUsageLog, Payment, ProjectInvoiceBasis, RentAdjustment, RentBillingItem, RentBillingRun, SupplierInvoice, SupplierInvoiceLine, Tenancy, VatCode } from '../types';
 
@@ -12,7 +13,7 @@ interface FinancePageProps {
   onNavigate: (page: string) => void;
 }
 
-type FinanceTab = 'overview' | 'companies' | 'customers' | 'invoices' | 'payments' | 'email' | 'rent' | 'project-basis' | 'suppliers' | 'supplier-invoices' | 'receipts' | 'number-series' | 'integrations' | 'ocr-usage' | 'audit';
+type FinanceTab = 'overview' | 'companies' | 'customers' | 'invoices' | 'payments' | 'email' | 'rent' | 'project-basis' | 'installment-plans' | 'suppliers' | 'supplier-invoices' | 'receipts' | 'number-series' | 'integrations' | 'ocr-usage' | 'audit';
 
 async function renameSupplierInvoiceDriveCopy(invoice: SupplierInvoice, companies: FinanceCompany[]) {
   const { data: driveFile } = await supabase
@@ -3400,6 +3401,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     { key: 'email', label: 'E-post' },
     { key: 'rent', label: 'Hyra' },
     { key: 'project-basis', label: 'Projektunderlag' },
+    { key: 'installment-plans', label: 'Avbetalningsplaner' },
     { key: 'suppliers', label: 'Leverantörer' },
     { key: 'supplier-invoices', label: 'Leverantörsfakturor' },
     { key: 'receipts', label: 'Kvitton' },
@@ -4182,6 +4184,16 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
             </>
           )}
         </Card>
+      )}
+
+      {activeTab === 'installment-plans' && organisationId && user && (
+        <InstallmentPlansPanel
+          organisationId={organisationId}
+          companies={companies}
+          customers={customers}
+          invoices={invoices}
+          userId={user.id}
+        />
       )}
 
       {activeTab === 'suppliers' && (
