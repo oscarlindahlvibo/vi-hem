@@ -46,6 +46,12 @@ export function calculateInstallmentSchedule(input: InstallmentScheduleInput): I
   }));
 }
 
+export function subtractCalendarDays(dateString: string, days: number): string {
+  const date = new Date(`${dateString}T12:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - Math.max(0, Math.floor(days)));
+  return isoDate(date);
+}
+
 export function allocatePaymentOldestFirst(
   invoices: InstallmentInvoiceBalance[],
   paymentAmount: number,

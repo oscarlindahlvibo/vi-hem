@@ -1358,6 +1358,7 @@ export interface FinanceCustomer {
   customer_type: FinanceCustomerType;
   name: string;
   organisation_number: string;
+  personal_number: string;
   vat_number: string;
   email: string;
   phone: string;
@@ -1500,6 +1501,7 @@ export interface InstallmentPlan {
   interval_months: number;
   day_of_month: number;
   payment_amount: number;
+  email_lead_days: number;
   terms: string;
   notes: string;
   pause_reason: string | null;
@@ -1540,6 +1542,10 @@ export interface InstallmentSchedule {
   paid_amount: number;
   status: 'pending' | 'partially_paid' | 'paid' | 'overdue' | 'paused' | 'cancelled';
   payment_reference: string | null;
+  email_send_date: string | null;
+  email_status: 'pending' | 'queued' | 'sent' | 'failed' | 'skipped';
+  email_sent_at: string | null;
+  email_error: string | null;
   created_at: string;
   updated_at: string;
 }

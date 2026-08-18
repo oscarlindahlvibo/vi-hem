@@ -23,7 +23,7 @@ type Reminder = {
   sent_to: string;
   reminder_type: string;
   plan?: { plan_number: string; terms: string; company?: { name: string }; customer?: { name: string } };
-  schedule?: { installment_no: number; due_date: string; amount: number; paid_amount: number };
+  schedule?: { id: string; installment_no: number; due_date: string; amount: number; paid_amount: number };
 };
 
 Deno.serve(async (req: Request) => {
@@ -44,7 +44,7 @@ Deno.serve(async (req: Request) => {
 
     let query = client
       .from("vihem_installment_reminder_log")
-      .select("*, plan:plan_id(plan_number, terms, company:company_id(name), customer:customer_id(name)), schedule:schedule_id(installment_no, due_date, amount, paid_amount)")
+      .select("*, plan:plan_id(plan_number, terms, company:company_id(name), customer:customer_id(name)), schedule:schedule_id(id, installment_no, due_date, amount, paid_amount)")
       .eq("status", "queued")
       .order("sent_at", { ascending: true })
       .limit(limit);
@@ -57,11 +57,18 @@ Deno.serve(async (req: Request) => {
     for (const reminder of (data || []) as Reminder[]) {
       try {
         await smtpSend(smtp, smtp.fromEmail, reminder.sent_to, buildMessage(smtp, reminder));
-        await client.from("vihem_installment_reminder_log").update({ status: "sent", sent_at: new Date().toISOString(), error: null }).eq("id", reminder.id);
+        const sentAt = new Date().toISOString();
+        await client.from("vihem_installment_reminder_log").update({ status: "sent", sent_at: sentAt, error: null }).eq("id", reminder.id);
+        if (reminder.schedule?.id) {
+          await client.from("vihem_installment_schedule").update({ email_status: "sent", email_sent_at: sentAt, email_error: null }).eq("id", reminder.schedule.id);
+        }
         results.push({ id: reminder.id, status: "sent" });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Kunde inte skicka avbetalningspåminnelse.";
         await client.from("vihem_installment_reminder_log").update({ status: "failed", error: message }).eq("id", reminder.id);
+        if (reminder.schedule?.id) {
+          await client.from("vihem_installment_schedule").update({ email_status: "failed", email_error: message }).eq("id", reminder.schedule.id);
+        }
         results.push({ id: reminder.id, status: "failed", error: message });
       }
     }

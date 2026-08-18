@@ -75,6 +75,7 @@ const emptyCustomerForm = {
   customer_type: 'company',
   name: '',
   organisation_number: '',
+  personal_number: '',
   email: '',
   invoice_email: '',
   payment_terms_days: '30',
@@ -1214,7 +1215,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         company_id: customerForm.company_id || null,
         customer_type: customerForm.customer_type,
         name: customerForm.name.trim(),
-        organisation_number: customerForm.organisation_number.trim(),
+        organisation_number: customerForm.customer_type === 'private' ? '' : customerForm.organisation_number.trim(),
+        personal_number: customerForm.customer_type === 'private' ? customerForm.personal_number.trim() : '',
         email: customerForm.email.trim(),
         invoice_email: customerForm.invoice_email.trim() || customerForm.email.trim(),
         payment_terms_days: Math.max(0, Math.round(toNumber(customerForm.payment_terms_days, 30))),
@@ -3593,7 +3595,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 <div key={customer.id} className="grid gap-3 p-4 md:grid-cols-[1.5fr_1fr_1fr_auto] md:items-center">
                   <div>
                     <h3 className="font-bold text-slate-950">{customer.name}</h3>
-                    <p className="text-sm text-slate-500">{customer.organisation_number || 'Organisationsnummer saknas'}</p>
+                    <p className="text-sm text-slate-500">{customer.customer_type === 'private' ? (customer.personal_number || 'Personnummer saknas') : (customer.organisation_number || 'Organisationsnummer saknas')}</p>
                   </div>
                   <p className="text-sm text-slate-600">{customer.invoice_email || customer.email || 'Ingen faktura-e-post'}</p>
                   <p className="text-sm text-slate-600">{customer.company?.name ?? 'Alla bolag'}</p>
@@ -5293,9 +5295,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       <Modal open={customerModalOpen} onClose={() => setCustomerModalOpen(false)} title="Ny kund" size="lg">
         <div className="grid gap-4 md:grid-cols-2">
           <Select label="Bolag" value={customerForm.company_id} options={companyOptions} onChange={e => setCustomerForm(prev => ({ ...prev, company_id: e.target.value }))} />
-          <Select label="Kundtyp" value={customerForm.customer_type} options={customerTypeOptions} onChange={e => setCustomerForm(prev => ({ ...prev, customer_type: e.target.value, organisation_number: e.target.value === 'private' ? '' : prev.organisation_number }))} />
+          <Select label="Kundtyp" value={customerForm.customer_type} options={customerTypeOptions} onChange={e => setCustomerForm(prev => ({ ...prev, customer_type: e.target.value, organisation_number: e.target.value === 'private' ? '' : prev.organisation_number, personal_number: e.target.value === 'private' ? prev.personal_number : '' }))} />
           <Input label="Namn" value={customerForm.name} onChange={e => setCustomerForm(prev => ({ ...prev, name: e.target.value }))} />
-          {customerForm.customer_type !== 'private' && <Input label="Organisationsnummer" value={customerForm.organisation_number} onChange={e => setCustomerForm(prev => ({ ...prev, organisation_number: e.target.value }))} />}
+          {customerForm.customer_type === 'private' ? <Input label="Personnummer" value={customerForm.personal_number} onChange={e => setCustomerForm(prev => ({ ...prev, personal_number: e.target.value }))} /> : <Input label="Organisationsnummer" value={customerForm.organisation_number} onChange={e => setCustomerForm(prev => ({ ...prev, organisation_number: e.target.value }))} />}
           <Input label="E-post" type="email" value={customerForm.email} onChange={e => setCustomerForm(prev => ({ ...prev, email: e.target.value }))} />
           <Input label="Faktura-e-post" type="email" value={customerForm.invoice_email} onChange={e => setCustomerForm(prev => ({ ...prev, invoice_email: e.target.value }))} />
           <Input label="Betalvillkor dagar" type="number" value={customerForm.payment_terms_days} onChange={e => setCustomerForm(prev => ({ ...prev, payment_terms_days: e.target.value }))} />
