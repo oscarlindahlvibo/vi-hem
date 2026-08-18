@@ -5293,9 +5293,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       <Modal open={customerModalOpen} onClose={() => setCustomerModalOpen(false)} title="Ny kund" size="lg">
         <div className="grid gap-4 md:grid-cols-2">
           <Select label="Bolag" value={customerForm.company_id} options={companyOptions} onChange={e => setCustomerForm(prev => ({ ...prev, company_id: e.target.value }))} />
-          <Select label="Kundtyp" value={customerForm.customer_type} options={customerTypeOptions} onChange={e => setCustomerForm(prev => ({ ...prev, customer_type: e.target.value }))} />
+          <Select label="Kundtyp" value={customerForm.customer_type} options={customerTypeOptions} onChange={e => setCustomerForm(prev => ({ ...prev, customer_type: e.target.value, organisation_number: e.target.value === 'private' ? '' : prev.organisation_number }))} />
           <Input label="Namn" value={customerForm.name} onChange={e => setCustomerForm(prev => ({ ...prev, name: e.target.value }))} />
-          <Input label="Organisationsnummer/personnummer" value={customerForm.organisation_number} onChange={e => setCustomerForm(prev => ({ ...prev, organisation_number: e.target.value }))} />
+          {customerForm.customer_type !== 'private' && <Input label="Organisationsnummer" value={customerForm.organisation_number} onChange={e => setCustomerForm(prev => ({ ...prev, organisation_number: e.target.value }))} />}
           <Input label="E-post" type="email" value={customerForm.email} onChange={e => setCustomerForm(prev => ({ ...prev, email: e.target.value }))} />
           <Input label="Faktura-e-post" type="email" value={customerForm.invoice_email} onChange={e => setCustomerForm(prev => ({ ...prev, invoice_email: e.target.value }))} />
           <Input label="Betalvillkor dagar" type="number" value={customerForm.payment_terms_days} onChange={e => setCustomerForm(prev => ({ ...prev, payment_terms_days: e.target.value }))} />

@@ -1456,7 +1456,7 @@ function CustomerModal({ open, onClose, form, setForm, onSave, saving, error }: 
     <Modal open={open} onClose={onClose} title="Ny kund" size="lg">
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Select label="Kundtyp" value={form.customer_type} onChange={(e) => setForm({ ...form, customer_type: e.target.value })} options={[
+          <Select label="Kundtyp" value={form.customer_type} onChange={(e) => setForm({ ...form, customer_type: e.target.value, identity_number: e.target.value === 'private' ? '' : form.identity_number })} options={[
             { value: 'private', label: 'Privatperson' },
             { value: 'company', label: 'Företag' },
             { value: 'brf', label: 'Bostadsrättsförening' },
@@ -1464,7 +1464,7 @@ function CustomerModal({ open, onClose, form, setForm, onSave, saving, error }: 
             { value: 'internal', label: 'Intern kund' },
           ]} />
           <Input label="Namn" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <Input label="Org/personnummer" value={form.identity_number} onChange={(e) => setForm({ ...form, identity_number: e.target.value })} />
+          {form.customer_type !== 'private' && <Input label="Organisationsnummer" value={form.identity_number} onChange={(e) => setForm({ ...form, identity_number: e.target.value })} />}
           <Input label="Kontaktperson" value={form.contact_person} onChange={(e) => setForm({ ...form, contact_person: e.target.value })} />
           <Input label="Telefon" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           <Input label="E-post" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
