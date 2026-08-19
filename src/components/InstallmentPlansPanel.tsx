@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Download, FileUp, Pause, Play, Plus, ReceiptText, Trash2, UserPlus, WalletCards } from 'lucide-react';
+import { CheckCircle2, Download, FileUp, Mail, Pause, Play, Plus, ReceiptText, Trash2, UserPlus, WalletCards } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { allocatePaymentOldestFirst, calculateInstallmentSchedule, deriveInstallmentPlanStatus, subtractCalendarDays } from '../lib/installmentPlans';
 import { buildInstallmentPaymentPdfBlob } from '../lib/installmentPaymentPdf';
@@ -282,7 +282,10 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
     ];
     const planRows = await supabase.from('vihem_installment_plan_invoices').insert(rows);
     const emailLeadDays = Math.max(0, Number(form.emailLeadDays) || 0);
-    const scheduleRows = calculateInstallmentSchedule({ totalAmount: total, installmentCount: count, firstDueDate: form.firstDueDate, intervalMonths: Number(form.intervalMonths) || 1, dayOfMonth: Number(form.dayOfMonth) || 1 }).map(row => ({ organisation_id: organisationId, plan_id: plan.id, installment_no: row.installmentNo, due_date: row.dueDate, email_send_date: subtractCalendarDays(row.dueDate, emailLeadDays), email_status: 'pending', paid_amount: 0, status: 'pending', amount: row.amount }));
+    const scheduleRows = calculateInstallmentSchedule({ totalAmount: total, installmentCount: count, firstDueDate: form.firstDueDate, intervalMonths: Number(form.intervalMonths) || 1, dayOfMonth: Number(form.dayOfMonth) || 1 }).map(row => {
+      const plannedSendDate = subtractCalendarDays(row.dueDate, emailLeadDays);
+      return { organisation_id: organisationId, plan_id: plan.id, installment_no: row.installmentNo, due_date: row.dueDate, email_send_date: plannedSendDate < today ? today : plannedSendDate, email_status: 'pending', paid_amount: 0, status: 'pending', amount: row.amount };
+    });
     const scheduleInsert = await supabase.from('vihem_installment_schedule').insert(scheduleRows);
     await supabase.from('vihem_installment_audit_log').insert({ organisation_id: organisationId, plan_id: plan.id, action: 'created', metadata: { source_invoice_count: linked.length, external_invoice_count: validExternalInvoices.length, external_amount: externalAmount }, created_by: userId });
     const persistenceError = planRows.error ?? scheduleInsert.error;
@@ -301,14 +304,12 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
     if (!selectedPlan || Number(paymentAmount) <= 0) return;
     setSaving(true); setError('');
     const amount = Number(paymentAmount);
-    if (amount > Number(selectedPlan.remaining_amount) + 0.005) {
-      setError(`Beloppet är större än återstående skuld (${money(Number(selectedPlan.remaining_amount))}).`);
-      setSaving(false);
-      return;
-    }
-    const { data: payment, error: paymentError } = await supabase.from('vihem_installment_payments').insert({ organisation_id: organisationId, plan_id: selectedPlan.id, payment_number: `P-${Date.now()}`, payment_date: paymentDate, amount, payment_method: paymentMethod, reference: paymentReference, notes: paymentNotes, accounting_exportable: false, created_by: userId }).select('*').single();
+    const remainingBefore = Math.max(0, Number(selectedPlan.remaining_amount));
+    const allocatedAmount = Math.min(amount, remainingBefore);
+    const unallocatedAmount = Math.max(0, amount - allocatedAmount);
+    const { data: payment, error: paymentError } = await supabase.from('vihem_installment_payments').insert({ organisation_id: organisationId, plan_id: selectedPlan.id, payment_number: `P-${Date.now()}`, payment_date: paymentDate, amount, unallocated_amount: unallocatedAmount, payment_method: paymentMethod, reference: paymentReference, notes: paymentNotes, accounting_exportable: false, created_by: userId }).select('*').single();
     if (paymentError || !payment) { setError(paymentError?.message ?? 'Kunde inte registrera betalningen.'); setSaving(false); return; }
-    const allocations = allocatePaymentOldestFirst(planInvoices.map(row => ({ id: row.id, dueDate: row.external_due_date ?? row.invoice?.due_date ?? today, balanceRemaining: Number(row.balance_remaining) })), amount);
+    const allocations = allocatePaymentOldestFirst(planInvoices.map(row => ({ id: row.id, dueDate: row.external_due_date ?? row.invoice?.due_date ?? today, balanceRemaining: Number(row.balance_remaining) })), allocatedAmount);
     if (allocations.length) {
       await supabase.from('vihem_installment_payment_allocations').insert(allocations.map(allocation => ({ organisation_id: organisationId, payment_id: payment.id, plan_invoice_id: allocation.invoiceId, invoice_id: planInvoices.find(row => row.id === allocation.invoiceId)?.invoice_id ?? null, amount: allocation.amount })));
       for (const allocation of allocations) {
@@ -316,7 +317,7 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
         if (row) await supabase.from('vihem_installment_plan_invoices').update({ balance_remaining: Math.max(0, Number(row.balance_remaining) - allocation.amount) }).eq('id', row.id);
       }
     }
-    let scheduleRemainingCents = Math.round(amount * 100);
+    let scheduleRemainingCents = Math.round(allocatedAmount * 100);
     const scheduleUpdates = [...schedule]
       .sort((a, b) => a.due_date.localeCompare(b.due_date) || a.installment_no - b.installment_no)
       .map(row => {
@@ -331,11 +332,12 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
       const status = fullyPaid ? 'paid' : 'partially_paid';
       await supabase.from('vihem_installment_schedule').update({ paid_amount: Math.min(Number(update.row.amount), update.paidAmount), status, payment_reference: paymentReference || payment.payment_number, updated_at: new Date().toISOString() }).eq('id', update.row.id);
     }
-    const nextPaid = Math.min(Number(selectedPlan.total_amount), Number(selectedPlan.paid_amount) + amount);
+    const nextPaid = Math.min(Number(selectedPlan.total_amount), Number(selectedPlan.paid_amount) + allocatedAmount);
     const hasOverdue = schedule.some(row => row.status === 'overdue' || (row.due_date < paymentDate && Number(row.paid_amount) < Number(row.amount)));
     const nextStatus = deriveInstallmentPlanStatus(Number(selectedPlan.total_amount), nextPaid, hasOverdue, selectedPlan.status);
     await supabase.from('vihem_installment_plans').update({ paid_amount: nextPaid, remaining_amount: Math.max(0, Number(selectedPlan.total_amount) - nextPaid), status: nextStatus, updated_by: userId }).eq('id', selectedPlan.id);
-    await supabase.from('vihem_installment_audit_log').insert({ organisation_id: organisationId, plan_id: selectedPlan.id, action: 'payment_registered', metadata: { amount, payment_id: payment.id, allocations }, created_by: userId });
+    await supabase.from('vihem_installment_audit_log').insert({ organisation_id: organisationId, plan_id: selectedPlan.id, action: 'payment_registered', metadata: { amount, allocated_amount: allocatedAmount, unallocated_amount: unallocatedAmount, payment_id: payment.id, allocations }, created_by: userId });
+    if (unallocatedAmount > 0) setNotice(`Betalningen registrerades. ${money(unallocatedAmount)} är över planens kvarvarande skuld och ligger som överskjutande belopp.`);
     setPaymentAmount(''); setPaymentReference(''); setPaymentNotes(''); setSaving(false); await refresh(); const updated = plans.find(item => item.id === selectedPlan.id); if (updated) await loadPlan({ ...updated, paid_amount: nextPaid, remaining_amount: Math.max(0, Number(updated.total_amount) - nextPaid), status: nextStatus });
   };
 
@@ -345,7 +347,7 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
     try {
       const { data, error: invoiceError } = await supabase.rpc('vihem_generate_installment_invoice', { p_schedule_id: row.id });
       const invoice = Array.isArray(data) ? data[0] : data;
-      if (invoiceError || !invoice?.id) throw new Error(invoiceError?.message ?? 'Kunde inte skapa fakturautkastet.');
+      if (invoiceError || !invoice?.id) throw new Error(invoiceError?.message ?? 'Kunde inte skapa fakturan.');
       if (reload) {
         await refresh();
         const next = plans.find(item => item.id === selectedPlan.id);
@@ -353,7 +355,7 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
       }
       return invoice.id as string;
     } catch (invoiceError) {
-      setError(invoiceError instanceof Error ? invoiceError.message : 'Kunde inte skapa fakturautkastet.');
+      setError(invoiceError instanceof Error ? invoiceError.message : 'Kunde inte skapa fakturan.');
       return null;
     } finally { setSaving(false); }
   };
@@ -361,22 +363,39 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
   const generateAllInvoices = async () => {
     if (!selectedPlan) return;
     const pendingRows = schedule.filter(row => !row.invoice_id);
-    if (!pendingRows.length) { setNotice('Alla delar har redan ett fakturautkast.'); return; }
+    if (!pendingRows.length) { setNotice('Alla delar har redan en faktura.'); return; }
     setSaving(true); setError('');
     let created = 0;
     try {
       for (const row of pendingRows) {
         const { data, error: invoiceError } = await supabase.rpc('vihem_generate_installment_invoice', { p_schedule_id: row.id });
         const invoice = Array.isArray(data) ? data[0] : data;
-        if (invoiceError || !invoice?.id) throw new Error(invoiceError?.message ?? `Kunde inte skapa fakturautkast för del ${row.installment_no}.`);
+        if (invoiceError || !invoice?.id) throw new Error(invoiceError?.message ?? `Kunde inte skapa faktura för del ${row.installment_no}.`);
         created += 1;
       }
-      setNotice(`${created} fakturautkast skapades.`);
+      setNotice(`${created} fakturor skapades.`);
       await refresh();
       const next = plans.find(item => item.id === selectedPlan.id);
       if (next) await loadPlan(next);
     } catch (invoiceError) {
-      setNoticeIsError(true); setNotice(invoiceError instanceof Error ? invoiceError.message : 'Kunde inte skapa fakturautkasten.');
+      setNoticeIsError(true); setNotice(invoiceError instanceof Error ? invoiceError.message : 'Kunde inte skapa fakturorna.');
+    } finally { setSaving(false); }
+  };
+
+  const sendScheduleInvoice = async (row: InstallmentSchedule) => {
+    if (!selectedPlan) return;
+    setSaving(true); setError(''); setNotice('');
+    try {
+      const invoiceId = row.invoice_id ?? await generateScheduleInvoice(row, false);
+      if (!invoiceId) return;
+      const { error: sendError } = await supabase.functions.invoke('vihem-send-installment-plan-email', { body: { organisation_id: organisationId, plan_id: selectedPlan.id, schedule_id: row.id } });
+      if (sendError) throw sendError;
+      setNotice('Fakturan skickades med e-post.');
+      await refresh();
+      const next = plans.find(item => item.id === selectedPlan.id);
+      if (next) await loadPlan(next);
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : 'Kunde inte skicka fakturan.');
     } finally { setSaving(false); }
   };
 
@@ -437,7 +456,7 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
     </div>
     <Card>{!selectedPlan ? <EmptyState title="Välj en plan" description="Här visas betalningsplan, fördelningar och manuellt registrerade betalningar." /> : <div className="space-y-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold uppercase tracking-wide text-blue-600">{selectedPlan.plan_number}</p><h2 className="mt-1 text-2xl font-bold text-slate-950">{selectedPlan.company?.name ?? 'Avbetalningsplan'}</h2><p className="text-sm text-slate-500">{selectedPlan.customer?.name ?? 'Ingen kund kopplad'}</p></div><div className="flex flex-wrap gap-2">{selectedPlan.status === 'pending_approval' && <Button size="sm" onClick={() => void changeStatus('active')}><CheckCircle2 className="h-4 w-4" />Godkänn</Button>}{selectedPlan.status === 'active' || selectedPlan.status === 'overdue' ? <Button size="sm" variant="secondary" onClick={() => void changeStatus('paused')}><Pause className="h-4 w-4" />Pausa</Button> : selectedPlan.status === 'paused' && <Button size="sm" variant="secondary" onClick={() => void changeStatus('active')}><Play className="h-4 w-4" />Återuppta</Button>}<Button size="sm" variant="secondary" onClick={() => void generateAllInvoices()} loading={saving} disabled={!schedule.some(row => !row.invoice_id)}><ReceiptText className="h-4 w-4" />Generera fakturor</Button><Button size="sm" variant="secondary" onClick={() => void deletePlan()} loading={saving} className="text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" />Radera plan</Button></div></div>
       <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-500">Totalt</p><p className="mt-1 font-bold">{money(Number(selectedPlan.total_amount))}</p></div><div className="rounded-lg bg-emerald-50 p-3"><p className="text-xs text-emerald-700">Betalt</p><p className="mt-1 font-bold text-emerald-900">{money(Number(selectedPlan.paid_amount))}</p></div><div className="rounded-lg bg-amber-50 p-3"><p className="text-xs text-amber-700">Kvar</p><p className="mt-1 font-bold text-amber-900">{money(Number(selectedPlan.remaining_amount))}</p></div></div>
-      <div><h3 className="mb-2 font-bold text-slate-950">Betalningsplan</h3><div className="overflow-x-auto rounded-lg border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="p-3">Del</th><th className="p-3">Förfallodag</th><th className="p-3">Belopp</th><th className="p-3">Status</th><th className="p-3">E-post</th><th className="p-3">Faktura</th></tr></thead><tbody className="divide-y divide-slate-100">{schedule.map(row => <tr key={row.id}><td className="p-3">{row.installment_no}</td><td className="p-3">{row.due_date}</td><td className="p-3">{money(Number(row.amount))}</td><td className="p-3"><Badge className="bg-slate-100 text-slate-700">{row.status}</Badge></td><td className="p-3"><Badge className={row.email_status === 'sent' ? 'bg-emerald-50 text-emerald-800' : row.email_status === 'failed' ? 'bg-red-50 text-red-800' : 'bg-slate-100 text-slate-700'}>{emailStatusLabel(row.email_status)}</Badge><span className="mt-1 block text-xs text-slate-500">{row.email_status === 'sent' && row.email_sent_at ? `Skickat ${new Date(row.email_sent_at).toLocaleDateString('sv-SE')}` : row.email_send_date ? `Planerat ${row.email_send_date}` : 'Ej planerat'}</span></td><td className="p-3">{row.invoice_id ? <Button size="sm" variant="secondary" onClick={() => void downloadScheduleInvoicePdf(row)} loading={saving}><Download className="h-4 w-4" />PDF</Button> : <Button size="sm" variant="secondary" onClick={() => void generateScheduleInvoice(row)} loading={saving}><ReceiptText className="h-4 w-4" />Skapa</Button>}</td></tr>)}</tbody></table></div></div>
+      <div><h3 className="mb-2 font-bold text-slate-950">Betalningsplan</h3><div className="overflow-x-auto rounded-lg border border-slate-200"><table className="min-w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="p-3">Del</th><th className="p-3">Förfallodag</th><th className="p-3">Belopp</th><th className="p-3">Status</th><th className="p-3">E-post</th><th className="p-3">Faktura</th></tr></thead><tbody className="divide-y divide-slate-100">{schedule.map(row => <tr key={row.id}><td className="p-3">{row.installment_no}</td><td className="p-3">{row.due_date}</td><td className="p-3">{money(Number(row.amount))}</td><td className="p-3"><Badge className="bg-slate-100 text-slate-700">{row.status}</Badge></td><td className="p-3"><Badge className={row.email_status === 'sent' ? 'bg-emerald-50 text-emerald-800' : row.email_status === 'failed' ? 'bg-red-50 text-red-800' : 'bg-slate-100 text-slate-700'}>{emailStatusLabel(row.email_status)}</Badge><span className="mt-1 block text-xs text-slate-500">{row.email_status === 'sent' && row.email_sent_at ? `Skickat ${new Date(row.email_sent_at).toLocaleDateString('sv-SE')}` : row.email_send_date ? `Planerat ${row.email_send_date}` : 'Ej planerat'}</span></td><td className="p-3"><div className="flex flex-wrap gap-2">{row.invoice_id ? <Button size="sm" variant="secondary" onClick={() => void downloadScheduleInvoicePdf(row)} loading={saving}><Download className="h-4 w-4" />PDF</Button> : <Button size="sm" variant="secondary" onClick={() => void generateScheduleInvoice(row)} loading={saving}><ReceiptText className="h-4 w-4" />Skapa</Button>}<Button size="sm" variant="secondary" onClick={() => void sendScheduleInvoice(row)} loading={saving} disabled={row.email_status === 'sent'}><Mail className="h-4 w-4" />Skicka</Button></div></td></tr>)}</tbody></table></div></div>
       <div><h3 className="mb-2 font-bold text-slate-950">Registrera manuell betalning</h3><div className="grid gap-3 sm:grid-cols-2"><Input label="Belopp" type="number" min="0.01" step="0.01" value={paymentAmount} onChange={event => setPaymentAmount(event.target.value)} /><Input label="Betalningsdatum" type="date" value={paymentDate} onChange={event => setPaymentDate(event.target.value)} /><Select label="Metod" value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} options={[{ value: 'bank_transfer', label: 'Banköverföring' }, { value: 'card', label: 'Kort' }, { value: 'cash', label: 'Kontant' }, { value: 'swish', label: 'Swish' }, { value: 'other', label: 'Annat' }]} /><Input label="Referens" value={paymentReference} onChange={event => setPaymentReference(event.target.value)} /></div><Textarea label="Anteckning" rows={2} value={paymentNotes} onChange={event => setPaymentNotes(event.target.value)} /><Button className="mt-3" onClick={registerPayment} loading={saving} disabled={Number(paymentAmount) <= 0}><WalletCards className="h-4 w-4" />Registrera betalning</Button>{error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}</div>
       <div><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold text-slate-950">Underlag</h3><label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 ring-1 ring-slate-200 hover:bg-slate-50"><FileUp className="h-4 w-4" />Lägg till bilaga<input type="file" className="sr-only" onChange={uploadAttachment} /></label></div><div className="mt-2 space-y-2">{planInvoices.map(row => <div key={row.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3 text-sm"><span>{row.description}</span><span>{money(Number(row.balance_remaining))} kvar</span></div>)}{documents.map(doc => <div key={doc.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-3 text-sm"><div><p className="font-semibold text-slate-900">{doc.title}</p><p className="text-xs text-slate-500">{doc.file_name} · {doc.document_type === 'payment_underlay' ? 'Betalningsunderlag' : 'Bilaga'}{doc.drive_file_id ? ' · Arkiverad i Drive' : ''}</p></div><Button size="sm" variant="secondary" onClick={() => void downloadDocument(doc)}><Download className="h-4 w-4" />Öppna</Button></div>)}</div><p className="mt-3 text-xs text-slate-500">Betalningar och underlag är administrativa. De ändrar inte originalfakturor och exporteras aldrig som bokföring.</p></div>
       <div><h3 className="mb-2 font-bold text-slate-950">Registrerade betalningar</h3>{payments.length === 0 ? <p className="text-sm text-slate-500">Inga betalningar registrerade ännu.</p> : <div className="space-y-2">{payments.map(payment => <div key={payment.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 text-sm"><div><p className="font-semibold text-slate-900">{payment.payment_number} · {money(Number(payment.amount))}</p><p className="text-slate-500">{payment.payment_date} · {payment.payment_method}{payment.reference ? ` · ${payment.reference}` : ''}</p></div><Button size="sm" variant="secondary" onClick={() => void downloadPaymentUnderlay(payment)} loading={saving}><Download className="h-4 w-4" />Betalningsunderlag</Button></div>)}</div>}</div>

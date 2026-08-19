@@ -15,6 +15,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const organisationId = typeof body.organisation_id === "string" ? body.organisation_id : "";
     const planId = typeof body.plan_id === "string" ? body.plan_id : "";
+    const scheduleId = typeof body.schedule_id === "string" ? body.schedule_id : "";
     if (!organisationId || !planId) return json({ error: "Organisation och plan saknas." }, 400);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -35,14 +36,17 @@ Deno.serve(async (req) => {
     const recipient = customer?.invoice_email || customer?.email || "";
     if (!recipient) return json({ error: "Kunden saknar e-postadress." }, 400);
     const { data: company } = await serviceClient.from("vihem_companies").select("name").eq("id", plan.company_id).eq("organisation_id", organisationId).maybeSingle();
-    const { data: schedule, error: scheduleError } = await serviceClient.from("vihem_installment_schedule").select("installment_no,due_date,amount").eq("plan_id", plan.id).order("installment_no");
+    let scheduleQuery = serviceClient.from("vihem_installment_schedule").select("id,installment_no,due_date,amount").eq("plan_id", plan.id).order("installment_no");
+    if (scheduleId) scheduleQuery = scheduleQuery.eq("id", scheduleId);
+    const { data: schedule, error: scheduleError } = await scheduleQuery;
     if (scheduleError) throw scheduleError;
+    if (scheduleId && (!schedule || schedule.length === 0)) return json({ error: "Delbetalningen hittades inte." }, 404);
 
     const lines = (schedule || []).map((row) => `${row.installment_no}. ${formatDate(row.due_date)} - ${money(row.amount)}`).join("\n");
     const text = [
       `Hej ${customer?.name || ""},`,
       "",
-      `Här kommer din avbetalningsplan ${plan.plan_number}.`,
+      scheduleId ? `Här kommer fakturan för delbetalning ${schedule?.[0]?.installment_no} i avbetalningsplan ${plan.plan_number}.` : `Här kommer din avbetalningsplan ${plan.plan_number}.`,
       company?.name ? `Avsändare: ${company.name}` : "",
       `Totalt belopp: ${money(plan.total_amount)}`,
       `Antal delbetalningar: ${plan.installment_count}`,
@@ -57,8 +61,12 @@ Deno.serve(async (req) => {
 
     const smtp = readSmtpConfig();
     await smtpSend(smtp, smtp.fromEmail, recipient, buildMessage(smtp, recipient, customer?.name || "", `Avbetalningsplan ${plan.plan_number}`, text));
-    await serviceClient.from("vihem_installment_audit_log").insert({ organisation_id: organisationId, plan_id: plan.id, action: "email_sent", metadata: { recipient }, created_by: user.id });
-    return json({ ok: true, sent_to: recipient, plan_number: plan.plan_number });
+    let statusUpdate = serviceClient.from("vihem_installment_schedule").update({ email_status: "sent", email_sent_at: new Date().toISOString(), email_error: null }).eq("plan_id", plan.id);
+    if (scheduleId) statusUpdate = statusUpdate.eq("id", scheduleId);
+    const { error: statusError } = await statusUpdate;
+    if (statusError) throw statusError;
+    await serviceClient.from("vihem_installment_audit_log").insert({ organisation_id: organisationId, plan_id: plan.id, action: "email_sent", metadata: { recipient, schedule_id: scheduleId || null }, created_by: user.id });
+    return json({ ok: true, sent_to: recipient, plan_number: plan.plan_number, schedule_id: scheduleId || null });
   } catch (error) {
     console.error(error);
     return json({ error: error instanceof Error ? error.message : "Kunde inte skicka e-post." }, 400);
