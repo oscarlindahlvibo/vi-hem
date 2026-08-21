@@ -337,10 +337,8 @@ function AppInner() {
   };
 
   function renderPage() {
-    // Superadmin sees only the organisations page, except for the
-    // Finance V2 foundation page (superadmin-only while it's being built
-    // out -- see the 'finance-v2' case below).
-    if (isSuperadmin && currentPage !== 'finance-v2') {
+    // Superadmin sees only the organisations page
+    if (isSuperadmin) {
       return <AdminOrganisationsPage onNavigate={navigate} />;
     }
 
@@ -469,10 +467,9 @@ function AppInner() {
         return <FinancePage onNavigate={navigate} />;
 
       case 'finance-v2':
-        // Foundation-stage Accounted integration, superadmin-only while it's
-        // being built out. Broadening to org admins is a deliberate later
-        // decision, not an oversight -- see docs/accounted-v2-integration.md.
-        if (!isSuperadmin) return renderDashboard();
+        // Foundation-stage Accounted integration. Same gate as legacy
+        // 'finance': org admin + the org's finance module enabled.
+        if (!isAdmin || !enabledModules.finance) return renderDashboard();
         return <FinanceV2Page />;
 
       case 'skatteverket':

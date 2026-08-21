@@ -74,7 +74,8 @@ självhostat läge (se `docs/SELF-HOSTING.md` i Accounted-repot, sektion
 
 `src/modules/finance-v2/` (types.ts, api.ts, pages/FinanceV2Page.tsx) — helt
 separat modul enligt strukturen `ARCHITECTURE_ROADMAP.md` föreslår. Nås via
-en ny meny-post "Ekonomi V2 (beta)", **superadmin-only** i detta skede
+en ny meny-post "Ekonomi V2 (beta)", med samma gating som legacy `finance`:
+org-admin + organisationens `finance`-modul aktiverad
 ([Layout.tsx](../src/components/Layout.tsx), [App.tsx](../src/App.tsx)).
 Legacy `FinancePage.tsx` är oförändrad utöver att den nu kallas "legacy" i
 kommentarer/dokumentation — ingen kod i den filen är rörd.
@@ -176,8 +177,10 @@ kräver ett separat beslut och arbete i Accounted-repot.
    default).
 2. Vem administrerar Accounted-API-nycklar i produktion, och hur roterar vi
    dem (nu manuellt via Bolagskoppling-fliken)?
-3. Ska "Ekonomi V2"-menyn öppnas för organisationsadmins innan
-   hyresfakturering är klar, eller vänta till fler flikar fungerar?
+3. ~~Ska "Ekonomi V2"-menyn öppnas för organisationsadmins innan
+   hyresfakturering är klar?~~ Beslutat 2026-08-21: ja, samma gating som
+   legacy `finance` (org-admin + `finance`-modulen aktiverad), inget
+   superadmin-specialfall.
 4. Bekräfta att `vihem-accounted-webhook`s publika URL faktiskt är nåbar
    utanför Vibos nätverk (Accounted SSRF-validerar att webhook-URL:en
    pekar på en publik, icke-privat adress vid registrering).
