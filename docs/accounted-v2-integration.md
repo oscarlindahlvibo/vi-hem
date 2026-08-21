@@ -33,9 +33,19 @@ kundprojekt (tid/material/pris), faktureringsunderlag innan fakturan finns,
 avbetalningsplaner, korttidsbokningar/-kvitton. Accounted äger fakturan från
 och med att den skapas där, plus allt kring bokföring/moms/reskontra/SIE.
 
-## Vad som finns i denna första etapp
+## Status
 
-### Nya tabeller (migration `20260821090000_accounted_v2_foundation.sql`)
+**Klart:** bolagskoppling, kundlänkning, fakturaskapande (generisk +
+hyresfakturering), webhook-grund.
+**Kvar:** en allmän avdrag/tillägg-modul (utöver hyresjusteringar, som redan
+fungerar), kundprojektfakturering mot Accounted, hyresgästportalens
+fakturavy, scanner → Accounted.
+
+## Vad som finns
+
+### Nya tabeller
+
+`20260821090000_accounted_v2_foundation.sql`:
 
 | Tabell | Syfte |
 | --- | --- |
@@ -52,17 +62,34 @@ Alla fyra länktabeller är läsbara för användare med bolagsåtkomst
 en "länkad"/"synkad" rad — varje skrivning måste först ha gått via Accounteds
 API i en Edge Function.
 
-Migrationen rör inte någon tabell som legacy-ekonomin använder
-(`vihem_invoices`, `vihem_finance_customers`, `vihem_accounting_*`, etc.).
+`20260821120000_accounted_v2_rent_billing_link.sql`:
 
-### Nya Edge Functions
+- `vihem_rent_billing_items.accounted_invoice_link_id` (nullable FK) — låter
+  en hyresrad faktureras via Accounted istället för legacy `invoice_id`.
+  Ett och samma villkor (`invoice_id IS NULL AND accounted_invoice_link_id
+  IS NULL`) styr vilka rader V2-batchen plockar upp, så legacy
+  `vihem_generate_rent_invoices` och V2 kan aldrig dubbelfakturera samma
+  rad.
 
-- **`_shared/accounted-crypto.ts`** — AES-GCM-kryptering av Accounted-hemligheter, samma teknik som `vihem-save-accounting-secret` men med en egen miljövariabel `VIHEM_ACCOUNTED_SECRET_KEY` (rotera oberoende av den gamla `VIHEM_ACCOUNTING_SECRET_KEY`).
-- **`_shared/accounted-rest-client.ts`** — enda platsen som bygger ett `Bearer gnubok_sk_...`-anrop mot Accounted. Hanterar `Idempotency-Key`, `dry_run`, timeout, och avkodar Accounteds felkuvert (`{ error: { code, message, recovery_hint, details } }`) till ett strukturerat `AccountedApiError`.
-- **`_shared/vihem-auth.ts`** — delat auth/behörighetshjälpmedel för den nya ytan (JWT-verifiering + `vihem_user_has_company_access`-koll). Befintliga 30+ Edge Functions är **inte** omskrivna till detta — det vore en separat, större förändring.
+Migrationerna rör inte någon tabell som legacy-ekonomin skriver till för
+befintlig produktionsfakturering (`vihem_invoices`, `vihem_accounting_*`,
+etc.) — bara additiva kolumner/tabeller.
+
+### Delad logik (`_shared/`)
+
+- **`accounted-crypto.ts`** — AES-GCM-kryptering av Accounted-hemligheter, egen miljövariabel `VIHEM_ACCOUNTED_SECRET_KEY`.
+- **`accounted-rest-client.ts`** — enda platsen som bygger ett `Bearer gnubok_sk_...`-anrop mot Accounted. Idempotency-Key, dry-run, timeout, strukturerat felkuvert (`AccountedApiError`).
+- **`accounted-company-context.ts`** — laddar bolagskoppling + dekrypterad API-nyckel; enhetliga felkoder (`ACCOUNTED_NOT_LINKED`/`ACCOUNTED_LINK_DISABLED`/`ACCOUNTED_NO_API_KEY`) oavsett vilken funktion som anropar.
+- **`accounted-customer-resolver.ts`** — `resolveOrCreateAccountedCustomer`: kundlänkning/-skapande, delad mellan `vihem-accounted-customers` och batch-anrop (hyresfakturering, framtida kundprojekt) så logiken bara finns på ett ställe.
+- **`accounted-invoice-creator.ts`** — `createAccountedInvoiceForSource`: samma sak för fakturaskapande.
+- **`vihem-auth.ts`** — delat auth/behörighetshjälpmedel (JWT + `vihem_user_has_company_access`). Befintliga 30+ Edge Functions är **inte** omskrivna till detta.
+
+### Edge Functions
+
 - **`vihem-accounted-admin`** — `save_company_link`, `test_connection`, `register_webhooks`. Kräver `admin`-bolagsbehörighet.
-- **`vihem-accounted-customers`** — `link_or_create`: hittar befintlig kundkoppling eller skapar kunden i Accounted (idempotent, dry-run-stödd).
-- **`vihem-accounted-invoices`** — `create` (idempotent, dry-run-stödd) och `refresh_status` (manuell polling-backstop).
+- **`vihem-accounted-customers`** — hittar befintlig kundkoppling eller skapar kunden i Accounted (idempotent, dry-run-stödd). Tunn wrapper runt den delade resolvern.
+- **`vihem-accounted-invoices`** — `create` (generisk, idempotent, dry-run-stödd) och `refresh_status`. Tunn wrapper runt den delade skaparen.
+- **`vihem-accounted-rent-billing`** — batchar fakturaskapande för en hel hyreskörning: för varje ej fakturerad rad, länka/skapa Accounted-kunden (`vihem_finance_customers`, via `finance_customer_id`) och skapa fakturan (en rad: grundhyra + hyresjusteringar, redan summerat av befintlig SQL). Partial-success-svar per rad, samma mönster som Accounteds egen `bulk-create`.
 - **`vihem-accounted-webhook`** — publik mottagare, HMAC-verifierad (`X-Gnubok-Signature`, Stripe-liknande schema), **ingen** Supabase-JWT. Måste deployas med `verify_jwt = false` (redan satt i `supabase/config.toml`).
 
 Ingen av dessa funktioner ger AI-tolkning eller PDF-generering själva — det
@@ -80,10 +107,17 @@ org-admin + organisationens `finance`-modul aktiverad
 Legacy `FinancePage.tsx` är oförändrad utöver att den nu kallas "legacy" i
 kommentarer/dokumentation — ingen kod i den filen är rörd.
 
-Sidan har fyra flikar i detta skede: Översikt, Bolagskoppling (fungerande
-admin-UI: spara URL/company-id/API-nyckel, testa anslutning, registrera
-webhooks), Fakturor (läser `vihem_accounted_invoice_links`, tom tills
-fakturering faktiskt kopplas in), och Kommande (platshållare).
+Fem flikar: Översikt, Bolagskoppling (spara URL/company-id/API-nyckel, testa
+anslutning, registrera webhooks), **Fakturering** (välj hyresperiod → hämta
+körning från befintlig `vihem_create_rent_billing_run` → förhandsgranska
+mot Accounted som dry-run → skapa fakturor på riktigt, med resultat per
+rad), Fakturor (läser `vihem_accounted_invoice_links`), och Kommande
+(platshållare för det som inte är byggt än).
+
+Kundskapande i Accounted (steget innan fakturan) körs alltid på riktigt,
+även under en fakturas dry-run — att skapa en kundpost har ingen ekonomisk
+effekt, och fakturans dry-run behöver ett riktigt `customer_id` att
+validera mot. Endast själva fakturaskapandet respekterar dry-run-flaggan.
 
 ## Accounted-sidan: vad som redan finns och används
 
@@ -158,16 +192,39 @@ kräver ett separat beslut och arbete i Accounted-repot.
 
 ## Vad som INTE är byggt än
 
-1. Hyresfakturering (VI-HEM räknar ut hyra/el/tillägg → skickar till
-   `vihem-accounted-invoices`).
-2. Avdrag & tillägg-modulen (pending adjustment, konsumeras först när
-   Accounted bekräftat fakturan).
+1. ~~Hyresfakturering~~ Klart (`vihem-accounted-rent-billing`) — grundhyra
+   och hyresjusteringar. Elförbrukning/eldebitering är inte beräknad
+   någonstans i kodbasen ännu (varken legacy eller V2) och ingår därför
+   inte i vad som faktureras.
+2. En allmän avdrag & tillägg-modul enligt originalspecen (pending
+   adjustment, konsumeras först när Accounted bekräftat fakturan). Hyra har
+   redan ett fungerande, mer begränsat avdragsflöde
+   (`vihem_rent_adjustments`, tillämpas innan fakturan skapas, inte kopplat
+   till bekräftelse-semantiken) — se avsnittet nedan om varför det räckte
+   för hyresfakturering.
 3. Kundprojektfakturering mot den nya vägen (idag går kundprojekt fortsatt
    via legacy `vihem_create_invoice_from_project_basis*`-RPC:erna).
 4. Hyresgästportalens fakturavy.
 5. Scanner → Accounted-kopplingen (rekommendation ovan, ej kopplad).
 6. Avbetalningsplaner i Finance V2-gränssnittet (fortsatt legacy tills
    vidare — panelen finns redan och flyttas inte i denna etapp).
+
+### Hyresfakturering: hur avdrag/tillägg faktiskt löstes
+
+Originalspecen (avsnitt 6) beskrev en generell pending-adjustment-modell där
+avdraget markeras förbrukat först när Accounted bekräftat rätt faktura.
+Hyresmodulen har redan en egen, enklare mekanism sedan tidigare
+(`vihem_rent_adjustments` + en trigger som summerar aktiva justeringar in i
+`vihem_rent_billing_items.amount` **vid körningsgenerering**, dvs innan
+Accounted är inblandat alls). Den mekanismen återanvänds oförändrad: en
+justering påverkar bara `draft`-rader (`item.status = 'draft'`), och en rad
+byter status till `invoiced` i samma steg som `accounted_invoice_link_id`
+sätts — så en justering kan aldrig ändra beloppet på en rad som redan
+skickats till Accounted. Det uppfyller samma säkerhetsegenskap
+("konsumeras inte i förtid, kan inte ändras i efterhand") utan att en ny
+generell modul behövde byggas för hyra specifikt. Den generella modulen
+(punkt 2 ovan) är kvar för andra faktureringskällor som saknar en
+motsvarande mekanism.
 
 ## Öppna frågor som kräver verksamhetsbeslut
 

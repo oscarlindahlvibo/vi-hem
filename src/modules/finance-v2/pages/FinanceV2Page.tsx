@@ -4,11 +4,13 @@
 // where Accounted (self-hosted) becomes the source of truth for the real
 // customer invoice, and VI-HEM only computes what should be billed.
 //
-// This first stage only ships: company <-> Accounted linking (with
-// connectivity test + webhook registration) and a read-only projection of
-// invoices Finance V2 has created. Rent billing, adjustments, customer-
-// project invoicing, portal sync and the scanner->Accounted bridge are
-// deliberately not wired up yet -- see docs/accounted-v2-integration.md.
+// This stage ships: company <-> Accounted linking (with connectivity test +
+// webhook registration), a read-only projection of invoices Finance V2 has
+// created, and rent billing (reuses the existing VI-HEM rent-run/adjustments
+// SQL, only invoice creation goes through Accounted). Avdrag & tillägg as a
+// general module, customer-project invoicing, portal sync and the
+// scanner->Accounted bridge are deliberately not wired up yet -- see
+// docs/accounted-v2-integration.md.
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
@@ -16,21 +18,25 @@ import { Badge, Button, Card, EmptyState, Input, LoadingPage, PageHeader, Select
 import { formatCurrency, formatDateTime } from '../../../lib/utils';
 import {
   AccountedIntegrationError,
+  createOrGetRentBillingRun,
+  createRentBillingInvoices,
   getCompanyLink,
   listInvoiceLinks,
+  listRentBillingItems,
   registerWebhooks,
   saveCompanyLink,
   testConnection,
 } from '../api';
-import type { AccountedCompanyLink, AccountedInvoiceLink } from '../types';
-import { Landmark, Link2, ListChecks, RefreshCw, Sparkles } from 'lucide-react';
+import type { AccountedCompanyLink, AccountedInvoiceLink, RentBillingItem, RentBillingItemResult, RentBillingRun } from '../types';
+import { CalendarClock, Landmark, Link2, ListChecks, RefreshCw, Sparkles } from 'lucide-react';
 
 type VihemCompany = { id: string; name: string; legal_name: string };
-type TabKey = 'overview' | 'company-link' | 'invoices' | 'upcoming';
+type TabKey = 'overview' | 'company-link' | 'billing' | 'invoices' | 'upcoming';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Översikt' },
   { key: 'company-link', label: 'Bolagskoppling' },
+  { key: 'billing', label: 'Fakturering' },
   { key: 'invoices', label: 'Fakturor' },
   { key: 'upcoming', label: 'Kommande' },
 ];
@@ -150,6 +156,7 @@ export function FinanceV2Page() {
             {tab === 'company-link' && (
               <CompanyLinkTab companyId={companyId} companyLink={companyLink} onSaved={loadCompanyLink} />
             )}
+            {tab === 'billing' && <RentBillingTab companyId={companyId} companyLink={companyLink} />}
             {tab === 'invoices' && <InvoicesTab companyLink={companyLink} />}
             {tab === 'upcoming' && <UpcomingTab />}
           </div>
@@ -329,6 +336,160 @@ function CompanyLinkTab({
   );
 }
 
+const RENT_ITEM_STATUS_LABELS: Record<string, string> = {
+  draft: 'Ej fakturerad',
+  invoiced: 'Fakturerad',
+  skipped: 'Överhoppad',
+  cancelled: 'Makulerad',
+};
+
+function currentMonthValue(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+function RentBillingTab({ companyId, companyLink }: { companyId: string; companyLink: AccountedCompanyLink | null }) {
+  const [rentPeriod, setRentPeriod] = useState(currentMonthValue());
+  const [run, setRun] = useState<RentBillingRun | null>(null);
+  const [items, setItems] = useState<RentBillingItem[]>([]);
+  const [itemResults, setItemResults] = useState<Record<string, RentBillingItemResult>>({});
+  const [loadingRun, setLoadingRun] = useState(false);
+  const [creatingInvoices, setCreatingInvoices] = useState(false);
+  const [message, setMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const loadItems = useCallback(async (runId: string) => {
+    const data = await listRentBillingItems(runId);
+    setItems(data);
+  }, []);
+
+  const handleCreateRun = async () => {
+    setLoadingRun(true);
+    setMessage('');
+    setErrorMessage('');
+    setItemResults({});
+    try {
+      const createdRun = await createOrGetRentBillingRun(companyId, rentPeriod);
+      setRun(createdRun);
+      await loadItems(createdRun.id);
+    } catch (err) {
+      setErrorMessage(describeError(err));
+    } finally {
+      setLoadingRun(false);
+    }
+  };
+
+  const handleCreateInvoices = async (dryRun: boolean) => {
+    if (!run) return;
+    setCreatingInvoices(true);
+    setMessage('');
+    setErrorMessage('');
+    try {
+      const outcome = await createRentBillingInvoices({ companyId, runId: run.id, dryRun });
+      const byItem: Record<string, RentBillingItemResult> = {};
+      outcome.results.forEach((r) => { byItem[r.item_id] = r; });
+      setItemResults(byItem);
+      if (dryRun) {
+        setMessage(`Förhandsgranskning klar: ${outcome.summary.succeeded} av ${outcome.summary.total} rader kan faktureras.`);
+      } else {
+        setMessage(`${outcome.summary.succeeded} av ${outcome.summary.total} fakturor skapade i Accounted.`);
+        await loadItems(run.id);
+      }
+    } catch (err) {
+      setErrorMessage(describeError(err));
+    } finally {
+      setCreatingInvoices(false);
+    }
+  };
+
+  const invoiceableCount = items.filter((i) => i.status === 'draft' && !i.accounted_invoice_link_id && !i.invoice_id).length;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="flex flex-wrap items-end gap-3">
+          <Input
+            label="Hyresperiod"
+            type="month"
+            value={rentPeriod.slice(0, 7)}
+            onChange={(e) => setRentPeriod(`${e.target.value}-01`)}
+          />
+          <Button onClick={handleCreateRun} loading={loadingRun} disabled={!companyLink}>
+            Hämta/skapa körning
+          </Button>
+          {run && invoiceableCount > 0 && (
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => handleCreateInvoices(true)}
+                loading={creatingInvoices}
+                disabled={!companyLink?.enabled}
+              >
+                Förhandsgranska mot Accounted (dry-run)
+              </Button>
+              <Button onClick={() => handleCreateInvoices(false)} loading={creatingInvoices} disabled={!companyLink?.enabled}>
+                Skapa fakturor i Accounted
+              </Button>
+            </>
+          )}
+        </div>
+        {!companyLink && (
+          <p className="mt-3 text-sm text-slate-500">Koppla bolaget mot Accounted under Bolagskoppling innan fakturor kan skapas.</p>
+        )}
+        {companyLink && !companyLink.enabled && (
+          <p className="mt-3 text-sm text-amber-700">Accounted-kopplingen är inaktiverad — aktivera den under Bolagskoppling för att kunna skapa fakturor.</p>
+        )}
+        {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
+        {errorMessage && <p className="mt-3 text-sm text-red-700">{errorMessage}</p>}
+      </Card>
+
+      {run && (
+        <Card>
+          {items.length === 0 ? (
+            <EmptyState icon={CalendarClock} title="Inga hyresrader" description="Inga aktiva hyresförhållanden matchade perioden, eller alla är redan fakturerade." />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase text-slate-500">
+                    <th className="py-2 pr-4">Hyresgäst</th>
+                    <th className="py-2 pr-4">Grundhyra</th>
+                    <th className="py-2 pr-4">Justering</th>
+                    <th className="py-2 pr-4">Att fakturera</th>
+                    <th className="py-2 pr-4">Status</th>
+                    <th className="py-2 pr-4">Resultat</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item) => {
+                    const result = itemResults[item.id];
+                    return (
+                      <tr key={item.id} className="border-b border-slate-100">
+                        <td className="py-2 pr-4">{item.tenant?.name ?? '–'}</td>
+                        <td className="py-2 pr-4">{formatCurrency(item.base_rent_amount)}</td>
+                        <td className="py-2 pr-4">{item.adjustment_amount !== 0 ? formatCurrency(item.adjustment_amount) : '–'}</td>
+                        <td className="py-2 pr-4 font-medium">{formatCurrency(item.total_amount)}</td>
+                        <td className="py-2 pr-4">
+                          <Badge text={RENT_ITEM_STATUS_LABELS[item.status] ?? item.status} />
+                        </td>
+                        <td className="py-2 pr-4 text-xs">
+                          {result?.ok && result.dry_run && <span className="text-blue-700">Kan faktureras</span>}
+                          {result?.ok && !result.dry_run && <span className="text-green-700">Skapad</span>}
+                          {result && !result.ok && <span className="text-red-700">{result.error?.message}</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function InvoicesTab({ companyLink }: { companyLink: AccountedCompanyLink | null }) {
   const [invoices, setInvoices] = useState<AccountedInvoiceLink[]>([]);
   const [loading, setLoading] = useState(false);
@@ -416,7 +577,7 @@ function UpcomingTab() {
       <EmptyState
         icon={Sparkles}
         title="Kommande i Finance V2"
-        description="Hyresfakturering, avdrag & tillägg, kundprojektfakturering, hyresgästportalens fakturavy och scanner → Accounted byggs stegvis ovanpå den här grunden. Avbetalningsplaner hanteras tills vidare i Ekonomi (legacy)."
+        description="En allmän avdrag & tillägg-modul (utöver hyresjusteringar, som redan fungerar), kundprojektfakturering, hyresgästportalens fakturavy och scanner → Accounted byggs stegvis ovanpå den här grunden. Avbetalningsplaner hanteras tills vidare i Ekonomi (legacy)."
       />
     </Card>
   );

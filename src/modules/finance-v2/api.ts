@@ -17,6 +17,9 @@ import type {
   AccountedCustomerSourceType,
   AccountedInvoiceLink,
   AccountedInvoiceSourceType,
+  RentBillingItem,
+  RentBillingItemResult,
+  RentBillingRun,
 } from './types';
 
 export class AccountedIntegrationError extends Error {
@@ -204,4 +207,44 @@ export async function listInvoiceLinks(companyLinkId: string): Promise<Accounted
     .limit(100);
   if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
   return (data ?? []) as AccountedInvoiceLink[];
+}
+
+// ── Rent billing (hyresfakturering) ─────────────────────────────────────
+// Run/item generation reuses the existing vihem_create_rent_billing_run RPC
+// (base rent + adjustments, computed entirely in VI-HEM) -- only invoice
+// creation goes through the new Accounted integration.
+
+export async function createOrGetRentBillingRun(
+  companyId: string,
+  rentPeriod: string,
+): Promise<RentBillingRun> {
+  const { data, error } = await supabase.rpc('vihem_create_rent_billing_run', {
+    target_company_id: companyId,
+    target_rent_period: rentPeriod,
+    include_existing: false,
+  });
+  if (error) throw new AccountedIntegrationError('RENT_RUN_CREATE_FAILED', error.message);
+  return data as RentBillingRun;
+}
+
+export async function listRentBillingItems(runId: string): Promise<RentBillingItem[]> {
+  const { data, error } = await supabase
+    .from('vihem_rent_billing_items')
+    .select('*, tenant:tenant_id(name)')
+    .eq('run_id', runId)
+    .order('created_at', { ascending: true });
+  if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
+  return (data ?? []) as unknown as RentBillingItem[];
+}
+
+export async function createRentBillingInvoices(params: {
+  companyId: string;
+  runId: string;
+  dryRun?: boolean;
+}): Promise<{ results: RentBillingItemResult[]; summary: { total: number; succeeded: number; failed: number } }> {
+  return invoke('vihem-accounted-rent-billing', {
+    company_id: params.companyId,
+    run_id: params.runId,
+    dry_run: params.dryRun ?? false,
+  }).then((res: any) => res.data);
 }

@@ -7,8 +7,9 @@
 // finance module's admin-write RLS policies use.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, type AuthContext, corsHeaders, errorJson, isAuthContext, json, requireCompanyAccess } from "../_shared/vihem-auth.ts";
-import { decryptAccountedSecret, encryptAccountedSecret, hintFor } from "../_shared/accounted-crypto.ts";
+import { encryptAccountedSecret, hintFor } from "../_shared/accounted-crypto.ts";
 import { createAccountedClient } from "../_shared/accounted-rest-client.ts";
+import { AccountedContextError, loadAccountedCompanyContext } from "../_shared/accounted-company-context.ts";
 
 // Accounted only accepts one event_type per webhook subscription (see
 // app/api/v1/companies/[companyId]/webhooks/route.ts CreateWebhookSchema),
@@ -115,55 +116,18 @@ async function handleSaveCompanyLink(auth: AuthContext, company: { id: string; o
   return json({ data: link });
 }
 
-interface CompanyLinkRow {
-  id: string;
-  organisation_id: string;
-  accounted_base_url: string;
-  accounted_company_id: string;
-}
-
-type LoadCompanyLinkResult =
-  | { error: Response; link?: undefined; client?: undefined }
-  | { error?: undefined; link: CompanyLinkRow; client: ReturnType<typeof createAccountedClient> };
-
-async function loadCompanyLinkAndClient(auth: AuthContext, companyId: string): Promise<LoadCompanyLinkResult> {
-  const { data: link, error: linkErr } = await auth.adminClient
-    .from("vihem_accounted_company_links")
-    .select("id, organisation_id, accounted_base_url, accounted_company_id")
-    .eq("company_id", companyId)
-    .maybeSingle();
-  if (linkErr || !link) {
-    return { error: errorJson("ACCOUNTED_NOT_LINKED", "Bolaget är inte kopplat till Accounted ännu.", 400) };
-  }
-
-  const { data: secret, error: secretErr } = await auth.adminClient
-    .from("vihem_accounted_secrets")
-    .select("encrypted_secret")
-    .eq("company_link_id", link.id)
-    .eq("secret_type", "api_key")
-    .is("webhook_subscription_id", null)
-    .maybeSingle();
-  if (secretErr || !secret) {
-    return { error: errorJson("ACCOUNTED_NO_API_KEY", "Ingen Accounted API-nyckel sparad för bolaget.", 400) };
-  }
-
-  let apiKey: string;
-  try {
-    apiKey = await decryptAccountedSecret(secret.encrypted_secret);
-  } catch (err) {
-    return { error: errorJson("SECRET_DECRYPTION_FAILED", err instanceof Error ? err.message : String(err), 500) };
-  }
-
-  const client = createAccountedClient({ baseUrl: link.accounted_base_url, apiKey });
-  return { link, client };
-}
-
 async function handleTestConnection(auth: AuthContext, companyId: string) {
-  const resolved = await loadCompanyLinkAndClient(auth, companyId);
-  if (resolved.error) return resolved.error;
-  const { link, client } = resolved;
+  let context;
+  try {
+    context = await loadAccountedCompanyContext(auth.adminClient, companyId, { requireEnabled: false });
+  } catch (err) {
+    if (err instanceof AccountedContextError) return errorJson(err.code, err.message, 400);
+    throw err;
+  }
+  const { link } = context;
+  const client = createAccountedClient({ baseUrl: link.accounted_base_url, apiKey: context.apiKey });
 
-  const result = await client!.healthCheck(link!.accounted_company_id);
+  const result = await client.healthCheck(link.accounted_company_id);
 
   await auth.adminClient
     .from("vihem_accounted_company_links")
@@ -172,7 +136,7 @@ async function handleTestConnection(auth: AuthContext, companyId: string) {
       last_health_status: result.ok ? "ok" : "error",
       last_health_error: result.ok ? "" : `${result.error?.code}: ${result.error?.message}`,
     })
-    .eq("id", link!.id);
+    .eq("id", link.id);
 
   if (!result.ok) {
     return errorJson(result.error!.code, result.error!.message, 502, {
@@ -184,9 +148,15 @@ async function handleTestConnection(auth: AuthContext, companyId: string) {
 }
 
 async function handleRegisterWebhooks(auth: AuthContext, companyId: string) {
-  const resolved = await loadCompanyLinkAndClient(auth, companyId);
-  if (resolved.error) return resolved.error;
-  const { link, client } = resolved;
+  let context;
+  try {
+    context = await loadAccountedCompanyContext(auth.adminClient, companyId, { requireEnabled: false });
+  } catch (err) {
+    if (err instanceof AccountedContextError) return errorJson(err.code, err.message, 400);
+    throw err;
+  }
+  const { link } = context;
+  const client = createAccountedClient({ baseUrl: link.accounted_base_url, apiKey: context.apiKey });
 
   const webhookBaseUrl = (Deno.env.get("VIHEM_ACCOUNTED_WEBHOOK_URL") || `${Deno.env.get("SUPABASE_URL")}/functions/v1/vihem-accounted-webhook`).replace(/\/$/, "");
 
@@ -196,7 +166,7 @@ async function handleRegisterWebhooks(auth: AuthContext, companyId: string) {
     const { data: existing } = await auth.adminClient
       .from("vihem_accounted_webhook_subscriptions")
       .select("id, accounted_webhook_id")
-      .eq("company_link_id", link!.id)
+      .eq("company_link_id", link.id)
       .eq("event_type", eventType)
       .maybeSingle();
 
@@ -205,12 +175,12 @@ async function handleRegisterWebhooks(auth: AuthContext, companyId: string) {
       continue;
     }
 
-    const callbackUrl = `${webhookBaseUrl}?link=${encodeURIComponent(link!.id)}&event=${encodeURIComponent(eventType)}`;
-    const idempotencyKey = `vihem-webhook-${link!.id}-${eventType}`;
+    const callbackUrl = `${webhookBaseUrl}?link=${encodeURIComponent(link.id)}&event=${encodeURIComponent(eventType)}`;
+    const idempotencyKey = `vihem-webhook-${link.id}-${eventType}`;
 
     try {
-      const created = await client!.post<{ id: string; secret: string }>(
-        `/api/v1/companies/${encodeURIComponent(link!.accounted_company_id)}/webhooks`,
+      const created = await client.post<{ id: string; secret: string }>(
+        `/api/v1/companies/${encodeURIComponent(link.accounted_company_id)}/webhooks`,
         { event_type: eventType, webhook_url: callbackUrl, name: `VI-HEM (${eventType})` },
         { idempotencyKey },
       );
@@ -219,8 +189,8 @@ async function handleRegisterWebhooks(auth: AuthContext, companyId: string) {
         .from("vihem_accounted_webhook_subscriptions")
         .upsert(
           {
-            organisation_id: link!.organisation_id,
-            company_link_id: link!.id,
+            organisation_id: link.organisation_id,
+            company_link_id: link.id,
             event_type: eventType,
             accounted_webhook_id: created.id,
             active: true,
@@ -234,8 +204,8 @@ async function handleRegisterWebhooks(auth: AuthContext, companyId: string) {
       const encrypted = await encryptAccountedSecret(created.secret);
       const { error: secretErr } = await auth.adminClient.from("vihem_accounted_secrets").upsert(
         {
-          organisation_id: link!.organisation_id,
-          company_link_id: link!.id,
+          organisation_id: link.organisation_id,
+          company_link_id: link.id,
           secret_type: "webhook_secret",
           webhook_subscription_id: subscription.id,
           encrypted_secret: encrypted,

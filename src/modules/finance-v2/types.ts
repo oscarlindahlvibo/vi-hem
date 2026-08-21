@@ -74,6 +74,56 @@ export interface AccountedWebhookSubscription {
   last_delivery_at: string | null;
 }
 
+// ── Rent billing (hyresfakturering) ─────────────────────────────────────
+// The run/item computation itself is existing VI-HEM logic
+// (vihem_create_rent_billing_run + the rent-adjustments triggers); Finance
+// V2 only adds the "push a draft item to Accounted" step on top.
+
+export type RentBillingRunStatus = 'draft' | 'generated' | 'approved' | 'sent' | 'cancelled';
+
+export interface RentBillingRun {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  rent_period: string;
+  due_date: string;
+  status: RentBillingRunStatus;
+  invoice_count: number;
+  total_amount: number;
+  created_at: string;
+}
+
+export type RentBillingItemStatus = 'draft' | 'invoiced' | 'skipped' | 'cancelled';
+
+export interface RentBillingItem {
+  id: string;
+  run_id: string;
+  tenancy_id: string;
+  tenant_id: string;
+  finance_customer_id: string | null;
+  rent_period: string;
+  due_date: string;
+  description: string;
+  base_rent_amount: number;
+  adjustment_amount: number;
+  amount: number;
+  vat_amount: number;
+  total_amount: number;
+  status: RentBillingItemStatus;
+  invoice_id: string | null;
+  accounted_invoice_link_id: string | null;
+  tenant?: { name: string } | null;
+}
+
+export interface RentBillingItemResult {
+  item_id: string;
+  ok: boolean;
+  dry_run?: boolean;
+  already_invoiced?: boolean;
+  accounted_invoice_id?: string;
+  error?: { code: string; message: string };
+}
+
 /** Structured error shape shared with Accounted's own v1 error envelope
  * (`{ error: { code, message, recovery_hint, details } }`), so the UI can
  * render one consistent error component for both local and upstream

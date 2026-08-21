@@ -5,16 +5,19 @@
 // keeps its own operational person/tenant data but never invents its own
 // duplicate "billing customer" concept.
 //
-// Idempotency: the Idempotency-Key sent to Accounted is derived from
-// (company_link_id, source_type, source_id), so calling this twice for the
-// same VI-HEM record is always safe — either it finds the existing local
-// link (fast path) or Accounted itself replays the cached create response.
+// Thin HTTP wrapper around the shared resolver in
+// _shared/accounted-customer-resolver.ts -- batch callers (rent billing,
+// future customer-project billing) call that module directly in-process
+// instead of round-tripping through this function.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, corsHeaders, errorJson, isAuthContext, json, requireCompanyAccess } from "../_shared/vihem-auth.ts";
-import { decryptAccountedSecret } from "../_shared/accounted-crypto.ts";
-import { createAccountedClient, deriveIdempotencyKey, AccountedApiError } from "../_shared/accounted-rest-client.ts";
-
-const SOURCE_TYPES = ["tenancy", "finance_customer", "customer_project_customer", "short_stay_guest"] as const;
+import { AccountedContextError, loadAccountedCompanyContext } from "../_shared/accounted-company-context.ts";
+import {
+  ACCOUNTED_CUSTOMER_SOURCE_TYPES,
+  resolveOrCreateAccountedCustomer,
+  type AccountedCustomerSourceType,
+} from "../_shared/accounted-customer-resolver.ts";
+import { AccountedApiError } from "../_shared/accounted-rest-client.ts";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
@@ -37,8 +40,8 @@ Deno.serve(async (req: Request) => {
   const customer = body?.customer || {};
 
   if (!companyId) return errorJson("VALIDATION_ERROR", "company_id krävs.", 400);
-  if (!SOURCE_TYPES.includes(sourceType as any)) {
-    return errorJson("VALIDATION_ERROR", `source_type måste vara en av: ${SOURCE_TYPES.join(", ")}`, 400);
+  if (!ACCOUNTED_CUSTOMER_SOURCE_TYPES.includes(sourceType as AccountedCustomerSourceType)) {
+    return errorJson("VALIDATION_ERROR", `source_type måste vara en av: ${ACCOUNTED_CUSTOMER_SOURCE_TYPES.join(", ")}`, 400);
   }
   if (!sourceId) return errorJson("VALIDATION_ERROR", "source_id krävs.", 400);
   if (!customer?.name) return errorJson("VALIDATION_ERROR", "customer.name krävs.", 400);
@@ -46,96 +49,19 @@ Deno.serve(async (req: Request) => {
   const accessError = await requireCompanyAccess(auth, companyId, "seller");
   if (accessError) return accessError;
 
-  const { data: link, error: linkErr } = await auth.adminClient
-    .from("vihem_accounted_company_links")
-    .select("id, organisation_id, accounted_base_url, accounted_company_id, enabled")
-    .eq("company_id", companyId)
-    .maybeSingle();
-  if (linkErr || !link) return errorJson("ACCOUNTED_NOT_LINKED", "Bolaget är inte kopplat till Accounted ännu.", 400);
-  if (!link.enabled) return errorJson("ACCOUNTED_LINK_DISABLED", "Accounted-kopplingen är inaktiverad för bolaget.", 400);
-
-  // Fast path: already linked.
-  const { data: existing } = await auth.adminClient
-    .from("vihem_accounted_customer_links")
-    .select("id, accounted_customer_id, accounted_customer_number, sync_status, last_synced_at")
-    .eq("company_link_id", link.id)
-    .eq("source_type", sourceType)
-    .eq("source_id", sourceId)
-    .maybeSingle();
-  if (existing) return json({ data: existing });
-
-  const { data: secret, error: secretErr } = await auth.adminClient
-    .from("vihem_accounted_secrets")
-    .select("encrypted_secret")
-    .eq("company_link_id", link.id)
-    .eq("secret_type", "api_key")
-    .is("webhook_subscription_id", null)
-    .maybeSingle();
-  if (secretErr || !secret) return errorJson("ACCOUNTED_NO_API_KEY", "Ingen Accounted API-nyckel sparad för bolaget.", 400);
-
-  let apiKey: string;
   try {
-    apiKey = await decryptAccountedSecret(secret.encrypted_secret);
+    const context = await loadAccountedCompanyContext(auth.adminClient, companyId);
+    const result = await resolveOrCreateAccountedCustomer(auth.adminClient, context.link, context.apiKey, {
+      sourceType: sourceType as AccountedCustomerSourceType,
+      sourceId,
+      customer,
+      dryRun,
+      createdBy: auth.callerId,
+    });
+    if ("dry_run" in result) return json({ data: result });
+    return json({ data: result });
   } catch (err) {
-    return errorJson("SECRET_DECRYPTION_FAILED", err instanceof Error ? err.message : String(err), 500);
-  }
-
-  const client = createAccountedClient({ baseUrl: link.accounted_base_url, apiKey });
-  const idempotencyKey = await deriveIdempotencyKey(["customer", link.id, sourceType, sourceId]);
-
-  const accountedPayload = {
-    name: customer.name,
-    customer_type: mapCustomerType(customer.customer_type),
-    email: customer.email || undefined,
-    phone: customer.phone || undefined,
-    address_line1: customer.address_line1 || undefined,
-    address_line2: customer.address_line2 || undefined,
-    postal_code: customer.postal_code || undefined,
-    city: customer.city || undefined,
-    country: customer.country_code || "SE",
-    org_number: customer.customer_type !== "individual" ? (customer.organisation_number || undefined) : undefined,
-    personal_number: customer.customer_type === "individual" ? (customer.personal_number || undefined) : undefined,
-    default_payment_terms: customer.payment_terms_days || undefined,
-  };
-
-  try {
-    if (dryRun) {
-      const preview = await client.post(
-        `/api/v1/companies/${encodeURIComponent(link.accounted_company_id)}/customers`,
-        accountedPayload,
-        { idempotencyKey, dryRun: true },
-      );
-      return json({ data: { dry_run: true, preview } });
-    }
-
-    const created = await client.post<{ id: string; customer_number?: string }>(
-      `/api/v1/companies/${encodeURIComponent(link.accounted_company_id)}/customers`,
-      accountedPayload,
-      { idempotencyKey },
-    );
-
-    const { data: inserted, error: insertErr } = await auth.adminClient
-      .from("vihem_accounted_customer_links")
-      .upsert(
-        {
-          organisation_id: link.organisation_id,
-          company_link_id: link.id,
-          source_type: sourceType,
-          source_id: sourceId,
-          accounted_customer_id: created.id,
-          accounted_customer_number: created.customer_number || "",
-          sync_status: "linked",
-          last_synced_at: new Date().toISOString(),
-          created_by: auth.callerId,
-        },
-        { onConflict: "company_link_id,source_type,source_id" },
-      )
-      .select("id, accounted_customer_id, accounted_customer_number, sync_status, last_synced_at")
-      .single();
-    if (insertErr) return errorJson("INTERNAL_ERROR", "Kunde inte spara kundkopplingen.", 500, { details: insertErr.message });
-
-    return json({ data: inserted }, 201);
-  } catch (err) {
+    if (err instanceof AccountedContextError) return errorJson(err.code, err.message, 400);
     if (err instanceof AccountedApiError) {
       return errorJson(err.code, err.message, err.httpStatus >= 400 ? err.httpStatus : 502, {
         recovery_hint: err.recoveryHint,
@@ -146,16 +72,3 @@ Deno.serve(async (req: Request) => {
     return errorJson("INTERNAL_ERROR", err instanceof Error ? err.message : String(err), 500);
   }
 });
-
-function mapCustomerType(vihemType: string | undefined): "individual" | "swedish_business" | "eu_business" | "non_eu_business" {
-  switch (vihemType) {
-    case "private":
-      return "individual";
-    case "company":
-    case "brf":
-    case "property_owner":
-    case "internal":
-    default:
-      return "swedish_business";
-  }
-}
