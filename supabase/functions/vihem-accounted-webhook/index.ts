@@ -182,19 +182,14 @@ async function processEvent(adminClient: any, companyLinkId: string, eventType: 
     const accountedInvoiceId = invoice?.id;
     if (!accountedInvoiceId) return;
 
-    const { data: existing } = await adminClient
-      .from("vihem_accounted_invoice_links")
-      .select("id")
-      .eq("company_link_id", companyLinkId)
-      .eq("accounted_invoice_id", accountedInvoiceId)
-      .maybeSingle();
-
-    // Only update invoices VI-HEM itself created (has a link row). An
-    // invoice.* event for an id we don't know about means it wasn't
-    // created via Finance V2 (e.g. entered directly in Accounted) -- we
-    // deliberately do not fabricate a source_type/source_id for it.
-    if (!existing) return;
-
+    // Update every local row pointing at this Accounted invoice, not just
+    // one: (company_link_id, accounted_invoice_id) is deliberately NOT
+    // unique (see 20260821140000_accounted_v2_invoice_link_many_sources.sql)
+    // so that a future collection/merge invoice can have several VI-HEM
+    // sources sharing one Accounted invoice id, all needing the same status
+    // refresh. An invoice.* event for an id with zero local rows means it
+    // wasn't created via Finance V2 (e.g. entered directly in Accounted) --
+    // we deliberately do not fabricate a source_type/source_id for it.
     await adminClient
       .from("vihem_accounted_invoice_links")
       .update({
@@ -206,6 +201,7 @@ async function processEvent(adminClient: any, companyLinkId: string, eventType: 
         last_sync_source: "webhook",
         last_synced_at: new Date().toISOString(),
       })
-      .eq("id", existing.id);
+      .eq("company_link_id", companyLinkId)
+      .eq("accounted_invoice_id", accountedInvoiceId);
   }
 }

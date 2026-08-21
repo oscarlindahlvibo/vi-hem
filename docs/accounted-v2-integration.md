@@ -210,13 +210,37 @@ kräver ett separat beslut och arbete i Accounted-repot.
    (`vihem-accounted-project-billing`), men bara ett underlag i taget —
    legacy `vihem_create_invoice_from_project_basis_batch`s förmåga att slå
    ihop flera underlag till EN faktura (t.ex. flera delfaktureringar av
-   samma kund) är inte porterad. Det kräver ett medvetet beslut om Accounted
-   ska få flera `source_id`:n peka på samma `accounted_invoice_id`, eller om
-   V2 ska bygga en egen batch-variant — inte gjort i denna etapp.
+   samma kund) är inte porterad, bara förberedd på datamodellnivå (se
+   nästa avsnitt). Ingen samlingsfaktura-funktion är byggd i denna etapp.
 4. Hyresgästportalens fakturavy.
 5. Scanner → Accounted-kopplingen (rekommendation ovan, ej kopplad).
 6. Avbetalningsplaner i Finance V2-gränssnittet (fortsatt legacy tills
    vidare — panelen finns redan och flyttas inte i denna etapp).
+
+### Datamodellen stödjer nu framtida samlingsfakturor
+
+`vihem_accounted_invoice_links` hade tidigare `UNIQUE (company_link_id,
+accounted_invoice_id)`, vilket tvingade fram exakt en VI-HEM-källa per
+Accounted-faktura. Migration `20260821140000_accounted_v2_invoice_link_
+many_sources.sql` tar bort den constrainten (dynamiskt, via
+`information_schema`-uppslag — inte ett hårdkodat constraint-namn) och
+ersätter den med ett vanligt index för snabba uppslag. Kvar står
+`UNIQUE (company_link_id, source_type, source_id)`, vilket ger exakt den
+relation som efterfrågades:
+
+```
+en VI-HEM source (source_type, source_id)  → högst en Accounted-faktura
+en Accounted-faktura (accounted_invoice_id) → kan ha flera VI-HEM sources
+```
+
+En framtida samlingsfaktura skulle alltså bara behöva skapa flera rader i
+`vihem_accounted_invoice_links` (en per underlag) som alla pekar på samma
+`accounted_invoice_id` — ingen ytterligare schemaändring krävs.
+`vihem-accounted-webhook`s statusuppdatering uppdaterar redan alla rader
+som matchar en `accounted_invoice_id` (inte bara en), så webhook-synken
+fungerar oförändrat den dagen flera rader delar samma faktura. Själva
+sammanslagningslogiken (vilka underlag som får slås ihop, hur en
+delbetalning fördelas tillbaka till respektive underlag) är **inte** byggd.
 
 ### Hyresfakturering: hur avdrag/tillägg faktiskt löstes
 
