@@ -572,6 +572,99 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const companyContextRequired = activeTab !== 'overview' && activeTab !== 'companies';
 
+  // All company-specific finance views use these scoped collections. The overview
+  // and company setup tabs intentionally remain organisation-wide.
+  const scopedToActiveCompany = useCallback((companyId?: string | null, includeUnassigned = false) => {
+    if (!companyContextRequired) return true;
+    if (!activeFinanceCompanyId) return false;
+    return companyId === activeFinanceCompanyId || (includeUnassigned && !companyId);
+  }, [activeFinanceCompanyId, companyContextRequired]);
+
+  const visibleCustomers = useMemo(
+    () => customers.filter(customer => scopedToActiveCompany(customer.company_id, true)),
+    [customers, scopedToActiveCompany],
+  );
+  const visibleSuppliers = useMemo(
+    () => suppliers.filter(supplier => scopedToActiveCompany(supplier.company_id, true)),
+    [suppliers, scopedToActiveCompany],
+  );
+  const visibleInvoices = useMemo(
+    () => invoices.filter(invoice => scopedToActiveCompany(invoice.company_id)),
+    [invoices, scopedToActiveCompany],
+  );
+  const visiblePayments = useMemo(
+    () => payments.filter(payment => scopedToActiveCompany(payment.company_id)),
+    [payments, scopedToActiveCompany],
+  );
+  const visibleInvoiceEmails = useMemo(
+    () => invoiceEmails.filter(email => scopedToActiveCompany(email.company_id)),
+    [invoiceEmails, scopedToActiveCompany],
+  );
+  const visibleSupplierInvoicesScoped = useMemo(
+    () => supplierInvoices.filter(invoice => scopedToActiveCompany(invoice.company_id)),
+    [supplierInvoices, scopedToActiveCompany],
+  );
+  const visibleRentRuns = useMemo(
+    () => rentRuns.filter(run => scopedToActiveCompany(run.company_id)),
+    [rentRuns, scopedToActiveCompany],
+  );
+  const visibleRentItems = useMemo(
+    () => rentItems.filter(item => scopedToActiveCompany(item.company_id)),
+    [rentItems, scopedToActiveCompany],
+  );
+  const visibleRentAdjustments = useMemo(
+    () => rentAdjustments.filter(adjustment => scopedToActiveCompany(adjustment.company_id)),
+    [rentAdjustments, scopedToActiveCompany],
+  );
+  const visibleDirectDebitMandates = useMemo(
+    () => directDebitMandates.filter(mandate => scopedToActiveCompany(mandate.company_id)),
+    [directDebitMandates, scopedToActiveCompany],
+  );
+  const visibleAccountingAccounts = useMemo(
+    () => accountingAccounts.filter(account => scopedToActiveCompany(account.company_id)),
+    [accountingAccounts, scopedToActiveCompany],
+  );
+  const visibleVatCodes = useMemo(
+    () => vatCodes.filter(code => scopedToActiveCompany(code.company_id)),
+    [vatCodes, scopedToActiveCompany],
+  );
+  const visibleNumberSeries = useMemo(
+    () => numberSeries.filter(series => scopedToActiveCompany(series.company_id)),
+    [numberSeries, scopedToActiveCompany],
+  );
+  const visibleIntegrations = useMemo(
+    () => integrations.filter(integration => scopedToActiveCompany(integration.company_id)),
+    [integrations, scopedToActiveCompany],
+  );
+  const visibleAccountingQueue = useMemo(
+    () => accountingQueue.filter(item => scopedToActiveCompany(item.company_id)),
+    [accountingQueue, scopedToActiveCompany],
+  );
+  const visibleFinanceAuditLogs = useMemo(
+    () => financeAuditLogs.filter(log => scopedToActiveCompany(log.company_id, true)),
+    [financeAuditLogs, scopedToActiveCompany],
+  );
+  const visibleOcrUsageLogs = useMemo(
+    () => ocrUsageLogs.filter(log => scopedToActiveCompany(log.company_id, true)),
+    [ocrUsageLogs, scopedToActiveCompany],
+  );
+  const visibleProjectBases = useMemo(
+    () => !companyContextRequired
+      ? projectBases
+      : activeFinanceCompanyId
+        ? projectBases.filter(basis => basis.project?.company_id === activeFinanceCompanyId)
+        : [],
+    [projectBases, activeFinanceCompanyId, companyContextRequired],
+  );
+  const visibleTenancies = useMemo(
+    () => tenancies.filter(tenancy => scopedToActiveCompany(tenancy.company_id, true)),
+    [tenancies, scopedToActiveCompany],
+  );
+  const visibleReminderSettings = useMemo(
+    () => reminderSettings.filter(setting => scopedToActiveCompany(setting.company_id)),
+    [reminderSettings, scopedToActiveCompany],
+  );
+
   const requireActiveFinanceCompany = (companyId?: string | null) => {
     if (!activeFinanceCompanyId) {
       setError('Välj ett aktivt bolag innan du ändrar eller skapar ekonomisk information.');
@@ -599,22 +692,22 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const customerOptions = useMemo(() => {
     const scoped = invoiceForm.company_id
-      ? customers.filter(customer => !customer.company_id || customer.company_id === invoiceForm.company_id)
-      : customers;
+      ? visibleCustomers.filter(customer => !customer.company_id || customer.company_id === invoiceForm.company_id)
+      : visibleCustomers;
 
     return [
       { value: '', label: 'Välj kund' },
       ...scoped.map(customer => ({ value: customer.id, label: customer.name })),
     ];
-  }, [customers, invoiceForm.company_id]);
+  }, [visibleCustomers, invoiceForm.company_id]);
 
   const selectedProjectBases = useMemo(() => {
-    return projectBases.filter(basis => selectedProjectBasisIds.includes(basis.id));
-  }, [projectBases, selectedProjectBasisIds]);
+    return visibleProjectBases.filter(basis => selectedProjectBasisIds.includes(basis.id));
+  }, [visibleProjectBases, selectedProjectBasisIds]);
 
   const invoiceAccountOptions = useMemo(() => {
     const scoped = invoiceForm.company_id
-      ? accountingAccounts.filter(account => account.company_id === invoiceForm.company_id && account.active)
+      ? visibleAccountingAccounts.filter(account => account.company_id === invoiceForm.company_id && account.active)
       : [];
     return [
       { value: '', label: 'Automatiskt försäljningskonto' },
@@ -622,11 +715,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .sort((a, b) => a.account_code.localeCompare(b.account_code, 'sv-SE'))
         .map(account => ({ value: account.account_code, label: `${account.account_code} · ${account.name}` })),
     ];
-  }, [accountingAccounts, invoiceForm.company_id]);
+  }, [visibleAccountingAccounts, invoiceForm.company_id]);
 
   const invoiceVatCodeOptions = useMemo(() => {
     const scoped = invoiceForm.company_id
-      ? vatCodes.filter(code => code.company_id === invoiceForm.company_id && code.active)
+      ? visibleVatCodes.filter(code => code.company_id === invoiceForm.company_id && code.active)
       : [];
     return [
       { value: '', label: 'Ange moms manuellt' },
@@ -634,11 +727,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .sort((a, b) => a.code.localeCompare(b.code, 'sv-SE'))
         .map(code => ({ value: code.code, label: `${code.code} · ${code.name} · ${Number(code.rate)}%` })),
     ];
-  }, [invoiceForm.company_id, vatCodes]);
+  }, [invoiceForm.company_id, visibleVatCodes]);
 
   const selectedInvoiceAccountOptions = useMemo(() => {
     const scoped = selectedInvoice
-      ? accountingAccounts.filter(account => account.company_id === selectedInvoice.company_id && account.active)
+      ? visibleAccountingAccounts.filter(account => account.company_id === selectedInvoice.company_id && account.active)
       : [];
     return [
       { value: '', label: 'Automatiskt försäljningskonto' },
@@ -646,11 +739,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .sort((a, b) => a.account_code.localeCompare(b.account_code, 'sv-SE'))
         .map(account => ({ value: account.account_code, label: `${account.account_code} · ${account.name}` })),
     ];
-  }, [accountingAccounts, selectedInvoice]);
+  }, [visibleAccountingAccounts, selectedInvoice]);
 
   const selectedInvoiceVatCodeOptions = useMemo(() => {
     const scoped = selectedInvoice
-      ? vatCodes.filter(code => code.company_id === selectedInvoice.company_id && code.active)
+      ? visibleVatCodes.filter(code => code.company_id === selectedInvoice.company_id && code.active)
       : [];
     return [
       { value: '', label: 'Ange moms manuellt' },
@@ -658,11 +751,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .sort((a, b) => a.code.localeCompare(b.code, 'sv-SE'))
         .map(code => ({ value: code.code, label: `${code.code} · ${code.name} · ${Number(code.rate)}%` })),
     ];
-  }, [selectedInvoice, vatCodes]);
+  }, [selectedInvoice, visibleVatCodes]);
 
   const supplierInvoiceAccountOptions = useMemo(() => {
     const scoped = supplierInvoiceForm.company_id
-      ? accountingAccounts.filter(account => account.company_id === supplierInvoiceForm.company_id && account.active)
+      ? visibleAccountingAccounts.filter(account => account.company_id === supplierInvoiceForm.company_id && account.active)
       : [];
     return [
       { value: '', label: 'Välj konto' },
@@ -670,11 +763,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .sort((a, b) => a.account_code.localeCompare(b.account_code, 'sv-SE'))
         .map(account => ({ value: account.account_code, label: `${account.account_code} · ${account.name}` })),
     ];
-  }, [accountingAccounts, supplierInvoiceForm.company_id]);
+  }, [visibleAccountingAccounts, supplierInvoiceForm.company_id]);
 
   const supplierInvoiceVatCodeOptions = useMemo(() => {
     const scoped = supplierInvoiceForm.company_id
-      ? vatCodes.filter(code => code.company_id === supplierInvoiceForm.company_id && code.active)
+      ? visibleVatCodes.filter(code => code.company_id === supplierInvoiceForm.company_id && code.active)
       : [];
     return [
       { value: '', label: 'Ange moms manuellt' },
@@ -682,12 +775,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .sort((a, b) => a.code.localeCompare(b.code, 'sv-SE'))
         .map(code => ({ value: code.code, label: `${code.code} · ${code.name} · ${Number(code.rate)}%` })),
     ];
-  }, [supplierInvoiceForm.company_id, vatCodes]);
+  }, [supplierInvoiceForm.company_id, visibleVatCodes]);
 
   const supplierInvoiceReviewAccountOptions = useMemo(() => {
     const companyId = supplierInvoiceReviewForm.company_id || selectedSupplierInvoice?.company_id || '';
     const scoped = companyId
-      ? accountingAccounts.filter(account => account.company_id === companyId && account.active)
+      ? visibleAccountingAccounts.filter(account => account.company_id === companyId && account.active)
       : [];
     return [
       { value: '', label: 'Välj konto' },
@@ -695,12 +788,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .sort((a, b) => a.account_code.localeCompare(b.account_code, 'sv-SE'))
         .map(account => ({ value: account.account_code, label: `${account.account_code} · ${account.name}` })),
     ];
-  }, [accountingAccounts, selectedSupplierInvoice, supplierInvoiceReviewForm.company_id]);
+  }, [visibleAccountingAccounts, selectedSupplierInvoice, supplierInvoiceReviewForm.company_id]);
 
   const supplierInvoiceReviewVatCodeOptions = useMemo(() => {
     const companyId = supplierInvoiceReviewForm.company_id || selectedSupplierInvoice?.company_id || '';
     const scoped = companyId
-      ? vatCodes.filter(code => code.company_id === companyId && code.active)
+      ? visibleVatCodes.filter(code => code.company_id === companyId && code.active)
       : [];
     return [
       { value: '', label: 'Ange moms manuellt' },
@@ -708,12 +801,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .sort((a, b) => a.code.localeCompare(b.code, 'sv-SE'))
         .map(code => ({ value: code.code, label: `${code.code} · ${code.name} · ${Number(code.rate)}%` })),
     ];
-  }, [selectedSupplierInvoice, supplierInvoiceReviewForm.company_id, vatCodes]);
+  }, [selectedSupplierInvoice, supplierInvoiceReviewForm.company_id, visibleVatCodes]);
 
   const accountingAccountOptions = useMemo(() => {
     const scoped = vatCodeForm.company_id
-      ? accountingAccounts.filter(account => account.company_id === vatCodeForm.company_id && account.active)
-      : accountingAccounts.filter(account => account.active);
+      ? visibleAccountingAccounts.filter(account => account.company_id === vatCodeForm.company_id && account.active)
+      : visibleAccountingAccounts.filter(account => account.active);
 
     return [
       { value: '', label: 'Välj konto' },
@@ -721,22 +814,22 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .sort((a, b) => a.account_code.localeCompare(b.account_code, 'sv-SE'))
         .map(account => ({ value: account.account_code, label: `${account.account_code} · ${account.name}` })),
     ];
-  }, [accountingAccounts, vatCodeForm.company_id]);
+  }, [visibleAccountingAccounts, vatCodeForm.company_id]);
 
   const supplierOptions = useMemo(() => {
     const scoped = supplierInvoiceForm.company_id
-      ? suppliers.filter(supplier => !supplier.company_id || supplier.company_id === supplierInvoiceForm.company_id)
-      : suppliers;
+      ? visibleSuppliers.filter(supplier => !supplier.company_id || supplier.company_id === supplierInvoiceForm.company_id)
+      : visibleSuppliers;
 
     return [
       { value: '', label: 'Välj leverantör' },
       ...scoped.map(supplier => ({ value: supplier.id, label: supplier.name })),
     ];
-  }, [suppliers, supplierInvoiceForm.company_id]);
+  }, [visibleSuppliers, supplierInvoiceForm.company_id]);
 
   const selectedInvoiceSeriesOptions = useMemo(() => {
     const scopedSeries = selectedInvoice
-      ? numberSeries.filter(series => series.company_id === selectedInvoice.company_id && series.active)
+      ? visibleNumberSeries.filter(series => series.company_id === selectedInvoice.company_id && series.active)
       : [];
 
     return [
@@ -746,20 +839,20 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         label: `${series.name} · ${series.prefix || 'utan prefix'}${String(series.next_number).padStart(series.padding, '0')}`,
       })),
     ];
-  }, [numberSeries, selectedInvoice]);
+  }, [visibleNumberSeries, selectedInvoice]);
 
   const openAmount = useMemo(() => {
-    return invoices
+    return visibleInvoices
       .filter(invoice => !['paid', 'credited', 'cancelled'].includes(invoice.status))
       .reduce((sum, invoice) => sum + Number(invoice.total_amount || 0) - Number(invoice.paid_amount || 0), 0);
-  }, [invoices]);
+  }, [visibleInvoices]);
 
-  const draftCount = invoices.filter(invoice => invoice.status === 'draft').length;
-  const queuedEmailCount = invoiceEmails.filter(email => email.status === 'queued').length;
+  const draftCount = visibleInvoices.filter(invoice => invoice.status === 'draft').length;
+  const queuedEmailCount = visibleInvoiceEmails.filter(email => email.status === 'queued').length;
 
   const ocrUsageThisMonth = useMemo(() => {
     const month = new Date().toISOString().slice(0, 7);
-    const rows = ocrUsageLogs.filter(log => log.created_at.slice(0, 7) === month);
+    const rows = visibleOcrUsageLogs.filter(log => log.created_at.slice(0, 7) === month);
     const documents = new Set(rows.map(log => log.supplier_invoice_id || log.document_id || log.id)).size;
     const totalCost = rows.reduce((sum, log) => sum + Number(log.estimated_cost_sek || 0), 0);
     return {
@@ -770,7 +863,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       cost: totalCost,
       average: documents > 0 ? totalCost / documents : 0,
     };
-  }, [ocrUsageLogs]);
+  }, [visibleOcrUsageLogs]);
 
   const confidenceBadgeClass = (value: unknown) => {
     const number = Number(value ?? 0);
@@ -791,8 +884,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   };
 
   const paidAmount = useMemo(() => {
-    return payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-  }, [payments]);
+    return visiblePayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  }, [visiblePayments]);
 
   const financeReadiness = useMemo(() => {
     return companies.map(company => {
@@ -834,20 +927,20 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const rentAdjustmentTenancyOptions = useMemo(() => {
     const scoped = rentAdjustmentForm.company_id
-      ? tenancies.filter(tenancy => !tenancy.company_id || tenancy.company_id === rentAdjustmentForm.company_id)
-      : tenancies;
+      ? visibleTenancies.filter(tenancy => !tenancy.company_id || tenancy.company_id === rentAdjustmentForm.company_id)
+      : visibleTenancies;
 
     return [
       { value: '', label: 'Välj hyresgäst/lägenhet' },
       ...scoped.map(tenancy => ({ value: tenancy.id, label: tenancyLabel(tenancy) })),
     ];
-  }, [rentAdjustmentForm.company_id, tenancies]);
+  }, [rentAdjustmentForm.company_id, visibleTenancies]);
 
   const directDebitTenancyOptions = useMemo(() => {
     const scoped = directDebitMandateForm.company_id
-      ? tenancies.filter(tenancy => !tenancy.company_id || tenancy.company_id === directDebitMandateForm.company_id)
-      : tenancies;
-    const usedTenancyIds = new Set(directDebitMandates.map(mandate => mandate.tenancy_id));
+      ? visibleTenancies.filter(tenancy => !tenancy.company_id || tenancy.company_id === directDebitMandateForm.company_id)
+      : visibleTenancies;
+    const usedTenancyIds = new Set(visibleDirectDebitMandates.map(mandate => mandate.tenancy_id));
 
     return [
       { value: '', label: 'Välj hyresgäst/lägenhet' },
@@ -855,14 +948,14 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         .filter(tenancy => tenancy.id === directDebitMandateForm.tenancy_id || !usedTenancyIds.has(tenancy.id))
         .map(tenancy => ({ value: tenancy.id, label: tenancyLabel(tenancy) })),
     ];
-  }, [directDebitMandateForm.company_id, directDebitMandateForm.tenancy_id, directDebitMandates, tenancies]);
+  }, [directDebitMandateForm.company_id, directDebitMandateForm.tenancy_id, visibleDirectDebitMandates, visibleTenancies]);
 
   const rentLedgerRows = useMemo(() => {
-    return tenancies
+    return visibleTenancies
       .filter(tenancy => tenancy.status === 'active')
       .map(tenancy => {
-        const items = rentItems.filter(item => item.tenancy_id === tenancy.id);
-        const mandate = directDebitMandates.find(item => item.tenancy_id === tenancy.id && item.status === 'active');
+        const items = visibleRentItems.filter(item => item.tenancy_id === tenancy.id);
+        const mandate = visibleDirectDebitMandates.find(item => item.tenancy_id === tenancy.id && item.status === 'active');
         const invoicedItems = items.filter(item => item.status === 'invoiced' && item.invoice);
         const invoicedAmount = invoicedItems.reduce((sum, item) => sum + Number(item.invoice?.total_amount ?? item.total_amount ?? 0), 0);
         const paidAmountForTenancy = invoicedItems.reduce((sum, item) => sum + Number(item.invoice?.paid_amount ?? 0), 0);
@@ -886,7 +979,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
         };
       })
       .sort((a, b) => b.balance - a.balance || tenancyLabel(a.tenancy).localeCompare(tenancyLabel(b.tenancy), 'sv-SE'));
-  }, [directDebitMandates, rentItems, tenancies]);
+  }, [visibleDirectDebitMandates, visibleRentItems, visibleTenancies]);
 
   const loadFinance = useCallback(async () => {
     if (!organisationId) return;
@@ -3486,9 +3579,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   if (loading) return <LoadingPage />;
 
-  const overdueInvoiceCount = invoices.filter(invoice => invoice.status === 'overdue').length;
+  const overdueInvoiceCount = visibleInvoices.filter(invoice => invoice.status === 'overdue').length;
   const showingReceipts = activeTab === 'receipts';
-  const visibleSupplierInvoices = supplierInvoices.filter(invoice =>
+  const visibleSupplierInvoices = visibleSupplierInvoicesScoped.filter(invoice =>
     showingReceipts ? invoice.document_kind === 'receipt' : invoice.document_kind !== 'receipt'
   );
 
@@ -3542,7 +3635,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
             <CalendarDays className="h-4 w-4" />
             Hyreskörning
           </Button>
-          <Button onClick={() => { resetInvoiceForm(); setInvoiceModalOpen(true); }} disabled={!activeFinanceCompanyId || customers.length === 0}>
+          <Button onClick={() => { resetInvoiceForm(); setInvoiceModalOpen(true); }} disabled={!activeFinanceCompanyId || visibleCustomers.length === 0}>
             <ReceiptText className="h-4 w-4" />
             Fakturautkast
           </Button>
@@ -3715,11 +3808,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
       {activeTab === 'customers' && (
         <Card className="overflow-hidden">
-          {customers.length === 0 ? (
+          {visibleCustomers.length === 0 ? (
             <EmptyState title="Inga kunder ännu" description="Lägg upp kundregister så fakturor kan kopplas till rätt mottagare." />
           ) : (
             <div className="divide-y divide-slate-100">
-              {customers.map(customer => (
+              {visibleCustomers.map(customer => (
                 <div key={customer.id} className="grid gap-3 p-4 md:grid-cols-[1.5fr_1fr_1fr_auto] md:items-center">
                   <div>
                     <h3 className="font-bold text-slate-950">{customer.name}</h3>
@@ -3751,11 +3844,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               Uppdatera förfallna
             </Button>
           </div>
-          {invoices.length === 0 ? (
+          {visibleInvoices.length === 0 ? (
             <EmptyState title="Inga fakturor ännu" description="Skapa ett fakturautkast för att testa den nya ekonomigrunden." />
           ) : (
             <div className="divide-y divide-slate-100">
-              {invoices.map(invoice => (
+              {visibleInvoices.map(invoice => (
                 <div key={invoice.id} className="grid gap-3 p-4 lg:grid-cols-[1.2fr_1fr_0.8fr_0.8fr_auto_auto] lg:items-center">
                   <div>
                     <h3 className="font-bold text-slate-950">{invoice.invoice_number ?? 'Utkast utan fakturanummer'}</h3>
@@ -3792,11 +3885,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               Importera CSV
             </Button>
           </div>
-          {payments.length === 0 ? (
+          {visiblePayments.length === 0 ? (
             <EmptyState title="Inga betalningar registrerade" description="När betalningar registreras på fakturor visas de här som betalningshistorik." />
           ) : (
             <div className="divide-y divide-slate-100">
-              {payments.map(payment => (
+              {visiblePayments.map(payment => (
                 <div key={payment.id} className="grid gap-3 p-4 lg:grid-cols-[1fr_1fr_0.8fr_0.8fr_auto] lg:items-center">
                   <div>
                     <h3 className="font-bold text-slate-950">{formatCurrency(Number(payment.amount), payment.currency)}</h3>
@@ -3843,14 +3936,14 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               </Button>
             </div>
           </div>
-          {invoiceEmails.length === 0 ? (
+          {visibleInvoiceEmails.length === 0 ? (
             <EmptyState
               title="Inga fakturamejl köade"
               description="Öppna en godkänd faktura och välj Köa e-post för att förbereda utskick med faktura-PDF."
             />
           ) : (
             <div className="divide-y divide-slate-100">
-              {invoiceEmails.map(email => (
+              {visibleInvoiceEmails.map(email => (
                 <div key={email.id} className="grid gap-3 p-4 lg:grid-cols-[1.2fr_1fr_1fr_0.8fr_auto_auto] lg:items-center">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -3958,7 +4051,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   Lägg in engångstillägg, löpande tillägg/avdrag eller indexjusteringar innan hyreskörningen skapas. Negativt belopp blir avdrag.
                 </p>
               </div>
-              <Badge className="bg-slate-100 text-slate-700">{rentAdjustments.filter(item => item.status === 'active').length} aktiva</Badge>
+              <Badge className="bg-slate-100 text-slate-700">{visibleRentAdjustments.filter(item => item.status === 'active').length} aktiva</Badge>
             </div>
             <div className="mt-4 grid gap-3 lg:grid-cols-4 lg:items-end">
               <Select
@@ -4037,9 +4130,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 Lägg till
               </Button>
             </div>
-            {rentAdjustments.length > 0 && (
+            {visibleRentAdjustments.length > 0 && (
               <div className="mt-5 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200">
-                {rentAdjustments.slice(0, 8).map(adjustment => (
+                {visibleRentAdjustments.slice(0, 8).map(adjustment => (
                   <div key={adjustment.id} className="grid gap-3 p-3 text-sm lg:grid-cols-[1.4fr_0.8fr_1fr_0.8fr_0.7fr_auto] lg:items-center">
                     <div>
                       <p className="font-bold text-slate-950">{adjustment.description}</p>
@@ -4088,7 +4181,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   Registrera autogiromandat per hyresförhållande och exportera hyreskörningar som CSV eller Bankgirot-fil.
                 </p>
               </div>
-              <Badge className="bg-slate-100 text-slate-700">{directDebitMandates.filter(item => item.status === 'active').length} aktiva</Badge>
+              <Badge className="bg-slate-100 text-slate-700">{visibleDirectDebitMandates.filter(item => item.status === 'active').length} aktiva</Badge>
             </div>
             <div className="mt-4 grid gap-3 lg:grid-cols-4 lg:items-end">
               <Select
@@ -4163,9 +4256,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 Lägg till mandat
               </Button>
             </div>
-            {directDebitMandates.length > 0 && (
+            {visibleDirectDebitMandates.length > 0 && (
               <div className="mt-5 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200">
-                {directDebitMandates.slice(0, 10).map(mandate => (
+                {visibleDirectDebitMandates.slice(0, 10).map(mandate => (
                   <div key={mandate.id} className="grid gap-3 p-3 text-sm lg:grid-cols-[1.5fr_0.9fr_0.8fr_0.8fr_0.8fr_auto] lg:items-center">
                     <div>
                       <p className="font-bold text-slate-950">{tenancyLabel(mandate.tenancy)}</p>
@@ -4201,14 +4294,14 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           </Card>
 
           <Card className="overflow-hidden">
-            {rentRuns.length === 0 ? (
+          {visibleRentRuns.length === 0 ? (
               <EmptyState
                 title="Inga hyreskörningar ännu"
                 description="Skapa en körning per bolag och månad. Systemet hämtar aktiva hyresförhållanden och sätter förfallodatum till sista dagen i månaden innan."
               />
             ) : (
               <div className="divide-y divide-slate-100">
-                {rentRuns.map(run => (
+                {visibleRentRuns.map(run => (
                   <div key={run.id} className="grid gap-3 p-4 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr_auto_auto_auto] lg:items-center">
                     <div>
                       <h3 className="font-bold text-slate-950">
@@ -4244,7 +4337,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
       {activeTab === 'project-basis' && (
         <Card className="overflow-hidden">
-          {projectBases.length === 0 ? (
+          {visibleProjectBases.length === 0 ? (
             <EmptyState title="Inga öppna projektunderlag" description="När kundprojekt får faktureringsunderlag visas de här och kan omvandlas till fakturautkast." />
           ) : (
             <>
@@ -4275,7 +4368,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 </div>
               </div>
               <div className="divide-y divide-slate-100">
-              {projectBases.map(basis => (
+              {visibleProjectBases.map(basis => (
                 <div key={basis.id} className="grid gap-3 p-4 lg:grid-cols-[auto_1.2fr_1fr_0.7fr_0.7fr_auto] lg:items-center">
                   <label className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white">
                     <input
@@ -4328,11 +4421,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
       {activeTab === 'suppliers' && (
         <Card className="overflow-hidden">
-          {suppliers.length === 0 ? (
+          {visibleSuppliers.length === 0 ? (
             <EmptyState title="Inga leverantörer ännu" description="Leverantörsregistret är förberett för kommande OCR- och attestflöde." />
           ) : (
             <div className="divide-y divide-slate-100">
-              {suppliers.map(supplier => (
+              {visibleSuppliers.map(supplier => (
                 <div key={supplier.id} className="grid gap-3 p-4 md:grid-cols-[1.5fr_1fr_1fr_auto_auto_auto] md:items-center">
                   <div>
                     <h3 className="font-bold text-slate-950">{supplier.name}</h3>
@@ -4391,7 +4484,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 variant="secondary"
                 onClick={() => exportSupplierPayments('csv')}
                 loading={saving}
-                disabled={!supplierInvoices.some(invoice => invoice.approval_status === 'approved' && invoice.payment_status === 'scheduled' && !invoice.payment_exported_at)}
+                disabled={!visibleSupplierInvoices.some(invoice => invoice.approval_status === 'approved' && invoice.payment_status === 'scheduled' && !invoice.payment_exported_at)}
               >
                 <Upload className="h-4 w-4" />
                 Exportera betalningar CSV
@@ -4400,7 +4493,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 variant="secondary"
                 onClick={() => exportSupplierPayments('bankgirot')}
                 loading={saving}
-                disabled={!supplierInvoices.some(invoice => invoice.approval_status === 'approved' && invoice.payment_status === 'scheduled' && !invoice.payment_exported_at)}
+                disabled={!visibleSupplierInvoices.some(invoice => invoice.approval_status === 'approved' && invoice.payment_status === 'scheduled' && !invoice.payment_exported_at)}
               >
                 <Landmark className="h-4 w-4" />
                 Bankgirot-underlag
@@ -4500,11 +4593,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               Ny nummerserie
             </Button>
           </div>
-          {numberSeries.length === 0 ? (
+          {visibleNumberSeries.length === 0 ? (
             <EmptyState title="Inga nummerserier" description="När ett bolag skapas läggs en standardserie upp automatiskt för fakturanummer." />
           ) : (
             <div className="divide-y divide-slate-100">
-              {numberSeries.map(series => (
+              {visibleNumberSeries.map(series => (
                 <div key={series.id} className="grid gap-3 p-4 md:grid-cols-[1.2fr_1fr_0.8fr_0.8fr_auto_auto] md:items-center">
                   <div>
                     <h3 className="font-bold text-slate-950">{series.name}</h3>
@@ -4543,14 +4636,14 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge className="bg-blue-50 text-blue-700">
-                  {accountingQueue.filter(item => ['queued', 'processing'].includes(item.status)).length} aktiva
+                  {visibleAccountingQueue.filter(item => ['queued', 'processing'].includes(item.status)).length} aktiva
                 </Badge>
                 <Button
                   variant="secondary"
                   size="sm"
                   onClick={exportAccountingQueueCsv}
                   loading={saving}
-                  disabled={!accountingQueue.some(item => ['queued', 'processing'].includes(item.status))}
+                  disabled={!visibleAccountingQueue.some(item => ['queued', 'processing'].includes(item.status))}
                 >
                   <Upload className="h-4 w-4" />
                   Exportera CSV
@@ -4560,7 +4653,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   size="sm"
                   onClick={exportAccountingQueueSie}
                   loading={saving}
-                  disabled={!accountingQueue.some(item => ['queued', 'processing'].includes(item.status))}
+                  disabled={!visibleAccountingQueue.some(item => ['queued', 'processing'].includes(item.status))}
                 >
                   <Upload className="h-4 w-4" />
                   Exportera SIE
@@ -4570,13 +4663,13 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   size="sm"
                   onClick={processAccountingQueue}
                   loading={saving}
-                  disabled={!accountingQueue.some(item => ['queued', 'processing'].includes(item.status))}
+                  disabled={!visibleAccountingQueue.some(item => ['queued', 'processing'].includes(item.status))}
                 >
                   Behandla kö
                 </Button>
               </div>
             </div>
-            {accountingQueue.length === 0 ? (
+            {visibleAccountingQueue.length === 0 ? (
               <EmptyState title="Inget köat ännu" description="Köa en godkänd faktura från fakturadetaljen när den ska vidare till bokföring." />
             ) : (
               <div className="mt-4 overflow-hidden rounded-lg border border-slate-200">
@@ -4588,7 +4681,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   <span>Åtgärder</span>
                 </div>
                 <div className="divide-y divide-slate-100">
-                  {accountingQueue.slice(0, 12).map(item => (
+                  {visibleAccountingQueue.slice(0, 12).map(item => (
                     <div key={item.id} className="grid gap-3 px-4 py-3 text-sm lg:grid-cols-[1fr_0.7fr_0.7fr_0.7fr_1.1fr] lg:items-center">
                       <div>
                         <p className="font-semibold text-slate-900">{item.entity_type} · {item.action}</p>
@@ -4805,7 +4898,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                     Styr när automatiska betalningspåminnelser får köas per bolag. Utskicken sker fortfarande via e-postkön.
                   </p>
                 </div>
-                <Badge className="bg-slate-100 text-slate-700">{reminderSettings.length} sparade</Badge>
+                <Badge className="bg-slate-100 text-slate-700">{visibleReminderSettings.length} sparade</Badge>
               </div>
               <div className="mt-4 grid gap-3">
                 {companies.map(company => {
@@ -5026,7 +5119,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               <MetricCard icon={<Camera className="h-5 w-5" />} label="OCR" value={ocrUsageThisMonth.ocr.toString()} />
               <MetricCard icon={<Sparkles className="h-5 w-5" />} label="Vision fallback" value={ocrUsageThisMonth.vision.toString()} />
               <MetricCard icon={<CircleDollarSign className="h-5 w-5" />} label="Total API-kostnad" value={`${ocrUsageThisMonth.cost.toFixed(2)} kr`} />
-              <MetricCard icon={<Hash className="h-5 w-5" />} label="Anrop" value={ocrUsageLogs.reduce((sum, log) => sum + Number(log.ai_call_count || 0), 0).toString()} />
+              <MetricCard icon={<Hash className="h-5 w-5" />} label="Anrop" value={visibleOcrUsageLogs.reduce((sum, log) => sum + Number(log.ai_call_count || 0), 0).toString()} />
             </div>
           </Card>
 
@@ -5035,11 +5128,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
               <h3 className="font-bold text-slate-950">Senaste OCR-körningar</h3>
               <p className="text-sm text-slate-500">Visar provider, modell, tokens, retries och uppskattad kostnad per dokument.</p>
             </div>
-            {ocrUsageLogs.length === 0 ? (
+            {visibleOcrUsageLogs.length === 0 ? (
               <EmptyState title="Ingen OCR-användning loggad ännu" description="När du tolkar fakturor eller kvitton visas kostnader och pipelineval här." />
             ) : (
               <div className="divide-y divide-slate-100">
-                {ocrUsageLogs.slice(0, 40).map(log => (
+                {visibleOcrUsageLogs.slice(0, 40).map(log => (
                   <div key={log.id} className="grid gap-3 p-4 text-sm lg:grid-cols-[0.8fr_1fr_1fr_0.7fr_0.8fr_0.7fr_0.7fr] lg:items-center">
                     <div>
                       <p className="font-semibold text-slate-900">{log.document_kind === 'receipt' ? 'Kvitto' : 'Leverantörsfaktura'}</p>
@@ -5074,13 +5167,13 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 Senaste ändringarna i ekonomimodulen. Loggen skapas av databasens audit-triggers.
               </p>
             </div>
-            <Badge className="bg-slate-100 text-slate-700">{financeAuditLogs.length} senaste</Badge>
+            <Badge className="bg-slate-100 text-slate-700">{visibleFinanceAuditLogs.length} senaste</Badge>
           </div>
-          {financeAuditLogs.length === 0 ? (
+          {visibleFinanceAuditLogs.length === 0 ? (
             <EmptyState title="Ingen ekonomilogg ännu" description="När ekonomiobjekt skapas, ändras eller raderas visas händelserna här." />
           ) : (
             <div className="divide-y divide-slate-100">
-              {financeAuditLogs.map(log => {
+              {visibleFinanceAuditLogs.map(log => {
                 const changedFields = Object.keys(log.new_data || {}).filter(key => {
                   const oldValue = (log.old_data || {})[key];
                   const newValue = (log.new_data || {})[key];
@@ -5985,7 +6078,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
             value={projectInvoiceForm.basis_id}
             options={[
               { value: '', label: 'Välj underlag' },
-              ...projectBases.map(basis => ({
+              ...visibleProjectBases.map(basis => ({
                 value: basis.id,
                 label: `${basis.basis_number || 'Underlag'} · ${basis.project?.title || basis.project?.name || 'Projekt'}`,
               })),
@@ -6001,7 +6094,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
             value={projectInvoiceForm.customer_id}
             options={[
               { value: '', label: 'Matcha eller skapa automatiskt' },
-              ...customers.map(customer => ({ value: customer.id, label: customer.name })),
+              ...visibleCustomers.map(customer => ({ value: customer.id, label: customer.name })),
             ]}
             onChange={e => setProjectInvoiceForm(prev => ({ ...prev, customer_id: e.target.value }))}
           />
