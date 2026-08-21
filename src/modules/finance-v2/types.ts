@@ -124,6 +124,26 @@ export interface RentBillingItemResult {
   error?: { code: string; message: string };
 }
 
+// ── Customer project billing (kundprojektfakturering) ───────────────────
+
+export type ProjectInvoiceBasisStatus = 'draft' | 'ready_for_invoicing' | 'invoiced' | 'do_not_invoice';
+
+export interface ProjectInvoiceBasis {
+  id: string;
+  project_id: string;
+  basis_number: string;
+  invoice_type: 'partial' | 'final' | 'credit' | 'internal';
+  status: ProjectInvoiceBasisStatus;
+  title: string;
+  description: string;
+  total_amount: number;
+  vat_amount: number;
+  finance_invoice_id: string | null;
+  accounted_invoice_link_id: string | null;
+  created_at: string;
+  project?: { title?: string; name?: string } | null;
+}
+
 /** Structured error shape shared with Accounted's own v1 error envelope
  * (`{ error: { code, message, recovery_hint, details } }`), so the UI can
  * render one consistent error component for both local and upstream

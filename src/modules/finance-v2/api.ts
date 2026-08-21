@@ -17,6 +17,7 @@ import type {
   AccountedCustomerSourceType,
   AccountedInvoiceLink,
   AccountedInvoiceSourceType,
+  ProjectInvoiceBasis,
   RentBillingItem,
   RentBillingItemResult,
   RentBillingRun,
@@ -247,4 +248,35 @@ export async function createRentBillingInvoices(params: {
     run_id: params.runId,
     dry_run: params.dryRun ?? false,
   }).then((res: any) => res.data);
+}
+
+// ── Customer project billing (kundprojektfakturering) ───────────────────
+// Reads the invoice basis directly (same table CustomerProjectsPage.tsx
+// writes to, untouched) -- only invoice creation goes through Accounted.
+
+export async function listInvoiceableProjectBases(companyId: string): Promise<ProjectInvoiceBasis[]> {
+  const { data, error } = await supabase
+    .from('vihem_project_invoice_basis')
+    .select('*, project:project_id(title, name, company_id)')
+    .eq('status', 'ready_for_invoicing')
+    .is('finance_invoice_id', null)
+    .is('accounted_invoice_link_id', null)
+    .order('created_at', { ascending: true });
+  if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
+  // project_invoice_basis has no direct company_id column (only via its
+  // project), so the company filter happens client-side on the joined row.
+  return ((data ?? []) as unknown as (ProjectInvoiceBasis & { project: { company_id?: string } | null })[])
+    .filter((row) => row.project?.company_id === companyId);
+}
+
+export async function createProjectBasisInvoice(params: {
+  companyId: string;
+  basisId: string;
+  dryRun?: boolean;
+}): Promise<unknown> {
+  return invoke('vihem-accounted-project-billing', {
+    company_id: params.companyId,
+    basis_id: params.basisId,
+    dry_run: params.dryRun ?? false,
+  });
 }

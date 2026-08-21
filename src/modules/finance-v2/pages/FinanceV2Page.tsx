@@ -19,24 +19,34 @@ import { formatCurrency, formatDateTime } from '../../../lib/utils';
 import {
   AccountedIntegrationError,
   createOrGetRentBillingRun,
+  createProjectBasisInvoice,
   createRentBillingInvoices,
   getCompanyLink,
+  listInvoiceableProjectBases,
   listInvoiceLinks,
   listRentBillingItems,
   registerWebhooks,
   saveCompanyLink,
   testConnection,
 } from '../api';
-import type { AccountedCompanyLink, AccountedInvoiceLink, RentBillingItem, RentBillingItemResult, RentBillingRun } from '../types';
-import { CalendarClock, Landmark, Link2, ListChecks, RefreshCw, Sparkles } from 'lucide-react';
+import type {
+  AccountedCompanyLink,
+  AccountedInvoiceLink,
+  ProjectInvoiceBasis,
+  RentBillingItem,
+  RentBillingItemResult,
+  RentBillingRun,
+} from '../types';
+import { Briefcase, CalendarClock, Landmark, Link2, ListChecks, RefreshCw, Sparkles } from 'lucide-react';
 
 type VihemCompany = { id: string; name: string; legal_name: string };
-type TabKey = 'overview' | 'company-link' | 'billing' | 'invoices' | 'upcoming';
+type TabKey = 'overview' | 'company-link' | 'billing' | 'project-billing' | 'invoices' | 'upcoming';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Översikt' },
   { key: 'company-link', label: 'Bolagskoppling' },
   { key: 'billing', label: 'Fakturering' },
+  { key: 'project-billing', label: 'Kundprojekt' },
   { key: 'invoices', label: 'Fakturor' },
   { key: 'upcoming', label: 'Kommande' },
 ];
@@ -157,6 +167,7 @@ export function FinanceV2Page() {
               <CompanyLinkTab companyId={companyId} companyLink={companyLink} onSaved={loadCompanyLink} />
             )}
             {tab === 'billing' && <RentBillingTab companyId={companyId} companyLink={companyLink} />}
+            {tab === 'project-billing' && <ProjectBillingTab companyId={companyId} companyLink={companyLink} />}
             {tab === 'invoices' && <InvoicesTab companyLink={companyLink} />}
             {tab === 'upcoming' && <UpcomingTab />}
           </div>
@@ -490,6 +501,119 @@ function RentBillingTab({ companyId, companyLink }: { companyId: string; company
   );
 }
 
+function ProjectBillingTab({ companyId, companyLink }: { companyId: string; companyLink: AccountedCompanyLink | null }) {
+  const [bases, setBases] = useState<ProjectInvoiceBasis[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [rowMessages, setRowMessages] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    if (!companyId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const data = await listInvoiceableProjectBases(companyId);
+      setBases(data);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [companyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleAction = async (basisId: string, dryRun: boolean) => {
+    setBusyId(basisId);
+    setRowMessages((prev) => ({ ...prev, [basisId]: undefined as any }));
+    try {
+      await createProjectBasisInvoice({ companyId, basisId, dryRun });
+      setRowMessages((prev) => ({
+        ...prev,
+        [basisId]: { ok: true, text: dryRun ? 'Kan faktureras' : 'Faktura skapad i Accounted' },
+      }));
+      if (!dryRun) await load();
+    } catch (err) {
+      setRowMessages((prev) => ({ ...prev, [basisId]: { ok: false, text: describeError(err) } }));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <Card>
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-sm font-medium text-slate-700">Fakturaunderlag redo att fakturera</p>
+        <Button variant="secondary" size="sm" onClick={load} loading={loading}>
+          <RefreshCw className="mr-1 h-3.5 w-3.5" /> Uppdatera
+        </Button>
+      </div>
+      {!companyLink && <p className="mb-3 text-sm text-slate-500">Koppla bolaget mot Accounted under Bolagskoppling innan fakturor kan skapas.</p>}
+      {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
+      {bases.length === 0 ? (
+        <EmptyState
+          icon={Briefcase}
+          title="Inga underlag väntar"
+          description="Faktureringsunderlag skapas och markeras 'redo att fakturera' i Kundprojekt-sidan; de dyker upp här när de kan skickas till Accounted."
+        />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase text-slate-500">
+                <th className="py-2 pr-4">Projekt</th>
+                <th className="py-2 pr-4">Underlag</th>
+                <th className="py-2 pr-4">Belopp</th>
+                <th className="py-2 pr-4">Resultat</th>
+                <th className="py-2 pr-4" />
+              </tr>
+            </thead>
+            <tbody>
+              {bases.map((basis) => {
+                const result = rowMessages[basis.id];
+                return (
+                  <tr key={basis.id} className="border-b border-slate-100">
+                    <td className="py-2 pr-4">{basis.project?.title || basis.project?.name || '–'}</td>
+                    <td className="py-2 pr-4">{basis.title || basis.basis_number || '(utan titel)'}</td>
+                    <td className="py-2 pr-4 font-medium">{formatCurrency(basis.total_amount + basis.vat_amount)}</td>
+                    <td className="py-2 pr-4 text-xs">
+                      {result && <span className={result.ok ? 'text-green-700' : 'text-red-700'}>{result.text}</span>}
+                    </td>
+                    <td className="py-2 pr-4">
+                      <div className="flex gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleAction(basis.id, true)}
+                          loading={busyId === basis.id}
+                          disabled={!companyLink?.enabled}
+                        >
+                          Förhandsgranska
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => handleAction(basis.id, false)}
+                          loading={busyId === basis.id}
+                          disabled={!companyLink?.enabled}
+                        >
+                          Skapa faktura
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function InvoicesTab({ companyLink }: { companyLink: AccountedCompanyLink | null }) {
   const [invoices, setInvoices] = useState<AccountedInvoiceLink[]>([]);
   const [loading, setLoading] = useState(false);
@@ -577,7 +701,7 @@ function UpcomingTab() {
       <EmptyState
         icon={Sparkles}
         title="Kommande i Finance V2"
-        description="En allmän avdrag & tillägg-modul (utöver hyresjusteringar, som redan fungerar), kundprojektfakturering, hyresgästportalens fakturavy och scanner → Accounted byggs stegvis ovanpå den här grunden. Avbetalningsplaner hanteras tills vidare i Ekonomi (legacy)."
+        description="En allmän avdrag & tillägg-modul (utöver hyresjusteringar och kundprojekt, som redan fungerar), hyresgästportalens fakturavy och scanner → Accounted byggs stegvis ovanpå den här grunden. Avbetalningsplaner hanteras tills vidare i Ekonomi (legacy)."
       />
     </Card>
   );

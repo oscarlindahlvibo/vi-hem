@@ -36,10 +36,10 @@ och med att den skapas där, plus allt kring bokföring/moms/reskontra/SIE.
 ## Status
 
 **Klart:** bolagskoppling, kundlänkning, fakturaskapande (generisk +
-hyresfakturering), webhook-grund.
-**Kvar:** en allmän avdrag/tillägg-modul (utöver hyresjusteringar, som redan
-fungerar), kundprojektfakturering mot Accounted, hyresgästportalens
-fakturavy, scanner → Accounted.
+hyresfakturering + kundprojektfakturering), webhook-grund.
+**Kvar:** en allmän avdrag/tillägg-modul (utöver hyresjusteringar och
+kundprojekt, som redan fungerar), hyresgästportalens fakturavy, scanner →
+Accounted.
 
 ## Vad som finns
 
@@ -90,6 +90,7 @@ etc.) — bara additiva kolumner/tabeller.
 - **`vihem-accounted-customers`** — hittar befintlig kundkoppling eller skapar kunden i Accounted (idempotent, dry-run-stödd). Tunn wrapper runt den delade resolvern.
 - **`vihem-accounted-invoices`** — `create` (generisk, idempotent, dry-run-stödd) och `refresh_status`. Tunn wrapper runt den delade skaparen.
 - **`vihem-accounted-rent-billing`** — batchar fakturaskapande för en hel hyreskörning: för varje ej fakturerad rad, länka/skapa Accounted-kunden (`vihem_finance_customers`, via `finance_customer_id`) och skapa fakturan (en rad: grundhyra + hyresjusteringar, redan summerat av befintlig SQL). Partial-success-svar per rad, samma mönster som Accounteds egen `bulk-create`.
+- **`vihem-accounted-project-billing`** — skapar Accounted-fakturan för ett `ready_for_invoicing`-faktureringsunderlag från Kundprojekt. Återanvänder den befintliga SQL-funktionen `vihem_ensure_finance_customer_for_project` (samma match-eller-skapa-logik som legacy-RPC:n) för kundmatchning, kör som anropande användare (inte service-role) eftersom funktionen är `SECURITY DEFINER` och läser `auth.uid()` internt. Fakturarader byggs direkt från underlagets `ready`-rader (tid/material/ändringsorder/fast pris).
 - **`vihem-accounted-webhook`** — publik mottagare, HMAC-verifierad (`X-Gnubok-Signature`, Stripe-liknande schema), **ingen** Supabase-JWT. Måste deployas med `verify_jwt = false` (redan satt i `supabase/config.toml`).
 
 Ingen av dessa funktioner ger AI-tolkning eller PDF-generering själva — det
@@ -107,12 +108,15 @@ org-admin + organisationens `finance`-modul aktiverad
 Legacy `FinancePage.tsx` är oförändrad utöver att den nu kallas "legacy" i
 kommentarer/dokumentation — ingen kod i den filen är rörd.
 
-Fem flikar: Översikt, Bolagskoppling (spara URL/company-id/API-nyckel, testa
-anslutning, registrera webhooks), **Fakturering** (välj hyresperiod → hämta
-körning från befintlig `vihem_create_rent_billing_run` → förhandsgranska
-mot Accounted som dry-run → skapa fakturor på riktigt, med resultat per
-rad), Fakturor (läser `vihem_accounted_invoice_links`), och Kommande
-(platshållare för det som inte är byggt än).
+Sex flikar: Översikt, Bolagskoppling (spara URL/company-id/API-nyckel, testa
+anslutning, registrera webhooks), **Fakturering** (hyra: välj hyresperiod →
+hämta körning från befintlig `vihem_create_rent_billing_run` →
+förhandsgranska mot Accounted som dry-run → skapa fakturor på riktigt, med
+resultat per rad), **Kundprojekt** (listar `ready_for_invoicing`-underlag
+oavsett projekt, förhandsgranska/skapa faktura per underlag — underlaget
+självt skapas fortfarande i Kundprojekt-sidan, orörd), Fakturor (läser
+`vihem_accounted_invoice_links`), och Kommande (platshållare för det som
+inte är byggt än).
 
 Kundskapande i Accounted (steget innan fakturan) körs alltid på riktigt,
 även under en fakturas dry-run — att skapa en kundpost har ingen ekonomisk
@@ -202,8 +206,13 @@ kräver ett separat beslut och arbete i Accounted-repot.
    (`vihem_rent_adjustments`, tillämpas innan fakturan skapas, inte kopplat
    till bekräftelse-semantiken) — se avsnittet nedan om varför det räckte
    för hyresfakturering.
-3. Kundprojektfakturering mot den nya vägen (idag går kundprojekt fortsatt
-   via legacy `vihem_create_invoice_from_project_basis*`-RPC:erna).
+3. ~~Kundprojektfakturering mot den nya vägen~~ Klart
+   (`vihem-accounted-project-billing`), men bara ett underlag i taget —
+   legacy `vihem_create_invoice_from_project_basis_batch`s förmåga att slå
+   ihop flera underlag till EN faktura (t.ex. flera delfaktureringar av
+   samma kund) är inte porterad. Det kräver ett medvetet beslut om Accounted
+   ska få flera `source_id`:n peka på samma `accounted_invoice_id`, eller om
+   V2 ska bygga en egen batch-variant — inte gjort i denna etapp.
 4. Hyresgästportalens fakturavy.
 5. Scanner → Accounted-kopplingen (rekommendation ovan, ej kopplad).
 6. Avbetalningsplaner i Finance V2-gränssnittet (fortsatt legacy tills
