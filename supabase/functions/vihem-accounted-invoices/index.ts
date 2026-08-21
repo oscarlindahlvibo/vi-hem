@@ -136,12 +136,14 @@ async function handleRefreshStatus(auth: AuthContext, context: Awaited<ReturnTyp
       status: result.status,
       total: result.total,
       remaining_amount: result.remaining_amount,
+      invoice_date: result.invoice_date,
+      due_date: result.due_date,
       paid_at: result.paid_at,
       last_sync_source: "manual_refresh",
       last_synced_at: new Date().toISOString(),
     })
     .eq("id", existing.id)
-    .select("id, accounted_invoice_id, accounted_invoice_number, status, total, remaining_amount, paid_at")
+    .select("id, accounted_invoice_id, accounted_invoice_number, status, total, remaining_amount, invoice_date, due_date, paid_at")
     .single();
   if (updateErr) return errorJson("INTERNAL_ERROR", "Kunde inte uppdatera fakturakopplingen.", 500, { details: updateErr.message });
 

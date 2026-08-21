@@ -51,6 +51,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     { label: 'Hem', icon: <Home className="w-5 h-5" />, items: [
       { label: 'Översikt', icon: <Home className="w-5 h-5" />, page: 'dashboard', roles: ['tenant', 'staff', 'admin'] },
       { label: 'Min lägenhet', icon: <Building2 className="w-5 h-5" />, page: 'apartment', roles: ['tenant'] },
+      { label: 'Mina fakturor', icon: <Landmark className="w-5 h-5" />, page: 'tenant-invoices', roles: ['tenant'], module: 'finance' },
     ] },
     { label: 'Arbete & projekt', icon: <Wrench className="w-5 h-5" />, items: [
       { label: 'Arbetsordrar', icon: <ClipboardList className="w-5 h-5" />, page: 'workorders', roles: ['staff', 'admin'] },

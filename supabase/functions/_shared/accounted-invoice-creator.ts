@@ -36,6 +36,8 @@ export interface InvoiceLinkRow {
   status: string;
   total: number | null;
   remaining_amount: number | null;
+  invoice_date: string | null;
+  due_date: string | null;
 }
 
 export type CreateAccountedInvoiceResult =
@@ -64,7 +66,7 @@ export async function createAccountedInvoiceForSource(
 ): Promise<CreateAccountedInvoiceResult> {
   const { data: existingLink } = await adminClient
     .from("vihem_accounted_invoice_links")
-    .select("id, accounted_invoice_id, accounted_invoice_number, status, total, remaining_amount")
+    .select("id, accounted_invoice_id, accounted_invoice_number, status, total, remaining_amount, invoice_date, due_date")
     .eq("company_link_id", link.id)
     .eq("source_type", params.sourceType)
     .eq("source_id", params.sourceId)
@@ -117,13 +119,15 @@ export async function createAccountedInvoiceForSource(
         currency: result.currency || "SEK",
         total: result.total,
         remaining_amount: result.remaining_amount,
+        invoice_date: result.invoice_date,
+        due_date: result.due_date,
         last_sync_source: "create",
         last_synced_at: new Date().toISOString(),
         created_by: params.createdBy,
       },
       { onConflict: "company_link_id,source_type,source_id" },
     )
-    .select("id, accounted_invoice_id, accounted_invoice_number, status, total, remaining_amount")
+    .select("id, accounted_invoice_id, accounted_invoice_number, status, total, remaining_amount, invoice_date, due_date")
     .single();
   if (insertErr) {
     // The invoice WAS created in Accounted; a local insert failure must not

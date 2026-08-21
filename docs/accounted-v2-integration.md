@@ -38,9 +38,10 @@ och med att den skapas där, plus allt kring bokföring/moms/reskontra/SIE.
 **Klart:** bolagskoppling, kundlänkning, fakturaskapande (generisk +
 hyresfakturering + kundprojektfakturering), webhook-grund, datamodellen
 förberedd för framtida samlingsfakturor, generell avdrag/tillägg-modul
-(kopplad till hyresfakturering).
+(kopplad till hyresfakturering), hyresgästportalens fakturavy (lista +
+PDF, Accounted som source of truth).
 **Kvar:** avdrag/tillägg-modulen kopplad till kundprojekt/andra
-faktureringskällor, hyresgästportalens fakturavy, scanner → Accounted.
+faktureringskällor, scanner → Accounted.
 
 ## Vad som finns
 
@@ -94,6 +95,17 @@ Samma mönster som övriga länktabeller: läsbara vid bolagsåtkomst,
 avsnittet om avdrag/tillägg nedan för varför), `..._applications` helt
 skrivskyddad för klienter.
 
+`20260821160000_accounted_v2_tenant_invoice_view.sql`:
+
+- `vihem_accounted_invoice_links.invoice_date`/`.due_date` (nullable) — de
+  två fält hyresgästportalen behöver som inte redan cachades lokalt.
+  Populeras vid fakturaskapande, webhook-uppdatering och manuell
+  `refresh_status`, precis som övriga cachade fält.
+- Utökad SELECT-policy på `vihem_accounted_invoice_links`: en hyresgäst får
+  nu läsa sina egna rader (`source_type = 'rental_billing'` och
+  `vihem_rent_billing_items.tenant_id = auth.uid()`) som en tredje
+  OR-gren, utöver superadmin och bolagsåtkomst som redan fanns.
+
 Migrationerna rör inte någon tabell som legacy-ekonomin skriver till för
 befintlig produktionsfakturering (`vihem_invoices`, `vihem_accounting_*`,
 `vihem_rent_adjustments`, etc.) — bara additiva kolumner/tabeller.
@@ -101,7 +113,7 @@ befintlig produktionsfakturering (`vihem_invoices`, `vihem_accounting_*`,
 ### Delad logik (`_shared/`)
 
 - **`accounted-crypto.ts`** — AES-GCM-kryptering av Accounted-hemligheter, egen miljövariabel `VIHEM_ACCOUNTED_SECRET_KEY`.
-- **`accounted-rest-client.ts`** — enda platsen som bygger ett `Bearer gnubok_sk_...`-anrop mot Accounted. Idempotency-Key, dry-run, timeout, strukturerat felkuvert (`AccountedApiError`).
+- **`accounted-rest-client.ts`** — enda platsen som bygger ett `Bearer gnubok_sk_...`-anrop mot Accounted. Idempotency-Key, dry-run, timeout, strukturerat felkuvert (`AccountedApiError`), plus `getBinary()` för Accounteds PDF-endpoint (raw `application/pdf`, inte v1-JSON-kuvertet).
 - **`accounted-company-context.ts`** — laddar bolagskoppling + dekrypterad API-nyckel; enhetliga felkoder (`ACCOUNTED_NOT_LINKED`/`ACCOUNTED_LINK_DISABLED`/`ACCOUNTED_NO_API_KEY`) oavsett vilken funktion som anropar.
 - **`accounted-customer-resolver.ts`** — `resolveOrCreateAccountedCustomer`: kundlänkning/-skapande, delad mellan `vihem-accounted-customers` och batch-anrop (hyresfakturering, framtida kundprojekt) så logiken bara finns på ett ställe.
 - **`accounted-invoice-creator.ts`** — `createAccountedInvoiceForSource`: samma sak för fakturaskapande.
@@ -116,6 +128,7 @@ befintlig produktionsfakturering (`vihem_invoices`, `vihem_accounting_*`,
 - **`vihem-accounted-rent-billing`** — batchar fakturaskapande för en hel hyreskörning: för varje ej fakturerad rad, länka/skapa Accounted-kunden (`vihem_finance_customers`, via `finance_customer_id`), hämta gällande avdrag/tillägg för hyresförhållandet och perioden, och skapa fakturan (grundhyra + hyresjusteringar redan summerat av befintlig SQL, plus en rad per avdrag/tillägg). Partial-success-svar per rad, samma mönster som Accounteds egen `bulk-create`.
 - **`vihem-accounted-project-billing`** — skapar Accounted-fakturan för ett `ready_for_invoicing`-faktureringsunderlag från Kundprojekt. Återanvänder den befintliga SQL-funktionen `vihem_ensure_finance_customer_for_project` (samma match-eller-skapa-logik som legacy-RPC:n) för kundmatchning, kör som anropande användare (inte service-role) eftersom funktionen är `SECURITY DEFINER` och läser `auth.uid()` internt. Fakturarader byggs direkt från underlagets `ready`-rader (tid/material/ändringsorder/fast pris). Avdrag/tillägg är inte kopplat in här ännu.
 - **`vihem-billing-adjustments`** — `create`/`update` för avdrag/tillägg. Enda platsen som får skriva till `vihem_billing_adjustments`.
+- **`vihem-accounted-tenant-invoices`** — `GET ?invoice_link_id=`, hyresgäst-scopad. Proxar Accounteds PDF-endpoint: verifierar ägarskap manuellt (`vihem_rent_billing_items.tenant_id = caller.id`, samma relation som RLS-policyn nedan) eftersom en binär PDF-respons inte kan gå via en vanlig RLS-skyddad tabellfråga. Vanlig `verify_jwt` (ingen `config.toml`-ändring) eftersom Accounted aldrig anropar den här — bara den inloggade hyresgästens webbläsare.
 - **`vihem-accounted-webhook`** — publik mottagare, HMAC-verifierad (`X-Gnubok-Signature`, Stripe-liknande schema), **ingen** Supabase-JWT. Måste deployas med `verify_jwt = false` (redan satt i `supabase/config.toml`).
 
 Ingen av dessa funktioner ger AI-tolkning eller PDF-generering själva — det
@@ -144,6 +157,26 @@ självt skapas fortfarande i Kundprojekt-sidan, orörd), **Avdrag & tillägg**
 Förbrukade-historik — plus ett skapa-formulär med hyresgästväljare; se eget
 avsnitt nedan), Fakturor (läser `vihem_accounted_invoice_links`), och
 Kommande (platshållare för det som inte är byggt än).
+
+**Hyresgästportalen.** [`src/pages/TenantInvoicesPage.tsx`](../src/pages/TenantInvoicesPage.tsx)
+— ny sida, ny meny-post "Mina fakturor" i "Hem"-gruppen
+([Layout.tsx](../src/components/Layout.tsx)), gated `roles: ['tenant']` +
+`module: 'finance'`. Listar hyresgästens egna rader ur
+`vihem_accounted_invoice_links` (fakturanummer, datum, förfallodatum,
+belopp, återstående belopp, status) via den utökade RLS-policyn — ingen
+egen edge function behövs för listan, bara `vihem-accounted-tenant-
+invoices` för själva PDF:en. Datafunktionerna (`listMyRentInvoices`,
+`fetchMyInvoicePdfUrl`) ligger i samma `src/modules/finance-v2/api.ts` som
+admin-sidans funktioner — samma modul, samma Accounted-domän, bara en
+annan sida/målgrupp som anropar den.
+
+Ingen manuell uppdateringsknapp på hyresgästsidan (till skillnad från
+admin-fliken "Fakturor") — `refresh_status` kräver `seller`-bolagsbehörighet
+som en hyresgäst inte har. Statusuppdateringar (betald, skickad osv.) når
+alltså hyresgästen enbart via webhooks. Om webhookarna inte är registrerade
+för ett bolag ser hyresgästen en faktura som fastnat på sin ursprungliga
+status tills en admin uppdaterar den via Ekonomi V2 eller registrerar
+webhooks under Bolagskoppling.
 
 Kundskapande i Accounted (steget innan fakturan) körs alltid på riktigt,
 även under en fakturas dry-run — att skapa en kundpost har ingen ekonomisk
@@ -237,7 +270,12 @@ kräver ett separat beslut och arbete i Accounted-repot.
    ihop flera underlag till EN faktura (t.ex. flera delfaktureringar av
    samma kund) är inte porterad, bara förberedd på datamodellnivå (se
    nästa avsnitt). Ingen samlingsfaktura-funktion är byggd i denna etapp.
-4. Hyresgästportalens fakturavy.
+4. ~~Hyresgästportalens fakturavy~~ Klart (`TenantInvoicesPage.tsx`,
+   `vihem-accounted-tenant-invoices`) — lista + PDF, Accounted som source of
+   truth. Bara hyresfakturor (`source_type = 'rental_billing'`); en
+   hyresgäst med kundprojekt- eller andra fakturor via Accounted ser inte
+   dem här, eftersom ingen sådan koppling mellan hyresgäst och de
+   `source_type`erna finns i datamodellen.
 5. Scanner → Accounted-kopplingen (rekommendation ovan, ej kopplad).
 6. Avbetalningsplaner i Finance V2-gränssnittet (fortsatt legacy tills
    vidare — panelen finns redan och flyttas inte i denna etapp).

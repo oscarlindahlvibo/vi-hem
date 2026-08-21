@@ -157,6 +157,60 @@ export function createAccountedClient(config: AccountedClientConfig) {
     return (payload.data ?? payload) as T;
   }
 
+  /**
+   * For endpoints that return a binary body (e.g. GET .../invoices/{id}/pdf)
+   * instead of the standard v1 JSON envelope. Bypasses request()'s JSON
+   * parsing entirely -- Accounted's PDF route returns raw application/pdf,
+   * not { data: ... }.
+   */
+  async function requestBinary(path: string): Promise<{ bytes: Uint8Array; contentType: string }> {
+    const url = `${baseUrl}${path}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/pdf" },
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeout);
+      const aborted = err instanceof Error && err.name === "AbortError";
+      throw new AccountedApiError({
+        code: aborted ? "ACCOUNTED_TIMEOUT" : "ACCOUNTED_NETWORK_ERROR",
+        message: aborted
+          ? "Accounted svarade inte inom tidsgränsen."
+          : `Kunde inte nå Accounted: ${err instanceof Error ? err.message : String(err)}`,
+        http_status: 0,
+      });
+    }
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      let payload: any = null;
+      try {
+        payload = text ? JSON.parse(text) : null;
+      } catch { /* not JSON, likely an HTML/plain-text error page */ }
+      if (payload?.error) {
+        throw new AccountedApiError({
+          code: String(payload.error.code || "ACCOUNTED_ERROR"),
+          message: String(payload.error.message || "Okänt fel från Accounted."),
+          http_status: response.status,
+        });
+      }
+      throw new AccountedApiError({
+        code: `HTTP_${response.status}`,
+        message: text.slice(0, 500) || `Accounted svarade ${response.status}.`,
+        http_status: response.status,
+      });
+    }
+
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return { bytes, contentType: response.headers.get("content-type") || "application/pdf" };
+  }
+
   return {
     get: <T = unknown>(path: string, query?: Record<string, string | undefined>) =>
       request<T>(path, { method: "GET", query }),
@@ -164,6 +218,7 @@ export function createAccountedClient(config: AccountedClientConfig) {
       request<T>(path, { method: "POST", body, idempotencyKey: opts.idempotencyKey, dryRun: opts.dryRun }),
     patch: <T = unknown>(path: string, body: unknown, opts: { idempotencyKey?: string }) =>
       request<T>(path, { method: "PATCH", body, idempotencyKey: opts.idempotencyKey }),
+    getBinary: requestBinary,
     async healthCheck(companyId: string): Promise<{ ok: boolean; error?: AccountedErrorShape }> {
       try {
         await request(`/api/v1/companies/${encodeURIComponent(companyId)}`, { method: "GET" });

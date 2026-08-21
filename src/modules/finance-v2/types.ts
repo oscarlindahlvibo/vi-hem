@@ -59,6 +59,8 @@ export interface AccountedInvoiceLink {
   currency: string;
   total: number | null;
   remaining_amount: number | null;
+  invoice_date: string | null;
+  due_date: string | null;
   paid_at: string | null;
   last_synced_at: string;
   last_sync_source: 'create' | 'webhook' | 'manual_refresh';

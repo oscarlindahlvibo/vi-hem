@@ -39,6 +39,7 @@ import { ScreenSettingsPage } from './pages/ScreenSettingsPage';
 import { GuestLaundryPage } from './pages/GuestLaundryPage';
 import { FinancePage } from './pages/FinancePage';
 import { FinanceV2Page } from './modules/finance-v2/pages/FinanceV2Page';
+import { TenantInvoicesPage } from './pages/TenantInvoicesPage';
 import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { StaffDocumentScannerPage } from './pages/StaffDocumentScannerPage';
 import { RentalPage } from './pages/RentalPage';
@@ -471,6 +472,10 @@ function AppInner() {
         // 'finance': org admin + the org's finance module enabled.
         if (!isAdmin || !enabledModules.finance) return renderDashboard();
         return <FinanceV2Page />;
+
+      case 'tenant-invoices':
+        if (!isTenant || !enabledModules.finance) return renderDashboard();
+        return <TenantInvoicesPage />;
 
       case 'skatteverket':
         if (!isAdmin || !enabledModules.skatteverket) return renderDashboard();

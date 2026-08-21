@@ -197,6 +197,8 @@ async function processEvent(adminClient: any, companyLinkId: string, eventType: 
         status: invoice.status ?? undefined,
         total: invoice.total ?? undefined,
         remaining_amount: invoice.remaining_amount ?? undefined,
+        invoice_date: invoice.invoice_date ?? undefined,
+        due_date: invoice.due_date ?? undefined,
         paid_at: invoice.paid_at ?? undefined,
         last_sync_source: "webhook",
         last_synced_at: new Date().toISOString(),

@@ -9,7 +9,7 @@
 // The Accounted API key never reaches this file or the browser: every write
 // here goes through a server-side Edge Function that decrypts the key from
 // vihem_accounted_secrets (service-role only, RLS blocks all client access).
-import { supabase } from '../../lib/supabase';
+import { supabase, supabaseAnonKey, supabaseUrl } from '../../lib/supabase';
 import type {
   AccountedApiErrorBody,
   AccountedCompanyLink,
@@ -361,4 +361,48 @@ export async function listActiveTenancies(companyId: string): Promise<TenancyOpt
     .order('created_at', { ascending: false });
   if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
   return (data ?? []) as unknown as TenancyOption[];
+}
+
+// ── Tenant portal invoice view ────────────────────────────────────────────
+// Accounted is the source of truth; this reads the same local cache table
+// Finance V2's admin "Fakturor" tab reads, just scoped to the caller's own
+// rows via the tenant-self-access RLS policy added in
+// 20260821160000_accounted_v2_tenant_invoice_view.sql. No company selection
+// needed -- RLS already limits rows to the tenant's own billing items.
+
+export async function listMyRentInvoices(): Promise<AccountedInvoiceLink[]> {
+  const { data, error } = await supabase
+    .from('vihem_accounted_invoice_links')
+    .select('*')
+    .eq('source_type', 'rental_billing')
+    .order('invoice_date', { ascending: false, nullsFirst: false });
+  if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
+  return (data ?? []) as AccountedInvoiceLink[];
+}
+
+/**
+ * Fetches the invoice PDF via vihem-accounted-tenant-invoices (the Accounted
+ * API key never reaches the browser) and returns a blob: URL the caller can
+ * open in a new tab or set as a download link's href. The caller is
+ * responsible for revoking it (URL.revokeObjectURL) once no longer needed.
+ */
+export async function fetchMyInvoicePdfUrl(invoiceLinkId: string): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    throw new AccountedIntegrationError('UNAUTHORIZED', 'Din inloggning kunde inte verifieras. Ladda om sidan och försök igen.');
+  }
+
+  const response = await fetch(
+    `${supabaseUrl}/functions/v1/vihem-accounted-tenant-invoices?invoice_link_id=${encodeURIComponent(invoiceLinkId)}`,
+    { headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${session.access_token}` } },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new AccountedIntegrationError(
+      body?.error?.code || 'PDF_FETCH_FAILED',
+      body?.error?.message || 'Kunde inte hämta fakturan från Accounted.',
+    );
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
