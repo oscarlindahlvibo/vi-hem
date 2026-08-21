@@ -21,6 +21,7 @@ import { AccountedContextError, loadAccountedCompanyContext } from "../_shared/a
 import { resolveOrCreateAccountedCustomer, type VihemCustomerInput } from "../_shared/accounted-customer-resolver.ts";
 import { createAccountedInvoiceForSource, type AccountedInvoiceItemInput } from "../_shared/accounted-invoice-creator.ts";
 import { AccountedApiError } from "../_shared/accounted-rest-client.ts";
+import { buildAdjustmentLineItems, listEligibleAdjustments, recordAdjustmentApplications } from "../_shared/billing-adjustments.ts";
 
 interface BasisRow {
   id: string;
@@ -164,13 +165,31 @@ Deno.serve(async (req: Request) => {
 
     const invoiceDate = new Date().toISOString().slice(0, 10);
     const dueDate = new Date(Date.now() + (financeCustomer.payment_terms_days || 30) * 86_400_000).toISOString().slice(0, 10);
-    const items: AccountedInvoiceItemInput[] = readyLines.map((line) => ({
-      description: line.description,
-      quantity: line.quantity,
-      unit: line.unit,
-      unit_price: line.unit_price,
-      vat_rate: line.vat_rate,
-    }));
+
+    // Avdrag & tillägg on the project itself (not the customer): projects
+    // don't have a calendar billing period the way rent does, so eligibility
+    // is checked against today's date rather than a specific period --
+    // "apply to the project's next invoice" reads the same either way, it
+    // just means a recurring adjustment's max_occurrences/end_period compare
+    // against the invoice date instead of a rent_period. Included in both
+    // dry-run previews and real invoices; recorded as consumed only after a
+    // confirmed (non-dry-run, newly-created) result below.
+    const eligibleAdjustments = await listEligibleAdjustments(auth.adminClient, {
+      companyId,
+      targetType: "customer_project",
+      targetId: project.id,
+      period: invoiceDate,
+    });
+    const items: AccountedInvoiceItemInput[] = [
+      ...readyLines.map((line) => ({
+        description: line.description,
+        quantity: line.quantity,
+        unit: line.unit,
+        unit_price: line.unit_price,
+        vat_rate: line.vat_rate,
+      })),
+      ...buildAdjustmentLineItems(eligibleAdjustments),
+    ];
 
     const invoiceResult = await createAccountedInvoiceForSource(auth.adminClient, context.link, context.apiKey, {
       sourceType: "customer_project",
@@ -191,6 +210,19 @@ Deno.serve(async (req: Request) => {
     if ("dry_run" in invoiceResult) return json({ data: { dry_run: true, preview: invoiceResult.preview } });
     if ("already_invoiced" in invoiceResult) {
       return json({ data: { already_invoiced: true, ...invoiceResult.link } });
+    }
+
+    // Invoice is confirmed created in Accounted from here on -- the ONLY
+    // point where these adjustments may be marked consumed.
+    if (eligibleAdjustments.length > 0) {
+      await recordAdjustmentApplications(auth.adminClient, {
+        organisationId: context.link.organisation_id,
+        adjustments: eligibleAdjustments,
+        billingPeriod: null,
+        sourceType: "customer_project",
+        sourceId: basisId,
+        accountedInvoiceLinkId: invoiceResult.link.id,
+      });
     }
 
     const { error: updateBasisErr } = await auth.adminClient
