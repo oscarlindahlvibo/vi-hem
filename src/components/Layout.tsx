@@ -231,7 +231,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       </aside>
 
       {/* Mobile top bar */}
-      <div className="fixed left-0 right-0 top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-xl lg:hidden">
+      <div className="vihem-mobile-header fixed left-0 right-0 top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-xl lg:hidden">
         <div className="flex items-center gap-3">
           <div className="h-8 w-8 overflow-hidden rounded-xl shadow-sm ring-1 ring-slate-200">
             <AppLogo className="w-full h-full" />
@@ -304,7 +304,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       )}
 
       {/* Main content */}
-      <main className="min-w-0 flex-1 overflow-x-hidden pb-24 pt-16 lg:ml-[17rem] lg:pb-0 lg:pt-0">
+      <main className="vihem-mobile-main min-w-0 flex-1 overflow-x-hidden pb-24 pt-16 lg:ml-[17rem] lg:pb-0 lg:pt-0">
         <div className="w-full min-w-0 max-w-[1560px] overflow-x-hidden p-4 lg:p-6 xl:p-8">
           {children}
         </div>

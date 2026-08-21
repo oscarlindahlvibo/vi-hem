@@ -435,12 +435,12 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
 
   if (loading) return <Card><p className="text-sm text-slate-500">Laddar avbetalningsplaner...</p></Card>;
 
-  return <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
+  return <div className="installment-plans-panel installment-plans-layout gap-5">
     <div className="space-y-4">
       <Card>
         <div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-bold text-slate-950">Avbetalningsplaner</h2><p className="mt-1 text-sm text-slate-500">Administrativ uppföljning av skuld. Fakturautkast skapas först när du väljer det och bokförs inte automatiskt.</p></div><Button size="sm" onClick={() => setShowCreate(value => !value)}><Plus className="h-4 w-4" />Ny plan</Button></div>
         <div className="mt-4 flex flex-wrap gap-2"><Badge className="bg-amber-50 text-amber-800">Ej bokföringsbar</Badge><Badge className="bg-slate-100 text-slate-700">{plans.length} planer</Badge></div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]"><Input label="Sök plan" placeholder="Plan, bolag eller kund" value={search} onChange={event => setSearch(event.target.value)} /><Select label="Status" value={statusFilter} onChange={event => setStatusFilter(event.target.value as typeof statusFilter)} options={[{ value: 'all', label: 'Alla statusar' }, ...(['draft', 'pending_approval', 'active', 'overdue', 'completed', 'paused', 'cancelled'] as const).map(status => ({ value: status, label: statusLabel(status) }))]} /></div>
+        <div className="installment-plans-filters mt-4 grid gap-3"><Input label="Sök plan" placeholder="Plan, bolag eller kund" value={search} onChange={event => setSearch(event.target.value)} /><Select label="Status" value={statusFilter} onChange={event => setStatusFilter(event.target.value as typeof statusFilter)} options={[{ value: 'all', label: 'Alla statusar' }, ...(['draft', 'pending_approval', 'active', 'overdue', 'completed', 'paused', 'cancelled'] as const).map(status => ({ value: status, label: statusLabel(status) }))]} /></div>
       </Card>
       {notice && <p className={`rounded-xl border p-3 text-sm font-medium ${noticeIsError ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{notice}</p>}
       {showCreate && <Card className="overflow-hidden border-blue-100 p-0 shadow-md"><div className="bg-gradient-to-r from-blue-700 to-indigo-600 px-5 py-5 text-white"><div className="flex items-center gap-3"><div className="rounded-xl bg-white/15 p-2"><ReceiptText className="h-5 w-5" /></div><div><h3 className="text-lg font-bold">Ny avbetalningsplan</h3><p className="mt-0.5 text-sm text-blue-100">Samla flera underlag i en tydlig plan.</p></div></div></div><div className="space-y-6 p-5">
