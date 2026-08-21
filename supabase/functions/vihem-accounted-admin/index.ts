@@ -61,11 +61,30 @@ async function handleSaveCompanyLink(auth: AuthContext, company: { id: string; o
   const accountedCompanyId = String(body?.accounted_company_id || "").trim();
   const apiKey: string | undefined = typeof body?.api_key === "string" ? body.api_key.trim() : undefined;
   const enabled = Boolean(body?.enabled);
+  const invoiceInboxEmail: string | undefined = typeof body?.invoice_inbox_email === "string" ? body.invoice_inbox_email.trim() : undefined;
 
   if (!baseUrl || !/^https:\/\//.test(baseUrl)) {
     return errorJson("VALIDATION_ERROR", "accounted_base_url måste vara en https-URL.", 400);
   }
   if (!accountedCompanyId) return errorJson("VALIDATION_ERROR", "accounted_company_id krävs.", 400);
+  if (invoiceInboxEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invoiceInboxEmail)) {
+    return errorJson("VALIDATION_ERROR", "invoice_inbox_email ser inte ut som en giltig e-postadress.", 400);
+  }
+
+  // settings is a free-form jsonb bag shared by anything that needs
+  // per-company config beyond the dedicated columns (today: just the
+  // Accounted invoice-inbox address for scanner forwarding). Merge instead
+  // of overwrite so saving other fields here never clobbers it.
+  const { data: existing } = await auth.adminClient
+    .from("vihem_accounted_company_links")
+    .select("settings")
+    .eq("company_id", company.id)
+    .maybeSingle();
+  const settings = { ...(existing?.settings || {}) };
+  if (invoiceInboxEmail !== undefined) {
+    if (invoiceInboxEmail) settings.invoice_inbox_email = invoiceInboxEmail;
+    else delete settings.invoice_inbox_email;
+  }
 
   const { data: link, error: upsertErr } = await auth.adminClient
     .from("vihem_accounted_company_links")
@@ -76,11 +95,12 @@ async function handleSaveCompanyLink(auth: AuthContext, company: { id: string; o
         accounted_base_url: baseUrl,
         accounted_company_id: accountedCompanyId,
         enabled,
+        settings,
         updated_by: auth.callerId,
       },
       { onConflict: "company_id" },
     )
-    .select("id, organisation_id, company_id, accounted_base_url, accounted_company_id, enabled, last_health_status, last_health_check_at, last_sync_at, created_at, updated_at")
+    .select("id, organisation_id, company_id, accounted_base_url, accounted_company_id, enabled, settings, last_health_status, last_health_check_at, last_sync_at, created_at, updated_at")
     .single();
 
   if (upsertErr) return errorJson("INTERNAL_ERROR", "Kunde inte spara bolagskopplingen.", 500, { details: upsertErr.message });

@@ -35,13 +35,18 @@ och med att den skapas där, plus allt kring bokföring/moms/reskontra/SIE.
 
 ## Status
 
-**Klart:** bolagskoppling, kundlänkning, fakturaskapande (generisk +
-hyresfakturering + kundprojektfakturering), webhook-grund, datamodellen
-förberedd för framtida samlingsfakturor, generell avdrag/tillägg-modul
-(kopplad till hyresfakturering), hyresgästportalens fakturavy (lista +
-PDF, Accounted som source of truth).
-**Kvar:** avdrag/tillägg-modulen kopplad till kundprojekt/andra
-faktureringskällor, scanner → Accounted.
+Samtliga faktureringsvägar från originalspecens etappordning (1.
+hyresfakturering, 2. avdrag/tillägg, 3. kundprojektfakturering, 4.
+portal-sync, 5. scanner → Accounted) är nu byggda i grundform. **Klart:**
+bolagskoppling, kundlänkning, fakturaskapande (generisk + hyresfakturering
++ kundprojektfakturering), webhook-grund, datamodellen förberedd för
+framtida samlingsfakturor, generell avdrag/tillägg-modul (kopplad till
+hyresfakturering OCH kundprojekt), hyresgästportalens fakturavy (lista +
+PDF, Accounted som source of truth), scanner → Accounted (e-postkanalen).
+**Kvar:** avdrag/tillägg för korttidsuthyrning/andra framtida
+faktureringskällor, samlingsfaktura-funktionen (datamodellen stödjer den,
+själva funktionen är inte byggd), en riktig server-till-server-koppling
+för scanner om e-postkanalen visar sig otillräcklig.
 
 ## Vad som finns
 
@@ -106,6 +111,17 @@ skrivskyddad för klienter.
   `vihem_rent_billing_items.tenant_id = auth.uid()`) som en tredje
   OR-gren, utöver superadmin och bolagsåtkomst som redan fanns.
 
+`20260821170000_accounted_v2_scanner_forwarding.sql`:
+
+- `vihem_accounted_scanner_uploads` — spårar varje underlag som mejlats
+  till Accounteds invoice-inbox: fil, status (`queued`/`sent`/`failed`),
+  felmeddelande. Ingen ny storage-bucket — återanvänder `vihem-documents`,
+  samma bucket legacy-scannern redan använder.
+
+`invoice_inbox_email` för ett bolag lagras inte som en egen kolumn utan i
+`vihem_accounted_company_links.settings` (jsonb-kolumnen som redan fanns
+från grundmigrationen) — ingen schemaändring behövdes för det.
+
 Migrationerna rör inte någon tabell som legacy-ekonomin skriver till för
 befintlig produktionsfakturering (`vihem_invoices`, `vihem_accounting_*`,
 `vihem_rent_adjustments`, etc.) — bara additiva kolumner/tabeller.
@@ -118,17 +134,19 @@ befintlig produktionsfakturering (`vihem_invoices`, `vihem_accounting_*`,
 - **`accounted-customer-resolver.ts`** — `resolveOrCreateAccountedCustomer`: kundlänkning/-skapande, delad mellan `vihem-accounted-customers` och batch-anrop (hyresfakturering, framtida kundprojekt) så logiken bara finns på ett ställe.
 - **`accounted-invoice-creator.ts`** — `createAccountedInvoiceForSource`: samma sak för fakturaskapande.
 - **`billing-adjustments.ts`** — `listEligibleAdjustments`/`buildAdjustmentLineItems`/`recordAdjustmentApplications`: avdrag & tillägg-logiken, se eget avsnitt nedan.
+- **`smtp-mailer.ts`** — SMTP-klient med bilaga, för scanner-vidarebefordran. En anpassad **kopia** av den redan fungerande implementationen i `vihem-send-invoice-emails/index.ts` (inte en extraktion som även skriver om originalet) — den funktionen skickar riktiga produktionsfakturamejl idag, och att röra den var inte värt risken för det som annars är en engångsduplicering. Om den nya modulen visar sig hålla är att migrera originalet till den ett separat, framtida steg.
 - **`vihem-auth.ts`** — delat auth/behörighetshjälpmedel (JWT + `vihem_user_has_company_access`). Befintliga 30+ Edge Functions är **inte** omskrivna till detta.
 
 ### Edge Functions
 
-- **`vihem-accounted-admin`** — `save_company_link`, `test_connection`, `register_webhooks`. Kräver `admin`-bolagsbehörighet.
+- **`vihem-accounted-admin`** — `save_company_link` (nu även `invoice_inbox_email`, sparas i `settings`), `test_connection`, `register_webhooks`. Kräver `admin`-bolagsbehörighet.
 - **`vihem-accounted-customers`** — hittar befintlig kundkoppling eller skapar kunden i Accounted (idempotent, dry-run-stödd). Tunn wrapper runt den delade resolvern.
 - **`vihem-accounted-invoices`** — `create` (generisk, idempotent, dry-run-stödd) och `refresh_status`. Tunn wrapper runt den delade skaparen.
 - **`vihem-accounted-rent-billing`** — batchar fakturaskapande för en hel hyreskörning: för varje ej fakturerad rad, länka/skapa Accounted-kunden (`vihem_finance_customers`, via `finance_customer_id`), hämta gällande avdrag/tillägg för hyresförhållandet och perioden, och skapa fakturan (grundhyra + hyresjusteringar redan summerat av befintlig SQL, plus en rad per avdrag/tillägg). Partial-success-svar per rad, samma mönster som Accounteds egen `bulk-create`.
-- **`vihem-accounted-project-billing`** — skapar Accounted-fakturan för ett `ready_for_invoicing`-faktureringsunderlag från Kundprojekt. Återanvänder den befintliga SQL-funktionen `vihem_ensure_finance_customer_for_project` (samma match-eller-skapa-logik som legacy-RPC:n) för kundmatchning, kör som anropande användare (inte service-role) eftersom funktionen är `SECURITY DEFINER` och läser `auth.uid()` internt. Fakturarader byggs direkt från underlagets `ready`-rader (tid/material/ändringsorder/fast pris). Avdrag/tillägg är inte kopplat in här ännu.
+- **`vihem-accounted-project-billing`** — skapar Accounted-fakturan för ett `ready_for_invoicing`-faktureringsunderlag från Kundprojekt. Återanvänder den befintliga SQL-funktionen `vihem_ensure_finance_customer_for_project` (samma match-eller-skapa-logik som legacy-RPC:n) för kundmatchning, kör som anropande användare (inte service-role) eftersom funktionen är `SECURITY DEFINER` och läser `auth.uid()` internt. Fakturarader byggs direkt från underlagets `ready`-rader (tid/material/ändringsorder/fast pris), plus gällande avdrag/tillägg för projektet (`target_type = 'customer_project'`, period = dagens datum eftersom projekt saknar en kalenderperiod-koppling).
 - **`vihem-billing-adjustments`** — `create`/`update` för avdrag/tillägg. Enda platsen som får skriva till `vihem_billing_adjustments`.
 - **`vihem-accounted-tenant-invoices`** — `GET ?invoice_link_id=`, hyresgäst-scopad. Proxar Accounteds PDF-endpoint: verifierar ägarskap manuellt (`vihem_rent_billing_items.tenant_id = caller.id`, samma relation som RLS-policyn nedan) eftersom en binär PDF-respons inte kan gå via en vanlig RLS-skyddad tabellfråga. Vanlig `verify_jwt` (ingen `config.toml`-ändring) eftersom Accounted aldrig anropar den här — bara den inloggade hyresgästens webbläsare.
+- **`vihem-accounted-scanner-forward`** — laddar ner en redan uppladdad fil från `vihem-documents`, mejlar den till bolagets Accounted-inkorgsadress via `smtp-mailer.ts`, och spårar status i `vihem_accounted_scanner_uploads`. Kräver `seller`-bolagsbehörighet.
 - **`vihem-accounted-webhook`** — publik mottagare, HMAC-verifierad (`X-Gnubok-Signature`, Stripe-liknande schema), **ingen** Supabase-JWT. Måste deployas med `verify_jwt = false` (redan satt i `supabase/config.toml`).
 
 Ingen av dessa funktioner ger AI-tolkning eller PDF-generering själva — det
@@ -146,17 +164,20 @@ org-admin + organisationens `finance`-modul aktiverad
 Legacy `FinancePage.tsx` är oförändrad utöver att den nu kallas "legacy" i
 kommentarer/dokumentation — ingen kod i den filen är rörd.
 
-Sju flikar: Översikt, Bolagskoppling (spara URL/company-id/API-nyckel, testa
-anslutning, registrera webhooks), **Fakturering** (hyra: välj hyresperiod →
-hämta körning från befintlig `vihem_create_rent_billing_run` →
-förhandsgranska mot Accounted som dry-run → skapa fakturor på riktigt, med
-resultat per rad), **Kundprojekt** (listar `ready_for_invoicing`-underlag
-oavsett projekt, förhandsgranska/skapa faktura per underlag — underlaget
-självt skapas fortfarande i Kundprojekt-sidan, orörd), **Avdrag & tillägg**
-(filtrerbar lista — Alla/Aktiva/Återkommande/Kommande/Pausade/
-Förbrukade-historik — plus ett skapa-formulär med hyresgästväljare; se eget
-avsnitt nedan), Fakturor (läser `vihem_accounted_invoice_links`), och
-Kommande (platshållare för det som inte är byggt än).
+Åtta flikar: Översikt, Bolagskoppling (spara URL/company-id/API-nyckel,
+Accounted-inkorgsadress, testa anslutning, registrera webhooks),
+**Fakturering** (hyra: välj hyresperiod → hämta körning från befintlig
+`vihem_create_rent_billing_run` → förhandsgranska mot Accounted som
+dry-run → skapa fakturor på riktigt, med resultat per rad),
+**Kundprojekt** (listar `ready_for_invoicing`-underlag oavsett projekt,
+förhandsgranska/skapa faktura per underlag — underlaget självt skapas
+fortfarande i Kundprojekt-sidan, orörd), **Avdrag & tillägg** (filtrerbar
+lista — Alla/Aktiva/Återkommande/Kommande/Pausade/Förbrukade-historik —
+plus ett skapa-formulär med hyresgästväljare; se eget avsnitt nedan),
+**Underlag** (filuppladdning + skickade-underlag-lista; se
+"Scanner → Accounted" nedan), Fakturor (läser
+`vihem_accounted_invoice_links`), och Kommande (platshållare för det som
+inte är byggt än).
 
 **Hyresgästportalen.** [`src/pages/TenantInvoicesPage.tsx`](../src/pages/TenantInvoicesPage.tsx)
 — ny sida, ny meny-post "Mina fakturor" i "Hem"-gruppen
@@ -221,7 +242,7 @@ genomgång, inte modifierad):
   nätverket (REST/webhook) — ingen Accounted-kod är kopierad eller länkad in
   i VI-HEM.
 
-## Scanner → Accounted: rekommendation (ej implementerad ännu)
+## Scanner → Accounted
 
 Undersökt konkret i Accounted-koden:
 
@@ -236,23 +257,31 @@ Undersökt konkret i Accounted-koden:
   läses av med AI och hamnar i granskningskön — exakt samma flöde som en
   vidarebefordrad leverantörsfaktura idag.
 
-**Rekommendation**: koppla VI-HEM-scannern till invoice-inbox via
-e-postkanalen, inte via ett nytt API-anrop. VI-HEM har redan Postfix/SMTP
-konfigurerat (se root-`README.md`). Flödet blir: personal scannar i VI-HEM →
-välj bolag → VI-HEM skickar originaldokumentet som mejlbilaga till bolagets
-Accounted-inkorgsadress (hämtas en gång manuellt från Accounteds UI och
-sparas i `vihem_accounted_company_links.settings` eller en ny kolumn) →
-Accounted tar över (AI-extraktion, granskning, attest). Detta kräver **ingen**
-ändring i Accounted.
+**Implementerat**: e-postkanalen, inte ett nytt API-anrop.
+[`vihem-accounted-scanner-forward`](../supabase/functions/vihem-accounted-scanner-forward/index.ts)
+laddar ner en fil som redan laddats upp till `vihem-documents` från
+frontend, och mejlar den (via [`_shared/smtp-mailer.ts`](../supabase/functions/_shared/smtp-mailer.ts),
+VI-HEM:s redan konfigurerade Postfix/SMTP — se root-`README.md`) till
+bolagets Accounted-inkorgsadress, som en admin en gång sparar manuellt
+under Bolagskoppling (`vihem_accounted_company_links.settings.
+invoice_inbox_email` — inte en ny kolumn, den fanns redan). Flödet:
+personal öppnar Underlag-fliken i Ekonomi V2 → väljer fil → VI-HEM laddar
+upp filen och skickar den vidare → Accounted tar över (AI-extraktion,
+granskning, attest). Detta kräver **ingen** ändring i Accounted.
+
+Legacy-scannern i `FinancePage.tsx` (`vihem-process-supplier-invoice-ocr`,
+VI-HEM:s egen OCR/AI) är **oförändrad** och finns kvar parallellt — de två
+vägarna delar ingen kod och en organisation väljer själv vilken de
+använder för ett givet underlag.
 
 Om ett äkta server-till-server-API senare visar sig nödvändigt (t.ex. för att
 slippa mejl-latens eller för att få tillbaka ett dokument-id synkront), är
-rekommendationen en **separat** Accounted-extension
+rekommendationen fortsatt en **separat** Accounted-extension
 (`extensions/general/vihem-bridge` eller liknande, eget `manifest.json`) som
 exponerar en API-nyckel-autentiserad `apiRoutes`-endpoint enligt samma
 mönster som `lib/api/v1/with-api-v1.ts` använder — INTE en ändring av
-`invoice-inbox`s egen kod. Detta är inte implementerat i denna etapp; det
-kräver ett separat beslut och arbete i Accounted-repot.
+`invoice-inbox`s egen kod. Kräver ett separat beslut och arbete i
+Accounted-repot; inte gjort.
 
 ## Vad som INTE är byggt än
 
@@ -261,9 +290,9 @@ kräver ett separat beslut och arbete i Accounted-repot.
    någonstans i kodbasen ännu (varken legacy eller V2) och ingår därför
    inte i vad som faktureras.
 2. ~~En allmän avdrag & tillägg-modul~~ Klart (`vihem_billing_adjustments`,
-   `vihem-billing-adjustments`), kopplad in i hyresfakturering. Inte kopplad
-   till kundprojekt eller andra faktureringskällor än — se eget avsnitt
-   nedan.
+   `vihem-billing-adjustments`), kopplad in i hyresfakturering OCH
+   kundprojektfakturering. Inte kopplad till korttidsuthyrning eller andra
+   framtida faktureringskällor — se eget avsnitt nedan.
 3. ~~Kundprojektfakturering mot den nya vägen~~ Klart
    (`vihem-accounted-project-billing`), men bara ett underlag i taget —
    legacy `vihem_create_invoice_from_project_basis_batch`s förmåga att slå
@@ -276,7 +305,10 @@ kräver ett separat beslut och arbete i Accounted-repot.
    hyresgäst med kundprojekt- eller andra fakturor via Accounted ser inte
    dem här, eftersom ingen sådan koppling mellan hyresgäst och de
    `source_type`erna finns i datamodellen.
-5. Scanner → Accounted-kopplingen (rekommendation ovan, ej kopplad).
+5. ~~Scanner → Accounted-kopplingen~~ Klart (`vihem-accounted-scanner-
+   forward`, fliken Underlag) — e-postkanalen. Ett äkta server-till-server-
+   API (separat Accounted-extension) är fortsatt inte byggt, se avsnittet
+   ovan.
 6. Avbetalningsplaner i Finance V2-gränssnittet (fortsatt legacy tills
    vidare — panelen finns redan och flyttas inte i denna etapp).
 
@@ -310,9 +342,10 @@ delbetalning fördelas tillbaka till respektive underlag) är **inte** byggd.
 **Datamodell.** En rad per avdrag/tillägg i `vihem_billing_adjustments`:
 
 - `target_type`/`target_id` — generiskt precis som `vihem_accounted_
-  invoice_links.source_type`/`source_id`: `tenancy` (enda konsumenten
-  hittills), `customer_project`, `finance_customer` finns med i
-  CHECK-listan för framtida bruk men läses inte av något ännu.
+  invoice_links.source_type`/`source_id`: `tenancy` (hyresfakturering) och
+  `customer_project` (kundprojektfakturering) konsumeras idag;
+  `finance_customer` finns med i CHECK-listan för framtida bruk men läses
+  inte av något ännu.
 - `amount` — **signerat, EN representation**: positivt = tillägg, negativt
   = avdrag. Ingen separat kind/riktning-kolumn; tecknet är hela modellen,
   i både databas och UI (röd/grön text + `+`/`-` i Ekonomi V2).
@@ -349,6 +382,15 @@ körningen genererats men innan fakturan skickas fångas ändå upp.
 Avdragen blir egna radposter i samma Accounted-faktura som grundhyran
 (`buildAdjustmentLineItems`), oavsett dry-run eller inte — en
 förhandsgranskning ska visa exakt vad som skulle faktureras.
+`vihem-accounted-project-billing` gör samma anrop med `target_type:
+'customer_project', target_id: project.id`, men eftersom ett kundprojekt
+saknar en kalenderperiod-koppling (varje underlag faktureras ad hoc, inte
+månadsvis) används dagens datum som `period` istället för en verklig
+period. Det gör att `end_period`/`max_occurrences` för ett projektavdrag
+jämförs mot faktureringsdatum snarare än en meningsfull periodgräns — ett
+fungerande men mindre exakt generaliseringsval, dokumenterat här istället
+för att byggas om till en riktig "faktureringstillfälle"-modell för
+projekt i denna etapp.
 
 **Exakt när de markeras konsumerade.** ENDAST efter att
 `createAccountedInvoiceForSource` returnerat ett bekräftat (icke-dry-run,

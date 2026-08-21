@@ -21,6 +21,7 @@ import {
   createOrGetRentBillingRun,
   createProjectBasisInvoice,
   createRentBillingInvoices,
+  forwardScannedDocument,
   getCompanyLink,
   listActiveTenancies,
   listBillingAdjustmentApplications,
@@ -28,6 +29,7 @@ import {
   listInvoiceableProjectBases,
   listInvoiceLinks,
   listRentBillingItems,
+  listScannerUploads,
   registerWebhooks,
   saveCompanyLink,
   testConnection,
@@ -36,6 +38,7 @@ import {
 import type {
   AccountedCompanyLink,
   AccountedInvoiceLink,
+  AccountedScannerUpload,
   BillingAdjustment,
   BillingAdjustmentApplication,
   BillingAdjustmentKind,
@@ -45,10 +48,10 @@ import type {
   RentBillingRun,
   TenancyOption,
 } from '../types';
-import { Briefcase, CalendarClock, Landmark, Link2, ListChecks, MinusCircle, RefreshCw, Sparkles } from 'lucide-react';
+import { Briefcase, CalendarClock, Landmark, Link2, ListChecks, MinusCircle, RefreshCw, ScanLine, Sparkles, Upload } from 'lucide-react';
 
 type VihemCompany = { id: string; name: string; legal_name: string };
-type TabKey = 'overview' | 'company-link' | 'billing' | 'project-billing' | 'adjustments' | 'invoices' | 'upcoming';
+type TabKey = 'overview' | 'company-link' | 'billing' | 'project-billing' | 'adjustments' | 'scanner' | 'invoices' | 'upcoming';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Översikt' },
@@ -56,6 +59,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'billing', label: 'Fakturering' },
   { key: 'project-billing', label: 'Kundprojekt' },
   { key: 'adjustments', label: 'Avdrag & tillägg' },
+  { key: 'scanner', label: 'Underlag' },
   { key: 'invoices', label: 'Fakturor' },
   { key: 'upcoming', label: 'Kommande' },
 ];
@@ -178,6 +182,9 @@ export function FinanceV2Page() {
             {tab === 'billing' && <RentBillingTab companyId={companyId} companyLink={companyLink} />}
             {tab === 'project-billing' && <ProjectBillingTab companyId={companyId} companyLink={companyLink} />}
             {tab === 'adjustments' && <AdjustmentsTab companyId={companyId} />}
+            {tab === 'scanner' && (
+              <ScannerTab organisationId={user?.organisation_id ?? ''} companyId={companyId} companyLink={companyLink} />
+            )}
             {tab === 'invoices' && <InvoicesTab companyLink={companyLink} />}
             {tab === 'upcoming' && <UpcomingTab />}
           </div>
@@ -240,6 +247,7 @@ function CompanyLinkTab({
   const [accountedCompanyId, setAccountedCompanyId] = useState(companyLink?.accounted_company_id ?? '');
   const [apiKey, setApiKey] = useState('');
   const [enabled, setEnabled] = useState(companyLink?.enabled ?? false);
+  const [invoiceInboxEmail, setInvoiceInboxEmail] = useState(companyLink?.settings?.invoice_inbox_email ?? '');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [registering, setRegistering] = useState(false);
@@ -250,6 +258,7 @@ function CompanyLinkTab({
     setBaseUrl(companyLink?.accounted_base_url ?? '');
     setAccountedCompanyId(companyLink?.accounted_company_id ?? '');
     setEnabled(companyLink?.enabled ?? false);
+    setInvoiceInboxEmail(companyLink?.settings?.invoice_inbox_email ?? '');
   }, [companyLink]);
 
   const handleSave = async () => {
@@ -263,6 +272,7 @@ function CompanyLinkTab({
         accountedCompanyId: accountedCompanyId.trim(),
         apiKey: apiKey.trim() || undefined,
         enabled,
+        invoiceInboxEmail: invoiceInboxEmail.trim(),
       });
       setApiKey('');
       setMessage('Bolagskopplingen sparades.');
@@ -332,6 +342,14 @@ function CompanyLinkTab({
           onChange={(e) => setApiKey(e.target.value)}
           placeholder={companyLink ? 'Lämna tomt för att behålla nuvarande nyckel' : 'gnubok_sk_...'}
           hint="Skapas i Accounted under Inställningar > API. Ge nyckeln minsta möjliga scope (companies:read, customers:read/write, invoices:read/write, documents:write, webhooks:manage)."
+        />
+        <Input
+          label="Accounted invoice-inbox e-post (valfritt)"
+          type="email"
+          value={invoiceInboxEmail}
+          onChange={(e) => setInvoiceInboxEmail(e.target.value)}
+          placeholder="bolag-xxxx@inbox.accounted.example"
+          hint="Bolagets unika inkorgsadress i Accounted (Inställningar > Dokumentinkorg). Krävs för fliken Underlag."
         />
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
@@ -979,6 +997,144 @@ function CreateAdjustmentModal({
   );
 }
 
+const SCANNER_STATUS_LABELS: Record<string, string> = {
+  queued: 'Skickas…',
+  sent: 'Skickat till Accounted',
+  failed: 'Misslyckades',
+};
+
+function ScannerTab({
+  organisationId,
+  companyId,
+  companyLink,
+}: {
+  organisationId: string;
+  companyId: string;
+  companyLink: AccountedCompanyLink | null;
+}) {
+  const [uploads, setUploads] = useState<AccountedScannerUpload[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const invoiceInboxEmail = companyLink?.settings?.invoice_inbox_email;
+
+  const load = useCallback(async () => {
+    if (!companyLink) { setUploads([]); return; }
+    setLoading(true);
+    try {
+      const data = await listScannerUploads(companyLink.id);
+      setUploads(data);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [companyLink]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !organisationId) return;
+    setSending(true);
+    setMessage('');
+    setError('');
+    try {
+      await forwardScannedDocument({ organisationId, companyId, file });
+      setMessage(`"${file.name}" skickades till Accounted.`);
+      await load();
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-slate-700">Skicka underlag till Accounted</p>
+            <p className="mt-1 text-sm text-slate-500">
+              Scanna eller ladda upp ett foto/PDF på en leverantörsfaktura eller ett kvitto. Dokumentet mejlas
+              vidare till bolagets Accounted-inkorg, som läser av det med AI och lägger det i granskningskön där.
+              VI-HEM:s egen scanner/OCR (i Ekonomi legacy) påverkas inte.
+            </p>
+          </div>
+          <ScanLine className="h-8 w-8 shrink-0 text-slate-300" />
+        </div>
+
+        {!companyLink && <p className="mt-3 text-sm text-slate-500">Koppla bolaget mot Accounted under Bolagskoppling först.</p>}
+        {companyLink && !invoiceInboxEmail && (
+          <p className="mt-3 text-sm text-amber-700">
+            Ingen Accounted-inkorgsadress är sparad. Ange den under Bolagskoppling innan underlag kan skickas.
+          </p>
+        )}
+        {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
+        {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
+
+        <label className="mt-4 flex w-fit cursor-pointer items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50">
+          <Upload className="h-4 w-4" />
+          {sending ? 'Skickar…' : 'Välj fil'}
+          <input
+            type="file"
+            accept="application/pdf,image/*"
+            className="hidden"
+            disabled={sending || !companyLink || !invoiceInboxEmail}
+            onChange={handleFileSelected}
+          />
+        </label>
+      </Card>
+
+      <Card>
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-sm font-medium text-slate-700">Skickade underlag</p>
+          <Button variant="secondary" size="sm" onClick={load} loading={loading}>
+            <RefreshCw className="mr-1 h-3.5 w-3.5" /> Uppdatera
+          </Button>
+        </div>
+        {uploads.length === 0 ? (
+          <EmptyState icon={ScanLine} title="Inga underlag skickade än" />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase text-slate-500">
+                  <th className="py-2 pr-4">Fil</th>
+                  <th className="py-2 pr-4">Status</th>
+                  <th className="py-2 pr-4">Skickat</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uploads.map((upload) => (
+                  <tr key={upload.id} className="border-b border-slate-100">
+                    <td className="py-2 pr-4">{upload.file_name}</td>
+                    <td className="py-2 pr-4">
+                      <Badge text={SCANNER_STATUS_LABELS[upload.status] ?? upload.status} />
+                      {upload.status === 'failed' && upload.error_message && (
+                        <p className="mt-1 text-xs text-red-700">{upload.error_message}</p>
+                      )}
+                    </td>
+                    <td className="py-2 pr-4 text-xs text-slate-500">
+                      {upload.sent_at ? formatDateTime(upload.sent_at) : formatDateTime(upload.created_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 function InvoicesTab({ companyLink }: { companyLink: AccountedCompanyLink | null }) {
   const [invoices, setInvoices] = useState<AccountedInvoiceLink[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1066,7 +1222,7 @@ function UpcomingTab() {
       <EmptyState
         icon={Sparkles}
         title="Kommande i Finance V2"
-        description="Hyresgästportalens fakturavy och scanner → Accounted byggs stegvis ovanpå den här grunden. Avdrag & tillägg är kopplat till hyresfakturering; kundprojekt och andra faktureringskällor kan koppla in samma modul senare. Avbetalningsplaner hanteras tills vidare i Ekonomi (legacy)."
+        description="Avdrag & tillägg kan kopplas in för fler faktureringskällor än hyra och kundprojekt allteftersom de byggs. Avbetalningsplaner hanteras tills vidare i Ekonomi (legacy)."
       />
     </Card>
   );

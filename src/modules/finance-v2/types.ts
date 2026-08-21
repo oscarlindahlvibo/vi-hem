@@ -14,8 +14,26 @@ export interface AccountedCompanyLink {
   last_health_check_at: string | null;
   last_health_error?: string;
   last_sync_at: string | null;
+  /** Free-form per-company config bag. Today just invoice_inbox_email
+   * (Accounted's invoice-inbox address for scanner forwarding). */
+  settings: { invoice_inbox_email?: string } & Record<string, unknown>;
   created_at: string;
   updated_at: string;
+}
+
+export type ScannerUploadStatus = 'queued' | 'sent' | 'failed';
+
+export interface AccountedScannerUpload {
+  id: string;
+  company_link_id: string;
+  storage_bucket: string;
+  storage_path: string;
+  file_name: string;
+  content_type: string;
+  status: ScannerUploadStatus;
+  error_message: string;
+  sent_at: string | null;
+  created_at: string;
 }
 
 export type AccountedCustomerSourceType =

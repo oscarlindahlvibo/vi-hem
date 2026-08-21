@@ -17,6 +17,7 @@ import type {
   AccountedCustomerSourceType,
   AccountedInvoiceLink,
   AccountedInvoiceSourceType,
+  AccountedScannerUpload,
   BillingAdjustment,
   BillingAdjustmentApplication,
   BillingAdjustmentKind,
@@ -89,6 +90,7 @@ export async function saveCompanyLink(params: {
   accountedCompanyId: string;
   apiKey?: string;
   enabled: boolean;
+  invoiceInboxEmail?: string;
 }): Promise<AccountedCompanyLink> {
   return invoke<{ data: AccountedCompanyLink }>('vihem-accounted-admin', {
     action: 'save_company_link',
@@ -97,6 +99,7 @@ export async function saveCompanyLink(params: {
     accounted_company_id: params.accountedCompanyId,
     api_key: params.apiKey,
     enabled: params.enabled,
+    invoice_inbox_email: params.invoiceInboxEmail,
   }).then((res) => res.data);
 }
 
@@ -405,4 +408,54 @@ export async function fetchMyInvoicePdfUrl(invoiceLinkId: string): Promise<strin
   }
   const blob = await response.blob();
   return URL.createObjectURL(blob);
+}
+
+// ── Scanner → Accounted (underlag) ───────────────────────────────────────
+// VI-HEM's own scanner UI/OCR (legacy, in FinancePage.tsx) is untouched.
+// This forwards a document to Accounted's invoice-inbox extension via email
+// instead, so Accounted's own AI extraction handles it -- see
+// docs/accounted-v2-integration.md "Scanner → Accounted".
+
+/**
+ * Uploads the file to the same vihem-documents bucket the legacy scanner
+ * uses, then asks vihem-accounted-scanner-forward to email it to the
+ * company's Accounted invoice-inbox address.
+ */
+export async function forwardScannedDocument(params: {
+  organisationId: string;
+  companyId: string;
+  file: File;
+}): Promise<AccountedScannerUpload> {
+  const safeName = params.file.name.replace(/[^a-zA-Z0-9._-]+/g, '-') || 'underlag';
+  const storagePath = `${params.organisationId}/accounted-scanner/${crypto.randomUUID()}/${safeName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('vihem-documents')
+    .upload(storagePath, params.file, { contentType: params.file.type || 'application/octet-stream' });
+  if (uploadError) {
+    throw new AccountedIntegrationError(
+      'STORAGE_UPLOAD_FAILED',
+      uploadError.message.toLowerCase().includes('bucket')
+        ? 'Storage-bucketen vihem-documents saknas. Kör senaste Supabase-migreringarna först.'
+        : uploadError.message,
+    );
+  }
+
+  return invoke<{ data: AccountedScannerUpload }>('vihem-accounted-scanner-forward', {
+    company_id: params.companyId,
+    storage_path: storagePath,
+    file_name: safeName,
+    content_type: params.file.type || 'application/octet-stream',
+  }).then((res) => res.data);
+}
+
+export async function listScannerUploads(companyLinkId: string): Promise<AccountedScannerUpload[]> {
+  const { data, error } = await supabase
+    .from('vihem_accounted_scanner_uploads')
+    .select('*')
+    .eq('company_link_id', companyLinkId)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
+  return (data ?? []) as AccountedScannerUpload[];
 }
