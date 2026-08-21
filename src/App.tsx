@@ -38,6 +38,7 @@ import { ScreenDisplayPage } from './pages/ScreenDisplayPage';
 import { ScreenSettingsPage } from './pages/ScreenSettingsPage';
 import { GuestLaundryPage } from './pages/GuestLaundryPage';
 import { FinancePage } from './pages/FinancePage';
+import { FinanceV2Page } from './modules/finance-v2/pages/FinanceV2Page';
 import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { StaffDocumentScannerPage } from './pages/StaffDocumentScannerPage';
 import { RentalPage } from './pages/RentalPage';
@@ -336,8 +337,10 @@ function AppInner() {
   };
 
   function renderPage() {
-    // Superadmin sees only the organisations page
-    if (isSuperadmin) {
+    // Superadmin sees only the organisations page, except for the
+    // Finance V2 foundation page (superadmin-only while it's being built
+    // out -- see the 'finance-v2' case below).
+    if (isSuperadmin && currentPage !== 'finance-v2') {
       return <AdminOrganisationsPage onNavigate={navigate} />;
     }
 
@@ -464,6 +467,13 @@ function AppInner() {
       case 'finance':
         if (!isAdmin || !enabledModules.finance) return renderDashboard();
         return <FinancePage onNavigate={navigate} />;
+
+      case 'finance-v2':
+        // Foundation-stage Accounted integration, superadmin-only while it's
+        // being built out. Broadening to org admins is a deliberate later
+        // decision, not an oversight -- see docs/accounted-v2-integration.md.
+        if (!isSuperadmin) return renderDashboard();
+        return <FinanceV2Page />;
 
       case 'skatteverket':
         if (!isAdmin || !enabledModules.skatteverket) return renderDashboard();

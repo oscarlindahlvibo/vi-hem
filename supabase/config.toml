@@ -385,6 +385,14 @@ deno_version = 2
 [functions.vihem-cellsynth-delivery-report]
 verify_jwt = false
 
+# Accounted calls this with its own HMAC signature (X-Gnubok-Signature), never
+# a Supabase JWT/anon key -- the function verifies authenticity itself
+# (see supabase/functions/vihem-accounted-webhook/index.ts). Must also be
+# deployed with --no-verify-jwt (or the equivalent self-hosted deploy flag)
+# wherever config.toml is not read by the deploy pipeline.
+[functions.vihem-accounted-webhook]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
