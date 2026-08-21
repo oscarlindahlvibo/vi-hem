@@ -3,8 +3,14 @@
 @tailwind utilities;
 
 @media (max-width: 1023px) {
-  .vihem-mobile-header { padding-top: calc(env(safe-area-inset-top, 0px) + 0.75rem); }
-  .vihem-mobile-main { padding-top: calc(4rem + env(safe-area-inset-top, 0px)); }
+  /* Keep malformed/oversized safe-area values from pushing the app down. */
+  .vihem-mobile-header {
+    top: 0;
+    padding-top: min(3rem, max(0.75rem, env(safe-area-inset-top, 0px)));
+  }
+  .vihem-mobile-main {
+    padding-top: min(7rem, calc(4rem + env(safe-area-inset-top, 0px)));
+  }
 }
 
 .installment-plans-panel { width: 100%; max-width: 1440px; margin-inline: auto; }
