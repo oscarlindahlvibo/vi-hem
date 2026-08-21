@@ -36,10 +36,11 @@ och med att den skapas där, plus allt kring bokföring/moms/reskontra/SIE.
 ## Status
 
 **Klart:** bolagskoppling, kundlänkning, fakturaskapande (generisk +
-hyresfakturering + kundprojektfakturering), webhook-grund.
-**Kvar:** en allmän avdrag/tillägg-modul (utöver hyresjusteringar och
-kundprojekt, som redan fungerar), hyresgästportalens fakturavy, scanner →
-Accounted.
+hyresfakturering + kundprojektfakturering), webhook-grund, datamodellen
+förberedd för framtida samlingsfakturor, generell avdrag/tillägg-modul
+(kopplad till hyresfakturering).
+**Kvar:** avdrag/tillägg-modulen kopplad till kundprojekt/andra
+faktureringskällor, hyresgästportalens fakturavy, scanner → Accounted.
 
 ## Vad som finns
 
@@ -71,9 +72,31 @@ API i en Edge Function.
   `vihem_generate_rent_invoices` och V2 kan aldrig dubbelfakturera samma
   rad.
 
+`20260821130000_accounted_v2_project_billing_link.sql`: samma mönster som
+ovan fast för `vihem_project_invoice_basis.accounted_invoice_link_id`.
+
+`20260821140000_accounted_v2_invoice_link_many_sources.sql`: tar bort
+`vihem_accounted_invoice_links`s `UNIQUE (company_link_id,
+accounted_invoice_id)` (hittad dynamiskt via `information_schema`, inte ett
+gissat constraint-namn) och ersätter med ett vanligt index. Se avsnittet
+"Datamodellen stödjer nu framtida samlingsfakturor" nedan.
+
+`20260821150000_billing_adjustments.sql`:
+
+| Tabell | Syfte |
+| --- | --- |
+| `vihem_billing_adjustments` | avdrag/tillägg: `target_type`/`target_id` (generiskt, samma mönster som övriga länktabeller), signerat `amount` (positivt=tillägg, negativt=avdrag), engångs/återkommande, period-/antalsgränser, `applied_count` |
+| `vihem_billing_adjustment_applications` | konsumtionsspår — en rad skapas ENDAST efter att Accounted bekräftat fakturan; ingen "pending"-status finns i denna tabell |
+
+Samma mönster som övriga länktabeller: läsbara vid bolagsåtkomst,
+`vihem_billing_adjustments` skrivbar endast via
+`vihem-billing-adjustments`-funktionen (inte direkt av klient — se
+avsnittet om avdrag/tillägg nedan för varför), `..._applications` helt
+skrivskyddad för klienter.
+
 Migrationerna rör inte någon tabell som legacy-ekonomin skriver till för
 befintlig produktionsfakturering (`vihem_invoices`, `vihem_accounting_*`,
-etc.) — bara additiva kolumner/tabeller.
+`vihem_rent_adjustments`, etc.) — bara additiva kolumner/tabeller.
 
 ### Delad logik (`_shared/`)
 
@@ -82,6 +105,7 @@ etc.) — bara additiva kolumner/tabeller.
 - **`accounted-company-context.ts`** — laddar bolagskoppling + dekrypterad API-nyckel; enhetliga felkoder (`ACCOUNTED_NOT_LINKED`/`ACCOUNTED_LINK_DISABLED`/`ACCOUNTED_NO_API_KEY`) oavsett vilken funktion som anropar.
 - **`accounted-customer-resolver.ts`** — `resolveOrCreateAccountedCustomer`: kundlänkning/-skapande, delad mellan `vihem-accounted-customers` och batch-anrop (hyresfakturering, framtida kundprojekt) så logiken bara finns på ett ställe.
 - **`accounted-invoice-creator.ts`** — `createAccountedInvoiceForSource`: samma sak för fakturaskapande.
+- **`billing-adjustments.ts`** — `listEligibleAdjustments`/`buildAdjustmentLineItems`/`recordAdjustmentApplications`: avdrag & tillägg-logiken, se eget avsnitt nedan.
 - **`vihem-auth.ts`** — delat auth/behörighetshjälpmedel (JWT + `vihem_user_has_company_access`). Befintliga 30+ Edge Functions är **inte** omskrivna till detta.
 
 ### Edge Functions
@@ -89,8 +113,9 @@ etc.) — bara additiva kolumner/tabeller.
 - **`vihem-accounted-admin`** — `save_company_link`, `test_connection`, `register_webhooks`. Kräver `admin`-bolagsbehörighet.
 - **`vihem-accounted-customers`** — hittar befintlig kundkoppling eller skapar kunden i Accounted (idempotent, dry-run-stödd). Tunn wrapper runt den delade resolvern.
 - **`vihem-accounted-invoices`** — `create` (generisk, idempotent, dry-run-stödd) och `refresh_status`. Tunn wrapper runt den delade skaparen.
-- **`vihem-accounted-rent-billing`** — batchar fakturaskapande för en hel hyreskörning: för varje ej fakturerad rad, länka/skapa Accounted-kunden (`vihem_finance_customers`, via `finance_customer_id`) och skapa fakturan (en rad: grundhyra + hyresjusteringar, redan summerat av befintlig SQL). Partial-success-svar per rad, samma mönster som Accounteds egen `bulk-create`.
-- **`vihem-accounted-project-billing`** — skapar Accounted-fakturan för ett `ready_for_invoicing`-faktureringsunderlag från Kundprojekt. Återanvänder den befintliga SQL-funktionen `vihem_ensure_finance_customer_for_project` (samma match-eller-skapa-logik som legacy-RPC:n) för kundmatchning, kör som anropande användare (inte service-role) eftersom funktionen är `SECURITY DEFINER` och läser `auth.uid()` internt. Fakturarader byggs direkt från underlagets `ready`-rader (tid/material/ändringsorder/fast pris).
+- **`vihem-accounted-rent-billing`** — batchar fakturaskapande för en hel hyreskörning: för varje ej fakturerad rad, länka/skapa Accounted-kunden (`vihem_finance_customers`, via `finance_customer_id`), hämta gällande avdrag/tillägg för hyresförhållandet och perioden, och skapa fakturan (grundhyra + hyresjusteringar redan summerat av befintlig SQL, plus en rad per avdrag/tillägg). Partial-success-svar per rad, samma mönster som Accounteds egen `bulk-create`.
+- **`vihem-accounted-project-billing`** — skapar Accounted-fakturan för ett `ready_for_invoicing`-faktureringsunderlag från Kundprojekt. Återanvänder den befintliga SQL-funktionen `vihem_ensure_finance_customer_for_project` (samma match-eller-skapa-logik som legacy-RPC:n) för kundmatchning, kör som anropande användare (inte service-role) eftersom funktionen är `SECURITY DEFINER` och läser `auth.uid()` internt. Fakturarader byggs direkt från underlagets `ready`-rader (tid/material/ändringsorder/fast pris). Avdrag/tillägg är inte kopplat in här ännu.
+- **`vihem-billing-adjustments`** — `create`/`update` för avdrag/tillägg. Enda platsen som får skriva till `vihem_billing_adjustments`.
 - **`vihem-accounted-webhook`** — publik mottagare, HMAC-verifierad (`X-Gnubok-Signature`, Stripe-liknande schema), **ingen** Supabase-JWT. Måste deployas med `verify_jwt = false` (redan satt i `supabase/config.toml`).
 
 Ingen av dessa funktioner ger AI-tolkning eller PDF-generering själva — det
@@ -108,15 +133,17 @@ org-admin + organisationens `finance`-modul aktiverad
 Legacy `FinancePage.tsx` är oförändrad utöver att den nu kallas "legacy" i
 kommentarer/dokumentation — ingen kod i den filen är rörd.
 
-Sex flikar: Översikt, Bolagskoppling (spara URL/company-id/API-nyckel, testa
+Sju flikar: Översikt, Bolagskoppling (spara URL/company-id/API-nyckel, testa
 anslutning, registrera webhooks), **Fakturering** (hyra: välj hyresperiod →
 hämta körning från befintlig `vihem_create_rent_billing_run` →
 förhandsgranska mot Accounted som dry-run → skapa fakturor på riktigt, med
 resultat per rad), **Kundprojekt** (listar `ready_for_invoicing`-underlag
 oavsett projekt, förhandsgranska/skapa faktura per underlag — underlaget
-självt skapas fortfarande i Kundprojekt-sidan, orörd), Fakturor (läser
-`vihem_accounted_invoice_links`), och Kommande (platshållare för det som
-inte är byggt än).
+självt skapas fortfarande i Kundprojekt-sidan, orörd), **Avdrag & tillägg**
+(filtrerbar lista — Alla/Aktiva/Återkommande/Kommande/Pausade/
+Förbrukade-historik — plus ett skapa-formulär med hyresgästväljare; se eget
+avsnitt nedan), Fakturor (läser `vihem_accounted_invoice_links`), och
+Kommande (platshållare för det som inte är byggt än).
 
 Kundskapande i Accounted (steget innan fakturan) körs alltid på riktigt,
 även under en fakturas dry-run — att skapa en kundpost har ingen ekonomisk
@@ -200,12 +227,10 @@ kräver ett separat beslut och arbete i Accounted-repot.
    och hyresjusteringar. Elförbrukning/eldebitering är inte beräknad
    någonstans i kodbasen ännu (varken legacy eller V2) och ingår därför
    inte i vad som faktureras.
-2. En allmän avdrag & tillägg-modul enligt originalspecen (pending
-   adjustment, konsumeras först när Accounted bekräftat fakturan). Hyra har
-   redan ett fungerande, mer begränsat avdragsflöde
-   (`vihem_rent_adjustments`, tillämpas innan fakturan skapas, inte kopplat
-   till bekräftelse-semantiken) — se avsnittet nedan om varför det räckte
-   för hyresfakturering.
+2. ~~En allmän avdrag & tillägg-modul~~ Klart (`vihem_billing_adjustments`,
+   `vihem-billing-adjustments`), kopplad in i hyresfakturering. Inte kopplad
+   till kundprojekt eller andra faktureringskällor än — se eget avsnitt
+   nedan.
 3. ~~Kundprojektfakturering mot den nya vägen~~ Klart
    (`vihem-accounted-project-billing`), men bara ett underlag i taget —
    legacy `vihem_create_invoice_from_project_basis_batch`s förmåga att slå
@@ -242,22 +267,87 @@ fungerar oförändrat den dagen flera rader delar samma faktura. Själva
 sammanslagningslogiken (vilka underlag som får slås ihop, hur en
 delbetalning fördelas tillbaka till respektive underlag) är **inte** byggd.
 
-### Hyresfakturering: hur avdrag/tillägg faktiskt löstes
+### Avdrag & tillägg (`vihem_billing_adjustments`)
 
-Originalspecen (avsnitt 6) beskrev en generell pending-adjustment-modell där
-avdraget markeras förbrukat först när Accounted bekräftat rätt faktura.
-Hyresmodulen har redan en egen, enklare mekanism sedan tidigare
-(`vihem_rent_adjustments` + en trigger som summerar aktiva justeringar in i
-`vihem_rent_billing_items.amount` **vid körningsgenerering**, dvs innan
-Accounted är inblandat alls). Den mekanismen återanvänds oförändrad: en
-justering påverkar bara `draft`-rader (`item.status = 'draft'`), och en rad
-byter status till `invoiced` i samma steg som `accounted_invoice_link_id`
-sätts — så en justering kan aldrig ändra beloppet på en rad som redan
-skickats till Accounted. Det uppfyller samma säkerhetsegenskap
-("konsumeras inte i förtid, kan inte ändras i efterhand") utan att en ny
-generell modul behövde byggas för hyra specifikt. Den generella modulen
-(punkt 2 ovan) är kvar för andra faktureringskällor som saknar en
-motsvarande mekanism.
+**Datamodell.** En rad per avdrag/tillägg i `vihem_billing_adjustments`:
+
+- `target_type`/`target_id` — generiskt precis som `vihem_accounted_
+  invoice_links.source_type`/`source_id`: `tenancy` (enda konsumenten
+  hittills), `customer_project`, `finance_customer` finns med i
+  CHECK-listan för framtida bruk men läses inte av något ännu.
+- `amount` — **signerat, EN representation**: positivt = tillägg, negativt
+  = avdrag. Ingen separat kind/riktning-kolumn; tecknet är hela modellen,
+  i både databas och UI (röd/grön text + `+`/`-` i Ekonomi V2).
+- `adjustment_type`: `one_time` eller `recurring`.
+- `start_period` — för engångsposter: ett golv ("gäller från och med
+  denna tidpunkt, tillämpas på målets nästa faktura oavsett kalendermånad"
+  — matchar "avdrag på nästa hyra", inte en specifik period). För
+  återkommande: första giltiga period.
+- `end_period` — endast återkommande, valfritt slutdatum.
+- `max_occurrences` — endast återkommande, valfritt tak ("X
+  faktureringstillfällen"). Engångsposter sätts till `max_occurrences = 1`
+  av API-lagret (inte ett DB-default), så behörighetsfrågan i
+  `listEligibleAdjustments` blir identisk för båda typerna.
+- `applied_count`, `last_applied_period` — uppdateras endast av
+  `recordAdjustmentApplications`, aldrig av klienten.
+- `status`: `active` → `paused`/`cancelled` (klientstyrt) eller `completed`
+  (endast systemet, när `applied_count` når `max_occurrences` eller
+  `end_period` passeras).
+- `description`, `created_by`, `created_at`.
+
+**Återkommande poster.** `listEligibleAdjustments` väljer rader där
+`status = 'active'`, `start_period <= period`, `end_period` är null eller
+`>= period`, `applied_count < max_occurrences` (eller `max_occurrences`
+är null), och `last_applied_period` skiljer sig från `period` (skydd mot
+dubbel tillämpning samma period). Samma fråga täcker engångs- och
+återkommande poster tack vare `max_occurrences = 1`-konventionen ovan.
+
+**Hur de väljs till en faktureringskörning.** `vihem-accounted-rent-billing`
+anropar `listEligibleAdjustments({company_id, target_type:'tenancy',
+target_id: item.tenancy_id, period: item.rent_period})` för varje
+hyresrad, **direkt innan** Accounted-anropet — inte inbakat i själva
+körningen (`vihem_create_rent_billing_run`), så ett avdrag skapat efter att
+körningen genererats men innan fakturan skickas fångas ändå upp.
+Avdragen blir egna radposter i samma Accounted-faktura som grundhyran
+(`buildAdjustmentLineItems`), oavsett dry-run eller inte — en
+förhandsgranskning ska visa exakt vad som skulle faktureras.
+
+**Exakt när de markeras konsumerade.** ENDAST efter att
+`createAccountedInvoiceForSource` returnerat ett bekräftat (icke-dry-run,
+icke-redan-fakturerat) resultat — dvs. efter att Accounted-anropet lyckats.
+Vid fel (Accounted svarar med fel, timeout, nätverksfel) kastas ett
+exception innan `recordAdjustmentApplications` någonsin anropas: inget
+skrivs, avdraget ligger kvar exakt som innan. Det finns inget
+"pending"-läge i modellen — konsumtion är antingen "hände inte alls" (inget
+skrivet) eller "hände och är bekräftat" (en rad i
+`vihem_billing_adjustment_applications`). Detta skiljer sig medvetet från
+den äldre `vihem_rent_adjustments`-mekanismen (kvar orörd för legacy), som
+tillämpar avdrag redan vid körningsgenerering via en databastrigger — långt
+innan något Accounted-anrop existerar och därför omöjlig att koppla till
+en bekräftelse. De två systemen kan köras sida vid sida (olika rader,
+ingen konflikt), men om en organisation råkar använda båda för samma
+hyresförhållande/period hamnar båda avdragen på fakturan — dokumenterat
+här som en verklig men osannolik källa till förvirring, inte tekniskt
+förhindrad.
+
+**Koppling till Accounted-fakturan.** Varje lyckad tillämpning skapar en
+rad i `vihem_billing_adjustment_applications` med `adjustment_id`,
+`billing_period`, `source_type`/`source_id` (samma vokabulär som
+`vihem_accounted_invoice_links`) och `accounted_invoice_link_id`
+(NOT NULL — raden existerar bara för bekräftade fall) plus ett snapshot av
+`amount` (så historik inte ändras om avdraget redigeras efteråt). Frågan
+"Avdrag 600 kr användes på Accounted-faktura X" besvaras genom att slå upp
+`accounted_invoice_link_id` → `vihem_accounted_invoice_links.accounted_
+invoice_id`/`accounted_invoice_number`. Ekonomi V2:s flik "Förbrukade/
+historik" visar detta direkt.
+
+**Känd begränsning (dokumenterad, inte löst):** ingen radlåsning över
+Accounted-anropet. Om två administratörer samtidigt startar fakturering
+för samma hyresgäst/period skulle båda i teorin kunna läsa samma
+"outnyttjade" avdrag och inkludera det på två olika fakturaförsök. Givet
+att hyreskörningen körs sekventiellt (en post i taget) och det i praktiken
+är en administratör som klickar "skapa fakturor", bedöms detta som en låg
+praktisk risk som inte motiverar en distribuerad låsning i detta skede.
 
 ## Öppna frågor som kräver verksamhetsbeslut
 
@@ -276,6 +366,15 @@ motsvarande mekanism.
    pekar på en publik, icke-privat adress vid registrering).
 5. Hur hämtas varje bolags invoice-inbox-mejladress ur Accounted i praktiken
    (manuellt kopierat av admin, eller finns ett sätt att läsa det via API)?
+6. Ska avdrag/tillägg kunna skapas direkt från en hyresgästs/avtals egen
+   sida (t.ex. `AdminTenantsPage.tsx`/`ApartmentPage.tsx`), inte bara från
+   Ekonomi V2? Uppdraget öppnade för det "om befintlig arkitektur gör detta
+   rimligt" — den här etappen byggde bara Ekonomi V2-vägen, eftersom de
+   sidorna är aktivt använda legacy-sidor och en till ingångspunkt hade
+   krävt antingen att dela UI-logik in i dem (mer sidyta att röra) eller
+   duplicera skapa-formuläret (precis det centraliseringen ska undvika).
+   Om det önskas är den enkla lösningen en länk från den sidan till Ekonomi
+   V2:s avdragsflik med hyresgästen förvald, inte en ny formulärimplementation.
 
 ## Felhantering
 

@@ -17,11 +17,13 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, corsHeaders, errorJson, isAuthContext, json, requireCompanyAccess } from "../_shared/vihem-auth.ts";
 import { AccountedContextError, loadAccountedCompanyContext } from "../_shared/accounted-company-context.ts";
 import { resolveOrCreateAccountedCustomer, type VihemCustomerInput } from "../_shared/accounted-customer-resolver.ts";
-import { createAccountedInvoiceForSource } from "../_shared/accounted-invoice-creator.ts";
+import { createAccountedInvoiceForSource, type AccountedInvoiceItemInput } from "../_shared/accounted-invoice-creator.ts";
 import { AccountedApiError } from "../_shared/accounted-rest-client.ts";
+import { buildAdjustmentLineItems, listEligibleAdjustments, recordAdjustmentApplications } from "../_shared/billing-adjustments.ts";
 
 interface RentBillingItemRow {
   id: string;
+  tenancy_id: string;
   finance_customer_id: string | null;
   rent_period: string;
   due_date: string;
@@ -37,6 +39,7 @@ interface ItemResult {
   dry_run?: boolean;
   already_invoiced?: boolean;
   accounted_invoice_id?: string;
+  adjustments_applied?: number;
   error?: { code: string; message: string };
 }
 
@@ -82,7 +85,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: items, error: itemsErr } = await auth.adminClient
     .from("vihem_rent_billing_items")
-    .select("id, finance_customer_id, rent_period, due_date, description, amount, vat_rate, total_amount")
+    .select("id, tenancy_id, finance_customer_id, rent_period, due_date, description, amount, vat_rate, total_amount")
     .eq("run_id", runId)
     .eq("status", "draft")
     .is("invoice_id", null)
@@ -147,6 +150,29 @@ Deno.serve(async (req: Request) => {
         throw new Error("Oväntat dry-run-svar vid kundskapande.");
       }
 
+      // Avdrag & tillägg: read fresh here (not baked into the run at
+      // generation time), so an adjustment created after the run was
+      // generated but before this invoice is sent still gets included.
+      // Included in the invoice payload regardless of dry-run (an accurate
+      // preview needs them); ONLY recorded as consumed after a real,
+      // confirmed (non-dry-run, newly-created) invoice below.
+      const eligibleAdjustments = await listEligibleAdjustments(auth.adminClient, {
+        companyId,
+        targetType: "tenancy",
+        targetId: item.tenancy_id,
+        period: item.rent_period,
+      });
+      const items: AccountedInvoiceItemInput[] = [
+        {
+          description: item.description || `Hyra ${item.rent_period}`,
+          quantity: 1,
+          unit: "mån",
+          unit_price: item.amount,
+          vat_rate: item.vat_rate,
+        },
+        ...buildAdjustmentLineItems(eligibleAdjustments),
+      ];
+
       const invoiceDate = new Date().toISOString().slice(0, 10);
       const invoiceResult = await createAccountedInvoiceForSource(auth.adminClient, context.link, context.apiKey, {
         sourceType: "rental_billing",
@@ -158,25 +184,30 @@ Deno.serve(async (req: Request) => {
           invoiceDate,
           dueDate: item.due_date,
           currency: "SEK",
-          items: [
-            {
-              description: item.description || `Hyra ${item.rent_period}`,
-              quantity: 1,
-              unit: "mån",
-              unit_price: item.amount,
-              vat_rate: item.vat_rate,
-            },
-          ],
+          items,
         },
       });
 
       if ("dry_run" in invoiceResult) {
-        results.push({ item_id: item.id, ok: true, dry_run: true });
+        results.push({ item_id: item.id, ok: true, dry_run: true, adjustments_applied: eligibleAdjustments.length });
         continue;
       }
       if ("already_invoiced" in invoiceResult) {
         results.push({ item_id: item.id, ok: true, already_invoiced: true, accounted_invoice_id: invoiceResult.link.accounted_invoice_id });
         continue;
+      }
+
+      // Invoice is confirmed created in Accounted from here on -- this is
+      // the ONLY point where adjustments may be marked consumed.
+      if (eligibleAdjustments.length > 0) {
+        await recordAdjustmentApplications(auth.adminClient, {
+          organisationId: context.link.organisation_id,
+          adjustments: eligibleAdjustments,
+          billingPeriod: item.rent_period,
+          sourceType: "rental_billing",
+          sourceId: item.id,
+          accountedInvoiceLinkId: invoiceResult.link.id,
+        });
       }
 
       const { error: updateErr } = await auth.adminClient
@@ -197,7 +228,12 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      results.push({ item_id: item.id, ok: true, accounted_invoice_id: invoiceResult.link.accounted_invoice_id });
+      results.push({
+        item_id: item.id,
+        ok: true,
+        accounted_invoice_id: invoiceResult.link.accounted_invoice_id,
+        adjustments_applied: eligibleAdjustments.length,
+      });
     } catch (err) {
       if (err instanceof AccountedApiError) {
         results.push({ item_id: item.id, ok: false, error: { code: err.code, message: err.message } });

@@ -6,47 +6,56 @@
 //
 // This stage ships: company <-> Accounted linking (with connectivity test +
 // webhook registration), a read-only projection of invoices Finance V2 has
-// created, and rent billing (reuses the existing VI-HEM rent-run/adjustments
-// SQL, only invoice creation goes through Accounted). Avdrag & tillägg as a
-// general module, customer-project invoicing, portal sync and the
-// scanner->Accounted bridge are deliberately not wired up yet -- see
-// docs/accounted-v2-integration.md.
+// created, rent billing, customer-project billing, and a general-purpose
+// avdrag & tillägg module (currently wired into rent billing only -- see
+// docs/accounted-v2-integration.md). Portal sync and the scanner->Accounted
+// bridge are deliberately not wired up yet.
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
-import { Badge, Button, Card, EmptyState, Input, LoadingPage, PageHeader, Select } from '../../../components/ui';
-import { formatCurrency, formatDateTime } from '../../../lib/utils';
+import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select } from '../../../components/ui';
+import { formatCurrency, formatDate, formatDateTime } from '../../../lib/utils';
 import {
   AccountedIntegrationError,
+  createBillingAdjustment,
   createOrGetRentBillingRun,
   createProjectBasisInvoice,
   createRentBillingInvoices,
   getCompanyLink,
+  listActiveTenancies,
+  listBillingAdjustmentApplications,
+  listBillingAdjustments,
   listInvoiceableProjectBases,
   listInvoiceLinks,
   listRentBillingItems,
   registerWebhooks,
   saveCompanyLink,
   testConnection,
+  updateBillingAdjustmentStatus,
 } from '../api';
 import type {
   AccountedCompanyLink,
   AccountedInvoiceLink,
+  BillingAdjustment,
+  BillingAdjustmentApplication,
+  BillingAdjustmentKind,
   ProjectInvoiceBasis,
   RentBillingItem,
   RentBillingItemResult,
   RentBillingRun,
+  TenancyOption,
 } from '../types';
-import { Briefcase, CalendarClock, Landmark, Link2, ListChecks, RefreshCw, Sparkles } from 'lucide-react';
+import { Briefcase, CalendarClock, Landmark, Link2, ListChecks, MinusCircle, RefreshCw, Sparkles } from 'lucide-react';
 
 type VihemCompany = { id: string; name: string; legal_name: string };
-type TabKey = 'overview' | 'company-link' | 'billing' | 'project-billing' | 'invoices' | 'upcoming';
+type TabKey = 'overview' | 'company-link' | 'billing' | 'project-billing' | 'adjustments' | 'invoices' | 'upcoming';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Översikt' },
   { key: 'company-link', label: 'Bolagskoppling' },
   { key: 'billing', label: 'Fakturering' },
   { key: 'project-billing', label: 'Kundprojekt' },
+  { key: 'adjustments', label: 'Avdrag & tillägg' },
   { key: 'invoices', label: 'Fakturor' },
   { key: 'upcoming', label: 'Kommande' },
 ];
@@ -168,6 +177,7 @@ export function FinanceV2Page() {
             )}
             {tab === 'billing' && <RentBillingTab companyId={companyId} companyLink={companyLink} />}
             {tab === 'project-billing' && <ProjectBillingTab companyId={companyId} companyLink={companyLink} />}
+            {tab === 'adjustments' && <AdjustmentsTab companyId={companyId} />}
             {tab === 'invoices' && <InvoicesTab companyLink={companyLink} />}
             {tab === 'upcoming' && <UpcomingTab />}
           </div>
@@ -614,6 +624,361 @@ function ProjectBillingTab({ companyId, companyLink }: { companyId: string; comp
   );
 }
 
+type AdjustmentFilter = 'all' | 'active' | 'recurring' | 'upcoming' | 'paused' | 'completed';
+
+const ADJUSTMENT_FILTERS: { key: AdjustmentFilter; label: string }[] = [
+  { key: 'all', label: 'Alla' },
+  { key: 'active', label: 'Aktiva' },
+  { key: 'recurring', label: 'Återkommande' },
+  { key: 'upcoming', label: 'Kommande' },
+  { key: 'paused', label: 'Pausade' },
+  { key: 'completed', label: 'Förbrukade/historik' },
+];
+
+function matchesAdjustmentFilter(adjustment: BillingAdjustment, filter: AdjustmentFilter): boolean {
+  const today = new Date().toISOString().slice(0, 10);
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'active':
+      return adjustment.status === 'active';
+    case 'recurring':
+      return adjustment.adjustment_type === 'recurring' && adjustment.status !== 'cancelled';
+    case 'upcoming':
+      return adjustment.status === 'active' && adjustment.start_period > today;
+    case 'paused':
+      return adjustment.status === 'paused';
+    case 'completed':
+      return adjustment.status === 'completed';
+    default:
+      return true;
+  }
+}
+
+function AdjustmentsTab({ companyId }: { companyId: string }) {
+  const [adjustments, setAdjustments] = useState<BillingAdjustment[]>([]);
+  const [applications, setApplications] = useState<BillingAdjustmentApplication[]>([]);
+  const [tenancies, setTenancies] = useState<TenancyOption[]>([]);
+  const [filter, setFilter] = useState<AdjustmentFilter>('active');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!companyId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const [adjustmentData, tenancyData] = await Promise.all([
+        listBillingAdjustments(companyId),
+        listActiveTenancies(companyId),
+      ]);
+      setAdjustments(adjustmentData);
+      setTenancies(tenancyData);
+      const applicationData = await listBillingAdjustmentApplications(adjustmentData.map((a) => a.id));
+      setApplications(applicationData);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [companyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const tenancyLabel = (tenancyId: string) => {
+    const t = tenancies.find((x) => x.id === tenancyId);
+    if (!t) return tenancyId.slice(0, 8);
+    const apt = t.apartment?.apartment_number ? ` (lgh ${t.apartment.apartment_number})` : '';
+    return `${t.tenant?.name ?? 'Okänd hyresgäst'}${apt}`;
+  };
+
+  const handleSetStatus = async (id: string, status: 'active' | 'paused' | 'cancelled') => {
+    setBusyId(id);
+    try {
+      await updateBillingAdjustmentStatus({ companyId, id, status });
+      await load();
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const filtered = adjustments.filter((a) => matchesAdjustmentFilter(a, filter));
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2">
+            {ADJUSTMENT_FILTERS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setFilter(f.key)}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  filter === f.key ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="secondary" size="sm" onClick={load} loading={loading}>
+              <RefreshCw className="mr-1 h-3.5 w-3.5" /> Uppdatera
+            </Button>
+            <Button size="sm" onClick={() => setCreateOpen(true)} disabled={tenancies.length === 0}>
+              + Nytt avdrag/tillägg
+            </Button>
+          </div>
+        </div>
+        {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
+      </Card>
+
+      <Card>
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon={MinusCircle}
+            title="Inga poster"
+            description="Avdrag och tillägg som skapas här inkluderas automatiskt nästa gång hyresgästens hyra faktureras via Accounted."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase text-slate-500">
+                  <th className="py-2 pr-4">Hyresgäst</th>
+                  <th className="py-2 pr-4">Beskrivning</th>
+                  <th className="py-2 pr-4">Belopp</th>
+                  <th className="py-2 pr-4">Typ</th>
+                  <th className="py-2 pr-4">Period</th>
+                  <th className="py-2 pr-4">Använt</th>
+                  <th className="py-2 pr-4">Status</th>
+                  <th className="py-2 pr-4" />
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((adjustment) => (
+                  <tr key={adjustment.id} className="border-b border-slate-100">
+                    <td className="py-2 pr-4">{adjustment.target_type === 'tenancy' ? tenancyLabel(adjustment.target_id) : adjustment.target_id.slice(0, 8)}</td>
+                    <td className="py-2 pr-4">{adjustment.description || '–'}</td>
+                    <td className={`py-2 pr-4 font-medium ${adjustment.amount < 0 ? 'text-red-700' : 'text-green-700'}`}>
+                      {adjustment.amount > 0 ? '+' : ''}{formatCurrency(adjustment.amount)}
+                    </td>
+                    <td className="py-2 pr-4">{adjustment.adjustment_type === 'recurring' ? 'Återkommande' : 'Engångs'}</td>
+                    <td className="py-2 pr-4 text-xs text-slate-500">
+                      {formatDate(adjustment.start_period)}
+                      {adjustment.end_period ? ` – ${formatDate(adjustment.end_period)}` : adjustment.adjustment_type === 'recurring' ? ' – tills vidare' : ''}
+                    </td>
+                    <td className="py-2 pr-4 text-xs text-slate-500">
+                      {adjustment.applied_count}{adjustment.max_occurrences ? ` / ${adjustment.max_occurrences}` : ''}
+                    </td>
+                    <td className="py-2 pr-4">
+                      <Badge text={ADJUSTMENT_STATUS_LABELS[adjustment.status] ?? adjustment.status} />
+                    </td>
+                    <td className="py-2 pr-4">
+                      {adjustment.status === 'active' && (
+                        <div className="flex gap-2">
+                          <Button variant="secondary" size="sm" loading={busyId === adjustment.id} onClick={() => handleSetStatus(adjustment.id, 'paused')}>
+                            Pausa
+                          </Button>
+                          <Button variant="secondary" size="sm" loading={busyId === adjustment.id} onClick={() => handleSetStatus(adjustment.id, 'cancelled')}>
+                            Avbryt
+                          </Button>
+                        </div>
+                      )}
+                      {adjustment.status === 'paused' && (
+                        <div className="flex gap-2">
+                          <Button variant="secondary" size="sm" loading={busyId === adjustment.id} onClick={() => handleSetStatus(adjustment.id, 'active')}>
+                            Aktivera
+                          </Button>
+                          <Button variant="secondary" size="sm" loading={busyId === adjustment.id} onClick={() => handleSetStatus(adjustment.id, 'cancelled')}>
+                            Avbryt
+                          </Button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {filter === 'completed' && applications.length > 0 && (
+        <Card>
+          <p className="mb-3 text-sm font-medium text-slate-700">Historik: vad som faktiskt skickades till Accounted</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase text-slate-500">
+                  <th className="py-2 pr-4">Period</th>
+                  <th className="py-2 pr-4">Belopp</th>
+                  <th className="py-2 pr-4">Använt av</th>
+                  <th className="py-2 pr-4">Tidpunkt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {applications.map((app) => (
+                  <tr key={app.id} className="border-b border-slate-100">
+                    <td className="py-2 pr-4">{app.billing_period ? formatDate(app.billing_period) : '–'}</td>
+                    <td className="py-2 pr-4">{formatCurrency(app.amount)}</td>
+                    <td className="py-2 pr-4 text-xs text-slate-500">{app.source_type} / {app.source_id.slice(0, 8)}</td>
+                    <td className="py-2 pr-4 text-xs text-slate-500">{formatDateTime(app.applied_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      <CreateAdjustmentModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        companyId={companyId}
+        tenancies={tenancies}
+        onCreated={() => {
+          setCreateOpen(false);
+          load();
+        }}
+      />
+    </div>
+  );
+}
+
+const ADJUSTMENT_STATUS_LABELS: Record<string, string> = {
+  active: 'Aktiv',
+  paused: 'Pausad',
+  cancelled: 'Avbruten',
+  completed: 'Förbrukad',
+};
+
+function CreateAdjustmentModal({
+  open,
+  onClose,
+  companyId,
+  tenancies,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  companyId: string;
+  tenancies: TenancyOption[];
+  onCreated: () => void;
+}) {
+  const [tenancyId, setTenancyId] = useState('');
+  const [kind, setKind] = useState<BillingAdjustmentKind>('one_time');
+  const [direction, setDirection] = useState<'deduction' | 'addition'>('deduction');
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [startPeriod, setStartPeriod] = useState(new Date().toISOString().slice(0, 10));
+  const [endPeriod, setEndPeriod] = useState('');
+  const [maxOccurrences, setMaxOccurrences] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open && tenancies.length > 0 && !tenancyId) setTenancyId(tenancies[0].id);
+  }, [open, tenancies, tenancyId]);
+
+  const handleSave = async () => {
+    const parsedAmount = Number(amount.replace(',', '.'));
+    if (!tenancyId) { setError('Välj en hyresgäst.'); return; }
+    if (!Number.isFinite(parsedAmount) || parsedAmount === 0) { setError('Ange ett belopp skilt från 0.'); return; }
+
+    setSaving(true);
+    setError('');
+    try {
+      await createBillingAdjustment({
+        companyId,
+        targetType: 'tenancy',
+        targetId: tenancyId,
+        adjustmentType: kind,
+        amount: direction === 'deduction' ? -Math.abs(parsedAmount) : Math.abs(parsedAmount),
+        description,
+        startPeriod,
+        endPeriod: kind === 'recurring' && endPeriod ? endPeriod : null,
+        maxOccurrences: kind === 'recurring' && maxOccurrences ? Number(maxOccurrences) : null,
+      });
+      setAmount('');
+      setDescription('');
+      onCreated();
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Nytt avdrag/tillägg">
+      <div className="space-y-4">
+        <Select
+          label="Hyresgäst"
+          value={tenancyId}
+          onChange={(e) => setTenancyId(e.target.value)}
+          options={tenancies.map((t) => ({
+            value: t.id,
+            label: `${t.tenant?.name ?? 'Okänd'}${t.apartment?.apartment_number ? ` (lgh ${t.apartment.apartment_number})` : ''}`,
+          }))}
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <Select
+            label="Typ"
+            value={direction}
+            onChange={(e) => setDirection(e.target.value as 'deduction' | 'addition')}
+            options={[
+              { value: 'deduction', label: 'Avdrag' },
+              { value: 'addition', label: 'Tillägg' },
+            ]}
+          />
+          <Select
+            label="Frekvens"
+            value={kind}
+            onChange={(e) => setKind(e.target.value as BillingAdjustmentKind)}
+            options={[
+              { value: 'one_time', label: 'Engångs (nästa faktura)' },
+              { value: 'recurring', label: 'Återkommande' },
+            ]}
+          />
+        </div>
+        <Input label="Belopp (kr)" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="600" />
+        <Input label="Anledning/beskrivning" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="T.ex. trasig diskmaskin" />
+        <Input
+          label={kind === 'recurring' ? 'Startperiod' : 'Tidigast (nästa faktura på eller efter detta datum)'}
+          type="date"
+          value={startPeriod}
+          onChange={(e) => setStartPeriod(e.target.value)}
+        />
+        {kind === 'recurring' && (
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Slutperiod (valfritt)" type="date" value={endPeriod} onChange={(e) => setEndPeriod(e.target.value)} />
+            <Input
+              label="Max antal tillfällen (valfritt)"
+              inputMode="numeric"
+              value={maxOccurrences}
+              onChange={(e) => setMaxOccurrences(e.target.value)}
+              placeholder="Obegränsat"
+            />
+          </div>
+        )}
+        {error && <p className="text-sm text-red-700">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="secondary" onClick={onClose}>Avbryt</Button>
+          <Button onClick={handleSave} loading={saving}>Skapa</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function InvoicesTab({ companyLink }: { companyLink: AccountedCompanyLink | null }) {
   const [invoices, setInvoices] = useState<AccountedInvoiceLink[]>([]);
   const [loading, setLoading] = useState(false);
@@ -701,7 +1066,7 @@ function UpcomingTab() {
       <EmptyState
         icon={Sparkles}
         title="Kommande i Finance V2"
-        description="En allmän avdrag & tillägg-modul (utöver hyresjusteringar och kundprojekt, som redan fungerar), hyresgästportalens fakturavy och scanner → Accounted byggs stegvis ovanpå den här grunden. Avbetalningsplaner hanteras tills vidare i Ekonomi (legacy)."
+        description="Hyresgästportalens fakturavy och scanner → Accounted byggs stegvis ovanpå den här grunden. Avdrag & tillägg är kopplat till hyresfakturering; kundprojekt och andra faktureringskällor kan koppla in samma modul senare. Avbetalningsplaner hanteras tills vidare i Ekonomi (legacy)."
       />
     </Card>
   );

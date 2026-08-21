@@ -144,6 +144,49 @@ export interface ProjectInvoiceBasis {
   project?: { title?: string; name?: string } | null;
 }
 
+// ── Billing adjustments (avdrag & tillägg) ───────────────────────────────
+// Amount sign is the model: positive = tillägg, negative = avdrag.
+
+export type BillingAdjustmentTargetType = 'tenancy' | 'customer_project' | 'finance_customer';
+export type BillingAdjustmentKind = 'one_time' | 'recurring';
+export type BillingAdjustmentStatus = 'active' | 'paused' | 'cancelled' | 'completed';
+
+export interface BillingAdjustment {
+  id: string;
+  organisation_id: string;
+  company_id: string;
+  target_type: BillingAdjustmentTargetType;
+  target_id: string;
+  adjustment_type: BillingAdjustmentKind;
+  amount: number;
+  vat_rate: number;
+  description: string;
+  status: BillingAdjustmentStatus;
+  start_period: string;
+  end_period: string | null;
+  max_occurrences: number | null;
+  applied_count: number;
+  last_applied_period: string | null;
+  created_at: string;
+}
+
+export interface BillingAdjustmentApplication {
+  id: string;
+  adjustment_id: string;
+  billing_period: string | null;
+  source_type: string;
+  source_id: string;
+  accounted_invoice_link_id: string;
+  amount: number;
+  applied_at: string;
+}
+
+export interface TenancyOption {
+  id: string;
+  tenant: { name: string } | null;
+  apartment: { apartment_number: string } | null;
+}
+
 /** Structured error shape shared with Accounted's own v1 error envelope
  * (`{ error: { code, message, recovery_hint, details } }`), so the UI can
  * render one consistent error component for both local and upstream

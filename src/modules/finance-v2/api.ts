@@ -17,10 +17,15 @@ import type {
   AccountedCustomerSourceType,
   AccountedInvoiceLink,
   AccountedInvoiceSourceType,
+  BillingAdjustment,
+  BillingAdjustmentApplication,
+  BillingAdjustmentKind,
+  BillingAdjustmentTargetType,
   ProjectInvoiceBasis,
   RentBillingItem,
   RentBillingItemResult,
   RentBillingRun,
+  TenancyOption,
 } from './types';
 
 export class AccountedIntegrationError extends Error {
@@ -279,4 +284,81 @@ export async function createProjectBasisInvoice(params: {
     basis_id: params.basisId,
     dry_run: params.dryRun ?? false,
   });
+}
+
+// ── Billing adjustments (avdrag & tillägg) ───────────────────────────────
+// Writes always go through vihem-billing-adjustments (RLS blocks direct
+// client writes on this table); reads go straight to the table since it's
+// non-sensitive and company-scoped by RLS.
+
+export async function listBillingAdjustments(companyId: string): Promise<BillingAdjustment[]> {
+  const { data, error } = await supabase
+    .from('vihem_billing_adjustments')
+    .select('*')
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false });
+  if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
+  return (data ?? []) as BillingAdjustment[];
+}
+
+export async function listBillingAdjustmentApplications(adjustmentIds: string[]): Promise<BillingAdjustmentApplication[]> {
+  if (adjustmentIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('vihem_billing_adjustment_applications')
+    .select('*')
+    .in('adjustment_id', adjustmentIds)
+    .order('applied_at', { ascending: false });
+  if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
+  return (data ?? []) as BillingAdjustmentApplication[];
+}
+
+export async function createBillingAdjustment(params: {
+  companyId: string;
+  targetType: BillingAdjustmentTargetType;
+  targetId: string;
+  adjustmentType: BillingAdjustmentKind;
+  amount: number;
+  vatRate?: number;
+  description?: string;
+  startPeriod?: string;
+  endPeriod?: string | null;
+  maxOccurrences?: number | null;
+}): Promise<BillingAdjustment> {
+  return invoke<{ data: BillingAdjustment }>('vihem-billing-adjustments', {
+    action: 'create',
+    company_id: params.companyId,
+    target_type: params.targetType,
+    target_id: params.targetId,
+    adjustment_type: params.adjustmentType,
+    amount: params.amount,
+    vat_rate: params.vatRate ?? 0,
+    description: params.description ?? '',
+    start_period: params.startPeriod,
+    end_period: params.endPeriod,
+    max_occurrences: params.maxOccurrences,
+  }).then((res) => res.data);
+}
+
+export async function updateBillingAdjustmentStatus(params: {
+  companyId: string;
+  id: string;
+  status: 'active' | 'paused' | 'cancelled';
+}): Promise<BillingAdjustment> {
+  return invoke<{ data: BillingAdjustment }>('vihem-billing-adjustments', {
+    action: 'update',
+    company_id: params.companyId,
+    id: params.id,
+    status: params.status,
+  }).then((res) => res.data);
+}
+
+export async function listActiveTenancies(companyId: string): Promise<TenancyOption[]> {
+  const { data, error } = await supabase
+    .from('vihem_tenancies')
+    .select('id, tenant:tenant_id(name), apartment:apartment_id(apartment_number)')
+    .eq('company_id', companyId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false });
+  if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
+  return (data ?? []) as unknown as TenancyOption[];
 }
