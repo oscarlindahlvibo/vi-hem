@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { createAccountedService } from "../_shared/accounted.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -49,12 +50,20 @@ Deno.serve(async (req: Request) => {
 
     const provider = integration.provider || "manual";
     const isLocalExport = ["manual", "sie", "none"].includes(provider);
-    const missingSecret = !isLocalExport && !integration.has_secret;
+    const secret = !isLocalExport && integration.has_secret
+      ? await loadIntegrationSecret(serviceClient, integration.id)
+      : "";
+    const missingSecret = !isLocalExport && !secret;
+    let adapterMessage = "";
+    if (!missingSecret && provider === "accounted") {
+      await createAccountedService(integration, secret).testConnection();
+      adapterMessage = " Accounted API svarade korrekt.";
+    }
     const message = missingSecret
       ? `Saknar sparad token för ${provider}.`
       : isLocalExport
         ? `${provider === "sie" ? "SIE" : "Manuell export"} är redo.`
-        : `Token finns för ${provider}. Riktig API-verifiering byggs i adaptersteget.`;
+        : `Token finns för ${provider}.${adapterMessage || " Kopplingen är redo."}`;
 
     const { error: updateError } = await serviceClient
       .from("vihem_accounting_integrations")
@@ -100,6 +109,25 @@ async function userCanManageIntegration(serviceClient: any, profile: any, compan
 
   if (error) throw error;
   return (data || []).length > 0;
+}
+
+async function loadIntegrationSecret(serviceClient: any, integrationId: string) {
+  const encryptionSecret = Deno.env.get("VIHEM_ACCOUNTING_SECRET_KEY") || "";
+  if (!encryptionSecret) return "";
+  const { data, error } = await serviceClient
+    .from("vihem_accounting_integration_secrets")
+    .select("encrypted_secret")
+    .eq("integration_id", integrationId)
+    .eq("secret_name", "primary_token")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.encrypted_secret) return "";
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.digest("SHA-256", encoder.encode(encryptionSecret));
+  const key = await crypto.subtle.importKey("raw", keyMaterial, "AES-GCM", false, ["decrypt"]);
+  const bytes = Uint8Array.from(atob(String(data.encrypted_secret)), char => char.charCodeAt(0));
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes.slice(0, 12) }, key, bytes.slice(12));
+  return new TextDecoder().decode(plain);
 }
 
 function json(data: Record<string, unknown>, status = 200) {

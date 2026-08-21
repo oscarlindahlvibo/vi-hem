@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { createAccountedService } from "../_shared/accounted.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -124,13 +125,15 @@ async function processQueueItem(serviceClient: any, item: any) {
     }
 
     const secret = await loadIntegrationSecret(serviceClient, item.integration.id);
-    if (!secret && item.integration.provider !== "accounted" && item.integration.provider !== "spiris") {
+    if (!secret) {
       throw new Error(`Saknar token för ${provider}. Lägg in token på bokföringskopplingen eller exportera via CSV/SIE.`);
     }
 
     const result = provider === "fortnox"
       ? await syncFortnoxItem(serviceClient, item, secret)
-      : await syncGenericHttpItem(serviceClient, item, secret);
+      : provider === "accounted"
+        ? await syncAccountedItem(serviceClient, item, secret)
+        : await syncGenericHttpItem(serviceClient, item, secret);
 
     await updateQueueStatus(serviceClient, item, "synced", result.external_id, "");
     return {
@@ -149,6 +152,12 @@ async function processQueueItem(serviceClient: any, item: any) {
       error: errorMessage,
     };
   }
+}
+
+async function syncAccountedItem(serviceClient: any, item: any, secret: string) {
+  const entity = await loadAccountingEntity(serviceClient, item);
+  if (!entity) throw new Error(`Kunde inte läsa ${item.entity_type} för Accounted-synk.`);
+  return createAccountedService(item.integration, secret).sync(item, entity);
 }
 
 async function updateQueueStatus(

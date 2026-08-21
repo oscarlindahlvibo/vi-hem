@@ -240,6 +240,9 @@ const emptyIntegrationConfigForm = {
   mode: 'manual',
   export_format: 'csv',
   external_tenant_id: '',
+  accounted_base_url: '',
+  accounted_company_id: '',
+  accounted_api_version: '2026-05-12',
   notes: '',
   config_json: '{}',
   secret_value: '',
@@ -530,12 +533,69 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const organisationId = user?.organisation_id ?? null;
 
+  // Economy actions are always performed in one legal-company context. The
+  // empty value is intentionally reserved for read-only overview screens.
+  const financeCompanyStorageKey = organisationId && user?.id
+    ? `vihem.finance.active-company.${organisationId}.${user.id}`
+    : null;
+  const [activeFinanceCompanyId, setActiveFinanceCompanyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!financeCompanyStorageKey) {
+      setActiveFinanceCompanyId(null);
+      return;
+    }
+
+    setActiveFinanceCompanyId(window.localStorage.getItem(financeCompanyStorageKey));
+  }, [financeCompanyStorageKey]);
+
+  useEffect(() => {
+    if (!activeFinanceCompanyId || companies.length === 0) return;
+    if (!companies.some(company => company.id === activeFinanceCompanyId)) {
+      setActiveFinanceCompanyId(null);
+      if (financeCompanyStorageKey) window.localStorage.removeItem(financeCompanyStorageKey);
+    }
+  }, [activeFinanceCompanyId, companies, financeCompanyStorageKey]);
+
+  const activeFinanceCompany = useMemo(
+    () => companies.find(company => company.id === activeFinanceCompanyId) ?? null,
+    [companies, activeFinanceCompanyId],
+  );
+
+  const setActiveFinanceCompany = (companyId: string) => {
+    const nextCompanyId = companyId || null;
+    setActiveFinanceCompanyId(nextCompanyId);
+    if (!financeCompanyStorageKey) return;
+    if (nextCompanyId) window.localStorage.setItem(financeCompanyStorageKey, nextCompanyId);
+    else window.localStorage.removeItem(financeCompanyStorageKey);
+  };
+
+  const companyContextRequired = activeTab !== 'overview' && activeTab !== 'companies';
+
+  const requireActiveFinanceCompany = (companyId?: string | null) => {
+    if (!activeFinanceCompanyId) {
+      setError('Välj ett aktivt bolag innan du ändrar eller skapar ekonomisk information.');
+      return false;
+    }
+
+    if (companyId && companyId !== activeFinanceCompanyId) {
+      setError('Byt aktivt bolag innan du arbetar med den här posten.');
+      return false;
+    }
+
+    return true;
+  };
+
   const companyOptions = useMemo(() => {
     return [
       { value: '', label: 'Välj bolag' },
-      ...companies.map(company => ({ value: company.id, label: company.name })),
+      ...(activeFinanceCompanyId
+        ? companies
+          .filter(company => company.id === activeFinanceCompanyId)
+          .map(company => ({ value: company.id, label: company.name }))
+        : []),
     ];
-  }, [companies]);
+  }, [companies, activeFinanceCompanyId]);
 
   const customerOptions = useMemo(() => {
     const scoped = invoiceForm.company_id
@@ -1042,13 +1102,13 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     });
     setCompanyModalOpen(true);
   };
-  const resetCustomerForm = () => setCustomerForm({ ...emptyCustomerForm, company_id: companies[0]?.id ?? '' });
+  const resetCustomerForm = () => setCustomerForm({ ...emptyCustomerForm, company_id: activeFinanceCompanyId ?? '' });
   const resetSupplierForm = () => {
     setSelectedSupplier(null);
-    setSupplierForm({ ...emptySupplierForm, company_id: companies[0]?.id ?? '' });
+    setSupplierForm({ ...emptySupplierForm, company_id: activeFinanceCompanyId ?? '' });
   };
   const resetInvoiceForm = () => {
-    const company = companies[0];
+    const company = companies.find(item => item.id === activeFinanceCompanyId);
     const invoiceDate = new Date().toISOString().slice(0, 10);
     setInvoiceForm({
       ...emptyInvoiceForm,
@@ -1079,7 +1139,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   };
 
   const resetSupplierInvoiceForm = () => {
-    const company = companies[0];
+    const company = companies.find(item => item.id === activeFinanceCompanyId);
     const invoiceDate = new Date().toISOString().slice(0, 10);
     setSupplierInvoiceForm({
       ...emptySupplierInvoiceForm,
@@ -1091,7 +1151,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   };
 
   const resetProjectInvoiceForm = (basis?: ProjectInvoiceBasis & { project?: CustomerProject | null }) => {
-    const company = companies.find(item => item.id === basis?.project?.company_id) ?? companies[0];
+    const company = companies.find(item => item.id === basis?.project?.company_id)
+      ?? companies.find(item => item.id === activeFinanceCompanyId);
     const invoiceDate = new Date().toISOString().slice(0, 10);
     setProjectInvoiceForm({
       ...emptyProjectInvoiceForm,
@@ -1105,7 +1166,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   const resetRentRunForm = () => {
     setRentRunForm({
       ...emptyRentRunForm,
-      company_id: companies[0]?.id ?? '',
+      company_id: activeFinanceCompanyId ?? '',
       rent_period: new Date().toISOString().slice(0, 7),
     });
   };
@@ -1114,9 +1175,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     setSelectedNumberSeries(series ?? null);
     setNumberSeriesForm({
       ...emptyNumberSeriesForm,
-      company_id: series?.company_id ?? companies[0]?.id ?? '',
+      company_id: series?.company_id ?? activeFinanceCompanyId ?? '',
       name: series?.name ?? 'Standard',
-      prefix: series?.prefix ?? companies[0]?.invoice_prefix ?? '',
+      prefix: series?.prefix ?? companies.find(item => item.id === activeFinanceCompanyId)?.invoice_prefix ?? '',
       next_number: String(series?.next_number ?? 1),
       padding: String(series?.padding ?? 4),
       fiscal_year: series?.fiscal_year ? String(series.fiscal_year) : '',
@@ -1127,7 +1188,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   const resetPaymentImportForm = () => {
     setPaymentImportForm({
       ...emptyPaymentImportForm,
-      company_id: companies[0]?.id ?? '',
+      company_id: activeFinanceCompanyId ?? '',
     });
     setPaymentImportResult('');
   };
@@ -1205,6 +1266,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const createCustomer = async () => {
     if (!organisationId || !customerForm.name.trim()) return;
+    if (!requireActiveFinanceCompany(customerForm.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -1238,6 +1300,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const createSupplier = async () => {
     if (!organisationId || !supplierForm.name.trim()) return;
+    if (!requireActiveFinanceCompany(supplierForm.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -1284,6 +1347,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const createInvoice = async () => {
     if (!organisationId || !invoiceForm.company_id || !invoiceForm.customer_id || !invoiceForm.description.trim()) return;
+    if (!requireActiveFinanceCompany(invoiceForm.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -1432,6 +1496,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const createSupplierInvoice = async () => {
     if (!organisationId || !supplierInvoiceForm.company_id || (!supplierInvoiceForm.description.trim() && !supplierInvoiceFile)) return;
+    if (!requireActiveFinanceCompany(supplierInvoiceForm.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -1743,6 +1808,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   };
 
   const approveSupplierInvoice = async (supplierInvoiceId: string) => {
+    const supplierInvoice = supplierInvoices.find(invoice => invoice.id === supplierInvoiceId);
+    if (!requireActiveFinanceCompany(supplierInvoice?.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -1756,6 +1823,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   };
 
   const scheduleSupplierInvoicePayment = async (supplierInvoiceId: string) => {
+    const supplierInvoice = supplierInvoices.find(invoice => invoice.id === supplierInvoiceId);
+    if (!requireActiveFinanceCompany(supplierInvoice?.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -1776,6 +1845,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   };
 
   const markSupplierInvoicePaid = async (supplierInvoiceId: string) => {
+    const supplierInvoice = supplierInvoices.find(invoice => invoice.id === supplierInvoiceId);
+    if (!requireActiveFinanceCompany(supplierInvoice?.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -1982,6 +2053,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       mode: String(config.mode || (provider === 'sie' ? 'sie_export' : provider === 'manual' ? 'manual_export' : 'api')),
       export_format: String(config.export_format || (provider === 'sie' ? 'sie' : 'csv')),
       external_tenant_id: String(config.external_tenant_id || ''),
+      accounted_base_url: String(config.base_url || ''),
+      accounted_company_id: String(config.accounted_company_id || config.external_tenant_id || ''),
+      accounted_api_version: String(config.api_version || '2026-05-12'),
       notes: String(config.notes || ''),
       config_json: prettyJson(config.extra || {}),
       secret_value: '',
@@ -1991,6 +2065,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const saveIntegrationConfig = async () => {
     if (!organisationId || !integrationConfigForm.company_id) return;
+    if (!requireActiveFinanceCompany(integrationConfigForm.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -2017,6 +2092,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           mode: integrationConfigForm.mode.trim(),
           export_format: integrationConfigForm.export_format.trim(),
           external_tenant_id: integrationConfigForm.external_tenant_id.trim(),
+          base_url: integrationConfigForm.accounted_base_url.trim(),
+          accounted_company_id: integrationConfigForm.accounted_company_id.trim(),
+          api_version: integrationConfigForm.accounted_api_version.trim(),
           notes: integrationConfigForm.notes.trim(),
           extra: extraConfig,
         },
@@ -2157,6 +2235,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       setError('Fyll i bolag, kontonummer och namn.');
       return;
     }
+    if (!requireActiveFinanceCompany(accountingAccountForm.company_id)) return;
 
     setSaving(true);
     setError('');
@@ -2218,6 +2297,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       setError('Fyll i bolag, kod och namn.');
       return;
     }
+    if (!requireActiveFinanceCompany(vatCodeForm.company_id)) return;
 
     setSaving(true);
     setError('');
@@ -2266,6 +2346,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const saveReminderSettings = async (company: FinanceCompany) => {
     if (!organisationId) return;
+    if (!requireActiveFinanceCompany(company.id)) return;
     const draft = reminderSettingsDrafts[company.id] ?? defaultReminderSettingsDraft;
     setSaving(true);
     setError('');
@@ -2431,6 +2512,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const createInvoiceFromProjectBasis = async () => {
     if (!projectInvoiceForm.basis_id || !projectInvoiceForm.company_id) return;
+    if (!requireActiveFinanceCompany(projectInvoiceForm.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -2460,12 +2542,16 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   };
 
   const createInvoiceFromSelectedProjectBases = async () => {
-    if (selectedProjectBasisIds.length === 0 || companies.length === 0) return;
+    if (selectedProjectBasisIds.length === 0 || !requireActiveFinanceCompany()) return;
     setSaving(true);
     setError('');
 
-    const firstBasis = selectedProjectBases[0];
-    const company = companies.find(item => item.id === firstBasis?.project?.company_id) ?? companies[0];
+    const company = companies.find(item => item.id === activeFinanceCompanyId);
+    if (!company) {
+      setError('Välj ett aktivt bolag innan projektunderlag konverteras till faktura.');
+      setSaving(false);
+      return;
+    }
     const invoiceDate = new Date().toISOString().slice(0, 10);
 
     const { data, error: conversionError } = await supabase.rpc('vihem_create_invoice_from_project_basis_batch', {
@@ -2495,6 +2581,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const createRentRun = async () => {
     if (!rentRunForm.company_id || !rentRunForm.rent_period) return;
+    if (!requireActiveFinanceCompany(rentRunForm.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -2518,6 +2605,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const createRentAdjustment = async () => {
     if (!organisationId || !rentAdjustmentForm.company_id || !rentAdjustmentForm.tenancy_id || !rentAdjustmentForm.description.trim()) return;
+    if (!requireActiveFinanceCompany(rentAdjustmentForm.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -2560,6 +2648,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   };
 
   const cancelRentAdjustment = async (adjustmentId: string) => {
+    const adjustment = rentAdjustments.find(item => item.id === adjustmentId);
+    if (!requireActiveFinanceCompany(adjustment?.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -2575,6 +2665,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const createDirectDebitMandate = async () => {
     if (!organisationId || !directDebitMandateForm.company_id || !directDebitMandateForm.tenancy_id) return;
+    if (!requireActiveFinanceCompany(directDebitMandateForm.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -2615,6 +2706,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   };
 
   const setDirectDebitMandateStatus = async (mandateId: string, status: DirectDebitMandate['status']) => {
+    const mandate = directDebitMandates.find(item => item.id === mandateId);
+    if (!requireActiveFinanceCompany(mandate?.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -2630,6 +2723,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const saveNumberSeries = async () => {
     if (!organisationId || !numberSeriesForm.company_id || !numberSeriesForm.name.trim()) return;
+    if (!requireActiveFinanceCompany(numberSeriesForm.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -2668,6 +2762,8 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
   };
 
   const generateRentInvoices = async (runId: string) => {
+    const run = rentRuns.find(item => item.id === runId);
+    if (!requireActiveFinanceCompany(run?.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -3257,6 +3353,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const registerPayment = async () => {
     if (!selectedInvoice) return;
+    if (!requireActiveFinanceCompany(selectedInvoice.company_id)) return;
     setSaving(true);
     setError('');
 
@@ -3283,6 +3380,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
 
   const importPayments = async () => {
     if (!paymentImportForm.company_id || !paymentImportForm.csv.trim()) return;
+    if (!requireActiveFinanceCompany(paymentImportForm.company_id)) return;
     setSaving(true);
     setError('');
     setPaymentImportResult('');
@@ -3428,23 +3526,23 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
             <Plus className="h-4 w-4" />
             Nytt bolag
           </Button>
-          <Button variant="secondary" onClick={() => { resetCustomerForm(); setCustomerModalOpen(true); }}>
+          <Button variant="secondary" onClick={() => { resetCustomerForm(); setCustomerModalOpen(true); }} disabled={!activeFinanceCompanyId}>
             <Users className="h-4 w-4" />
             Ny kund
           </Button>
-          <Button variant="secondary" onClick={() => { resetSupplierForm(); setSupplierModalOpen(true); }}>
+          <Button variant="secondary" onClick={() => { resetSupplierForm(); setSupplierModalOpen(true); }} disabled={!activeFinanceCompanyId}>
             <Truck className="h-4 w-4" />
             Ny leverantör
           </Button>
-          <Button variant="secondary" onClick={() => { resetSupplierInvoiceForm(); setSupplierInvoiceModalOpen(true); }} disabled={companies.length === 0}>
+          <Button variant="secondary" onClick={() => { resetSupplierInvoiceForm(); setSupplierInvoiceModalOpen(true); }} disabled={!activeFinanceCompanyId}>
             <FileText className="h-4 w-4" />
             Leverantörsfaktura
           </Button>
-          <Button variant="secondary" onClick={() => { resetRentRunForm(); setRentRunModalOpen(true); }} disabled={companies.length === 0}>
+          <Button variant="secondary" onClick={() => { resetRentRunForm(); setRentRunModalOpen(true); }} disabled={!activeFinanceCompanyId}>
             <CalendarDays className="h-4 w-4" />
             Hyreskörning
           </Button>
-          <Button onClick={() => { resetInvoiceForm(); setInvoiceModalOpen(true); }} disabled={companies.length === 0 || customers.length === 0}>
+          <Button onClick={() => { resetInvoiceForm(); setInvoiceModalOpen(true); }} disabled={!activeFinanceCompanyId || customers.length === 0}>
             <ReceiptText className="h-4 w-4" />
             Fakturautkast
           </Button>
@@ -3454,6 +3552,36 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
           {error}
+        </div>
+      )}
+
+      <Card className="border-blue-100 bg-blue-50/60 p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">Aktivt bolag</p>
+            <p className="mt-1 text-sm text-slate-600">
+              {activeFinanceCompany
+                ? `Nya ekonomiska poster och åtgärder kopplas till ${activeFinanceCompany.name}.`
+                : 'Välj ett bolag för att arbeta med fakturor, underlag, betalningar och rapporter.'}
+            </p>
+          </div>
+          <select
+            aria-label="Aktivt bolag i ekonomin"
+            value={activeFinanceCompanyId ?? ''}
+            onChange={event => setActiveFinanceCompany(event.target.value)}
+            className="min-h-10 min-w-[15rem] rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          >
+            <option value="">Alla bolag · endast översikt</option>
+            {companies.map(company => (
+              <option key={company.id} value={company.id}>{company.name}</option>
+            ))}
+          </select>
+        </div>
+      </Card>
+
+      {companyContextRequired && !activeFinanceCompanyId && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+          Välj ett aktivt bolag ovan. Företagsspecifika ekonomivyer är skrivskyddade tills ett bolag är valt.
         </div>
       )}
 
@@ -3658,7 +3786,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 resetPaymentImportForm();
                 setPaymentImportModalOpen(true);
               }}
-              disabled={companies.length === 0}
+              disabled={!activeFinanceCompanyId}
             >
               <Upload className="h-4 w-4" />
               Importera CSV
@@ -4140,7 +4268,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                     size="sm"
                     onClick={createInvoiceFromSelectedProjectBases}
                     loading={saving}
-                    disabled={selectedProjectBasisIds.length === 0 || companies.length === 0}
+                    disabled={selectedProjectBasisIds.length === 0 || !activeFinanceCompanyId}
                   >
                     Skapa samlingsfaktura
                   </Button>
@@ -4176,7 +4304,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                       resetProjectInvoiceForm(basis);
                       setProjectInvoiceModalOpen(true);
                     }}
-                    disabled={companies.length === 0}
+                    disabled={!activeFinanceCompanyId}
                   >
                     Skapa faktura
                   </Button>
@@ -4245,7 +4373,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                   setSupplierInvoiceForm(prev => ({ ...prev, document_kind: 'receipt' }));
                   setSupplierInvoiceModalOpen(true);
                 }}
-                disabled={companies.length === 0}
+                disabled={!activeFinanceCompanyId}
               >
                 <Camera className="h-4 w-4" />
                 Scanna kvitto
@@ -4366,7 +4494,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
                 resetNumberSeriesForm();
                 setNumberSeriesModalOpen(true);
               }}
-              disabled={companies.length === 0}
+              disabled={!activeFinanceCompanyId}
             >
               <Plus className="h-4 w-4" />
               Ny nummerserie
@@ -5036,6 +5164,31 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
             value={integrationConfigForm.external_tenant_id}
             onChange={event => setIntegrationConfigForm(prev => ({ ...prev, external_tenant_id: event.target.value }))}
           />
+          {integrationConfigForm.provider === 'accounted' && (
+            <>
+              <Input
+                label="Accounted API-bas-URL"
+                value={integrationConfigForm.accounted_base_url}
+                onChange={event => setIntegrationConfigForm(prev => ({ ...prev, accounted_base_url: event.target.value }))}
+                placeholder="https://accounted.example.se/api/v1"
+              />
+              <Input
+                label="Accounted company-id"
+                value={integrationConfigForm.accounted_company_id}
+                onChange={event => setIntegrationConfigForm(prev => ({ ...prev, accounted_company_id: event.target.value }))}
+                placeholder="Bolagets id i Accounted"
+              />
+              <Input
+                label="Accounted API-version"
+                value={integrationConfigForm.accounted_api_version}
+                onChange={event => setIntegrationConfigForm(prev => ({ ...prev, accounted_api_version: event.target.value }))}
+                placeholder="2026-05-12"
+              />
+              <div className="rounded-xl bg-blue-50 p-3 text-sm text-blue-800 md:col-span-2">
+                Accounted körs server-side. Ange hela API-bas-URL:en och company-id från den self-hostade installationen. VI-HEM skickar aldrig token från webbläsaren.
+              </div>
+            </>
+          )}
           <Input
             label="Senast ändrad"
             value={selectedIntegration?.updated_at ? new Date(selectedIntegration.updated_at).toLocaleString('sv-SE') : 'Ny koppling'}
