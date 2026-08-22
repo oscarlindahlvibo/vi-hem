@@ -11,6 +11,7 @@ import {
   getAgreement,
   getTemplate,
   listAgreements,
+  listExistingPartyOptions,
   listTemplates,
   remindSigner,
   removeAttachment,
@@ -36,9 +37,11 @@ import type {
   AgreementSigner,
   AgreementStatus,
   AgreementTemplate,
+  ExistingPartyOption,
 } from '../types';
 import { BlockEditor } from '../components/BlockEditor';
 import { BlockRenderer } from '../components/BlockRenderer';
+import { Modal } from '../../../components/ui';
 import { ArchiveIcon, ArrowLeft, Bell, FileSignature, FileText, Paperclip, Plus, Send, Trash2, Users, XCircle } from 'lucide-react';
 
 function describeError(err: unknown): string {
@@ -315,6 +318,16 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
   const [parties, setParties] = useState<AgreementParty[]>([]);
   const [signers, setSigners] = useState<AgreementSigner[]>([]);
 
+  // The last-PERSISTED shape of each, so we can tell whether the live state
+  // above actually differs from what the backend has -- both for
+  // auto-saving on tab switch and for deciding whether leaving the editor
+  // needs to ask "save as draft first?". Updated after every successful
+  // save (manual, auto-on-switch, or the initial load itself, which is
+  // trivially "already saved").
+  const [savedBlocks, setSavedBlocks] = useState<AgreementBlock[]>([]);
+  const [savedParties, setSavedParties] = useState<AgreementParty[]>([]);
+  const [savedSigners, setSavedSigners] = useState<AgreementSigner[]>([]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -324,6 +337,9 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
       setBlocks(data.blocks);
       setParties(data.parties);
       setSigners(data.signers);
+      setSavedBlocks(data.blocks);
+      setSavedParties(data.parties);
+      setSavedSigners(data.signers);
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -356,10 +372,63 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
   const { agreement } = detail;
   const editable = agreement.status === 'draft' || agreement.status === 'ready';
 
+  const blocksDirty = editable && JSON.stringify(blocks) !== JSON.stringify(savedBlocks);
+  const partiesDirty = editable && JSON.stringify(parties) !== JSON.stringify(savedParties);
+  const signersDirty = editable && JSON.stringify(signers) !== JSON.stringify(savedSigners);
+  const currentStepDirty = (step === 'content' && blocksDirty) || (step === 'parties' && partiesDirty) || (step === 'signing' && signersDirty);
+
+  // Persists whichever step's data is currently unsaved. Used both when
+  // switching tabs (silent auto-save -- "spara blocken automatiskt när man
+  // växlar flik") and when leaving the editor entirely after the user
+  // confirms they want to save as a draft first. Returns false on failure
+  // so callers can decide not to proceed (e.g. not switch tabs) rather than
+  // silently losing the edit.
+  const saveCurrentStep = async (): Promise<boolean> => {
+    try {
+      if (step === 'content' && blocksDirty) {
+        await saveBlocks(agreement.id, blocks);
+        setSavedBlocks(blocks);
+        setMessage('Innehållet sparades automatiskt.');
+      } else if (step === 'parties' && partiesDirty) {
+        await saveParties(agreement.id, parties);
+        setSavedParties(parties);
+        setMessage('Parterna sparades automatiskt.');
+      } else if (step === 'signing' && signersDirty) {
+        await saveSigners(agreement.id, signers);
+        setSavedSigners(signers);
+        setMessage('Signatärerna sparades automatiskt.');
+      }
+      return true;
+    } catch (err) {
+      setError(describeError(err));
+      return false;
+    }
+  };
+
+  const handleTabClick = async (next: EditorStep) => {
+    if (next === step) return;
+    if (currentStepDirty) {
+      const ok = await saveCurrentStep();
+      if (!ok) return; // stay put -- don't switch away from a failed save
+    }
+    setStep(next);
+  };
+
+  const handleBack = async () => {
+    if (currentStepDirty) {
+      const wantsSave = confirm('Du har osparade ändringar i det här dokumentet. Spara som utkast innan du lämnar?');
+      if (wantsSave) {
+        const ok = await saveCurrentStep();
+        if (!ok) return; // failed save -- stay so the error is visible and nothing is silently lost
+      }
+    }
+    onBack();
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700">
+        <button onClick={handleBack} className="flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700">
           <ArrowLeft className="h-4 w-4" /> Tillbaka till arkivet
         </button>
         <div className="flex items-center gap-2">
@@ -385,7 +454,7 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
         ] as const).map(([key, label, Icon]) => (
           <button
             key={key}
-            onClick={() => setStep(key)}
+            onClick={() => handleTabClick(key)}
             className={`flex items-center gap-1.5 whitespace-nowrap px-4 py-2 text-sm font-medium ${step === key ? 'border-b-2 border-blue-600 text-blue-700' : 'text-slate-500 hover:text-slate-700'}`}
           >
             <Icon className="h-3.5 w-3.5" /> {label}
@@ -403,13 +472,23 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
           signers={signers}
           attachments={detail.attachments}
           editable={editable}
-          onSaved={setMessage}
+          onSaved={(m) => { setMessage(m); setSavedBlocks(blocks); }}
           onError={setError}
           onAttachmentsChanged={refreshDetail}
         />
       )}
       {step === 'parties' && (
-        <PartiesStep agreementId={agreement.id} parties={parties} onPartiesChange={setParties} editable={editable} onSaved={setMessage} onError={setError} />
+        <PartiesStep
+          agreementId={agreement.id}
+          organisationId={organisationId}
+          parties={parties}
+          onPartiesChange={setParties}
+          signers={signers}
+          onSignersChange={setSigners}
+          editable={editable}
+          onSaved={(m) => { setMessage(m); setSavedParties(parties); }}
+          onError={setError}
+        />
       )}
       {step === 'signing' && (
         <SigningStep
@@ -417,8 +496,9 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
           agreementStatus={agreement.status}
           signers={signers}
           onSignersChange={setSigners}
+          parties={parties}
           editable={editable}
-          onSaved={setMessage}
+          onSaved={(m) => { setMessage(m); setSavedSigners(signers); }}
           onError={setError}
           onSent={(m) => { setMessage(m); load(); }}
         />
@@ -509,26 +589,65 @@ function ContentStep({
   );
 }
 
+/** Turns a party's current name/email/phone into a draft signer, so
+ * "same people on parties and signing" doesn't mean retyping them --
+ * party_id is left null since a not-yet-saved party has no real id to
+ * link to yet (see PartiesStep's quick-add button, which only offers this
+ * for parties that already came from the system so profile_id can also be
+ * carried across correctly). */
+function signerDraftFromNames(name: string, email: string, phone: string, profileId: string | null = null): AgreementSigner {
+  return {
+    party_id: null,
+    profile_id: profileId,
+    name,
+    email,
+    phone,
+    personal_number: '',
+    role_title: '',
+    signing_method: 'handwritten',
+    signing_required: true,
+    sign_order: null,
+  };
+}
+
 function PartiesStep({
   agreementId,
+  organisationId,
   parties,
   onPartiesChange,
+  signers,
+  onSignersChange,
   editable,
   onSaved,
   onError,
 }: {
   agreementId: string;
+  organisationId: string;
   parties: AgreementParty[];
   onPartiesChange: (parties: AgreementParty[]) => void;
+  signers: AgreementSigner[];
+  onSignersChange: (signers: AgreementSigner[]) => void;
   editable: boolean;
   onSaved: (m: string) => void;
   onError: (e: string) => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
-  const addParty = () => onPartiesChange([...parties, { party_type: 'manual', display_name: '', org_number: '', email: '', phone: '', address: '', source_type: null, source_id: null }]);
+  const addParty = (party: AgreementParty, alsoSigner: boolean) => {
+    onPartiesChange([...parties, party]);
+    if (alsoSigner) {
+      const sourceProfileId = party.source_type === 'tenant' || party.source_type === 'staff' ? party.source_id : null;
+      onSignersChange([...signers, signerDraftFromNames(party.display_name, party.email, party.phone, sourceProfileId)]);
+    }
+  };
+  const addManualParty = () => addParty({ party_type: 'manual', display_name: '', org_number: '', email: '', phone: '', address: '', source_type: null, source_id: null }, false);
   const updateParty = (i: number, patch: Partial<AgreementParty>) => onPartiesChange(parties.map((p, ii) => (ii === i ? { ...p, ...patch } : p)));
   const removeParty = (i: number) => onPartiesChange(parties.filter((_, ii) => ii !== i));
+  const addAsSigner = (party: AgreementParty) => {
+    const sourceProfileId = party.source_type === 'tenant' || party.source_type === 'staff' ? party.source_id : null;
+    onSignersChange([...signers, signerDraftFromNames(party.display_name, party.email, party.phone, sourceProfileId)]);
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -550,12 +669,15 @@ function PartiesStep({
       {parties.map((party, i) => (
         <div key={i} className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="mb-2 flex items-center justify-between">
-            <select value={party.party_type} onChange={(e) => updateParty(i, { party_type: e.target.value as any })} className="rounded-lg border border-slate-200 px-2 py-1 text-xs">
-              <option value="manual">Manuellt angiven</option>
-              <option value="internal_org">Eget bolag</option>
-              <option value="contact">Kontakt/kund i VI-HEM</option>
-              <option value="company">Företag</option>
-            </select>
+            <div className="flex items-center gap-2">
+              <select value={party.party_type} onChange={(e) => updateParty(i, { party_type: e.target.value as any })} className="rounded-lg border border-slate-200 px-2 py-1 text-xs">
+                <option value="manual">Manuellt angiven</option>
+                <option value="internal_org">Eget bolag</option>
+                <option value="contact">Kontakt/kund i VI-HEM</option>
+                <option value="company">Företag</option>
+              </select>
+              {party.source_type && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-600">Från systemet</span>}
+            </div>
             <button onClick={() => removeParty(i)} className="text-slate-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -565,9 +687,15 @@ function PartiesStep({
             <input placeholder="Telefon" value={party.phone} onChange={(e) => updateParty(i, { phone: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
             <input placeholder="Adress" value={party.address} onChange={(e) => updateParty(i, { address: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm sm:col-span-2" />
           </div>
+          <button onClick={() => addAsSigner(party)} className="mt-2 flex items-center gap-1.5 text-xs font-medium text-blue-600">
+            <Plus className="h-3 w-3" /> Lägg också till som signatär
+          </button>
         </div>
       ))}
-      <button onClick={addParty} className="flex items-center gap-1.5 text-sm font-medium text-blue-600"><Plus className="h-4 w-4" /> Lägg till part</button>
+      <div className="flex flex-wrap gap-3">
+        <button onClick={() => setPickerOpen(true)} className="flex items-center gap-1.5 text-sm font-medium text-blue-600"><Plus className="h-4 w-4" /> Välj från systemet</button>
+        <button onClick={addManualParty} className="flex items-center gap-1.5 text-sm font-medium text-slate-500"><Plus className="h-4 w-4" /> Lägg till manuellt</button>
+      </div>
       {editable && (
         <div>
           <button onClick={handleSave} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
@@ -575,7 +703,93 @@ function PartiesStep({
           </button>
         </div>
       )}
+      <ExistingPartyPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} organisationId={organisationId} onPick={addParty} />
     </div>
+  );
+}
+
+function ExistingPartyPickerModal({
+  open,
+  onClose,
+  organisationId,
+  onPick,
+}: {
+  open: boolean;
+  onClose: () => void;
+  organisationId: string;
+  onPick: (party: AgreementParty, alsoSigner: boolean) => void;
+}) {
+  const [options, setOptions] = useState<ExistingPartyOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    listExistingPartyOptions(organisationId).then(setOptions).catch(() => setOptions([])).finally(() => setLoading(false));
+  }, [open, organisationId]);
+
+  const groups: { label: string; type: ExistingPartyOption['source_type'] }[] = [
+    { label: 'Hyresgäster', type: 'tenant' },
+    { label: 'Kunder', type: 'finance_customer' },
+    { label: 'Personal', type: 'staff' },
+  ];
+  const query = search.trim().toLowerCase();
+  const matches = (o: ExistingPartyOption) => !query || o.display_name.toLowerCase().includes(query) || o.email.toLowerCase().includes(query);
+
+  return (
+    <Modal open={open} onClose={onClose} title="Välj part från systemet">
+      <div className="space-y-4">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Sök namn eller e-post..."
+          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+        />
+        {loading && <p className="text-sm text-slate-500">Laddar...</p>}
+        {!loading && groups.map((group) => {
+          const items = options.filter((o) => o.source_type === group.type && matches(o));
+          if (items.length === 0) return null;
+          return (
+            <div key={group.type}>
+              <p className="mb-1.5 text-xs font-semibold uppercase text-slate-400">{group.label}</p>
+              <div className="space-y-1.5">
+                {items.map((o) => (
+                  <div key={`${o.source_type}-${o.source_id}`} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-slate-800">{o.display_name}</p>
+                      <p className="truncate text-xs text-slate-500">{o.email || o.phone || '—'}</p>
+                    </div>
+                    <div className="flex flex-shrink-0 gap-1.5">
+                      <button
+                        onClick={() => {
+                          onPick({ party_type: o.party_type, display_name: o.display_name, org_number: o.org_number, email: o.email, phone: o.phone, address: o.address, source_type: o.source_type, source_id: o.source_id }, false);
+                          onClose();
+                        }}
+                        className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                      >
+                        Lägg till
+                      </button>
+                      <button
+                        onClick={() => {
+                          onPick({ party_type: o.party_type, display_name: o.display_name, org_number: o.org_number, email: o.email, phone: o.phone, address: o.address, source_type: o.source_type, source_id: o.source_id }, true);
+                          onClose();
+                        }}
+                        className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700"
+                      >
+                        + Signatär
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {!loading && options.filter(matches).length === 0 && <p className="text-sm text-slate-500">Inga träffar.</p>}
+      </div>
+    </Modal>
   );
 }
 
@@ -584,6 +798,7 @@ function SigningStep({
   agreementStatus,
   signers,
   onSignersChange,
+  parties,
   editable,
   onSaved,
   onError,
@@ -593,6 +808,7 @@ function SigningStep({
   agreementStatus: AgreementStatus;
   signers: AgreementSigner[];
   onSignersChange: (signers: AgreementSigner[]) => void;
+  parties: AgreementParty[];
   editable: boolean;
   onSaved: (m: string) => void;
   onError: (e: string) => void;
@@ -604,6 +820,14 @@ function SigningStep({
   const [smsChannel, setSmsChannel] = useState(false);
 
   const addSigner = () => onSignersChange([...signers, { party_id: null, profile_id: null, name: '', email: '', phone: '', personal_number: '', role_title: '', signing_method: 'handwritten', signing_required: true, sign_order: null }]);
+  const addSignerFromParty = (party: AgreementParty) => {
+    const sourceProfileId = party.source_type === 'tenant' || party.source_type === 'staff' ? party.source_id : null;
+    onSignersChange([...signers, signerDraftFromNames(party.display_name, party.email, party.phone, sourceProfileId)]);
+  };
+  // Parties not already mirrored as a signer by name+email -- a light
+  // heuristic (no hard party_id link exists for parties added before they
+  // were ever saved), just enough to stop offering someone already added.
+  const availableParties = parties.filter((p) => p.display_name && !signers.some((s) => s.name === p.display_name && s.email === p.email));
   const updateSigner = (i: number, patch: Partial<AgreementSigner>) => onSignersChange(signers.map((s, ii) => (ii === i ? { ...s, ...patch } : s)));
   const removeSigner = (i: number) => onSignersChange(signers.filter((_, ii) => ii !== i));
 
@@ -680,7 +904,19 @@ function SigningStep({
                 </label>
               </div>
             ))}
-            <button onClick={addSigner} className="flex items-center gap-1.5 text-sm font-medium text-blue-600"><Plus className="h-4 w-4" /> Lägg till signatär</button>
+            {availableParties.length > 0 && (
+              <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/40 p-3">
+                <p className="mb-1.5 text-xs font-medium text-slate-600">Redan tillagd som part — lägg till som signatär med ett klick:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {availableParties.map((p, i) => (
+                    <button key={i} onClick={() => addSignerFromParty(p)} className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50">
+                      + {p.display_name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <button onClick={addSigner} className="flex items-center gap-1.5 text-sm font-medium text-blue-600"><Plus className="h-4 w-4" /> Lägg till signatär manuellt</button>
           </div>
           <div>
             <button onClick={handleSave} disabled={saving} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 disabled:opacity-50">

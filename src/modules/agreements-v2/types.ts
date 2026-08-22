@@ -113,6 +113,28 @@ export interface AgreementParty {
   source_id: string | null;
 }
 
+/** One selectable row in the "pick an existing party" list -- a VI-HEM
+ * tenant, finance customer, or staff member, pre-shaped into the fields an
+ * AgreementParty needs so adding one is a single click rather than
+ * retyping data that's already in the system. */
+export type ExistingEntitySourceType = 'tenant' | 'finance_customer' | 'staff';
+
+export interface ExistingPartyOption {
+  source_type: ExistingEntitySourceType;
+  source_id: string;
+  display_name: string;
+  email: string;
+  phone: string;
+  address: string;
+  org_number: string;
+  party_type: PartyType;
+  /** Set for tenant/staff (both are vihem_profiles rows) so a signer
+   * created from this party can be linked back to a real VI-HEM login via
+   * AgreementSigner.profile_id -- null for finance customers, who don't
+   * necessarily have one. */
+  profile_id: string | null;
+}
+
 export type SigningMethod = 'handwritten' | 'bankid';
 export type SignerStatus = 'pending' | 'sent' | 'viewed' | 'signed' | 'declined';
 

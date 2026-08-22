@@ -238,12 +238,29 @@ async function mergeLinkedEntity(db: any, context: DynamicFieldContext, entityTy
   try {
     switch (entityType) {
       case "tenant": {
-        const { data } = await db.from("vihem_profiles").select("name, email, phone, personal_number").eq("id", entityId).maybeSingle();
+        // vihem_profiles has no general personal_number column (only
+        // bankid_personal_number, populated post-login, not a reliable
+        // general-purpose field) -- selecting it here would error. Caught
+        // by re-checking the actual schema while building the party
+        // picker below, not by the earlier end-to-end test (which never
+        // exercised a 'tenant' entity link).
+        const { data } = await db.from("vihem_profiles").select("name, email, phone").eq("id", entityId).maybeSingle();
         return data ? mergeEntityContext(context, "tenant", data) : context;
       }
       case "apartment": {
-        const { data } = await db.from("vihem_apartments").select("apartment_number, address, size, rooms").eq("id", entityId).maybeSingle();
-        return data ? mergeEntityContext(context, "apartment", data) : context;
+        // address lives on the parent property, not the apartment row
+        // itself (vihem_apartments has no address column) -- joined here
+        // so {{apartment.address}} still resolves per the brief's example
+        // token list.
+        const { data } = await db
+          .from("vihem_apartments")
+          .select("apartment_number, size, rooms, property:property_id(address)")
+          .eq("id", entityId)
+          .maybeSingle();
+        if (!data) return context;
+        const property = data.property as { address?: string } | { address?: string }[] | null;
+        const address = Array.isArray(property) ? property[0]?.address : property?.address;
+        return mergeEntityContext(context, "apartment", { apartment_number: data.apartment_number, size: data.size, rooms: data.rooms, address: address || "" });
       }
       case "property": {
         const { data } = await db.from("vihem_properties").select("name, address").eq("id", entityId).maybeSingle();
@@ -254,8 +271,11 @@ async function mergeLinkedEntity(db: any, context: DynamicFieldContext, entityTy
         return data ? mergeEntityContext(context, "customer", data) : context;
       }
       case "customer_project": {
-        const { data } = await db.from("vihem_customer_projects").select("title, name").eq("id", entityId).maybeSingle();
-        return data ? mergeEntityContext(context, "project", { name: data.title || data.name || "" }) : context;
+        // vihem_customer_projects has no "title" column (only name +
+        // customer_name) -- another mismatch caught by re-checking the
+        // actual schema rather than trusting the earlier assumption.
+        const { data } = await db.from("vihem_customer_projects").select("name, customer_name").eq("id", entityId).maybeSingle();
+        return data ? mergeEntityContext(context, "project", { name: data.name || "", customer_name: data.customer_name || "" }) : context;
       }
       default:
         return context;

@@ -15,6 +15,7 @@ import type {
   AgreementBlock,
   AgreementDocumentType,
   AgreementStatus,
+  ExistingPartyOption,
   PublicSignView,
 } from './types';
 
@@ -95,6 +96,45 @@ export function listEntityAgreements(entityType: AgreementEntityType, entityId: 
  * how TenantInvoicesPage.tsx reads vihem_accounted_invoice_links directly
  * rather than through an edge function.
  */
+/**
+ * Existing tenants, finance customers, and staff -- offered as one-click
+ * "pick instead of retype" options when adding a party, per the explicit
+ * request that creating a manual party should stay available but not be
+ * the only path. Direct RLS-backed reads (same pattern as
+ * listMyAgreements above), not an edge function: staff/admin already have
+ * SELECT access to these tables within their own organisation via
+ * existing RLS (AdminTenantsPage.tsx already reads vihem_profiles the
+ * same way).
+ */
+export async function listExistingPartyOptions(organisationId: string): Promise<ExistingPartyOption[]> {
+  const [tenants, customers, staff] = await Promise.all([
+    supabase.from('vihem_profiles').select('id, name, email, phone').eq('organisation_id', organisationId).eq('role', 'tenant').eq('active', true).order('name'),
+    supabase.from('vihem_finance_customers').select('id, name, email, phone, address_line1, city, organisation_number, customer_type').eq('organisation_id', organisationId).eq('active', true).order('name'),
+    supabase.from('vihem_profiles').select('id, name, email, phone').eq('organisation_id', organisationId).in('role', ['staff', 'admin']).eq('active', true).order('name'),
+  ]);
+  const options: ExistingPartyOption[] = [];
+  for (const t of tenants.data || []) {
+    options.push({ source_type: 'tenant', source_id: t.id, display_name: t.name, email: t.email || '', phone: t.phone || '', address: '', org_number: '', party_type: 'contact', profile_id: t.id });
+  }
+  for (const c of customers.data || []) {
+    options.push({
+      source_type: 'finance_customer',
+      source_id: c.id,
+      display_name: c.name,
+      email: c.email || '',
+      phone: c.phone || '',
+      address: [c.address_line1, c.city].filter(Boolean).join(', '),
+      org_number: c.organisation_number || '',
+      party_type: c.customer_type === 'private' ? 'contact' : 'company',
+      profile_id: null,
+    });
+  }
+  for (const s of staff.data || []) {
+    options.push({ source_type: 'staff', source_id: s.id, display_name: s.name, email: s.email || '', phone: s.phone || '', address: '', org_number: '', party_type: 'internal_org', profile_id: s.id });
+  }
+  return options;
+}
+
 export async function listMyAgreements(): Promise<AgreementListItem[]> {
   const { data, error } = await supabase
     .from('vihem_agreements')

@@ -74,7 +74,7 @@ RLS-policyer och två skrivvägar för samma logiska logg).
 ## 3. Nya tabeller och RLS
 
 Alla tolv tabeller har `ENABLE ROW LEVEL SECURITY` och minst en policy —
-verifierat direkt mot en lokal Postgres 17-instans (se punkt 20), inte bara
+verifierat direkt mot en lokal Postgres 17-instans (se punkt 19), inte bara
 läst. Mönster:
 
 - **Läsning**: org-scopad via `vihem_get_my_role()`/`vihem_get_my_org_id()`
@@ -94,7 +94,7 @@ läst. Mönster:
   signaturer, audit-events och dokumentversioner via ett separat
   `profile_id = auth.uid()`-villkor — men ALDRIG organisationens hela
   arkiv. `vihem_agreement_attachments` har ingen sådan gren ännu (se
-  punkt 22).
+  punkt 23).
 
 Ingen tabell delar constraint-namn eller RLS-policynamn med legacy-tabeller.
 Inget i migrationerna rör `vihem_contract_signatures`, `vihem_documents`,
@@ -308,7 +308,7 @@ hashad, versionerad datastruktur (`vihem_agreement_versions.blocks` +
 bilagornas `content_hash`) som är exakt det en PDF-generator skulle
 behöva som indata. Att rendera detta till en snygg, nedladdningsbar
 slutgiltig PDF (med logotyp, dokumentnummer, signaturer, audit-ID) är
-kvar till nästa etapp — se punkt 22.
+kvar till nästa etapp — se punkt 23.
 
 ## 14. Koppling till lägenhet/hyresgäst utan att vara obligatorisk
 
@@ -326,7 +326,7 @@ kopplade till denna entitet").
 "+ Skapa avtal" som förifyller `entity_links`) — API:t och datamodellen
 för det finns (`saveEntityLinks`/`listEntityAgreements` i
 `src/modules/agreements-v2/api.ts`), men inget UI konsumerar dem än. Se
-punkt 22.
+punkt 23.
 
 ## 15. Fristående avtal
 
@@ -547,7 +547,81 @@ flikbyte Innehåll → Parter → Innehåll. Testdata och uppladdade
 teständer efteråt bort igen (både databasrader och storage-objekt via
 Storage API:t, som blockerar direkta SQL-DELETE mot `storage.objects`).
 
-## 22. Öppna frågor / kvarstående arbete till nästa etapp
+## 22. Auto-spara vid flikbyte, bekräftelse vid utlämning, partsväljare
+
+Tre uppföljande funktioner, alla från direkt användarfeedback.
+
+**Auto-spara vid flikbyte.** `AgreementEditor` håller nu koll på ett
+"senast sparat"-tillstånd (`savedBlocks`/`savedParties`/`savedSigners`)
+separat från det levande redigeringstillståndet, och jämför dem
+(`JSON.stringify`-diff) för att avgöra om något är osparat. Att klicka på
+en annan flik (Innehåll/Parter/Signering) sparar nu automatiskt den
+lämnade flikens ändringar till backend innan bytet sker — misslyckas
+sparningen stannar man kvar på fliken istället för att tyst tappa
+ändringen. De befintliga "Spara"-knapparna finns kvar oförändrade för
+den som vill spara utan att byta flik.
+
+**Bekräftelse vid utlämning.** Klick på "Tillbaka till arkivet" med
+osparade ändringar i den AKTIVA fliken (dvs. ändringar gjorda sedan
+senaste flikbytet eller sparknapp-tryck) visar `confirm()`: *"Du har
+osparade ändringar i det här dokumentet. Spara som utkast innan du
+lämnar?"* — OK sparar och lämnar, Avbryt lämnar utan att spara (ingenting
+raderas, bara den senaste osparade ändringen syns inte förrän man öppnar
+dokumentet igen och redigerar på nytt). Samma `window.confirm`-mönster
+som redan används på annat håll i modulen (`handleCancel` i
+Signering-fliken).
+
+**Partsväljare — kunder/hyresgäster/personal från systemet.**
+`listExistingPartyOptions()` i `api.ts` läser (RLS-skyddat, direkt
+`supabase-js`, ingen ny edge-funktion) hyresgäster och personal från
+`vihem_profiles` samt kunder från `vihem_finance_customers`, allt
+org-scopat. Ny `ExistingPartyPickerModal` i Parter-fliken listar dem
+grupperat och sökbart; att välja en fyller i namn/e-post/telefon/adress
+automatiskt OCH sätter `source_type`/`source_id` korrekt (kolumner som
+redan fanns i datamodellen men aldrig konsumerades av UI:t förrän nu).
+Manuell part ("Lägg till manuellt") finns kvar helt oförändrad som
+alternativ.
+
+**"Samma person på både parter och signering känns som dubbelarbete."**
+Löst med en enda handling istället för att fylla i samma formulär två
+gånger: varje rad i partsväljaren har en "+ Signatär"-knapp som lägger
+till BÅDE parten och en matchande signatär i samma klick — och när
+parten kommer från en hyresgäst eller personal (båda `vihem_profiles`-
+rader) sätts signatärens `profile_id` korrekt, vilket automatiskt ger den
+personen läsrätt till dokumentet i sin egen portal (RLS-policyn från
+migration 20260822150000). En redan tillagd part (oavsett om den kom
+från väljaren eller skrevs manuellt) får också en "Lägg också till som
+signatär"-knapp på sin egen rad, och Signering-fliken visar tvärtom
+snabbval-chips för parter som ännu inte är signatärer — så kopplingen
+går åt båda hållen utan att bygga en full part↔signatär-synkronisering.
+
+**Sidoeffekt-bugg hittad och fixad under detta arbete:** när jag
+verifierade partsväljarens `source_type`-fält mot det faktiska schemat
+upptäckte jag att `mergeLinkedEntity` i `vihem-agreements-workflow`
+(byggd i en tidigare etapp samma dag) antog tre kolumner som inte
+existerar: `vihem_profiles.personal_number` (finns bara på
+`vihem_finance_customers`), `vihem_apartments.address` (adressen ligger
+på `vihem_properties` och kräver en join), och
+`vihem_customer_projects.title` (kolumnen heter bara `name`). Dessa hade
+gett ett runtime-fel först när ett avtal med en `tenant`/`apartment`/
+`customer_project`-koppling faktiskt skickades för signering — inget den
+tidigare end-to-end-verifieringen råkade träffa. Alla tre fixade och
+typecheckade; inte omtestade mot en riktig `send`-signering med
+entity-links i denna omgång (tidsprioritering), så värt att bekräfta vid
+nästa tillfälle en agreement med en faktisk lägenhets-/hyresgästkoppling
+skickas.
+
+Verifierat i en riktig webbläsarsession mot den lokala databasen: skapade
+ett dokument, la till ett block, bytte flik utan att klicka Spara →
+bekräftade i databasen att blocket faktiskt persisterades. Öppnade
+partsväljaren → riktiga seedade hyresgäster/personal visades korrekt
+grupperat. Klickade "+ Signatär" på en hyresgäst → bekräftade i databasen
+att både part (med `source_type='tenant'`) och signatär (med korrekt
+ifylld `profile_id`) skapades. Testade båda utfallen av
+bekräftelsedialogen (spara-och-lämna respektive lämna-utan-att-spara) och
+bekräftade i databasen att vardera gjorde exakt det den skulle.
+
+## 23. Öppna frågor / kvarstående arbete till nästa etapp
 
 1. **BankID-koppling** — se punkt 10 för exakt vad som krävs.
 2. **Slutlig PDF-generering** — rendera en frusen version + bilagor +
