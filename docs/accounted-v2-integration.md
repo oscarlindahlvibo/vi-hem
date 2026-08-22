@@ -42,11 +42,16 @@ bolagskoppling, kundlänkning, fakturaskapande (generisk + hyresfakturering
 + kundprojektfakturering), webhook-grund, datamodellen förberedd för
 framtida samlingsfakturor, generell avdrag/tillägg-modul (kopplad till
 hyresfakturering OCH kundprojekt), hyresgästportalens fakturavy (lista +
-PDF, Accounted som source of truth), scanner → Accounted (e-postkanalen).
+PDF, Accounted som source of truth), scanner → Accounted (e-postkanalen),
+avbetalningsplaner tillgängliga i Finance V2 (samma delade
+`InstallmentPlansPanel`, inte omskrivet mot Accounted).
 **Kvar:** avdrag/tillägg för korttidsuthyrning/andra framtida
 faktureringskällor, samlingsfaktura-funktionen (datamodellen stödjer den,
 själva funktionen är inte byggd), en riktig server-till-server-koppling
-för scanner om e-postkanalen visar sig otillräcklig.
+för scanner om e-postkanalen visar sig otillräcklig, en genväg för att
+bygga en avbetalningsplan direkt från en Accounted-faktura (går redan via
+det befintliga externa-underlag-fältet, men utan en egen "hämta från
+Accounted"-väljare).
 
 ## Vad som finns
 
@@ -164,7 +169,7 @@ org-admin + organisationens `finance`-modul aktiverad
 Legacy `FinancePage.tsx` är oförändrad utöver att den nu kallas "legacy" i
 kommentarer/dokumentation — ingen kod i den filen är rörd.
 
-Åtta flikar: Översikt, Bolagskoppling (spara URL/company-id/API-nyckel,
+Nio flikar: Översikt, Bolagskoppling (spara URL/company-id/API-nyckel,
 Accounted-inkorgsadress, testa anslutning, registrera webhooks),
 **Fakturering** (hyra: välj hyresperiod → hämta körning från befintlig
 `vihem_create_rent_billing_run` → förhandsgranska mot Accounted som
@@ -176,8 +181,9 @@ lista — Alla/Aktiva/Återkommande/Kommande/Pausade/Förbrukade-historik —
 plus ett skapa-formulär med hyresgästväljare; se eget avsnitt nedan),
 **Underlag** (filuppladdning + skickade-underlag-lista; se
 "Scanner → Accounted" nedan), Fakturor (läser
-`vihem_accounted_invoice_links`), och Kommande (platshållare för det som
-inte är byggt än).
+`vihem_accounted_invoice_links`), **Avbetalningsplaner** (samma delade
+panel som legacy använder, se eget stycke nedan), och Kommande
+(platshållare för det som inte är byggt än).
 
 **Hyresgästportalen.** [`src/pages/TenantInvoicesPage.tsx`](../src/pages/TenantInvoicesPage.tsx)
 — ny sida, ny meny-post "Mina fakturor" i "Hem"-gruppen
@@ -198,6 +204,41 @@ alltså hyresgästen enbart via webhooks. Om webhookarna inte är registrerade
 för ett bolag ser hyresgästen en faktura som fastnat på sin ursprungliga
 status tills en admin uppdaterar den via Ekonomi V2 eller registrerar
 webhooks under Bolagskoppling.
+
+**Avbetalningsplaner.** Fliken renderar det befintliga
+[`InstallmentPlansPanel`](../src/components/InstallmentPlansPanel.tsx)
+oförändrat — samma komponent legacy `FinancePage.tsx` redan använder, nu
+med två anropare istället för en. Finance V2 matar den med tre
+organisation-scopade läsningar (`listCompaniesForInstallmentPlans`,
+`listFinanceCustomersForInstallmentPlans`,
+`listLegacyInvoicesForInstallmentPlans` i `api.ts`) som är exakta kopior
+av FinancePage.tsx:s egna frågor mot `vihem_companies`/
+`vihem_finance_customers`/`vihem_invoices`, så panelen beter sig identiskt
+oavsett varifrån den renderas.
+
+Detta är en **ren flytt av åtkomst**, inte en ombyggnad: panelen skapar
+fortfarande sina egna administrativa "delfakturor" mot legacy
+`vihem_invoices` via RPC:n `vihem_generate_installment_invoice`
+(`accounting_exportable` är hårdlåst till `false` i databasen på både
+`vihem_installment_plans` och `vihem_installment_payments`, så inget av
+detta någonsin når bokföring eller Accounted). Det är ett medvetet val,
+inte en genväg: originalspecen är uttrycklig om att en avbetalningsplan
+ska vara ett betalningsuppföljningslager ovanpå redan existerande skuld
+— "VI-HEM ska INTE skapa nya ersättningsfakturor i Accounted varje
+månad" — så delfaktura-mekanismen ska inte skrivas om mot Accounted.
+
+En plan kan redan idag byggas på en Accounted-skapad hyres- eller
+kundprojektfaktura, men bara via panelens befintliga "Övriga
+ursprungsunderlag"-sektion (fritextfälten `external_invoice_number`/
+`external_invoice_date`/`external_due_date`/`amount` — samma mekanism
+som redan används för alla fakturor VI-HEM inte har en lokal
+`vihem_invoices`-rad för). En genväg som fyller i de fälten automatiskt
+från en vald `vihem_accounted_invoice_links`-rad är inte byggd i denna
+etapp — panelen är oförändrad, så det skulle vara ett separat, litet
+tillägg till just den komponenten.
+
+`InstallmentPlansPanel.tsx` och `FinancePage.tsx` är **oförändrade** —
+`git status` bekräftar noll ändringar i båda filerna för detta steg.
 
 Kundskapande i Accounted (steget innan fakturan) körs alltid på riktigt,
 även under en fakturas dry-run — att skapa en kundpost har ingen ekonomisk

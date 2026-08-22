@@ -4,15 +4,16 @@
 // where Accounted (self-hosted) becomes the source of truth for the real
 // customer invoice, and VI-HEM only computes what should be billed.
 //
-// This stage ships: company <-> Accounted linking (with connectivity test +
-// webhook registration), a read-only projection of invoices Finance V2 has
-// created, rent billing, customer-project billing, and a general-purpose
-// avdrag & tillägg module (currently wired into rent billing only -- see
-// docs/accounted-v2-integration.md). Portal sync and the scanner->Accounted
-// bridge are deliberately not wired up yet.
+// This stage ships: company <-> Accounted linking, a read-only projection
+// of invoices Finance V2 has created, rent billing, customer-project
+// billing, a general-purpose avdrag & tillägg module (rent + projects),
+// scanner -> Accounted forwarding, and avbetalningsplaner (relocated from
+// legacy, same shared InstallmentPlansPanel component, not rewired to
+// Accounted -- see docs/accounted-v2-integration.md).
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
+import { InstallmentPlansPanel } from '../../../components/InstallmentPlansPanel';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select } from '../../../components/ui';
 import { formatCurrency, formatDate, formatDateTime } from '../../../lib/utils';
 import {
@@ -26,8 +27,11 @@ import {
   listActiveTenancies,
   listBillingAdjustmentApplications,
   listBillingAdjustments,
+  listCompaniesForInstallmentPlans,
+  listFinanceCustomersForInstallmentPlans,
   listInvoiceableProjectBases,
   listInvoiceLinks,
+  listLegacyInvoicesForInstallmentPlans,
   listRentBillingItems,
   listScannerUploads,
   registerWebhooks,
@@ -48,10 +52,11 @@ import type {
   RentBillingRun,
   TenancyOption,
 } from '../types';
+import type { FinanceCompany, FinanceCustomer, Invoice } from '../../../types';
 import { Briefcase, CalendarClock, Landmark, Link2, ListChecks, MinusCircle, RefreshCw, ScanLine, Sparkles, Upload } from 'lucide-react';
 
 type VihemCompany = { id: string; name: string; legal_name: string };
-type TabKey = 'overview' | 'company-link' | 'billing' | 'project-billing' | 'adjustments' | 'scanner' | 'invoices' | 'upcoming';
+type TabKey = 'overview' | 'company-link' | 'billing' | 'project-billing' | 'adjustments' | 'scanner' | 'invoices' | 'installments' | 'upcoming';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Översikt' },
@@ -61,6 +66,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'adjustments', label: 'Avdrag & tillägg' },
   { key: 'scanner', label: 'Underlag' },
   { key: 'invoices', label: 'Fakturor' },
+  { key: 'installments', label: 'Avbetalningsplaner' },
   { key: 'upcoming', label: 'Kommande' },
 ];
 
@@ -186,6 +192,7 @@ export function FinanceV2Page() {
               <ScannerTab organisationId={user?.organisation_id ?? ''} companyId={companyId} companyLink={companyLink} />
             )}
             {tab === 'invoices' && <InvoicesTab companyLink={companyLink} />}
+            {tab === 'installments' && <InstallmentPlansTab organisationId={user?.organisation_id ?? ''} userId={user?.id ?? ''} />}
             {tab === 'upcoming' && <UpcomingTab />}
           </div>
         </>
@@ -1135,6 +1142,53 @@ function ScannerTab({
   );
 }
 
+// Relocated from legacy FinancePage.tsx (same shared component, same
+// org-scoped query shapes) so avbetalningsplaner are reachable from Finance
+// V2 without duplicating InstallmentPlansPanel or touching FinancePage.tsx.
+// The panel keeps working exactly as before there too -- this is a second
+// consumer, not a move. It is NOT rewired to Accounted: an installment plan
+// tracks payment of already-existing debt and deliberately doesn't create
+// new invoices anywhere, so it has nothing to link to Accounted yet. A
+// plan built from an Accounted-sourced invoice today has to go through the
+// panel's existing "Övriga ursprungsunderlag" (external/manual) entry,
+// same as it would for any other invoice VI-HEM doesn't hold a local
+// vihem_invoices row for -- a dedicated "hämta från Accounted-faktura"
+// picker would be a natural follow-up, not built in this stage.
+function InstallmentPlansTab({ organisationId, userId }: { organisationId: string; userId: string }) {
+  const [companies, setCompanies] = useState<FinanceCompany[]>([]);
+  const [customers, setCustomers] = useState<FinanceCustomer[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!organisationId) return;
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    Promise.all([
+      listCompaniesForInstallmentPlans(organisationId),
+      listFinanceCustomersForInstallmentPlans(organisationId),
+      listLegacyInvoicesForInstallmentPlans(organisationId),
+    ])
+      .then(([companyData, customerData, invoiceData]) => {
+        if (cancelled) return;
+        setCompanies(companyData);
+        setCustomers(customerData);
+        setInvoices(invoiceData);
+      })
+      .catch((err) => { if (!cancelled) setError(describeError(err)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [organisationId]);
+
+  if (!organisationId || !userId) return null;
+  if (loading) return <Card><p className="text-sm text-slate-500">Laddar avbetalningsplaner…</p></Card>;
+  if (error) return <Card><p className="text-sm text-red-700">{error}</p></Card>;
+
+  return <InstallmentPlansPanel organisationId={organisationId} companies={companies} customers={customers} invoices={invoices} userId={userId} />;
+}
+
 function InvoicesTab({ companyLink }: { companyLink: AccountedCompanyLink | null }) {
   const [invoices, setInvoices] = useState<AccountedInvoiceLink[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1222,7 +1276,7 @@ function UpcomingTab() {
       <EmptyState
         icon={Sparkles}
         title="Kommande i Finance V2"
-        description="Avdrag & tillägg kan kopplas in för fler faktureringskällor än hyra och kundprojekt allteftersom de byggs. Avbetalningsplaner hanteras tills vidare i Ekonomi (legacy)."
+        description="Avdrag & tillägg kan kopplas in för fler faktureringskällor än hyra och kundprojekt allteftersom de byggs. Samlingsfakturor (flera underlag → en Accounted-faktura) är förberett på datamodellnivå men inte byggt."
       />
     </Card>
   );

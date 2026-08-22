@@ -28,6 +28,7 @@ import type {
   RentBillingRun,
   TenancyOption,
 } from './types';
+import type { FinanceCompany, FinanceCustomer, Invoice } from '../../types';
 
 export class AccountedIntegrationError extends Error {
   code: string;
@@ -458,4 +459,46 @@ export async function listScannerUploads(companyLinkId: string): Promise<Account
     .limit(50);
   if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
   return (data ?? []) as AccountedScannerUpload[];
+}
+
+// ── Avbetalningsplaner (legacy workflow, relocated into Finance V2) ─────
+// InstallmentPlansPanel itself (src/components/InstallmentPlansPanel.tsx)
+// is untouched -- it's shared with legacy FinancePage.tsx, still generates
+// its own administrative "delfaktura" PDFs against legacy vihem_invoices
+// (accounting_exportable is hard-locked to false at the DB level, so none
+// of this ever reaches bookkeeping), and that mechanism is intentionally
+// NOT being rewired to Accounted: per the original brief, an installment
+// plan is a payment-tracking layer on top of already-existing debt, not a
+// new invoice source. These three reads just reproduce the exact query
+// shapes FinancePage.tsx already feeds the panel, so it renders identically
+// from Finance V2.
+
+export async function listCompaniesForInstallmentPlans(organisationId: string): Promise<FinanceCompany[]> {
+  const { data, error } = await supabase
+    .from('vihem_companies')
+    .select('*')
+    .eq('organisation_id', organisationId)
+    .order('name', { ascending: true });
+  if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
+  return (data ?? []) as FinanceCompany[];
+}
+
+export async function listFinanceCustomersForInstallmentPlans(organisationId: string): Promise<FinanceCustomer[]> {
+  const { data, error } = await supabase
+    .from('vihem_finance_customers')
+    .select('*, company:company_id(*)')
+    .eq('organisation_id', organisationId)
+    .order('name', { ascending: true });
+  if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
+  return (data ?? []) as unknown as FinanceCustomer[];
+}
+
+export async function listLegacyInvoicesForInstallmentPlans(organisationId: string): Promise<Invoice[]> {
+  const { data, error } = await supabase
+    .from('vihem_invoices')
+    .select('*, company:company_id(*), customer:customer_id(*)')
+    .eq('organisation_id', organisationId)
+    .order('created_at', { ascending: false });
+  if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
+  return (data ?? []) as unknown as Invoice[];
 }
