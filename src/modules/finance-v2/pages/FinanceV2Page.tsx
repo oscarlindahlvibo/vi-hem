@@ -405,6 +405,7 @@ function RentBillingTab({ companyId, companyLink }: { companyId: string; company
   const [itemResults, setItemResults] = useState<Record<string, RentBillingItemResult>>({});
   const [loadingRun, setLoadingRun] = useState(false);
   const [creatingInvoices, setCreatingInvoices] = useState(false);
+  const [combineByCustomer, setCombineByCustomer] = useState(false);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -435,7 +436,7 @@ function RentBillingTab({ companyId, companyLink }: { companyId: string; company
     setMessage('');
     setErrorMessage('');
     try {
-      const outcome = await createRentBillingInvoices({ companyId, runId: run.id, dryRun });
+      const outcome = await createRentBillingInvoices({ companyId, runId: run.id, dryRun, combineByCustomer });
       const byItem: Record<string, RentBillingItemResult> = {};
       outcome.results.forEach((r) => { byItem[r.item_id] = r; });
       setItemResults(byItem);
@@ -469,6 +470,15 @@ function RentBillingTab({ companyId, companyLink }: { companyId: string; company
           </Button>
           {run && invoiceableCount > 0 && (
             <>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-blue-600"
+                  checked={combineByCustomer}
+                  onChange={(e) => setCombineByCustomer(e.target.checked)}
+                />
+                Slå ihop flera hyresrader per kund till en faktura
+              </label>
               <Button
                 variant="secondary"
                 onClick={() => handleCreateInvoices(true)}
@@ -483,6 +493,11 @@ function RentBillingTab({ companyId, companyLink }: { companyId: string; company
             </>
           )}
         </div>
+        {run && invoiceableCount > 0 && combineByCustomer && (
+          <p className="mt-2 text-xs text-slate-500">
+            Hyresgäster med flera lägenheter i denna körning får en gemensam faktura istället för en per lägenhet.
+          </p>
+        )}
         {!companyLink && (
           <p className="mt-3 text-sm text-slate-500">Koppla bolaget mot Accounted under Bolagskoppling innan fakturor kan skapas.</p>
         )}

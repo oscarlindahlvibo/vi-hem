@@ -39,20 +39,20 @@ Samtliga faktureringsvägar från originalspecens etappordning (1.
 hyresfakturering, 2. avdrag/tillägg, 3. kundprojektfakturering, 4.
 portal-sync, 5. scanner → Accounted) är nu byggda i grundform. **Klart:**
 bolagskoppling, kundlänkning, fakturaskapande (generisk + hyresfakturering
-+ kundprojektfakturering), webhook-grund, samlingsfaktura för
-kundprojektunderlag (flera underlag → en Accounted-faktura), generell
-avdrag/tillägg-modul (kopplad till hyresfakturering OCH kundprojekt, med
-skapa-UI för båda måltyperna), hyresgästportalens fakturavy (lista + PDF,
-Accounted som source of truth), scanner → Accounted (e-postkanalen),
-avbetalningsplaner tillgängliga i Finance V2 (samma delade
-`InstallmentPlansPanel`, inte omskrivet mot Accounted).
++ kundprojektfakturering), webhook-grund, samlingsfaktura för både
+kundprojektunderlag (manuellt vald, flera underlag → en Accounted-faktura)
+och hyresfakturering (automatisk gruppering per kund inom en körning),
+generell avdrag/tillägg-modul (kopplad till hyresfakturering OCH
+kundprojekt, med skapa-UI för båda måltyperna), hyresgästportalens
+fakturavy (lista + PDF, Accounted som source of truth), scanner →
+Accounted (e-postkanalen), avbetalningsplaner tillgängliga i Finance V2
+(samma delade `InstallmentPlansPanel`, inte omskrivet mot Accounted).
 **Kvar:** avdrag/tillägg och fakturering för korttidsuthyrning (och andra
 framtida faktureringskällor bortom hyra/kundprojekt) — se avsnittet
-"Avdrag & tillägg" nedan för exakt vad det gapet innebär, samlingsfaktura
-för hyresfakturering (bara kundprojekt har funktionen idag — se
-"Samlingsfaktura" nedan), en riktig server-till-server-koppling för
-scanner om e-postkanalen visar sig otillräcklig, en genväg för att bygga
-en avbetalningsplan direkt från en Accounted-faktura (går redan via det
+"Avdrag & tillägg" nedan för exakt vad det gapet innebär, en riktig
+server-till-server-koppling för scanner om e-postkanalen visar sig
+otillräcklig, en genväg för att bygga en avbetalningsplan direkt från en
+Accounted-faktura (går redan via det
 befintliga externa-underlag-fältet, men utan en egen "hämta från
 Accounted"-väljare).
 
@@ -150,7 +150,7 @@ befintlig produktionsfakturering (`vihem_invoices`, `vihem_accounting_*`,
 - **`vihem-accounted-admin`** — `save_company_link` (nu även `invoice_inbox_email`, sparas i `settings`), `test_connection`, `register_webhooks`. Kräver `admin`-bolagsbehörighet.
 - **`vihem-accounted-customers`** — hittar befintlig kundkoppling eller skapar kunden i Accounted (idempotent, dry-run-stödd). Tunn wrapper runt den delade resolvern.
 - **`vihem-accounted-invoices`** — `create` (generisk, idempotent, dry-run-stödd) och `refresh_status`. Tunn wrapper runt den delade skaparen.
-- **`vihem-accounted-rent-billing`** — batchar fakturaskapande för en hel hyreskörning: för varje ej fakturerad rad, länka/skapa Accounted-kunden (`vihem_finance_customers`, via `finance_customer_id`), hämta gällande avdrag/tillägg för hyresförhållandet och perioden, och skapa fakturan (grundhyra + hyresjusteringar redan summerat av befintlig SQL, plus en rad per avdrag/tillägg). Partial-success-svar per rad, samma mönster som Accounteds egen `bulk-create`.
+- **`vihem-accounted-rent-billing`** — batchar fakturaskapande för en hel hyreskörning: för varje ej fakturerad rad, länka/skapa Accounted-kunden (`vihem_finance_customers`, via `finance_customer_id`), hämta gällande avdrag/tillägg för hyresförhållandet och perioden, och skapa fakturan (grundhyra + hyresjusteringar redan summerat av befintlig SQL, plus en rad per avdrag/tillägg). Partial-success-svar per rad, samma mönster som Accounteds egen `bulk-create`. Valfri `combine_by_customer` (default `false`) grupperar rader med samma `finance_customer_id` till en gemensam samlingsfaktura, se "Samlingsfaktura (hyresfakturering)" nedan.
 - **`vihem-accounted-project-billing`** — två anropsformer på samma endpoint: `{ basis_id }` skapar Accounted-fakturan för ETT `ready_for_invoicing`-faktureringsunderlag (ursprunglig väg, oförändrat beteende); `{ basis_ids: [...] }` (2–25 st) skapar EN samlingsfaktura av flera underlag, se "Samlingsfaktura" nedan. Återanvänder den befintliga SQL-funktionen `vihem_ensure_finance_customer_for_project` (samma match-eller-skapa-logik som legacy-RPC:n) för kundmatchning, kör som anropande användare (inte service-role) eftersom funktionen är `SECURITY DEFINER` och läser `auth.uid()` internt. Fakturarader byggs direkt från underlagets `ready`-rader (tid/material/ändringsorder/fast pris), plus gällande avdrag/tillägg för projektet (`target_type = 'customer_project'`, period = dagens datum eftersom projekt saknar en kalenderperiod-koppling).
 - **`vihem-billing-adjustments`** — `create`/`update` för avdrag/tillägg. Enda platsen som får skriva till `vihem_billing_adjustments`.
 - **`vihem-accounted-tenant-invoices`** — `GET ?invoice_link_id=`, hyresgäst-scopad. Proxar Accounteds PDF-endpoint: verifierar ägarskap manuellt (`vihem_rent_billing_items.tenant_id = caller.id`, samma relation som RLS-policyn nedan) eftersom en binär PDF-respons inte kan gå via en vanlig RLS-skyddad tabellfråga. Vanlig `verify_jwt` (ingen `config.toml`-ändring) eftersom Accounted aldrig anropar den här — bara den inloggade hyresgästens webbläsare.
@@ -175,13 +175,15 @@ kommentarer/dokumentation — ingen kod i den filen är rörd.
 Nio flikar: Översikt, Bolagskoppling (spara URL/company-id/API-nyckel,
 Accounted-inkorgsadress, testa anslutning, registrera webhooks),
 **Fakturering** (hyra: välj hyresperiod → hämta körning från befintlig
-`vihem_create_rent_billing_run` → förhandsgranska mot Accounted som
-dry-run → skapa fakturor på riktigt, med resultat per rad),
+`vihem_create_rent_billing_run` → valfri kryssruta "Slå ihop flera
+hyresrader per kund till en faktura" (`combine_by_customer`, se
+"Samlingsfaktura (hyresfakturering)" nedan) → förhandsgranska mot
+Accounted som dry-run → skapa fakturor på riktigt, med resultat per rad),
 **Kundprojekt** (listar `ready_for_invoicing`-underlag oavsett projekt,
 förhandsgranska/skapa faktura per underlag — underlaget självt skapas
 fortfarande i Kundprojekt-sidan, orörd; kryssrutor + en samlingsåtgärd
 låter en markera 2+ underlag och förhandsgranska/skapa DEM som en enda
-Accounted-faktura, se "Samlingsfaktura" nedan), **Avdrag & tillägg**
+Accounted-faktura, se "Samlingsfaktura (kundprojekt)" nedan), **Avdrag & tillägg**
 (filtrerbar lista — Alla/Aktiva/Återkommande/Kommande/Pausade/Förbrukade-
 historik — plus ett skapa-formulär med en måltyp-väljare
 (hyresgäst/kundprojekt) och en beroende hyresgäst- eller
@@ -353,13 +355,14 @@ Accounted-repot; inte gjort.
    faktura, per originalspecen), och ingenting i denna etapp ändrar det.
 3. ~~Kundprojektfakturering mot den nya vägen~~ Klart
    (`vihem-accounted-project-billing`), inklusive samlingsfaktura av flera
-   underlag (`{ basis_ids: [...] }`, se "Samlingsfaktura" nedan) — legacy
-   `vihem_create_invoice_from_project_basis_batch`s förmåga att slå ihop
-   flera underlag till EN faktura är alltså nu porterad till V2-vägen,
-   inte bara förberedd på datamodellnivå. Samlingsfakturering för
-   hyresfakturering (`vihem-accounted-rent-billing`) är fortfarande inte
-   byggd — samma datamodell stödjer det, men funktionen är inte
-   implementerad för den vägen i denna etapp.
+   underlag (`{ basis_ids: [...] }`, se "Samlingsfaktura (kundprojekt)"
+   nedan) — legacy `vihem_create_invoice_from_project_basis_batch`s
+   förmåga att slå ihop flera underlag till EN faktura är alltså nu
+   porterad till V2-vägen, inte bara förberedd på datamodellnivå.
+   ~~Samlingsfakturering för hyresfakturering~~ Klart också
+   (`vihem-accounted-rent-billing`, `combine_by_customer`) — en
+   hyresgäst med flera lägenheter i samma körning kan nu få en gemensam
+   faktura, se "Samlingsfaktura (hyresfakturering)" nedan.
 4. ~~Hyresgästportalens fakturavy~~ Klart (`TenantInvoicesPage.tsx`,
    `vihem-accounted-tenant-invoices`) — lista + PDF, Accounted som source of
    truth. Bara hyresfakturor (`source_type = 'rental_billing'`); en
@@ -422,11 +425,36 @@ unika id) istället för `basis_id`:
 som matchar en `accounted_invoice_id` (inte bara en) innan detta steg, så
 webhook-synken fungerar oförändrat för en samlingsfaktura.
 
-Motsvarande samlingsfunktion för **hyresfakturering**
-(`vihem-accounted-rent-billing`) är inte byggd i denna etapp — samma
-datamodell och samma delade `createAccountedCollectionInvoiceForSources`
-skulle kunna återanvändas, men ingen UI eller anropslogik finns för det
-ännu.
+### Samlingsfaktura (hyresfakturering)
+
+`vihem-accounted-rent-billing` stödjer nu samma samlingsmönster, men
+automatiskt istället för manuellt: en valfri `combine_by_customer`-flagga
+(default `false`, styrd av en kryssruta "Slå ihop flera hyresrader per
+kund till en faktura" i Fakturering-fliken) grupperar körningens
+faktureringsrader efter `finance_customer_id` innan de skapas. En
+hyresgäst med flera lägenheter i samma körning (samma `finance_customer_id`
+på flera `vihem_rent_billing_items`) får då EN Accounted-faktura för alla
+sina lägenheter istället för en per lägenhet; en hyresgäst med bara en
+lägenhet faktureras exakt som innan oavsett flaggan. Ingen manuell
+markering krävs (till skillnad från Kundprojekt-flikens kryssrutor) --
+grupperingen är entydig eftersom `finance_customer_id` redan är den rätta
+nyckeln för "samma betalande part".
+
+Delar samma delade `createAccountedCollectionInvoiceForSources` och samma
+garantier (kundmatchning en gång per grupp, idempotent Accounted-anrop,
+per-rad varningar om en enskild rads egen länk-uppdatering misslyckas
+efter att fakturan redan skapats). Skillnaden mot kundprojekt-varianten:
+varje hyresrad har sin EGEN faktureringsperiod och sina egna avdrag, så
+`vihem-accounted-rent-billing` kan använda varje rads egen
+`accounted_invoice_link_id` (en per källa, från
+`createAccountedCollectionInvoiceForSources`s svar) som exakt referens när
+avdrag markeras konsumerade -- ingen "representativ länk"-kompromiss
+behövs här, till skillnad från kundprojekt-varianten där avdrag är på
+projektnivå och delas mellan flera underlag.
+
+`combine_by_customer=false` (default) kör exakt samma kodväg som innan
+detta steg, orörd -- ingen befintlig integration påverkas av att
+funktionen finns.
 
 ### Avdrag & tillägg (`vihem_billing_adjustments`)
 
