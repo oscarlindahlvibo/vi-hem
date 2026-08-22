@@ -3,6 +3,7 @@
 // internal components in one file rather than a deep folder tree).
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
+import { supabase } from '../../../lib/supabase';
 import {
   cancelAgreement,
   createAgreement,
@@ -15,6 +16,7 @@ import {
   listTemplates,
   remindSigner,
   removeAttachment,
+  resendFinalPdf,
   saveBlocks,
   saveParties,
   saveSigners,
@@ -42,7 +44,7 @@ import type {
 import { BlockEditor } from '../components/BlockEditor';
 import { BlockRenderer } from '../components/BlockRenderer';
 import { Modal } from '../../../components/ui';
-import { ArchiveIcon, ArrowLeft, Bell, FileSignature, FileText, Paperclip, Plus, Send, Trash2, Users, XCircle } from 'lucide-react';
+import { ArchiveIcon, ArrowLeft, Bell, Download, FileSignature, FileText, Paperclip, Plus, RefreshCw, Send, Trash2, Users, XCircle } from 'lucide-react';
 
 function describeError(err: unknown): string {
   if (err instanceof AgreementApiError) return err.message;
@@ -437,9 +439,20 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
         </div>
       </div>
 
-      <div>
-        <h1 className="text-xl font-bold text-slate-900">{agreement.title || '(namnlöst dokument)'}</h1>
-        <p className="text-sm text-slate-400">{agreement.document_number}</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">{agreement.title || '(namnlöst dokument)'}</h1>
+          <p className="text-sm text-slate-400">{agreement.document_number}</p>
+        </div>
+        {agreement.final_pdf_storage_path && (
+          <FinalPdfActions
+            agreementId={agreement.id}
+            storagePath={agreement.final_pdf_storage_path}
+            documentNumber={agreement.document_number}
+            onMessage={setMessage}
+            onError={setError}
+          />
+        )}
       </div>
 
       {message && <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p>}
@@ -505,6 +518,78 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
       )}
       {step === 'attachments' && <AttachmentsStep detail={detail} organisationId={organisationId} editable={editable} onChanged={refreshDetail} onError={setError} />}
       {step === 'history' && <HistoryStep events={detail.audit_events} />}
+    </div>
+  );
+}
+
+// The final signed PDF (generated once every required signer has signed --
+// see _shared/agreement-completion.ts) lives in the private `vihem-agreements`
+// storage bucket. Staff already have direct RLS-backed read access to it, so
+// downloading is just a short-lived signed URL, same pattern as
+// pages/DocumentsPage.tsx -- no dedicated edge function needed. "Skicka
+// igen" re-runs the same generate-and-email step on demand (e.g. a party's
+// email bounced) rather than only firing once automatically.
+function FinalPdfActions({
+  agreementId,
+  storagePath,
+  documentNumber,
+  onMessage,
+  onError,
+}: {
+  agreementId: string;
+  storagePath: string;
+  documentNumber: string;
+  onMessage: (m: string) => void;
+  onError: (m: string) => void;
+}) {
+  const [downloading, setDownloading] = useState(false);
+  const [resending, setResending] = useState(false);
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const { data, error } = await supabase.storage
+        .from('vihem-agreements')
+        .createSignedUrl(storagePath, 60 * 5, { download: `${documentNumber}.pdf` });
+      if (error || !data?.signedUrl) throw error || new Error('Kunde inte skapa nedladdningslänk.');
+      window.open(data.signedUrl, '_blank');
+    } catch (err) {
+      onError(describeError(err));
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setResending(true);
+    try {
+      const result = await resendFinalPdf(agreementId);
+      const ok = (result.deliveries || []).filter((d) => d.ok).length;
+      const failed = (result.deliveries || []).filter((d) => !d.ok).length;
+      onMessage(failed > 0 ? `PDF skickades till ${ok} part(er), misslyckades för ${failed}.` : `PDF skickades till ${ok} part(er).`);
+    } catch (err) {
+      onError(describeError(err));
+    } finally {
+      setResending(false);
+    }
+  };
+
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      <button
+        onClick={handleDownload}
+        disabled={downloading}
+        className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+      >
+        <Download className="h-3.5 w-3.5" /> {downloading ? 'Öppnar...' : 'Ladda ner PDF'}
+      </button>
+      <button
+        onClick={handleResend}
+        disabled={resending}
+        className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+      >
+        <RefreshCw className="h-3.5 w-3.5" /> {resending ? 'Skickar...' : 'Skicka igen'}
+      </button>
     </div>
   );
 }

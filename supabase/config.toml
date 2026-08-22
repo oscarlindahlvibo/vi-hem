@@ -408,6 +408,13 @@ verify_jwt = false
 [functions.vihem-agreements-public]
 verify_jwt = false
 
+# Avtal V2 (BETA) public verification surface -- given only a document
+# number + verification code (printed on the final signed PDF), returns a
+# read-only signature summary. No JWT, no signing-token; same
+# --no-verify-jwt deploy caveat as vihem-accounted-webhook above.
+[functions.vihem-agreements-verify]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

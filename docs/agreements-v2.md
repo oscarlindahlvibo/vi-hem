@@ -303,12 +303,13 @@ blockerar tills en ny version finns) ingick aldrig i det som skickades.
 
 ## 13. Slutlig PDF
 
-**Inte byggt i denna etapp.** Det som finns: en fullständigt renderad,
-hashad, versionerad datastruktur (`vihem_agreement_versions.blocks` +
-bilagornas `content_hash`) som är exakt det en PDF-generator skulle
-behöva som indata. Att rendera detta till en snygg, nedladdningsbar
-slutgiltig PDF (med logotyp, dokumentnummer, signaturer, audit-ID) är
-kvar till nästa etapp — se punkt 23.
+**Byggd (samma dag, efter första committen) — se punkt 24** för
+arkitektur, den WinAnsiEncoding-bugg som hittades och fixades, och
+verifieringsmetoden. Det denna sektion ursprungligen beskrev som
+förutsättning stämmer fortfarande: den frusna, hashade, versionerade
+datastrukturen (`vihem_agreement_versions.blocks` + bilagornas
+`content_hash`) är exakt det PDF-generatorn i punkt 24 använder som
+indata.
 
 ## 14. Koppling till lägenhet/hyresgäst utan att vara obligatorisk
 
@@ -370,6 +371,20 @@ Ekonomi V2:s `module: 'finance'`-krav).
 **Orörda**: `vihem_contract_signatures`, `InspectionsPage.tsx`,
 `ApartmentPage.tsx`, `vihem-bankid/index.ts`, `vihem_documents`,
 `vihem-send-invoice-emails` — bekräftat via `git status --short` innan commit.
+
+**Tillägg för slutlig PDF (samma dag, se punkt 24)**: ny migration
+(`final_pdf_storage_path`/`final_pdf_generated_at`/`verification_code`
+på `vihem_agreements`); nya delade backend-moduler `_shared/png-decode.ts`
+och `_shared/agreement-pdf.ts` samt orkestreringslagret
+`_shared/agreement-completion.ts`; ny edge-funktion
+`vihem-agreements-verify` (`verify_jwt=false`, samma mönster som
+`vihem-agreements-public`); `vihem-agreements-public` (anropar
+`generateAndDeliverFinalPdf` när sista obligatoriska signatären
+signerar) och `vihem-agreements-workflow` (ny `resend_final_pdf`-action)
+ändrade; frontend fick `FinalPdfActions`-komponenten i
+`AgreementsV2Page.tsx` (ladda ner/skicka igen) och en ny publik sida
+`PublicAgreementVerifyPage.tsx` (`/verify?doc=...&code=...`, samma
+routing-mönster som `/sign` i `App.tsx`).
 
 ## 19. Tester / verifiering
 
@@ -623,27 +638,202 @@ bekräftade i databasen att vardera gjorde exakt det den skulle.
 
 ## 23. Öppna frågor / kvarstående arbete till nästa etapp
 
-1. **BankID-koppling** — se punkt 10 för exakt vad som krävs.
-2. **Slutlig PDF-generering** — rendera en frusen version + bilagor +
-   signaturer till en nedladdningsbar PDF.
-3. **Riktig deep-link-prefill** från lägenhets-/hyresgästsidan till en ny
+1. **BankID-koppling** — se punkt 10 för exakt vad som krävs. Sedan punkt
+   24 gäller detta även den slutliga PDF:en: en BankID-signering skulle
+   fylla i `bankid_personal_number`/`bankid_reference` på
+   `vihem_agreement_signatures`, vilket PDF-generatorn redan har stöd för
+   att rendera (maskerat personnummer + referens + verifieringslänk) —
+   bara själva signeringsflödet saknas, inte PDF-sidan av det.
+2. **Riktig deep-link-prefill** från lägenhets-/hyresgästsidan till en ny
    Avtal V2-utkast (kräver en delad navigerings-/state-mekanism som inte
    finns i appen idag, se punkt 20).
-4. **Sekventiell signering** — datamodellen (`sign_order`) finns,
+3. **Sekventiell signering** — datamodellen (`sign_order`) finns,
    arbetsflödet tillämpar bara parallell signering.
-5. **En riktig testsvit** enligt uppdragets sektion 30-lista. Manuellt
-   verifierat för närvarande (se punkt 19: hela skapa→skicka→signera-
-   flödet, dubbelsignering blockerad, ogiltig token avvisad, RLS-
-   isolering), men det är inte samma sak som en automatiserad, repeterbar
-   testsvit i CI.
-6. **Ny avtalsversion efter utskick** — datamodellen stödjer flera
+4. **En riktig testsvit** enligt uppdragets sektion 30-lista. Manuellt
+   verifierat för närvarande (se punkt 19 och punkt 24: hela
+   skapa→skicka→signera→PDF-generering→e-postleverans-flödet,
+   dubbelsignering blockerad, ogiltig token avvisad, RLS-isolering,
+   verifieringssidan med rätt/fel kod), men det är inte samma sak som en
+   automatiserad, repeterbar testsvit i CI.
+5. **Ny avtalsversion efter utskick** — datamodellen stödjer flera
    versioner per avtal, men UI-flödet "gör om ett redan skickat utkast
    och skicka som version 2" är inte byggt.
-7. Mall-driven kategoristruktur ("Hyresavtal/Kundavtal/Offerter/..." som
+6. Mall-driven kategoristruktur ("Hyresavtal/Kundavtal/Offerter/..." som
    separata mappar) är idag bara `category`-textfiltret i arkivet, inte en
    egen hierarki — bedömdes tillräckligt för "känslan av ett centralt
    arkiv" per uppdragets egen öppning för det, men kan byggas ut.
-8. **Motsvarande integration för fastigheter/lägenheter** (inte bara
+7. **Motsvarande integration för fastigheter/lägenheter** (inte bara
    hyresgäster) — `AdminPropertiesPage.tsx`s lägenhetsdetalj har ingen
    "Avtal"-sektion än; samma mönster som `AdminTenantsPage.tsx` skulle
    kunna återanvändas rakt av.
+8. **`generateAndDeliverFinalPdf`s hantering av kopplade entiteter**
+   (`{{tenant.x}}`/`{{apartment.x}}`/`{{project.x}}`-block) är inte
+   end-to-end-testad med en riktig `entity_links`-rad i det fullständiga
+   signerings→PDF-flödet — bara var för sig (se punkt 19 för
+   entitetsuppslagningens egna schemafixar, punkt 24 för PDF-flödets
+   E2E-test, som använde ett fristående avtal utan entitetslänkar).
+
+## 24. Slutlig PDF: generering, leverans och verifiering (tillagd samma dag)
+
+Uppdrag: *"Ett signerat avtal ska skickas till alla parter som pdf med
+signatur / info om bank-id signatur och länk till verifiering av
+signatur om signaturen gjorts med BankID. I vi-hem ska man kunna ladda
+ner avtalet som pdf."*
+
+**Arkitektur.** Deno edge-runtimen har varken DOM, `canvas` eller
+`document.createElement`, så PDF:en byggs helt handrullad — samma
+mönster som det befintliga, webbläsarbaserade
+`src/lib/generatedDocuments.ts`, men portat till edge: manuell
+PDF-objektgraf (Catalog→Pages→Page→Contents/XObject), text hex-escapad
+enligt WinAnsiEncoding, manuell xref-tabell + trailer,
+`CompressionStream("deflate")` för FlateDecode-komprimering av
+sidinnehåll. `_shared/agreement-pdf.ts` (`buildAgreementPdf`) tar frusna
+block + parter + signaturer + en verifieringslänk som indata och bygger
+sidorna: titel/parter, dokumentets innehåll (samtliga 20 blocktyper
+renderade till läsbar text), och en avslutande "Signaturer och
+verifiering"-sektion.
+
+**Signaturbilder.** En handskriven signatur lagras som en PNG data-URL
+(samma som resten av modulen). Eftersom edge-runtimen inte kan avkoda
+PNG via `<img>`/`canvas`, skrevs en egen PNG-avkodare,
+`_shared/png-decode.ts`: parsar IHDR/IDAT/IEND, inflaterar den
+zlib-wrappade IDAT-strömmen via `DecompressionStream("deflate")` (matchar
+RFC 1950 exakt), återställer PNG:s per-rad-filter (None/Sub/Up/Average/
+Paeth) och plattar ut alfakanalen mot vit botten. Verifierad
+pixel-perfekt: en riktig PIL-genererad 300×100 RGBA-testsignatur
+rundtripprades genom avkodning → PDF-inbäddning → `pypdf`-extraktion →
+`numpy`-diff mot originalet, **max pixeldiff: 0**.
+
+**En bugg som bara syns i en riktig PDF-läsare, inte i typecheck.**
+Fyra textsträngar i blockrenderingen använde Unicode-tecken utanför
+WinAnsiEncodings säkra intervall (0x20–0xFF + ett fåtal specialtecken):
+punktlistans `•` (U+2022), avdelarens `─` (U+2500, box-drawing),
+callout-blockets `ℹ`-prefix (U+2139) och bilaga-blockets 📎-prefix
+(U+1F4CE). Var och en av dessa hade renderats som ett bokstavligt
+frågetecken i en riktig PDF-läsare — TypeScript ser inget fel i en
+sträng, oavsett vilka kodpunkter den innehåller. Hittades genom att
+faktiskt rendera en testPDF och köra `pypdf.extract_text()` på den.
+Fixat: `•` lades till i `winAnsiByte`s specialtabell (CP1252 definierar
+den faktiskt på 0x95), `─` byttes mot vanlig ASCII (`"-".repeat(70)`),
+`ℹ` mot `"OBS: "`, 📎 mot `"Bilaga: "`. Omverifierat efteråt: 0
+frågetecken-korruption över samtliga 20 blocktyper.
+
+**BankID-signaturer i PDF:en.** Signeringsflödet för BankID i Avtal V2
+är fortfarande inte kopplat (se punkt 10) — men PDF-generatorn stödjer
+redan att RENDERA en BankID-signatur, så den dagen kopplingen byggs
+kräver den ingen ändring i punkt 24:s kod. Om en signaturrad har
+`method='bankid'` skriver PDF:en ut ett maskerat personnummer (samma
+`maskPersonalNumber()`-princip som redan används i UI:t, sista fyra
+siffrorna synliga), BankID-referensen, och verifieringslänken — INTE
+någon bild, eftersom BankID inte producerar en handskriven signaturbild.
+
+**Verifieringslänk och -kod.** Varje avtal får vid första
+PDF-genereringen en slumpmässig `verification_code` (12 bytes hex,
+kolumn `vihem_agreements.verification_code`, unikt index). Länken som
+trycks i PDF:en är `${VIHEM_PUBLIC_APP_URL}/verify?doc=<document_number>&code=<verification_code>`.
+Detta är medvetet EN ANNAN behörighetsmodell än signeringslänken (punkt
+8): en signeringstoken ger en specifik signatär makt att signera ett
+specifikt dokument och är tänkt att hållas hemlig av just den personen;
+verifieringskoden är tänkt att DELAS ÖPPET (en bank, en domstol, ett
+annat företag ska kunna klistra in den) och ger enbart läsrättighet till
+en signatursammanfattning — aldrig dokumentets faktiska innehåll eller
+bilagor. Ny edge-funktion `vihem-agreements-verify` (`verify_jwt=false`,
+samma icke-JWT-mönster som `vihem-agreements-public`): tar
+`document_number` + `code`, slår upp avtalet, jämför koden, och svarar
+antingen med `{title, document_number, status, completed_at,
+content_hash, signers: [{name, role_title, method, status, signed_at}]}`
+eller ett generiskt `NOT_VERIFIED`/404 — medvetet SAMMA svar oavsett om
+dokumentnumret inte finns eller koden är fel, så en anropare aldrig kan
+avgöra vilket. Ny publik sida `PublicAgreementVerifyPage.tsx`
+(`/verify?doc=...&code=...`, samma routingkonvention i `App.tsx` som
+`/sign`/`/laundry-guest`) renderar detta.
+
+**Orkestrering och leverans.** `_shared/agreement-completion.ts`
+(`generateAndDeliverFinalPdf(db, agreementId)`) är den enda platsen som
+faktiskt genererar och skickar den slutliga PDF:en: laddar avtal +
+frusen version + parter + signatärer + signaturer + organisationsnamn,
+bygger PDF:en, laddar upp den till den befintliga privata
+`vihem-agreements`-bucketen (`${organisation_id}/${agreementId}/final-signed.pdf`,
+`upsert:true` — regenerering skriver alltid över, det finns aldrig
+anledning att behålla en gammal version eftersom indata är immutable),
+uppdaterar `vihem_agreements.final_pdf_storage_path`/
+`final_pdf_generated_at`, skriver ett `final_pdf_generated`-audit-event,
+och mejlar PDF:en som bilaga (via befintliga `_shared/smtp-mailer.ts`,
+ingen ny leveransmekanism) till **samtliga parter med en ifylld
+e-postadress** — uttryckligen inte bara signatärerna, per uppdragets
+egen formulering ("skickas till alla parter"). Ett `pdf_sent_email`-
+respektive `pdf_delivery_failed`-audit-event skrivs per part (med en ny
+`maskEmail()`-hjälpfunktion i metadatan, samma maskeringsprincip som
+`maskPersonalNumber()`). Anropas dels automatiskt från
+`vihem-agreements-public`s `maybeCompleteAgreement()` när sista
+obligatoriska signatären signerar (best-effort — misslyckas
+PDF-generering eller e-postleverans kastas felet INTE vidare, eftersom
+en signatärs bekräftelse av sin egen signatur aldrig får fallera på
+grund av ett nedströms PDF/e-post-problem; felet fångas ändå i audit-
+trailen), dels on-demand via en ny `resend_final_pdf`-action i
+`vihem-agreements-workflow` (kräver status `signed`/`accepted`, skriver
+ett `final_pdf_resent`-event) — för när t.ex. en parts e-post
+studsade.
+
+**Nedladdning i VI-HEM.** Personal med RLS-baserad läsbehörighet till
+bucketen (samma org-prefix-policy som redan fanns för bilagor, se punkt
+12 — `final-signed.pdf` följer samma
+`${organisation_id}/${agreement_id}/...`-konvention) kan ladda ner
+direkt från frontend utan någon ny edge-funktion: `FinalPdfActions`-
+komponenten i `AgreementsV2Page.tsx` (syns i avtalsredigerarens header
+när `final_pdf_storage_path` är satt) skapar en kortlivad signerad URL
+via `supabase.storage.from('vihem-agreements').createSignedUrl(...)`,
+exakt samma mönster som `DocumentsPage.tsx` redan använder. Samma
+komponent har en "Skicka igen"-knapp mot `resend_final_pdf`.
+
+**Verifiering.** Samma trestegsmetod som resten av sessionen
+(typecheck → riktig Postgres-verifiering → riktig edge-runtime-körning),
+men den sista nivån gick här längre än tidigare eftersom PDF och PNG är
+binärformat där typecheck i praktiken inte kan fånga fel:
+
+- `pip3 install pypdf pillow numpy` i sandboxen (nätverk tillgängligt),
+  en engångs edge-funktion byggd enbart för att köra `buildAgreementPdf`
+  mot representativa testblock (samtliga 20 blocktyper + en handskriven
+  och en BankID-signatur) — validerad strukturellt (sidantal,
+  XObject-dimensioner/filter) och pixel-för-pixel (se ovan). Funktionen
+  och alla temporära PDF-filer togs bort efter verifieringen.
+- **Fullständigt end-to-end-test av HELA orkestreringen** (inte bara den
+  fristående `buildAgreementPdf`): skapade ett riktigt testavtal +
+  version + part + signatär + `signature_request` direkt i den lokala
+  databasen, anropade `vihem-agreements-public`s `sign`-action med ett
+  känt token över riktig HTTP (mot `supabase functions serve`), och
+  bekräftade: avtalets status gick till `signed`, `verification_code`
+  genererades, `final_pdf_storage_path`/`final_pdf_generated_at`
+  sattes, PDF:en (3061 byte) landade i `storage.objects` på rätt sökväg,
+  audit-trailen fick `signed → completed → final_pdf_generated →
+  pdf_delivery_failed` (SMTP var avsiktligt inte konfigurerat i denna
+  körning — bekräftar att den gracefulla felvägen fungerar utan att
+  krascha huvudflödet, en tidigare etablerad e-postleveransmekanism
+  återanvänds oförändrad). PDF:en hämtades ur storage-volymen och
+  validerades med `pypdf`: 3 sidor, rätt organisationsnamn/
+  dokumentnummer/innehåll, signatursidan med en egen bildsida
+  (`/XObject`), verifieringslänken med rätt kod, inga
+  frågetecken-korruptioner.
+- `vihem-agreements-verify` testad direkt med riktig HTTP mot ett andra
+  testavtal: rätt kod → fullständig signatursammanfattning; fel kod →
+  generiskt 404 `NOT_VERIFIED`; obefintligt dokumentnummer → SAMMA
+  generiska 404 (bekräftar att de två fallen är omöjliga att skilja åt
+  utanför systemet).
+- All testdata (två fristående testavtal + relaterade rader i samtliga
+  berörda tabeller) skapades och raderades i den lokala databasen
+  efteråt.
+- `npm run typecheck` (hela projektet, inte bara de nya filerna) grönt
+  efter varje ändring.
+- **Inte gjort**: en visuell webbläsarverifiering av de nya
+  frontend-komponenterna (nedladdningsknappen i avtalsredigeraren,
+  `PublicAgreementVerifyPage.tsx`) — den lokala förhandsgranskningsmiljön
+  gav upprepade, olösta navigeringsfel den här sessionen (`policy
+  check`/`navigation denied` mot `localhost:5173`, till synes ett
+  miljöproblem snarare än ett applikationsfel, se punkt 21 för en
+  liknande men separat tidigare webbläsarkvirk). Kompenserat med: exakt
+  spegling av redan webbläsarverifierade syskonkomponenter
+  (`DocumentsPage.tsx`s signerade-URL-mönster,
+  `PublicAgreementSignPage.tsx`s sidstruktur), en API-kontraktsverifiering
+  ord-för-ord mot `vihem-agreements-verify`s faktiska `curl`-testade
+  JSON-svar, och ett grönt helprojekt-`tsc`. Bör webbläsarverifieras
+  manuellt innan release.

@@ -13,6 +13,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { hashSigningToken } from "../_shared/agreement-tokens.ts";
+import { generateAndDeliverFinalPdf } from "../_shared/agreement-completion.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -209,6 +210,14 @@ async function maybeCompleteAgreement(db: any, agreementId: string) {
       .update({ status: agreement?.document_type === "offer" ? "accepted" : "signed", completed_at: new Date().toISOString() })
       .eq("id", agreementId);
     await db.from("vihem_agreement_audit_events").insert({ agreement_id: agreementId, event_type: "completed", actor_type: "system" });
+
+    // Best-effort: the agreement is already correctly marked signed/
+    // accepted above regardless of whether PDF generation or delivery
+    // succeeds -- a signer's confirmation of their own signature must
+    // never fail because of a downstream PDF/email problem. Failures are
+    // captured in the audit trail by generateAndDeliverFinalPdf itself,
+    // not re-thrown here.
+    await generateAndDeliverFinalPdf(db, agreementId);
   } else if (anySigned) {
     await db.from("vihem_agreements").update({ status: "partially_signed" }).eq("id", agreementId).in("status", ["sent", "viewed", "partially_signed"]);
   }

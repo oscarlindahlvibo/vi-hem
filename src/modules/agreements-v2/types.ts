@@ -36,6 +36,8 @@ export interface Agreement {
   sent_at: string | null;
   completed_at: string | null;
   archived_at: string | null;
+  final_pdf_storage_path: string | null;
+  final_pdf_generated_at: string | null;
 }
 
 export interface AgreementListItem {
@@ -233,4 +235,16 @@ export interface PublicSignView {
   parties: { display_name: string; party_type: PartyType }[];
   attachments: { id: string; name: string; description: string; content_type: string; file_size: number }[];
   already_signed: boolean;
+}
+
+// ── Public verification view ─────────────────────────────────────────────
+
+export interface PublicVerificationResult {
+  document_number: string;
+  title: string;
+  document_type: AgreementDocumentType;
+  status: AgreementStatus;
+  completed_at: string | null;
+  content_hash: string | null;
+  signers: { name: string; role_title: string; method: SigningMethod; status: SignerStatus; signed_at: string | null }[];
 }

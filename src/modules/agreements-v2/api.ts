@@ -17,6 +17,7 @@ import type {
   AgreementStatus,
   ExistingPartyOption,
   PublicSignView,
+  PublicVerificationResult,
 } from './types';
 
 export class AgreementApiError extends Error {
@@ -210,6 +211,9 @@ export function remindSigner(agreementId: string, signerId: string, alsoSms = fa
 export function cancelAgreement(agreementId: string): Promise<{ ok: boolean }> {
   return invokeWorkflow('cancel', { agreement_id: agreementId });
 }
+export function resendFinalPdf(agreementId: string): Promise<{ ok: boolean; deliveries?: { party: string; email: string; ok: boolean; error?: string }[] }> {
+  return invokeWorkflow('resend_final_pdf', { agreement_id: agreementId });
+}
 
 // ── Public signing (used by PublicAgreementSignPage) ────────────────────
 
@@ -224,4 +228,15 @@ export function submitSignature(token: string, params: { signature_image: string
 }
 export function declineSigning(token: string, reason?: string): Promise<{ ok: boolean }> {
   return invokePublic('decline', { token, reason });
+}
+
+// ── Public verification (used by PublicAgreementVerifyPage) ─────────────
+// A separate edge function/token scheme from signing on purpose -- the
+// verification code is printed on the final PDF and meant to be shared
+// with third parties (a bank, a court), so it must never grant the signing
+// powers a per-signer token has. See vihem-agreements-verify/index.ts.
+
+export async function verifyDocument(documentNumber: string, code: string): Promise<PublicVerificationResult> {
+  const { data, error } = await supabase.functions.invoke('vihem-agreements-verify', { body: { document_number: documentNumber, code } });
+  return unwrap<PublicVerificationResult>(data, error);
 }

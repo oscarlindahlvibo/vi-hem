@@ -11,6 +11,7 @@ import { authenticate, corsHeaders, errorJson, isAuthContext, json } from "../_s
 import { buildDynamicFieldContext, hashBlocks, mergeEntityContext, resolveBlocks, type AgreementBlock, type DynamicFieldContext } from "../_shared/agreement-snapshot.ts";
 import { buildSigningUrl, generateSigningToken, hashSigningToken } from "../_shared/agreement-tokens.ts";
 import { readSmtpConfigFromEnv, sendMail } from "../_shared/smtp-mailer.ts";
+import { generateAndDeliverFinalPdf } from "../_shared/agreement-completion.ts";
 
 const STAFF_ROLES = ["staff", "admin", "superadmin"];
 const REQUEST_TTL_DAYS = 30;
@@ -223,6 +224,19 @@ Deno.serve(async (req: Request) => {
         await db.from("vihem_agreements").update({ status: "cancelled", updated_by: auth.callerId }).eq("id", agreementId);
         await writeAudit(db, agreementId, null, "cancelled", "staff", auth.callerId);
         return json({ data: { ok: true } });
+      }
+
+      case "resend_final_pdf": {
+        const agreementId = String(body?.agreement_id || "");
+        const agreement = await loadAgreement(agreementId);
+        if (!agreement) return errorJson("NOT_FOUND", "Dokumentet hittades inte.", 404);
+        if (!["signed", "accepted"].includes(agreement.status)) {
+          return errorJson("INVALID_STATUS", "Endast färdigsignerade dokument har en slutlig PDF att skicka.", 409);
+        }
+        const result = await generateAndDeliverFinalPdf(db, agreementId);
+        if (!result.ok) return errorJson("PDF_GENERATION_FAILED", result.error || "Kunde inte generera PDF.", 500);
+        await writeAudit(db, agreementId, null, "final_pdf_resent", "staff", auth.callerId);
+        return json({ data: { ok: true, deliveries: result.deliveries } });
       }
 
       default:

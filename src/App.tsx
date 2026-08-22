@@ -41,6 +41,7 @@ import { FinancePage } from './pages/FinancePage';
 import { FinanceV2Page } from './modules/finance-v2/pages/FinanceV2Page';
 import { AgreementsV2Page } from './modules/agreements-v2/pages/AgreementsV2Page';
 import { PublicAgreementSignPage } from './modules/agreements-v2/pages/PublicAgreementSignPage';
+import { PublicAgreementVerifyPage } from './modules/agreements-v2/pages/PublicAgreementVerifyPage';
 import { TenantInvoicesPage } from './pages/TenantInvoicesPage';
 import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { StaffDocumentScannerPage } from './pages/StaffDocumentScannerPage';
@@ -140,11 +141,18 @@ function isAgreementSignRoute() {
   return path === '/sign' || hashPath === '/sign';
 }
 
+function isAgreementVerifyRoute() {
+  const path = normalizeAppPath(window.location.pathname);
+  const hashPath = normalizeAppPath(window.location.hash.replace(/^#/, '').split('?')[0] || '/');
+  return path === '/verify' || hashPath === '/verify';
+}
+
 function AppInner() {
   const { user, loading, passwordRecovery } = useAuth();
   const isScreenPath = isScreenRoute();
   const isGuestLaundryPath = isGuestLaundryRoute();
   const isAgreementSignPath = isAgreementSignRoute();
+  const isAgreementVerifyPath = isAgreementVerifyRoute();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [notificationCount, setNotificationCount] = useState(0);
   const [chatNotificationCount, setChatNotificationCount] = useState(0);
@@ -325,6 +333,8 @@ function AppInner() {
   if (isGuestLaundryPath) return <GuestLaundryPage />;
 
   if (isAgreementSignPath) return <PublicAgreementSignPage />;
+
+  if (isAgreementVerifyPath) return <PublicAgreementVerifyPage />;
 
   if (isScreenPath) return <ScreenDisplayPage />;
 
