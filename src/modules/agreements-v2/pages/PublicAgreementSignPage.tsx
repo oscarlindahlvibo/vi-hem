@@ -2,7 +2,7 @@
 // isAgreementSignRoute() in App.tsx, same convention as
 // isGuestLaundryRoute()/GuestLaundryPage.tsx). No VI-HEM login, no Layout
 // chrome -- a standalone mobile-first page.
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { declineSigning, getAttachmentDownloadUrl, getSignView, submitSignature, AgreementApiError } from '../api';
 import type { PublicSignView } from '../types';
 import { BlockRenderer } from '../components/BlockRenderer';
@@ -77,6 +77,11 @@ export function PublicAgreementSignPage() {
     }
   };
 
+  const resolveAttachmentUrl = useCallback(
+    async (attachmentId: string) => (await getAttachmentDownloadUrl(token, attachmentId)).url,
+    [token],
+  );
+
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
       <div className="mx-auto max-w-2xl px-4 py-6">
@@ -112,7 +117,13 @@ export function PublicAgreementSignPage() {
             {(mode === 'read' || mode === 'sign') && (
               <>
                 <div className="mb-4 rounded-2xl bg-white p-5 shadow-sm">
-                  <BlockRenderer blocks={view.version.blocks} parties={view.parties} signers={[view.signer]} />
+                  <BlockRenderer
+                    blocks={view.version.blocks}
+                    parties={view.parties}
+                    signers={[view.signer]}
+                    attachments={view.attachments}
+                    resolveAttachmentUrl={resolveAttachmentUrl}
+                  />
                 </div>
 
                 {view.attachments.length > 0 && (

@@ -640,6 +640,21 @@ function ContentStep({
     return { id: uploaded.id, name: uploaded.name };
   };
 
+  // Staff already have direct RLS-backed storage read access (same
+  // org-prefix policy the final-PDF download button relies on), so the
+  // preview pane can resolve its own signed URL without a round-trip
+  // through any edge function -- same pattern as DocumentsPage.tsx.
+  const resolveAttachmentUrl = useCallback(
+    async (attachmentId: string) => {
+      const attachment = attachments.find((a) => a.id === attachmentId);
+      if (!attachment) throw new Error('Bilagan hittades inte.');
+      const { data, error } = await supabase.storage.from(attachment.storage_bucket).createSignedUrl(attachment.storage_path, 300);
+      if (error || !data?.signedUrl) throw error || new Error('Kunde inte skapa förhandsgranskningslänk.');
+      return data.signedUrl;
+    },
+    [attachments],
+  );
+
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <div>
@@ -667,7 +682,7 @@ function ContentStep({
       <div className={preview ? '' : 'hidden lg:block'}>
         <p className="mb-2 text-sm font-medium text-slate-700">Förhandsgranskning</p>
         <div className="rounded-xl border border-slate-200 bg-white p-6">
-          <BlockRenderer blocks={blocks} parties={parties} signers={signers} />
+          <BlockRenderer blocks={blocks} parties={parties} signers={signers} attachments={attachments} resolveAttachmentUrl={resolveAttachmentUrl} />
         </div>
       </div>
     </div>

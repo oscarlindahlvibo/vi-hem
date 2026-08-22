@@ -2,7 +2,10 @@
 // public signing page. Deliberately the SAME component in both places: what
 // a signer sees must be exactly what staff previewed, no second render path
 // to drift out of sync.
-import type { AgreementBlock, AgreementParty, AgreementSigner } from '../types';
+import { useEffect, useState } from 'react';
+import type { AgreementAttachment, AgreementBlock, AgreementParty, AgreementSigner } from '../types';
+
+type RendererAttachment = Pick<AgreementAttachment, 'id' | 'name' | 'content_type'>;
 
 function formatCurrency(amount: string, unit: string): string {
   const n = Number(amount.replace(',', '.'));
@@ -14,15 +17,22 @@ export function BlockRenderer({
   blocks,
   parties = [],
   signers = [],
+  attachments = [],
+  resolveAttachmentUrl,
 }: {
   blocks: AgreementBlock[];
   parties?: Pick<AgreementParty, 'display_name' | 'party_type'>[];
   signers?: Pick<AgreementSigner, 'name' | 'role_title'>[];
+  // Both optional -- omitting them (e.g. contexts with no attachment data at
+  // hand) just falls back to the plain "📎 label" line an attachment_ref
+  // block always used to render, so this can't break any existing caller.
+  attachments?: RendererAttachment[];
+  resolveAttachmentUrl?: (attachmentId: string) => Promise<string>;
 }) {
   return (
     <div className="space-y-3 text-sm text-slate-800">
       {blocks.map((block) => (
-        <BlockView key={block.id} block={block} parties={parties} signers={signers} />
+        <BlockView key={block.id} block={block} parties={parties} signers={signers} attachments={attachments} resolveAttachmentUrl={resolveAttachmentUrl} />
       ))}
     </div>
   );
@@ -32,10 +42,14 @@ function BlockView({
   block,
   parties,
   signers,
+  attachments,
+  resolveAttachmentUrl,
 }: {
   block: AgreementBlock;
   parties: Pick<AgreementParty, 'display_name' | 'party_type'>[];
   signers: Pick<AgreementSigner, 'name' | 'role_title'>[];
+  attachments: RendererAttachment[];
+  resolveAttachmentUrl?: (attachmentId: string) => Promise<string>;
 }) {
   const c = block.content || {};
   switch (block.block_type) {
@@ -149,8 +163,13 @@ function BlockView({
         </div>
       );
     }
-    case 'attachment_ref':
+    case 'attachment_ref': {
+      const attachment = attachments.find((a) => a.id === c.attachment_id);
+      if (attachment && resolveAttachmentUrl) {
+        return <AttachmentEmbed attachment={attachment} label={c.label} resolveUrl={resolveAttachmentUrl} />;
+      }
       return <p className="text-blue-700">📎 {c.label || 'Se bilaga'}</p>;
+    }
     case 'fillable_text':
       return (
         <div className="rounded-lg border border-dashed border-blue-300 bg-blue-50/50 px-3 py-2">
@@ -168,4 +187,51 @@ function BlockView({
     default:
       return null;
   }
+}
+
+// Fetches its own signed URL (via whichever resolver the caller supplied --
+// a public signing token or a staff Supabase session, see the two call
+// sites) and embeds the attachment inline: an <iframe> for PDFs, an <img>
+// for images, a plain link for anything else. The point of the "signature
+// disappears" bug report this replaces a bare link for is letting a signer
+// actually read what they're about to sign without leaving the page.
+function AttachmentEmbed({
+  attachment,
+  label,
+  resolveUrl,
+}: {
+  attachment: RendererAttachment;
+  label?: string;
+  resolveUrl: (attachmentId: string) => Promise<string>;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setUrl(null);
+    setError(false);
+    resolveUrl(attachment.id)
+      .then((resolved) => { if (!cancelled) setUrl(resolved); })
+      .catch(() => { if (!cancelled) setError(true); });
+    return () => { cancelled = true; };
+  }, [attachment.id, resolveUrl]);
+
+  const isPdf = attachment.content_type === 'application/pdf';
+  const isImage = attachment.content_type.startsWith('image/');
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+      <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500">📎 {label || attachment.name}</p>
+      {error && <p className="text-xs text-red-600">Kunde inte visa bilagan. Försök igen senare.</p>}
+      {!error && !url && <p className="text-xs text-slate-400">Laddar förhandsgranskning...</p>}
+      {url && isPdf && (
+        <iframe src={url} title={attachment.name} className="h-[70vh] w-full rounded border border-slate-200 bg-white" />
+      )}
+      {url && isImage && <img src={url} alt={attachment.name} className="w-full rounded border border-slate-200" />}
+      {url && !isPdf && !isImage && (
+        <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-700 underline">Öppna {attachment.name}</a>
+      )}
+    </div>
+  );
 }
