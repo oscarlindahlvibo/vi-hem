@@ -4,11 +4,31 @@
 // implemented stably, and up/down arrows are unambiguous on mobile too,
 // which full HTML5 drag-and-drop is not).
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, Copy, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Copy, Paperclip, Plus, Trash2, Upload } from 'lucide-react';
+import { Modal } from '../../../components/ui';
 import type { AgreementBlock, BlockType } from '../types';
 import { BLOCK_TYPES, blockTypeDef, createBlock, type BlockFieldDef } from '../blocks/blockTypes';
 
-export function BlockEditor({ blocks, onChange }: { blocks: AgreementBlock[]; onChange: (blocks: AgreementBlock[]) => void }) {
+export interface AttachmentOption {
+  id: string;
+  name: string;
+}
+
+export function BlockEditor({
+  blocks,
+  onChange,
+  attachments,
+  onUploadAttachment,
+}: {
+  blocks: AgreementBlock[];
+  onChange: (blocks: AgreementBlock[]) => void;
+  /** Only meaningful when editing a concrete agreement's blocks (not a
+   * template's) -- lets the "Bilaga/PDF" block pick or upload a real file
+   * inline instead of just typing a label. Omitted entirely in the
+   * template editor, where there's no document to attach a file to yet. */
+  attachments?: AttachmentOption[];
+  onUploadAttachment?: (file: File) => Promise<AttachmentOption>;
+}) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const addBlock = (type: BlockType) => {
@@ -52,35 +72,34 @@ export function BlockEditor({ blocks, onChange }: { blocks: AgreementBlock[]; on
           onDuplicate={() => duplicateBlock(block.id)}
           onMoveUp={() => moveBlock(block.id, -1)}
           onMoveDown={() => moveBlock(block.id, 1)}
+          attachments={attachments}
+          onUploadAttachment={onUploadAttachment}
         />
       ))}
 
-      <div className="relative">
-        <button
-          type="button"
-          onClick={() => setPickerOpen((v) => !v)}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-3 text-sm font-medium text-slate-500 hover:border-blue-400 hover:text-blue-600"
-        >
-          <Plus className="h-4 w-4" /> Lägg till block
-        </button>
-        {pickerOpen && (
-          <div className="absolute z-20 mt-2 w-full rounded-xl border border-slate-200 bg-white p-2 shadow-lg max-h-80 overflow-y-auto">
-            <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-              {BLOCK_TYPES.map((def) => (
-                <button
-                  key={def.type}
-                  type="button"
-                  onClick={() => addBlock(def.type)}
-                  className="rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
-                >
-                  <p className="font-medium text-slate-800">{def.label}</p>
-                  <p className="text-xs text-slate-500">{def.description}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      <button
+        type="button"
+        onClick={() => setPickerOpen(true)}
+        className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-3 text-sm font-medium text-slate-500 hover:border-blue-400 hover:text-blue-600"
+      >
+        <Plus className="h-4 w-4" /> Lägg till block
+      </button>
+
+      <Modal open={pickerOpen} onClose={() => setPickerOpen(false)} title="Lägg till block">
+        <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+          {BLOCK_TYPES.map((def) => (
+            <button
+              key={def.type}
+              type="button"
+              onClick={() => addBlock(def.type)}
+              className="rounded-lg border border-slate-100 px-3 py-2.5 text-left text-sm hover:border-blue-200 hover:bg-blue-50"
+            >
+              <p className="font-medium text-slate-800">{def.label}</p>
+              <p className="text-xs text-slate-500">{def.description}</p>
+            </button>
+          ))}
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -94,6 +113,8 @@ function BlockRow({
   onDuplicate,
   onMoveUp,
   onMoveDown,
+  attachments,
+  onUploadAttachment,
 }: {
   block: AgreementBlock;
   isFirst: boolean;
@@ -103,6 +124,8 @@ function BlockRow({
   onDuplicate: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  attachments?: AttachmentOption[];
+  onUploadAttachment?: (file: File) => Promise<AttachmentOption>;
 }) {
   const def = blockTypeDef(block.block_type);
 
@@ -117,8 +140,91 @@ function BlockRow({
           <IconButton onClick={onRemove} title="Ta bort" danger><Trash2 className="h-3.5 w-3.5" /></IconButton>
         </div>
       </div>
-      <BlockFields def={def.fields} content={block.content} onChange={onUpdate} />
+      {block.block_type === 'attachment_ref' ? (
+        <AttachmentRefFields content={block.content} onChange={onUpdate} attachments={attachments} onUploadAttachment={onUploadAttachment} />
+      ) : (
+        <BlockFields def={def.fields} content={block.content} onChange={onUpdate} />
+      )}
       {def.structural && def.fields.length === 0 && <p className="text-xs italic text-slate-400">Inget att redigera för det här blocket.</p>}
+    </div>
+  );
+}
+
+/** Special-cased (not a generic BlockFields entry) because it needs the
+ * agreement's real attachment list + an upload callback, which no other
+ * block type needs. Falls back to a plain label field when neither prop is
+ * supplied (e.g. inside the template editor, which has no concrete
+ * document to attach a file to). */
+function AttachmentRefFields({
+  content,
+  onChange,
+  attachments,
+  onUploadAttachment,
+}: {
+  content: Record<string, any>;
+  onChange: (content: Record<string, any>) => void;
+  attachments?: AttachmentOption[];
+  onUploadAttachment?: (file: File) => Promise<AttachmentOption>;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!onUploadAttachment) {
+    return <BlockFields def={[{ key: 'label', label: 'Etikett', kind: 'text' }]} content={content} onChange={onChange} />;
+  }
+
+  const selected = (attachments || []).find((a) => a.id === content.attachment_id);
+
+  const handleUpload = async (file: File) => {
+    setUploading(true);
+    setError('');
+    try {
+      const uploaded = await onUploadAttachment(file);
+      onChange({ ...content, attachment_id: uploaded.id, label: uploaded.name });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Uppladdningen misslyckades.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      {(attachments && attachments.length > 0) && (
+        <select
+          value={content.attachment_id || ''}
+          onChange={(e) => {
+            const chosen = attachments.find((a) => a.id === e.target.value);
+            onChange({ ...content, attachment_id: e.target.value, label: chosen?.name || content.label });
+          }}
+          className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+        >
+          <option value="">Välj en redan uppladdad bilaga...</option>
+          {attachments.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+      )}
+      {selected && (
+        <p className="flex items-center gap-1.5 text-xs text-green-700"><Paperclip className="h-3 w-3" /> {selected.name}</p>
+      )}
+      <label className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:border-blue-400 hover:text-blue-600">
+        <Upload className="h-3.5 w-3.5" />
+        {uploading ? 'Laddar upp...' : 'Bifoga PDF från telefonen eller datorn'}
+        <input
+          type="file"
+          accept="application/pdf,image/jpeg,image/png,image/webp"
+          disabled={uploading}
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ''; }}
+        />
+      </label>
+      {error && <p className="text-xs text-red-700">{error}</p>}
+      <input
+        type="text"
+        value={content.label || ''}
+        onChange={(e) => onChange({ ...content, label: e.target.value })}
+        placeholder="Etikett i dokumentet"
+        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+      />
     </div>
   );
 }

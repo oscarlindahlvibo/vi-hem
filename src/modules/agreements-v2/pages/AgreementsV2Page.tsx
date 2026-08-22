@@ -303,15 +303,48 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
+  // Lifted OUT of the step components: they used to hold their own local
+  // copy synced from `detail`, which React discards the moment a step
+  // unmounts on tab switch -- any edit made but not yet explicitly saved
+  // vanished the instant you clicked another tab. Living here instead means
+  // switching tabs can never lose an in-progress edit, since this
+  // component never unmounts while the editor is open. The explicit
+  // "Spara"-buttons still persist to the backend exactly as before; this
+  // only fixes what happens to unsaved edits in between.
+  const [blocks, setBlocks] = useState<AgreementBlock[]>([]);
+  const [parties, setParties] = useState<AgreementParty[]>([]);
+  const [signers, setSigners] = useState<AgreementSigner[]>([]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      setDetail(await getAgreement(agreementId));
+      const data = await getAgreement(agreementId);
+      setDetail(data);
+      setBlocks(data.blocks);
+      setParties(data.parties);
+      setSigners(data.signers);
     } catch (err) {
       setError(describeError(err));
     } finally {
       setLoading(false);
+    }
+  }, [agreementId]);
+
+  // Refreshes ONLY the read-only parts of `detail` (attachments, versions,
+  // audit trail) -- deliberately does NOT touch blocks/parties/signers.
+  // Uploading or removing an attachment (from the content step's inline
+  // picker, or the Bilagor tab) used to call the full `load()` above, which
+  // silently overwrote whatever unsaved edits were sitting in the lifted
+  // blocks/parties/signers state -- the exact "everything disappears"
+  // report this refactor was meant to fix, just reintroduced through a
+  // different door. This is the narrow version that can't do that.
+  const refreshDetail = useCallback(async () => {
+    try {
+      const data = await getAgreement(agreementId);
+      setDetail(data);
+    } catch (err) {
+      setError(describeError(err));
     }
   }, [agreementId]);
 
@@ -360,40 +393,86 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
         ))}
       </div>
 
-      {step === 'content' && <ContentStep detail={detail} editable={editable} onSaved={(m) => { setMessage(m); load(); }} onError={setError} />}
-      {step === 'parties' && <PartiesStep detail={detail} editable={editable} onSaved={(m) => { setMessage(m); load(); }} onError={setError} />}
+      {step === 'content' && (
+        <ContentStep
+          agreementId={agreement.id}
+          organisationId={organisationId}
+          blocks={blocks}
+          onBlocksChange={setBlocks}
+          parties={parties}
+          signers={signers}
+          attachments={detail.attachments}
+          editable={editable}
+          onSaved={setMessage}
+          onError={setError}
+          onAttachmentsChanged={refreshDetail}
+        />
+      )}
+      {step === 'parties' && (
+        <PartiesStep agreementId={agreement.id} parties={parties} onPartiesChange={setParties} editable={editable} onSaved={setMessage} onError={setError} />
+      )}
       {step === 'signing' && (
         <SigningStep
-          detail={detail}
+          agreementId={agreement.id}
+          agreementStatus={agreement.status}
+          signers={signers}
+          onSignersChange={setSigners}
           editable={editable}
-          onSaved={(m) => { setMessage(m); load(); }}
+          onSaved={setMessage}
           onError={setError}
           onSent={(m) => { setMessage(m); load(); }}
         />
       )}
-      {step === 'attachments' && <AttachmentsStep detail={detail} organisationId={organisationId} editable={editable} onChanged={load} onError={setError} />}
+      {step === 'attachments' && <AttachmentsStep detail={detail} organisationId={organisationId} editable={editable} onChanged={refreshDetail} onError={setError} />}
       {step === 'history' && <HistoryStep events={detail.audit_events} />}
     </div>
   );
 }
 
-function ContentStep({ detail, editable, onSaved, onError }: { detail: AgreementDetail; editable: boolean; onSaved: (m: string) => void; onError: (e: string) => void }) {
-  const [blocks, setBlocks] = useState<AgreementBlock[]>(detail.blocks);
+function ContentStep({
+  agreementId,
+  organisationId,
+  blocks,
+  onBlocksChange,
+  parties,
+  signers,
+  attachments,
+  editable,
+  onSaved,
+  onError,
+  onAttachmentsChanged,
+}: {
+  agreementId: string;
+  organisationId: string;
+  blocks: AgreementBlock[];
+  onBlocksChange: (blocks: AgreementBlock[]) => void;
+  parties: AgreementParty[];
+  signers: AgreementSigner[];
+  attachments: AgreementAttachment[];
+  editable: boolean;
+  onSaved: (m: string) => void;
+  onError: (e: string) => void;
+  onAttachmentsChanged: () => void;
+}) {
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState(false);
-
-  useEffect(() => setBlocks(detail.blocks), [detail.blocks]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await saveBlocks(detail.agreement.id, blocks);
+      await saveBlocks(agreementId, blocks);
       onSaved('Innehållet sparat.');
     } catch (err) {
       onError(describeError(err));
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleUploadAttachment = async (file: File) => {
+    const uploaded = await uploadAttachment({ organisationId, agreementId, file });
+    onAttachmentsChanged();
+    return { id: uploaded.id, name: uploaded.name };
   };
 
   return (
@@ -412,33 +491,49 @@ function ContentStep({ detail, editable, onSaved, onError }: { detail: Agreement
         </div>
         {!editable && <p className="mb-2 text-xs text-amber-700">Dokumentet är skickat och kan inte längre redigeras direkt.</p>}
         <div className={preview ? 'hidden lg:block' : ''}>
-          <BlockEditor blocks={blocks} onChange={setBlocks} />
+          <BlockEditor
+            blocks={blocks}
+            onChange={onBlocksChange}
+            attachments={attachments.map((a) => ({ id: a.id, name: a.name }))}
+            onUploadAttachment={handleUploadAttachment}
+          />
         </div>
       </div>
       <div className={preview ? '' : 'hidden lg:block'}>
         <p className="mb-2 text-sm font-medium text-slate-700">Förhandsgranskning</p>
         <div className="rounded-xl border border-slate-200 bg-white p-6">
-          <BlockRenderer blocks={blocks} parties={detail.parties} signers={detail.signers} />
+          <BlockRenderer blocks={blocks} parties={parties} signers={signers} />
         </div>
       </div>
     </div>
   );
 }
 
-function PartiesStep({ detail, editable, onSaved, onError }: { detail: AgreementDetail; editable: boolean; onSaved: (m: string) => void; onError: (e: string) => void }) {
-  const [parties, setParties] = useState<AgreementParty[]>(detail.parties);
+function PartiesStep({
+  agreementId,
+  parties,
+  onPartiesChange,
+  editable,
+  onSaved,
+  onError,
+}: {
+  agreementId: string;
+  parties: AgreementParty[];
+  onPartiesChange: (parties: AgreementParty[]) => void;
+  editable: boolean;
+  onSaved: (m: string) => void;
+  onError: (e: string) => void;
+}) {
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => setParties(detail.parties), [detail.parties]);
-
-  const addParty = () => setParties([...parties, { party_type: 'manual', display_name: '', org_number: '', email: '', phone: '', address: '', source_type: null, source_id: null }]);
-  const updateParty = (i: number, patch: Partial<AgreementParty>) => setParties(parties.map((p, ii) => (ii === i ? { ...p, ...patch } : p)));
-  const removeParty = (i: number) => setParties(parties.filter((_, ii) => ii !== i));
+  const addParty = () => onPartiesChange([...parties, { party_type: 'manual', display_name: '', org_number: '', email: '', phone: '', address: '', source_type: null, source_id: null }]);
+  const updateParty = (i: number, patch: Partial<AgreementParty>) => onPartiesChange(parties.map((p, ii) => (ii === i ? { ...p, ...patch } : p)));
+  const removeParty = (i: number) => onPartiesChange(parties.filter((_, ii) => ii !== i));
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await saveParties(detail.agreement.id, parties);
+      await saveParties(agreementId, parties);
       onSaved('Parter sparade.');
     } catch (err) {
       onError(describeError(err));
@@ -485,34 +580,37 @@ function PartiesStep({ detail, editable, onSaved, onError }: { detail: Agreement
 }
 
 function SigningStep({
-  detail,
+  agreementId,
+  agreementStatus,
+  signers,
+  onSignersChange,
   editable,
   onSaved,
   onError,
   onSent,
 }: {
-  detail: AgreementDetail;
+  agreementId: string;
+  agreementStatus: AgreementStatus;
+  signers: AgreementSigner[];
+  onSignersChange: (signers: AgreementSigner[]) => void;
   editable: boolean;
   onSaved: (m: string) => void;
   onError: (e: string) => void;
   onSent: (m: string) => void;
 }) {
-  const [signers, setSigners] = useState<AgreementSigner[]>(detail.signers);
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [emailChannel, setEmailChannel] = useState(true);
   const [smsChannel, setSmsChannel] = useState(false);
 
-  useEffect(() => setSigners(detail.signers), [detail.signers]);
-
-  const addSigner = () => setSigners([...signers, { party_id: null, profile_id: null, name: '', email: '', phone: '', personal_number: '', role_title: '', signing_method: 'handwritten', signing_required: true, sign_order: null }]);
-  const updateSigner = (i: number, patch: Partial<AgreementSigner>) => setSigners(signers.map((s, ii) => (ii === i ? { ...s, ...patch } : s)));
-  const removeSigner = (i: number) => setSigners(signers.filter((_, ii) => ii !== i));
+  const addSigner = () => onSignersChange([...signers, { party_id: null, profile_id: null, name: '', email: '', phone: '', personal_number: '', role_title: '', signing_method: 'handwritten', signing_required: true, sign_order: null }]);
+  const updateSigner = (i: number, patch: Partial<AgreementSigner>) => onSignersChange(signers.map((s, ii) => (ii === i ? { ...s, ...patch } : s)));
+  const removeSigner = (i: number) => onSignersChange(signers.filter((_, ii) => ii !== i));
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await saveSigners(detail.agreement.id, signers);
+      await saveSigners(agreementId, signers);
       onSaved('Signatärer sparade.');
     } catch (err) {
       onError(describeError(err));
@@ -524,8 +622,8 @@ function SigningStep({
   const handleSend = async () => {
     setSending(true);
     try {
-      await saveSigners(detail.agreement.id, signers);
-      const result = await sendAgreement(detail.agreement.id, { email: emailChannel, sms: smsChannel });
+      await saveSigners(agreementId, signers);
+      const result = await sendAgreement(agreementId, { email: emailChannel, sms: smsChannel });
       const failed = result.delivery.filter((d) => !d.ok);
       onSent(failed.length === 0 ? 'Dokumentet skickades till alla signatärer.' : `Skickat, men ${failed.length} leverans(er) misslyckades — se historik.`);
     } catch (err) {
@@ -537,7 +635,7 @@ function SigningStep({
 
   const handleRemind = async (signerId: string) => {
     try {
-      await remindSigner(detail.agreement.id, signerId, smsChannel);
+      await remindSigner(agreementId, signerId, smsChannel);
       onSent('Påminnelse skickad.');
     } catch (err) {
       onError(describeError(err));
@@ -547,7 +645,7 @@ function SigningStep({
   const handleCancel = async () => {
     if (!confirm('Avbryt dokumentet? Redan skickade signeringslänkar återkallas.')) return;
     try {
-      await cancelAgreement(detail.agreement.id);
+      await cancelAgreement(agreementId);
       onSent('Dokumentet avbröts.');
     } catch (err) {
       onError(describeError(err));
@@ -612,13 +710,13 @@ function SigningStep({
               </div>
               <div className="flex items-center gap-2">
                 <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">{signer.status}</span>
-                {signer.status !== 'signed' && signer.status !== 'declined' && ['sent', 'viewed'].includes(detail.agreement.status) && (
+                {signer.status !== 'signed' && signer.status !== 'declined' && ['sent', 'viewed'].includes(agreementStatus) && (
                   <button onClick={() => handleRemind(signer.id!)} className="flex items-center gap-1 text-xs font-medium text-blue-600"><Bell className="h-3 w-3" /> Påminn</button>
                 )}
               </div>
             </div>
           ))}
-          {!['signed', 'accepted', 'declined', 'rejected', 'cancelled', 'archived'].includes(detail.agreement.status) && (
+          {!['signed', 'accepted', 'declined', 'rejected', 'cancelled', 'archived'].includes(agreementStatus) && (
             <button onClick={handleCancel} className="flex items-center gap-1.5 text-sm font-medium text-red-600"><XCircle className="h-4 w-4" /> Avbryt dokumentet</button>
           )}
         </div>

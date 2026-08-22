@@ -8,11 +8,21 @@
 // by vihem_laundry_guest_links elsewhere in this codebase -- see the
 // migration header (20260822120000) for why a legal signature link is held
 // to a stricter bar.
-const TOKEN_BYTES = 32; // 256 bits of entropy, hex-encoded (64 chars)
+const TOKEN_BYTES = 32; // 256 bits of entropy, base64url-encoded (43 chars, vs. 64 for hex)
 
+/**
+ * base64url (RFC 4648 §5) rather than hex: same 256 bits of entropy, ~1/3
+ * shorter string -- meaningfully shortens the SMS signing link, and
+ * base64url is URL-safe by construction (+/= replaced, no extra encoding
+ * needed in the query string). Verification is encoding-agnostic (just
+ * hashes whatever string it receives), so this doesn't touch already-issued
+ * tokens' validity.
+ */
 export function generateSigningToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(TOKEN_BYTES));
-  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 export async function hashSigningToken(token: string): Promise<string> {

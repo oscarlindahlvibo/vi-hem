@@ -495,7 +495,59 @@ väljer/länkar hyresgästen inifrån Avtal V2 istället, för nu.
 Inget i detta steg rör `vihem_contract_signatures`,
 `InspectionsPage.tsx`, eller någon annan legacy-tabell/fil.
 
-## 21. Öppna frågor / kvarstående arbete till nästa etapp
+## 21. Fixar från verklig mobiltest (samma dag)
+
+Fem konkreta problem rapporterade efter hands-on-test av appen på en
+riktig iPhone:
+
+1. **Innehåll försvann vid flikbyte.** `blocks`/`parties`/`signers` låg
+   som lokal state i respektive flik-komponent, synkad från `detail` —
+   React kastar den staten när komponenten unmountas vid flikbyte.
+   Löst genom att flytta staten upp till `AgreementEditor` (som aldrig
+   unmountas medan editorn är öppen), så en flikväxling aldrig längre kan
+   tappa en osparad ändring. De explicita "Spara"-knapparna fungerar
+   som innan.
+   **Under arbetet med detta introducerade jag temporärt exakt samma bugg
+   igen** via en annan väg: PDF-uppladdning triggade en full omladdning
+   (`load()`) som skrev över den nyss lyfta staten. Fångades genom att
+   faktiskt testa flödet i webbläsaren (inte bara läsa koden) — löst med
+   en separat, snävare `refreshDetail()` som bara uppdaterar bilagor/
+   versioner/historik, aldrig block/parter/signatärer.
+2. **Blockmenyn knappt synlig.** Bytte den handrullade
+   `absolute`-positionerade dropdownen i `BlockEditor.tsx` mot appens
+   redan beprövade `Modal`-komponent (samma som `NewDocumentModal`
+   använder) — bottom-sheet på mobil, garanterat synlig oavsett
+   föräldraelementens layout.
+3. **Ingen knapp för att bifoga PDF direkt i "Bilaga/PDF"-blocket.**
+   Blocket hade bara ett textfält för en etikett — själva uppladdningen
+   fanns bara i den separata Bilagor-fliken. `BlockEditor` tar nu
+   valfria `attachments`/`onUploadAttachment`-props (bara skickade från
+   `ContentStep`, inte från malleditorn — mallar har inget konkret
+   dokument att bifoga en fil till), och "Bilaga/PDF"-blocket får en
+   riktig "Bifoga PDF från telefonen eller datorn"-knapp plus en
+   väljare för redan uppladdade bilagor.
+4–5. **SMS misslyckades / signeringslänken för lång för 160 tecken.**
+   Två samverkande fixar: (a) `generateSigningToken()` bytte kodning
+   från hex (64 tecken) till base64url (43 tecken) — exakt samma 256
+   bitars entropi, bara kortare textrepresentation, och base64url är
+   URL-säkert utan extra kodning. (b) SMS-mallarna i
+   `vihem-agreements-workflow` kortades och skrivs nu utan å/ä/ö
+   (`"fran"` istället för `"från"` etc.) så meddelandet garanterat
+   GSM-7-kodas (160 tecken/segment) istället för UCS-2 (70 tecken/segment,
+   vilket diakritiska tecken annars tvingar fram). Ett typiskt meddelande
+   är nu ~118 tecken, väl under gränsen. Om SMS ändå misslyckas efter
+   detta är det värt att kontrollera Cellsynt-kontots avsändar-/saldo-
+   konfiguration separat — längden var den enda konkreta, verifierbara
+   orsak jag kunde åtgärda härifrån.
+
+Alla fem verifierade i en riktig webbläsarsession (inte bara typecheck):
+skapade ett testdokument, la till "Bilaga/PDF"-blocket, laddade upp en
+riktig PDF-fil, bekräftade att blocket och bilagan låg kvar efter
+flikbyte Innehåll → Parter → Innehåll. Testdata och uppladdade
+teständer efteråt bort igen (både databasrader och storage-objekt via
+Storage API:t, som blockerar direkta SQL-DELETE mot `storage.objects`).
+
+## 22. Öppna frågor / kvarstående arbete till nästa etapp
 
 1. **BankID-koppling** — se punkt 10 för exakt vad som krävs.
 2. **Slutlig PDF-generering** — rendera en frusen version + bilagor +

@@ -308,9 +308,13 @@ async function sendSigningSms(
   isReminder = false,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
+    // Kept deliberately short: the token itself is already the largest
+    // component of signUrl (see _shared/agreement-tokens.ts -- base64url,
+    // not hex, specifically to keep this under a single SMS's length),
+    // and every extra word here eats into that budget further.
     const message = isReminder
-      ? `Påminnelse: du har ett dokument som väntar på signatur från ${orgName}. Öppna: ${signUrl}`
-      : `Du har fått ett dokument från ${orgName}. Öppna och signera: ${signUrl}`;
+      ? `Paminnelse: dokument fran ${orgName} vantar pa signatur: ${signUrl}`
+      : `Dokument fran ${orgName} att signera: ${signUrl}`;
     const { data, error } = await userClient.functions.invoke("vihem-send-sms", {
       body: { organisation_id: organisationId, recipient: signer.phone, message, related_type: "agreement_signing", related_id: null },
     });
