@@ -36,7 +36,7 @@ BEGIN
     AND tc.table_name = 'vihem_accounted_invoice_links'
     AND tc.constraint_type = 'UNIQUE'
     AND (
-      SELECT array_agg(kcu.column_name ORDER BY kcu.column_name)
+      SELECT array_agg(kcu.column_name::text ORDER BY kcu.column_name)
       FROM information_schema.key_column_usage kcu
       WHERE kcu.table_schema = tc.table_schema
         AND kcu.table_name = tc.table_name
