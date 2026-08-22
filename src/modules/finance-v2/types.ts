@@ -207,6 +207,12 @@ export interface TenancyOption {
   apartment: { apartment_number: string } | null;
 }
 
+export interface ProjectOption {
+  id: string;
+  title: string | null;
+  name: string | null;
+}
+
 /** Structured error shape shared with Accounted's own v1 error envelope
  * (`{ error: { code, message, recovery_hint, details } }`), so the UI can
  * render one consistent error component for both local and upstream

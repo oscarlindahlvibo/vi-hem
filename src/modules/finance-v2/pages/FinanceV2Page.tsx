@@ -20,10 +20,12 @@ import {
   AccountedIntegrationError,
   createBillingAdjustment,
   createOrGetRentBillingRun,
+  createProjectBasisCollectionInvoice,
   createProjectBasisInvoice,
   createRentBillingInvoices,
   forwardScannedDocument,
   getCompanyLink,
+  listActiveCustomerProjects,
   listActiveTenancies,
   listBillingAdjustmentApplications,
   listBillingAdjustments,
@@ -46,10 +48,12 @@ import type {
   BillingAdjustment,
   BillingAdjustmentApplication,
   BillingAdjustmentKind,
+  BillingAdjustmentTargetType,
   ProjectInvoiceBasis,
   RentBillingItem,
   RentBillingItemResult,
   RentBillingRun,
+  ProjectOption,
   TenancyOption,
 } from '../types';
 import type { FinanceCompany, FinanceCustomer, Invoice } from '../../../types';
@@ -542,6 +546,9 @@ function ProjectBillingTab({ companyId, companyLink }: { companyId: string; comp
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowMessages, setRowMessages] = useState<Record<string, { ok: boolean; text: string }>>({});
   const [error, setError] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [collectionBusy, setCollectionBusy] = useState<'preview' | 'create' | null>(null);
+  const [collectionMessage, setCollectionMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -550,6 +557,7 @@ function ProjectBillingTab({ companyId, companyLink }: { companyId: string; comp
     try {
       const data = await listInvoiceableProjectBases(companyId);
       setBases(data);
+      setSelectedIds((prev) => prev.filter((id) => data.some((b) => b.id === id)));
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -578,74 +586,140 @@ function ProjectBillingTab({ companyId, companyLink }: { companyId: string; comp
     }
   };
 
+  const toggleSelected = (basisId: string) => {
+    setSelectedIds((prev) => (prev.includes(basisId) ? prev.filter((id) => id !== basisId) : [...prev, basisId]));
+  };
+
+  const handleCollection = async (dryRun: boolean) => {
+    if (selectedIds.length < 2) return;
+    setCollectionBusy(dryRun ? 'preview' : 'create');
+    setCollectionMessage(null);
+    try {
+      const result: any = await createProjectBasisCollectionInvoice({ companyId, basisIds: selectedIds, dryRun });
+      if (dryRun) {
+        setCollectionMessage({ ok: true, text: 'Samlingsfakturan kan skapas — förhandsgranskning ser bra ut.' });
+      } else {
+        setCollectionMessage({
+          ok: true,
+          text: `Samlingsfaktura ${result?.accounted_invoice_number || result?.accounted_invoice_id || ''} skapad för ${selectedIds.length} underlag.`,
+        });
+        setSelectedIds([]);
+        await load();
+      }
+    } catch (err) {
+      setCollectionMessage({ ok: false, text: describeError(err) });
+    } finally {
+      setCollectionBusy(null);
+    }
+  };
+
   return (
-    <Card>
-      <div className="mb-3 flex items-center justify-between">
-        <p className="text-sm font-medium text-slate-700">Fakturaunderlag redo att fakturera</p>
-        <Button variant="secondary" size="sm" onClick={load} loading={loading}>
-          <RefreshCw className="mr-1 h-3.5 w-3.5" /> Uppdatera
-        </Button>
-      </div>
-      {!companyLink && <p className="mb-3 text-sm text-slate-500">Koppla bolaget mot Accounted under Bolagskoppling innan fakturor kan skapas.</p>}
-      {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
-      {bases.length === 0 ? (
-        <EmptyState
-          icon={Briefcase}
-          title="Inga underlag väntar"
-          description="Faktureringsunderlag skapas och markeras 'redo att fakturera' i Kundprojekt-sidan; de dyker upp här när de kan skickas till Accounted."
-        />
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase text-slate-500">
-                <th className="py-2 pr-4">Projekt</th>
-                <th className="py-2 pr-4">Underlag</th>
-                <th className="py-2 pr-4">Belopp</th>
-                <th className="py-2 pr-4">Resultat</th>
-                <th className="py-2 pr-4" />
-              </tr>
-            </thead>
-            <tbody>
-              {bases.map((basis) => {
-                const result = rowMessages[basis.id];
-                return (
-                  <tr key={basis.id} className="border-b border-slate-100">
-                    <td className="py-2 pr-4">{basis.project?.title || basis.project?.name || '–'}</td>
-                    <td className="py-2 pr-4">{basis.title || basis.basis_number || '(utan titel)'}</td>
-                    <td className="py-2 pr-4 font-medium">{formatCurrency(basis.total_amount + basis.vat_amount)}</td>
-                    <td className="py-2 pr-4 text-xs">
-                      {result && <span className={result.ok ? 'text-green-700' : 'text-red-700'}>{result.text}</span>}
-                    </td>
-                    <td className="py-2 pr-4">
-                      <div className="flex gap-2">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleAction(basis.id, true)}
-                          loading={busyId === basis.id}
-                          disabled={!companyLink?.enabled}
-                        >
-                          Förhandsgranska
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => handleAction(basis.id, false)}
-                          loading={busyId === basis.id}
-                          disabled={!companyLink?.enabled}
-                        >
-                          Skapa faktura
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+    <div className="space-y-4">
+      {selectedIds.length >= 2 && (
+        <Card className="border-blue-200 bg-blue-50/60">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">{selectedIds.length} underlag valda</p>
+              <p className="text-xs text-slate-600">
+                Slås ihop till en samlingsfaktura om de tillhör samma kund. Bolaget kontrollerar detta och avvisar hela
+                begäran annars.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={() => handleCollection(true)} loading={collectionBusy === 'preview'} disabled={!companyLink?.enabled}>
+                Förhandsgranska samlingsfaktura
+              </Button>
+              <Button size="sm" onClick={() => handleCollection(false)} loading={collectionBusy === 'create'} disabled={!companyLink?.enabled}>
+                Skapa samlingsfaktura
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setSelectedIds([])}>
+                Avmarkera
+              </Button>
+            </div>
+          </div>
+          {collectionMessage && (
+            <p className={`mt-2 text-sm ${collectionMessage.ok ? 'text-green-700' : 'text-red-700'}`}>{collectionMessage.text}</p>
+          )}
+        </Card>
       )}
-    </Card>
+
+      <Card>
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-sm font-medium text-slate-700">Fakturaunderlag redo att fakturera</p>
+          <Button variant="secondary" size="sm" onClick={load} loading={loading}>
+            <RefreshCw className="mr-1 h-3.5 w-3.5" /> Uppdatera
+          </Button>
+        </div>
+        {!companyLink && <p className="mb-3 text-sm text-slate-500">Koppla bolaget mot Accounted under Bolagskoppling innan fakturor kan skapas.</p>}
+        {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
+        {bases.length === 0 ? (
+          <EmptyState
+            icon={Briefcase}
+            title="Inga underlag väntar"
+            description="Faktureringsunderlag skapas och markeras 'redo att fakturera' i Kundprojekt-sidan; de dyker upp här när de kan skickas till Accounted."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase text-slate-500">
+                  <th className="py-2 pr-4" />
+                  <th className="py-2 pr-4">Projekt</th>
+                  <th className="py-2 pr-4">Underlag</th>
+                  <th className="py-2 pr-4">Belopp</th>
+                  <th className="py-2 pr-4">Resultat</th>
+                  <th className="py-2 pr-4" />
+                </tr>
+              </thead>
+              <tbody>
+                {bases.map((basis) => {
+                  const result = rowMessages[basis.id];
+                  return (
+                    <tr key={basis.id} className="border-b border-slate-100">
+                      <td className="py-2 pr-4">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-blue-600"
+                          checked={selectedIds.includes(basis.id)}
+                          onChange={() => toggleSelected(basis.id)}
+                        />
+                      </td>
+                      <td className="py-2 pr-4">{basis.project?.title || basis.project?.name || '–'}</td>
+                      <td className="py-2 pr-4">{basis.title || basis.basis_number || '(utan titel)'}</td>
+                      <td className="py-2 pr-4 font-medium">{formatCurrency(basis.total_amount + basis.vat_amount)}</td>
+                      <td className="py-2 pr-4 text-xs">
+                        {result && <span className={result.ok ? 'text-green-700' : 'text-red-700'}>{result.text}</span>}
+                      </td>
+                      <td className="py-2 pr-4">
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleAction(basis.id, true)}
+                            loading={busyId === basis.id}
+                            disabled={!companyLink?.enabled}
+                          >
+                            Förhandsgranska
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => handleAction(basis.id, false)}
+                            loading={busyId === basis.id}
+                            disabled={!companyLink?.enabled}
+                          >
+                            Skapa faktura
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 
@@ -684,6 +758,7 @@ function AdjustmentsTab({ companyId }: { companyId: string }) {
   const [adjustments, setAdjustments] = useState<BillingAdjustment[]>([]);
   const [applications, setApplications] = useState<BillingAdjustmentApplication[]>([]);
   const [tenancies, setTenancies] = useState<TenancyOption[]>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [filter, setFilter] = useState<AdjustmentFilter>('active');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -695,12 +770,14 @@ function AdjustmentsTab({ companyId }: { companyId: string }) {
     setLoading(true);
     setError('');
     try {
-      const [adjustmentData, tenancyData] = await Promise.all([
+      const [adjustmentData, tenancyData, projectData] = await Promise.all([
         listBillingAdjustments(companyId),
         listActiveTenancies(companyId),
+        listActiveCustomerProjects(companyId),
       ]);
       setAdjustments(adjustmentData);
       setTenancies(tenancyData);
+      setProjects(projectData);
       const applicationData = await listBillingAdjustmentApplications(adjustmentData.map((a) => a.id));
       setApplications(applicationData);
     } catch (err) {
@@ -719,6 +796,17 @@ function AdjustmentsTab({ companyId }: { companyId: string }) {
     if (!t) return tenancyId.slice(0, 8);
     const apt = t.apartment?.apartment_number ? ` (lgh ${t.apartment.apartment_number})` : '';
     return `${t.tenant?.name ?? 'Okänd hyresgäst'}${apt}`;
+  };
+
+  const projectLabel = (projectId: string) => {
+    const p = projects.find((x) => x.id === projectId);
+    return p ? (p.title || p.name || projectId.slice(0, 8)) : projectId.slice(0, 8);
+  };
+
+  const targetLabel = (adjustment: BillingAdjustment) => {
+    if (adjustment.target_type === 'tenancy') return tenancyLabel(adjustment.target_id);
+    if (adjustment.target_type === 'customer_project') return `Projekt: ${projectLabel(adjustment.target_id)}`;
+    return adjustment.target_id.slice(0, 8);
   };
 
   const handleSetStatus = async (id: string, status: 'active' | 'paused' | 'cancelled') => {
@@ -757,7 +845,7 @@ function AdjustmentsTab({ companyId }: { companyId: string }) {
             <Button variant="secondary" size="sm" onClick={load} loading={loading}>
               <RefreshCw className="mr-1 h-3.5 w-3.5" /> Uppdatera
             </Button>
-            <Button size="sm" onClick={() => setCreateOpen(true)} disabled={tenancies.length === 0}>
+            <Button size="sm" onClick={() => setCreateOpen(true)} disabled={tenancies.length === 0 && projects.length === 0}>
               + Nytt avdrag/tillägg
             </Button>
           </div>
@@ -770,14 +858,14 @@ function AdjustmentsTab({ companyId }: { companyId: string }) {
           <EmptyState
             icon={MinusCircle}
             title="Inga poster"
-            description="Avdrag och tillägg som skapas här inkluderas automatiskt nästa gång hyresgästens hyra faktureras via Accounted."
+            description="Avdrag och tillägg som skapas här inkluderas automatiskt nästa gång målets hyra eller kundprojektfaktura skapas via Accounted."
           />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase text-slate-500">
-                  <th className="py-2 pr-4">Hyresgäst</th>
+                  <th className="py-2 pr-4">Mål</th>
                   <th className="py-2 pr-4">Beskrivning</th>
                   <th className="py-2 pr-4">Belopp</th>
                   <th className="py-2 pr-4">Typ</th>
@@ -790,7 +878,7 @@ function AdjustmentsTab({ companyId }: { companyId: string }) {
               <tbody>
                 {filtered.map((adjustment) => (
                   <tr key={adjustment.id} className="border-b border-slate-100">
-                    <td className="py-2 pr-4">{adjustment.target_type === 'tenancy' ? tenancyLabel(adjustment.target_id) : adjustment.target_id.slice(0, 8)}</td>
+                    <td className="py-2 pr-4">{targetLabel(adjustment)}</td>
                     <td className="py-2 pr-4">{adjustment.description || '–'}</td>
                     <td className={`py-2 pr-4 font-medium ${adjustment.amount < 0 ? 'text-red-700' : 'text-green-700'}`}>
                       {adjustment.amount > 0 ? '+' : ''}{formatCurrency(adjustment.amount)}
@@ -869,6 +957,7 @@ function AdjustmentsTab({ companyId }: { companyId: string }) {
         onClose={() => setCreateOpen(false)}
         companyId={companyId}
         tenancies={tenancies}
+        projects={projects}
         onCreated={() => {
           setCreateOpen(false);
           load();
@@ -890,15 +979,19 @@ function CreateAdjustmentModal({
   onClose,
   companyId,
   tenancies,
+  projects,
   onCreated,
 }: {
   open: boolean;
   onClose: () => void;
   companyId: string;
   tenancies: TenancyOption[];
+  projects: ProjectOption[];
   onCreated: () => void;
 }) {
+  const [targetType, setTargetType] = useState<BillingAdjustmentTargetType>('tenancy');
   const [tenancyId, setTenancyId] = useState('');
+  const [projectId, setProjectId] = useState('');
   const [kind, setKind] = useState<BillingAdjustmentKind>('one_time');
   const [direction, setDirection] = useState<'deduction' | 'addition'>('deduction');
   const [amount, setAmount] = useState('');
@@ -913,9 +1006,24 @@ function CreateAdjustmentModal({
     if (open && tenancies.length > 0 && !tenancyId) setTenancyId(tenancies[0].id);
   }, [open, tenancies, tenancyId]);
 
+  useEffect(() => {
+    if (open && projects.length > 0 && !projectId) setProjectId(projects[0].id);
+  }, [open, projects, projectId]);
+
+  useEffect(() => {
+    if (open && tenancies.length === 0 && projects.length > 0 && targetType === 'tenancy') {
+      setTargetType('customer_project');
+    }
+  }, [open, tenancies, projects, targetType]);
+
+  const targetId = targetType === 'tenancy' ? tenancyId : projectId;
+
   const handleSave = async () => {
     const parsedAmount = Number(amount.replace(',', '.'));
-    if (!tenancyId) { setError('Välj en hyresgäst.'); return; }
+    if (!targetId) {
+      setError(targetType === 'tenancy' ? 'Välj en hyresgäst.' : 'Välj ett kundprojekt.');
+      return;
+    }
     if (!Number.isFinite(parsedAmount) || parsedAmount === 0) { setError('Ange ett belopp skilt från 0.'); return; }
 
     setSaving(true);
@@ -923,8 +1031,8 @@ function CreateAdjustmentModal({
     try {
       await createBillingAdjustment({
         companyId,
-        targetType: 'tenancy',
-        targetId: tenancyId,
+        targetType,
+        targetId,
         adjustmentType: kind,
         amount: direction === 'deduction' ? -Math.abs(parsedAmount) : Math.abs(parsedAmount),
         description,
@@ -945,15 +1053,38 @@ function CreateAdjustmentModal({
   return (
     <Modal open={open} onClose={onClose} title="Nytt avdrag/tillägg">
       <div className="space-y-4">
-        <Select
-          label="Hyresgäst"
-          value={tenancyId}
-          onChange={(e) => setTenancyId(e.target.value)}
-          options={tenancies.map((t) => ({
-            value: t.id,
-            label: `${t.tenant?.name ?? 'Okänd'}${t.apartment?.apartment_number ? ` (lgh ${t.apartment.apartment_number})` : ''}`,
-          }))}
-        />
+        {tenancies.length > 0 && projects.length > 0 && (
+          <Select
+            label="Måltyp"
+            value={targetType}
+            onChange={(e) => setTargetType(e.target.value as BillingAdjustmentTargetType)}
+            options={[
+              { value: 'tenancy', label: 'Hyresgäst' },
+              { value: 'customer_project', label: 'Kundprojekt' },
+            ]}
+          />
+        )}
+        {targetType === 'tenancy' ? (
+          <Select
+            label="Hyresgäst"
+            value={tenancyId}
+            onChange={(e) => setTenancyId(e.target.value)}
+            options={tenancies.map((t) => ({
+              value: t.id,
+              label: `${t.tenant?.name ?? 'Okänd'}${t.apartment?.apartment_number ? ` (lgh ${t.apartment.apartment_number})` : ''}`,
+            }))}
+          />
+        ) : (
+          <Select
+            label="Kundprojekt"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            options={projects.map((p) => ({
+              value: p.id,
+              label: p.title || p.name || 'Namnlöst projekt',
+            }))}
+          />
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Select
             label="Typ"

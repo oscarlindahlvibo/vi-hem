@@ -23,6 +23,7 @@ import type {
   BillingAdjustmentKind,
   BillingAdjustmentTargetType,
   ProjectInvoiceBasis,
+  ProjectOption,
   RentBillingItem,
   RentBillingItemResult,
   RentBillingRun,
@@ -290,6 +291,24 @@ export async function createProjectBasisInvoice(params: {
   });
 }
 
+/**
+ * Samlingsfaktura: combines several invoice bases into ONE Accounted
+ * invoice. All bases must resolve to the same Accounted customer (enforced
+ * server-side); the edge function rejects the whole request otherwise
+ * rather than guessing which ones to drop.
+ */
+export async function createProjectBasisCollectionInvoice(params: {
+  companyId: string;
+  basisIds: string[];
+  dryRun?: boolean;
+}): Promise<unknown> {
+  return invoke('vihem-accounted-project-billing', {
+    company_id: params.companyId,
+    basis_ids: params.basisIds,
+    dry_run: params.dryRun ?? false,
+  });
+}
+
 // ── Billing adjustments (avdrag & tillägg) ───────────────────────────────
 // Writes always go through vihem-billing-adjustments (RLS blocks direct
 // client writes on this table); reads go straight to the table since it's
@@ -365,6 +384,20 @@ export async function listActiveTenancies(companyId: string): Promise<TenancyOpt
     .order('created_at', { ascending: false });
   if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
   return (data ?? []) as unknown as TenancyOption[];
+}
+
+/** For the avdrag/tillägg target picker -- lets an adjustment target a
+ * customer project directly, matching the target_type the project-billing
+ * function already knows how to consume (see vihem-accounted-project-billing). */
+export async function listActiveCustomerProjects(companyId: string): Promise<ProjectOption[]> {
+  const { data, error } = await supabase
+    .from('vihem_customer_projects')
+    .select('id, title, name')
+    .eq('company_id', companyId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false });
+  if (error) throw new AccountedIntegrationError('DB_READ_FAILED', error.message);
+  return (data ?? []) as ProjectOption[];
 }
 
 // ── Tenant portal invoice view ────────────────────────────────────────────

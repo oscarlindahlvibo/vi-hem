@@ -140,3 +140,117 @@ export async function createAccountedInvoiceForSource(
 
   return { created: true, link: inserted as InvoiceLinkRow };
 }
+
+export type CreateAccountedCollectionInvoiceResult =
+  | { dry_run: true; preview: unknown }
+  | { created: true; links: InvoiceLinkRow[] };
+
+/**
+ * Creates ONE Accounted invoice combining line items from several VI-HEM
+ * sources, then links every source to it. Relies on
+ * vihem_accounted_invoice_links no longer requiring a unique accounted_
+ * invoice_id per company_link (see
+ * 20260821140000_accounted_v2_invoice_link_many_sources.sql): each source
+ * gets its OWN link row (still unique per (company_link, source_type,
+ * source_id), so it can never be double-invoiced), all pointing at the same
+ * accounted_invoice_id. vihem-accounted-webhook already updates every row
+ * sharing an accounted_invoice_id, so status sync works unchanged for a
+ * collection invoice.
+ *
+ * Idempotency-Key is derived from the sorted, deduplicated set of sources:
+ * retrying with the exact same combination replays Accounted's cached
+ * response; a different combination (one more/fewer source) is a distinct
+ * request by design, not a retry of this one.
+ *
+ * Callers must have already verified every source is eligible to be
+ * invoiced (not already linked) and resolves to the SAME Accounted customer
+ * -- this function does not re-check either, it only creates the invoice
+ * and writes the links.
+ */
+export async function createAccountedCollectionInvoiceForSources(
+  adminClient: SupabaseClient,
+  link: CompanyLinkForAccounted,
+  apiKey: string,
+  params: {
+    sources: { sourceType: AccountedInvoiceSourceType; sourceId: string }[];
+    invoice: CreateAccountedInvoiceInput;
+    dryRun?: boolean;
+    createdBy: string;
+  },
+): Promise<CreateAccountedCollectionInvoiceResult> {
+  if (params.sources.length === 0) throw new Error("createAccountedCollectionInvoiceForSources: sources är tom.");
+
+  const client = createAccountedClient({ baseUrl: link.accounted_base_url, apiKey });
+  const sortedKey = params.sources
+    .map((s) => `${s.sourceType}:${s.sourceId}`)
+    .sort()
+    .join(",");
+  const idempotencyKey = await deriveIdempotencyKey(["collection-invoice", link.id, sortedKey]);
+  const inv = params.invoice;
+
+  const accountedPayload = {
+    customer_id: inv.accountedCustomerId,
+    invoice_date: inv.invoiceDate,
+    due_date: inv.dueDate,
+    currency: inv.currency || "SEK",
+    your_reference: inv.yourReference || undefined,
+    our_reference: inv.ourReference || undefined,
+    notes: inv.notes || undefined,
+    items: inv.items.map((item) => ({
+      description: item.description,
+      quantity: item.quantity,
+      unit: item.unit || "st",
+      unit_price: item.unit_price,
+      vat_rate: item.vat_rate,
+    })),
+  };
+
+  const result = await client.post<any>(
+    `/api/v1/companies/${encodeURIComponent(link.accounted_company_id)}/invoices`,
+    accountedPayload,
+    { idempotencyKey, dryRun: params.dryRun },
+  );
+
+  if (params.dryRun) return { dry_run: true, preview: result };
+
+  const links: InvoiceLinkRow[] = [];
+  for (const source of params.sources) {
+    const { data: inserted, error: insertErr } = await adminClient
+      .from("vihem_accounted_invoice_links")
+      .upsert(
+        {
+          organisation_id: link.organisation_id,
+          company_link_id: link.id,
+          source_type: source.sourceType,
+          source_id: source.sourceId,
+          accounted_invoice_id: result.id,
+          accounted_invoice_number: result.invoice_number,
+          accounted_document_type: result.document_type || "invoice",
+          status: result.status || "draft",
+          currency: result.currency || "SEK",
+          total: result.total,
+          remaining_amount: result.remaining_amount,
+          invoice_date: result.invoice_date,
+          due_date: result.due_date,
+          last_sync_source: "create",
+          last_synced_at: new Date().toISOString(),
+          created_by: params.createdBy,
+        },
+        { onConflict: "company_link_id,source_type,source_id" },
+      )
+      .select("id, accounted_invoice_id, accounted_invoice_number, status, total, remaining_amount, invoice_date, due_date")
+      .single();
+    if (insertErr) {
+      // The invoice WAS created in Accounted; some sources may already be
+      // linked to it at this point. Surface exactly which source failed and
+      // the Accounted id so an operator can finish reconciling the rest by
+      // hand instead of guessing what's still missing.
+      throw new Error(
+        `Samlingsfakturan skapades i Accounted (id ${result.id}) men kunde inte länkas för ${source.sourceType}:${source.sourceId}: ${insertErr.message}. Redan länkade källor: ${links.map((l) => l.id).join(", ") || "inga"}.`,
+      );
+    }
+    links.push(inserted as InvoiceLinkRow);
+  }
+
+  return { created: true, links };
+}
