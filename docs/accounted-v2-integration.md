@@ -46,7 +46,11 @@ generell avdrag/tillägg-modul (kopplad till hyresfakturering OCH
 kundprojekt, med skapa-UI för båda måltyperna), hyresgästportalens
 fakturavy (lista + PDF, Accounted som source of truth), scanner →
 Accounted (e-postkanalen), avbetalningsplaner tillgängliga i Finance V2
-(samma delade `InstallmentPlansPanel`, inte omskrivet mot Accounted).
+(samma delade `InstallmentPlansPanel`, inte omskrivet mot Accounted),
+proaktiv schemalagd hälsokontroll (pg_cron, var 30:e minut, se
+"Proaktiv hälsokontroll" nedan). En driftklar-checklista för att koppla på
+en riktig Accounted-instans finns i
+[accounted-v2-golive-checklist.md](accounted-v2-golive-checklist.md).
 **Kvar:** avdrag/tillägg och fakturering för korttidsuthyrning (och andra
 framtida faktureringskällor bortom hyra/kundprojekt) — se avsnittet
 "Avdrag & tillägg" nedan för exakt vad det gapet innebär, en riktig
@@ -130,9 +134,42 @@ skrivskyddad för klienter.
 `vihem_accounted_company_links.settings` (jsonb-kolumnen som redan fanns
 från grundmigrationen) — ingen schemaändring behövdes för det.
 
+`20260822090000_accounted_v2_scheduled_healthcheck.sql`: schemalägger den
+proaktiva hälsokontrollen (se "Proaktiv hälsokontroll" nedan) — ingen ny
+tabell, bara en rad i den redan delade `vihem_system_settings` (skapad av
+den befintliga Beds24-schemaläggningen), en `SECURITY DEFINER`-funktion som
+anropar edge-funktionen via `pg_net`, och en `cron.schedule()`. Samma
+mönster som de två andra schemalagda jobben i kodbasen
+(`vihem-beds24-sync-every-15-minutes`, `vihem-gmail-watch-daily`).
+
 Migrationerna rör inte någon tabell som legacy-ekonomin skriver till för
 befintlig produktionsfakturering (`vihem_invoices`, `vihem_accounting_*`,
 `vihem_rent_adjustments`, etc.) — bara additiva kolumner/tabeller.
+
+### Proaktiv hälsokontroll
+
+Innan detta steg upptäcktes en trasig Accounted-koppling (utgången nyckel,
+nätverksproblem, fel URL) bara om någon råkade klicka "Testa anslutning" i
+Bolagskoppling-fliken. `vihem-accounted-healthcheck` körs nu av pg_cron var
+30:e minut för varje **aktiverad** bolagskoppling och skriver samma
+`last_health_status`/`last_health_check_at`/`last_health_error` som den
+manuella knappen redan gjorde och som UI:t redan visade — ingen ny kolumn,
+inget nytt UI, bara att den fältet nu hålls färskt automatiskt istället för
+att bero på ett manuellt klick.
+
+Delar implementation med den manuella "Testa anslutning"-knappen via en ny
+`runAccountedHealthCheck(adminClient, companyId)`-helper i
+`_shared/accounted-company-context.ts` — `vihem-accounted-admin`s
+`test_connection`-action anropar samma funktion, så de två vägarna
+(manuell/schemalagd) skriver alltid identisk logik och kan aldrig divergera.
+
+Autentisering följer exakt samma dubbla mönster som de två andra
+schemalagda funktionerna i kodbasen (`vihem-sync-beds24-bookings`,
+`vihem-gmail`): en delad hemlighet i en egen header
+(`x-vihem-accounted-healthcheck-secret`) för pg_cron-anropet, eller en
+superadmins Supabase-JWT för en manuell engångskörning (praktiskt för att
+verifiera funktionen fungerar utan att vänta på nästa cron-tick). Ingen
+skillnad i beteende mellan de två — bara vem som fick köra den.
 
 ### Delad logik (`_shared/`)
 
@@ -147,7 +184,7 @@ befintlig produktionsfakturering (`vihem_invoices`, `vihem_accounting_*`,
 
 ### Edge Functions
 
-- **`vihem-accounted-admin`** — `save_company_link` (nu även `invoice_inbox_email`, sparas i `settings`), `test_connection`, `register_webhooks`. Kräver `admin`-bolagsbehörighet.
+- **`vihem-accounted-admin`** — `save_company_link` (nu även `invoice_inbox_email`, sparas i `settings`), `test_connection` (delar implementation med den schemalagda hälsokontrollen, se nedan), `register_webhooks`. Kräver `admin`-bolagsbehörighet. `register_webhooks` är idempotent by design: den kontrollerar per event-typ om en prenumeration redan har ett `accounted_webhook_id` innan den anropar Accounted, så att klicka knappen flera gånger (t.ex. efter ett delvist misslyckande) skapar aldrig dubblettprenumerationer — bara de event-typer som faktiskt saknas registreras.
 - **`vihem-accounted-customers`** — hittar befintlig kundkoppling eller skapar kunden i Accounted (idempotent, dry-run-stödd). Tunn wrapper runt den delade resolvern.
 - **`vihem-accounted-invoices`** — `create` (generisk, idempotent, dry-run-stödd) och `refresh_status`. Tunn wrapper runt den delade skaparen.
 - **`vihem-accounted-rent-billing`** — batchar fakturaskapande för en hel hyreskörning: för varje ej fakturerad rad, länka/skapa Accounted-kunden (`vihem_finance_customers`, via `finance_customer_id`), hämta gällande avdrag/tillägg för hyresförhållandet och perioden, och skapa fakturan (grundhyra + hyresjusteringar redan summerat av befintlig SQL, plus en rad per avdrag/tillägg). Partial-success-svar per rad, samma mönster som Accounteds egen `bulk-create`. Valfri `combine_by_customer` (default `false`) grupperar rader med samma `finance_customer_id` till en gemensam samlingsfaktura, se "Samlingsfaktura (hyresfakturering)" nedan.
@@ -156,6 +193,7 @@ befintlig produktionsfakturering (`vihem_invoices`, `vihem_accounting_*`,
 - **`vihem-accounted-tenant-invoices`** — `GET ?invoice_link_id=`, hyresgäst-scopad. Proxar Accounteds PDF-endpoint: verifierar ägarskap manuellt (`vihem_rent_billing_items.tenant_id = caller.id`, samma relation som RLS-policyn nedan) eftersom en binär PDF-respons inte kan gå via en vanlig RLS-skyddad tabellfråga. Vanlig `verify_jwt` (ingen `config.toml`-ändring) eftersom Accounted aldrig anropar den här — bara den inloggade hyresgästens webbläsare.
 - **`vihem-accounted-scanner-forward`** — laddar ner en redan uppladdad fil från `vihem-documents`, mejlar den till bolagets Accounted-inkorgsadress via `smtp-mailer.ts`, och spårar status i `vihem_accounted_scanner_uploads`. Kräver `seller`-bolagsbehörighet.
 - **`vihem-accounted-webhook`** — publik mottagare, HMAC-verifierad (`X-Gnubok-Signature`, Stripe-liknande schema), **ingen** Supabase-JWT. Måste deployas med `verify_jwt = false` (redan satt i `supabase/config.toml`).
+- **`vihem-accounted-healthcheck`** — körs av pg_cron var 30:e minut, kontrollerar varje aktiverad bolagskoppling och skriver samma `last_health_status`/`last_health_check_at`/`last_health_error` som den manuella "Testa anslutning"-knappen. Delar sin implementation (`runAccountedHealthCheck` i `_shared/accounted-company-context.ts`) med `vihem-accounted-admin`s `test_connection`-action, så de två vägarna aldrig kan divergera. Auktoriseras antingen av en superadmins JWT (manuell körning, t.ex. för test) eller en delad hemlighet i headern `x-vihem-accounted-healthcheck-secret` (pg_cron), samma dubbla mönster som `vihem-sync-beds24-bookings`/`vihem-gmail`. Måste deployas med `verify_jwt = false` (satt i `supabase/config.toml`), se "Proaktiv hälsokontroll" nedan.
 
 Ingen av dessa funktioner ger AI-tolkning eller PDF-generering själva — det
 sker i Accounted, som redan har stöd för direkt Anthropic API i

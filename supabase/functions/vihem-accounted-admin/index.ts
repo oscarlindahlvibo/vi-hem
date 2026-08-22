@@ -9,7 +9,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, type AuthContext, corsHeaders, errorJson, isAuthContext, json, requireCompanyAccess } from "../_shared/vihem-auth.ts";
 import { encryptAccountedSecret, hintFor } from "../_shared/accounted-crypto.ts";
 import { createAccountedClient } from "../_shared/accounted-rest-client.ts";
-import { AccountedContextError, loadAccountedCompanyContext } from "../_shared/accounted-company-context.ts";
+import { AccountedContextError, loadAccountedCompanyContext, runAccountedHealthCheck } from "../_shared/accounted-company-context.ts";
 
 // Accounted only accepts one event_type per webhook subscription (see
 // app/api/v1/companies/[companyId]/webhooks/route.ts CreateWebhookSchema),
@@ -137,27 +137,13 @@ async function handleSaveCompanyLink(auth: AuthContext, company: { id: string; o
 }
 
 async function handleTestConnection(auth: AuthContext, companyId: string) {
-  let context;
+  let result: Awaited<ReturnType<typeof runAccountedHealthCheck>>;
   try {
-    context = await loadAccountedCompanyContext(auth.adminClient, companyId, { requireEnabled: false });
+    result = await runAccountedHealthCheck(auth.adminClient, companyId);
   } catch (err) {
     if (err instanceof AccountedContextError) return errorJson(err.code, err.message, 400);
     throw err;
   }
-  const { link } = context;
-  const client = createAccountedClient({ baseUrl: link.accounted_base_url, apiKey: context.apiKey });
-
-  const result = await client.healthCheck(link.accounted_company_id);
-
-  await auth.adminClient
-    .from("vihem_accounted_company_links")
-    .update({
-      last_health_check_at: new Date().toISOString(),
-      last_health_status: result.ok ? "ok" : "error",
-      last_health_error: result.ok ? "" : `${result.error?.code}: ${result.error?.message}`,
-    })
-    .eq("id", link.id);
-
   if (!result.ok) {
     return errorJson(result.error!.code, result.error!.message, 502, {
       recovery_hint: result.error!.recovery_hint,

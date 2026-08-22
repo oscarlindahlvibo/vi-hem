@@ -393,6 +393,13 @@ verify_jwt = false
 [functions.vihem-accounted-webhook]
 verify_jwt = false
 
+# pg_cron calls this on a schedule with a shared secret header, never a
+# Supabase JWT (see supabase/migrations/*_accounted_v2_scheduled_healthcheck.sql
+# and supabase/functions/vihem-accounted-healthcheck/index.ts). Same
+# --no-verify-jwt deploy caveat as vihem-accounted-webhook above.
+[functions.vihem-accounted-healthcheck]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

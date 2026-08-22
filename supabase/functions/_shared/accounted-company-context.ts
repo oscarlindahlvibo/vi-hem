@@ -6,6 +6,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { decryptAccountedSecret } from "./accounted-crypto.ts";
 import type { CompanyLinkForAccounted } from "./accounted-customer-resolver.ts";
+import { createAccountedClient } from "./accounted-rest-client.ts";
 
 export class AccountedContextError extends Error {
   code: string;
@@ -66,4 +67,59 @@ export async function loadAccountedCompanyContext(
   }
 
   return { link: link as AccountedCompanyContext["link"], apiKey };
+}
+
+/**
+ * Runs a connectivity check against Accounted for one company link and
+ * persists the result on vihem_accounted_company_links (last_health_status /
+ * last_health_check_at / last_health_error) -- the exact same read/update
+ * vihem-accounted-admin's "Testa anslutning" button triggers manually.
+ * Shared so the manual button and the scheduled healthcheck function
+ * (vihem-accounted-healthcheck, run by pg_cron) can never drift apart.
+ *
+ * Checks a link even if it's disabled or missing its API key -- an operator
+ * setting up a new company link benefits from seeing why it's not healthy
+ * yet, same as the manual button (requireEnabled: false).
+ */
+export interface AccountedHealthCheckResult {
+  ok: boolean;
+  error?: { code: string; message: string; recovery_hint?: string; details?: unknown };
+}
+
+export async function runAccountedHealthCheck(
+  adminClient: SupabaseClient,
+  companyId: string,
+): Promise<AccountedHealthCheckResult> {
+  let context: AccountedCompanyContext;
+  try {
+    context = await loadAccountedCompanyContext(adminClient, companyId, { requireEnabled: false });
+  } catch (err) {
+    if (err instanceof AccountedContextError) {
+      return { ok: false, error: { code: err.code, message: err.message } };
+    }
+    throw err;
+  }
+
+  const client = createAccountedClient({ baseUrl: context.link.accounted_base_url, apiKey: context.apiKey });
+  const result = await client.healthCheck(context.link.accounted_company_id);
+
+  await adminClient
+    .from("vihem_accounted_company_links")
+    .update({
+      last_health_check_at: new Date().toISOString(),
+      last_health_status: result.ok ? "ok" : "error",
+      last_health_error: result.ok ? "" : `${result.error?.code}: ${result.error?.message}`,
+    })
+    .eq("id", context.link.id);
+
+  if (result.ok) return { ok: true };
+  return {
+    ok: false,
+    error: {
+      code: result.error!.code,
+      message: result.error!.message,
+      recovery_hint: result.error!.recovery_hint,
+      details: result.error!.details,
+    },
+  };
 }
