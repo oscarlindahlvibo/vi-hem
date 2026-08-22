@@ -403,19 +403,40 @@ möjligt att verifiera betydligt mer konkret än i tidigare etapper:
   verifierade databasen, loggade in som en seedad admin-användare,
   bekräftade att "Avtal V2 (beta)" syns i navigeringen, öppnas korrekt,
   och att arkivsidans filter/sök/tomt-läge/felhantering renderar rätt.
-  Den faktiska edge-funktions-roundtripen (skapa/lista dokument) kunde
-  **inte** verifieras end-to-end i webbläsaren: den lokala Docker-baserade
-  edge-runtime-behållaren i denna sandbox visade sig servera en gammal,
-  cachad uppsättning funktioner (från en tidigare `supabase start`) och
-  kunde inte startas om tillförlitligt i denna miljö (containern
-  kraschade upprepade gånger vid omstart — troligen relaterat till en
-  redan varnad CPU/AVX-inkompatibilitet i sandboxen, inte till koden).
-  Detta är en miljöbegränsning i just detta testverktyg, inte ett bevisat
-  fel i koden — men det är ärligt att säga att en fullständig
-  klick-igenom-hela-flödet-verifiering (skapa avtal → lägg block → lägg
-  signatär → skicka → öppna publik länk → signera → se audit trail) INTE
-  kunde genomföras i denna session och bör göras vid nästa tillfälle en
-  fungerande edge-runtime finns tillgänglig.
+- **Fullständig end-to-end-verifiering av edge-funktionerna (klart i ett
+  senare pass samma dag)**: den lokala Docker-baserade edge-runtime-
+  behållaren visade sig servera en gammal, cachad funktionslista och
+  kunde inte startas om tillförlitligt via `docker restart`/`docker
+  start` — löst genom att köra `supabase functions serve` istället, som
+  läser funktionerna live från katalogen. Med det kördes ett riktigt,
+  fullständigt flöde via riktiga HTTP-anrop (inloggning med lösenord,
+  `vihem-agreements-admin`, `vihem-agreements-workflow`,
+  `vihem-agreements-public`) mot den lokala databasen:
+  1. Skapa avtal → fick riktigt sekventiellt dokumentnummer (`AVT-2026-…`).
+  2. Lägg till block (inklusive ett `{{today.date}}`-dynamiskt fält) och
+     en signatär.
+  3. Skicka för signering utan leveranskanaler → version+hash frystes
+     korrekt, `sent`-audit-event skrevs, signeringstoken skapades ändå
+     (leverans och tokenskapande är korrekt frikopplade).
+  4. Skicka med e-post aktiverat men ingen SMTP konfigurerad → misslyckades
+     snyggt (`email_delivery_failed`-event med exakt felmeddelande,
+     kraschade inte hela anropet).
+  5. Öppna den publika signeringssidans `get`-action med en känd giltig
+     token → fick tillbaka exakt den frysta versionens block, korrekt
+     `content_hash`, INGA interna ID:n exponerade. `viewed`-status och
+     audit-event skrevs.
+  6. Signera → riktig signaturrad skapad (metod, namn, IP, user-agent,
+     pinnad till exakt `agreement_version_id`), signatärens och avtalets
+     status gick automatiskt till `signed`, ett `completed`-audit-event
+     skrevs. Slutlig audit trail: `created → sent → email_delivery_failed
+     → viewed → signed → completed` — matchar exakt exempelflödet i
+     uppdragets sektion 14.
+  7. **Säkerhetstest**: försök att signera samma dokument igen avvisades
+     med `ALREADY_SIGNED` (409). Ett påhittat/felaktigt token avvisades
+     med `LINK_INVALID` (404).
+  All testdata (två testavtal + relaterade rader) skapades och
+  raderades i den lokala databasen efteråt; cascade-borttagningen
+  bekräftades tom efteråt (0 kvarvarande rader i alla berörda tabeller).
 - **Inga automatiska testfiler (Vitest/Jest) skrevs** för detta första
   steg — inget testramverk för backend-logik är etablerat i repot sedan
   tidigare (samma situation som gällde för Ekonomi V2/Accounted V2
@@ -484,18 +505,19 @@ Inget i detta steg rör `vihem_contract_signatures`,
    finns i appen idag, se punkt 20).
 4. **Sekventiell signering** — datamodellen (`sign_order`) finns,
    arbetsflödet tillämpar bara parallell signering.
-5. **En riktig testsvit** enligt uppdragets sektion 30-lista.
-6. **Fullständig edge-funktions-verifiering i en fungerande lokal miljö**
-   (blockerades av sandboxens Docker-instabilitet denna session, se
-   punkt 19).
-7. **Ny avtalsversion efter utskick** — datamodellen stödjer flera
+5. **En riktig testsvit** enligt uppdragets sektion 30-lista. Manuellt
+   verifierat för närvarande (se punkt 19: hela skapa→skicka→signera-
+   flödet, dubbelsignering blockerad, ogiltig token avvisad, RLS-
+   isolering), men det är inte samma sak som en automatiserad, repeterbar
+   testsvit i CI.
+6. **Ny avtalsversion efter utskick** — datamodellen stödjer flera
    versioner per avtal, men UI-flödet "gör om ett redan skickat utkast
    och skicka som version 2" är inte byggt.
-8. Mall-driven kategoristruktur ("Hyresavtal/Kundavtal/Offerter/..." som
+7. Mall-driven kategoristruktur ("Hyresavtal/Kundavtal/Offerter/..." som
    separata mappar) är idag bara `category`-textfiltret i arkivet, inte en
    egen hierarki — bedömdes tillräckligt för "känslan av ett centralt
    arkiv" per uppdragets egen öppning för det, men kan byggas ut.
-9. **Motsvarande integration för fastigheter/lägenheter** (inte bara
+8. **Motsvarande integration för fastigheter/lägenheter** (inte bara
    hyresgäster) — `AdminPropertiesPage.tsx`s lägenhetsdetalj har ingen
    "Avtal"-sektion än; samma mönster som `AdminTenantsPage.tsx` skulle
    kunna återanvändas rakt av.
