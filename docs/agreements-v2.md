@@ -35,6 +35,7 @@ supabase/migrations/
   20260822120000_agreements_v2_parties_signers.sql      parter + signatärer + signeringar
   20260822130000_agreements_v2_attachments_links_audit.sql  bilagor + kopplingar + audit
   20260822140000_agreements_v2_storage.sql              privat storage-bucket
+  20260822150000_agreements_v2_signer_self_read.sql      fix: signatär-självläsning på vihem_agreements (RLS-rekursionsfix)
 ```
 
 Org-scopat (inte bolags-scopat som Ekonomi V2) — samma modell som legacy
@@ -426,14 +427,61 @@ möjligt att verifiera betydligt mer konkret än i tidigare etapper:
   i denna etapp** och bör prioriteras tidigt i nästa, eftersom detta är
   ett uttryckligen säkerhets-/integritetskänsligt område.
 
-## 20. Öppna frågor / kvarstående arbete till nästa etapp
+## 20. Lägenhets-/hyresgästsidans integration (tillagd efter första committen)
+
+Byggd som ett eget, litet steg direkt efter grunden, med samma
+säkerhetsverifiering mot lokal Postgres som resten av modulen.
+
+**Hyresgästsidan (`ApartmentPage.tsx`, hyresgästens egen "Min lägenhet")**:
+ny, skrivskyddad "Avtal"-sektion (skild från den befintliga
+"Hyresavtal"-legacy-sektionen, som är orörd) som listar dokument där
+hyresgästen är signatär, via `listMyAgreements()` i
+`src/modules/agreements-v2/api.ts` — går **direkt via supabase-js**, inte
+via `vihem-agreements-admin` (som är staff/admin-låst), och förlitar sig
+helt på RLS för åtkomstkontroll.
+
+**Under utvecklingen av detta hittades och fixades en verklig
+RLS-bugg**, upptäckt genom att faktiskt köra frågan mot databasen (inte
+bara läsa policyn): den ursprungliga signatär-självläs-policyn på
+`vihem_agreements` (migration `20260822150000_agreements_v2_signer_self_
+read.sql`) orsakade **oändlig rekursion** — att läsa `vihem_agreements`
+via den nya policyn triggade `vihem_agreement_signers`s egen
+"staff access"-policy, som läser `vihem_agreements` igen, som triggar
+samma policy igen. Postgres kastade `"infinite recursion detected in
+policy for relation vihem_agreements"` direkt vid en riktig testfråga.
+Löst med en `SECURITY DEFINER`-hjälpfunktion
+(`vihem_agreement_ids_for_signer_profile`), samma mönster som
+`vihem_user_has_company_access` redan använder i kodbasen — funktionens
+interna fråga körs som tabellägaren och kringgår därmed RLS helt, vilket
+bryter cirkeln vid källan. Verifierat efteråt med tre riktiga
+RLS-sessionstester direkt mot databasen: (1) rätt hyresgäst SER sitt eget
+testavtal, (2) en ANNAN hyresgäst ser INTE avtalet (0 rader), (3) admins
+vanliga org-scopade läsning fungerar oförändrat. Samtliga tre gav rätt
+resultat.
+
+**Adminsidan (`AdminTenantsPage.tsx`, hyresgästdetalj)**: en ny
+"Avtal"-sektion under hyresförhållandena som listar dokument kopplade
+till hyresgästen via `listEntityAgreements('tenant', tenantId)` (den
+generiska kopplingstabellen, ingen ny FK-kolumn) plus en
+"Skapa avtal"-knapp. Knappen navigerar till Avtal V2-modulen men fyller
+**inte** i förväg i vilken hyresgäst som avsågs — appens navigering är en
+platt sid-nyckel-switch utan mekanism för att skicka med kontext mellan
+sidor, så att bygga en riktig förifylld deep-link kräver antingen en delad
+state/context eller query-parametrar, vilket inte fanns tidigare i appen
+och bedömdes vara för stor arkitekturändring för detta lilla steg. Admin
+väljer/länkar hyresgästen inifrån Avtal V2 istället, för nu.
+
+Inget i detta steg rör `vihem_contract_signatures`,
+`InspectionsPage.tsx`, eller någon annan legacy-tabell/fil.
+
+## 21. Öppna frågor / kvarstående arbete till nästa etapp
 
 1. **BankID-koppling** — se punkt 10 för exakt vad som krävs.
 2. **Slutlig PDF-generering** — rendera en frusen version + bilagor +
    signaturer till en nedladdningsbar PDF.
-3. **Apartment/hyresgäst-sidans UI-integration** — API:t finns
-   (`saveEntityLinks`/`listEntityAgreements`), UI:t i
-   `ApartmentPage.tsx`/`AdminTenantsPage.tsx` är inte byggt.
+3. **Riktig deep-link-prefill** från lägenhets-/hyresgästsidan till en ny
+   Avtal V2-utkast (kräver en delad navigerings-/state-mekanism som inte
+   finns i appen idag, se punkt 20).
 4. **Sekventiell signering** — datamodellen (`sign_order`) finns,
    arbetsflödet tillämpar bara parallell signering.
 5. **En riktig testsvit** enligt uppdragets sektion 30-lista.
@@ -443,11 +491,11 @@ möjligt att verifiera betydligt mer konkret än i tidigare etapper:
 7. **Ny avtalsversion efter utskick** — datamodellen stödjer flera
    versioner per avtal, men UI-flödet "gör om ett redan skickat utkast
    och skicka som version 2" är inte byggt.
-8. **Tenant-portalvy** ("Mina avtal") — RLS-grunden finns redan
-   (`vihem_agreement_signers.profile_id = auth.uid()`), men ingen egen
-   sida konsumerar den ännu (till skillnad från t.ex. `TenantInvoicesPage.tsx`
-   för Ekonomi V2).
-9. Mall-driven kategoristruktur ("Hyresavtal/Kundavtal/Offerter/..." som
+8. Mall-driven kategoristruktur ("Hyresavtal/Kundavtal/Offerter/..." som
    separata mappar) är idag bara `category`-textfiltret i arkivet, inte en
    egen hierarki — bedömdes tillräckligt för "känslan av ett centralt
    arkiv" per uppdragets egen öppning för det, men kan byggas ut.
+9. **Motsvarande integration för fastigheter/lägenheter** (inte bara
+   hyresgäster) — `AdminPropertiesPage.tsx`s lägenhetsdetalj har ingen
+   "Avtal"-sektion än; samma mönster som `AdminTenantsPage.tsx` skulle
+   kunna återanvändas rakt av.

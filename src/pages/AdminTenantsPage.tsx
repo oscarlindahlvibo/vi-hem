@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Plus, Edit2, Home, Mail, Phone, KeyRound } from 'lucide-react';
+import { Users, Plus, Edit2, Home, Mail, Phone, KeyRound, FileSignature } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { createUserAccount, sendUserPasswordResetEmail } from '../lib/userAdmin';
@@ -16,9 +16,11 @@ import {
 } from '../components/ui';
 import { formatDate, formatCurrency } from '../lib/utils';
 import { Profile, Tenancy, Apartment, Property } from '../types';
+import { listEntityAgreements } from '../modules/agreements-v2/api';
+import type { AgreementListItem } from '../modules/agreements-v2/types';
 
 interface AdminTenantsPageProps { onNavigate: (page: string) => void; }
-export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPageProps) {
+export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
   const { user } = useAuth();
   const [tenants, setTenants] = useState<Profile[]>([]);
   const [tenancies, setTenancies] = useState<Tenancy[]>([]);
@@ -27,6 +29,7 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTenant, setSelectedTenant] = useState<Profile | null>(null);
+  const [tenantAgreements, setTenantAgreements] = useState<AgreementListItem[]>([]);
   const [editingTenant, setEditingTenant] = useState<Profile | null>(null);
   const [showTenantModal, setShowTenantModal] = useState(false);
   const [showLinkTenancyModal, setShowLinkTenancyModal] = useState(false);
@@ -55,6 +58,14 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Avtal V2 (beta): agreements linked to the selected tenant via the
+  // generic entity-link table. Best-effort -- never blocks the rest of
+  // the tenant detail view from rendering.
+  useEffect(() => {
+    if (!selectedTenant) { setTenantAgreements([]); return; }
+    listEntityAgreements('tenant', selectedTenant.id).then(setTenantAgreements).catch(() => setTenantAgreements([]));
+  }, [selectedTenant]);
 
   const fetchData = async () => {
     try {
@@ -407,6 +418,40 @@ export function AdminTenantsPage({ onNavigate: _onNavigate }: AdminTenantsPagePr
                       </Card>
                     );
                   })}
+                </div>
+              )}
+            </div>
+
+            {/* Avtal V2 (beta) -- linked via the generic entity-link
+                table (entity_type='tenant'), never a dedicated FK column
+                here. "+ Skapa avtal" just opens the module; it doesn't
+                deep-link a prefilled draft yet (the app's navigation is a
+                flat page-key switch with no query-param/context passing
+                between pages), so the admin picks/links this tenant from
+                inside Avtal V2 itself for now -- see docs/agreements-v2.md
+                "Öppna frågor" for the deferred deep-prefill flow. */}
+            <div className="mt-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-800">
+                  <FileSignature className="h-4 w-4 text-blue-600" /> Avtal
+                </h3>
+                <Button variant="secondary" size="sm" onClick={() => onNavigate('agreements-v2')} className="gap-2">
+                  <Plus className="w-4 h-4" /> Skapa avtal
+                </Button>
+              </div>
+              {tenantAgreements.length === 0 ? (
+                <p className="text-sm text-slate-500">Inga avtal kopplade till denna hyresgäst ännu.</p>
+              ) : (
+                <div className="space-y-2">
+                  {tenantAgreements.map((doc) => (
+                    <Card key={doc.id} className="flex items-center justify-between p-3">
+                      <div>
+                        <p className="text-sm font-medium text-slate-800">{doc.title || doc.document_number}</p>
+                        <p className="text-xs text-slate-500">{doc.document_number}</p>
+                      </div>
+                      <Badge className="bg-slate-100 text-slate-600">{doc.status}</Badge>
+                    </Card>
+                  ))}
                 </div>
               )}
             </div>

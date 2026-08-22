@@ -87,6 +87,23 @@ export function listEntityAgreements(entityType: AgreementEntityType, entityId: 
   return invokeAdmin('list_entity_agreements', { entity_type: entityType, entity_id: entityId });
 }
 
+/**
+ * Tenant-facing "my agreements" read. Deliberately NOT routed through
+ * vihem-agreements-admin (staff/admin only) -- goes straight through
+ * supabase-js so RLS does the access control (the signer-self-read policy
+ * added in 20260822150000_agreements_v2_signer_self_read.sql), matching
+ * how TenantInvoicesPage.tsx reads vihem_accounted_invoice_links directly
+ * rather than through an edge function.
+ */
+export async function listMyAgreements(): Promise<AgreementListItem[]> {
+  const { data, error } = await supabase
+    .from('vihem_agreements')
+    .select('id, document_number, document_type, category, title, status, created_at, updated_at, sent_at, completed_at, valid_until')
+    .order('created_at', { ascending: false });
+  if (error) throw new AgreementApiError('DB_READ_FAILED', error.message);
+  return (data ?? []) as AgreementListItem[];
+}
+
 // ── Attachments ──────────────────────────────────────────────────────────
 
 async function sha256HexOfFile(file: File): Promise<string> {

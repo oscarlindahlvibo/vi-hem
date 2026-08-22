@@ -15,6 +15,7 @@ import {
   ClipboardCheck,
   PenLine,
   ShieldCheck,
+  FileSignature,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -31,6 +32,8 @@ import { formatDate, formatCurrency } from '../lib/utils';
 import { BANKID_ENABLED, bankIDLaunchUrl, collectBankIDOrder, initiateBankIDSign } from '../lib/bankid';
 import { buildGeneratedDocumentWithImages } from '../lib/generatedDocuments';
 import { Tenancy, Apartment, Property } from '../types';
+import { listMyAgreements } from '../modules/agreements-v2/api';
+import type { AgreementListItem } from '../modules/agreements-v2/types';
 
 interface ContactInfo {
   property_manager?: string;
@@ -129,6 +132,7 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
   const [organisationLogo, setOrganisationLogo] = useState('');
   const [inspections, setInspections] = useState<any[]>([]);
   const [contracts, setContracts] = useState<any[]>([]);
+  const [agreementsV2, setAgreementsV2] = useState<AgreementListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showSignModal, setShowSignModal] = useState(false);
   const [signingContract, setSigningContract] = useState<any>(null);
@@ -160,6 +164,12 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
           .maybeSingle();
         setOrganisationLogo(organisation?.logo_url || '');
       }
+
+      // Avtal V2 (beta): documents where this tenant is a signer, not
+      // scoped to the tenancy lookup below -- a signer link can exist
+      // independently of an active vihem_tenancies row. Best-effort: never
+      // let this block the rest of the page from loading.
+      listMyAgreements().then(setAgreementsV2).catch(() => setAgreementsV2([]));
 
       const { data: tenancyData } = await supabase
         .from('vihem_tenancies')
@@ -325,6 +335,22 @@ Signeringsmetod: Handskriven signatur`,
     pending_tenant: 'bg-amber-100 text-amber-700',
     signed: 'bg-green-100 text-green-700',
     cancelled: 'bg-red-100 text-red-600',
+  };
+
+  const agreementV2StatusLabel: Record<string, string> = {
+    draft: 'Utkast', ready: 'Redo', sent: 'Skickat', viewed: 'Öppnat',
+    partially_signed: 'Delsignerat', signed: 'Signerat', accepted: 'Accepterat',
+    declined: 'Avböjt', rejected: 'Avvisat', expired: 'Utgånget',
+    cancelled: 'Avbrutet', archived: 'Arkiverat',
+  };
+  const agreementV2StatusClass: Record<string, string> = {
+    draft: 'bg-slate-100 text-slate-600', ready: 'bg-blue-100 text-blue-700',
+    sent: 'bg-amber-100 text-amber-700', viewed: 'bg-amber-100 text-amber-700',
+    partially_signed: 'bg-amber-100 text-amber-700',
+    signed: 'bg-green-100 text-green-700', accepted: 'bg-green-100 text-green-700',
+    declined: 'bg-red-100 text-red-600', rejected: 'bg-red-100 text-red-600',
+    expired: 'bg-red-100 text-red-600', cancelled: 'bg-slate-200 text-slate-500',
+    archived: 'bg-slate-100 text-slate-500',
   };
 
   const inspectionTypeLabel: Record<string, string> = {
@@ -500,6 +526,34 @@ Signeringsmetod: Handskriven signatur`,
                 </div>
               )}
             </Card>
+
+            {/* Agreements V2 (beta) -- documents where this tenant is a
+                signer, e.g. sent for signing via the new Avtal V2 module.
+                Read-only here: creating/managing happens on the staff
+                side, this just lets the tenant see status. Separate card
+                from the legacy "Hyresavtal" one above -- different data
+                source, never merged. */}
+            {agreementsV2.length > 0 && (
+              <Card className="p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <FileSignature className="w-5 h-5 text-blue-600" />
+                  <h3 className="text-base font-semibold text-slate-800">Avtal</h3>
+                </div>
+                <div className="space-y-3">
+                  {agreementsV2.map((doc) => (
+                    <div key={doc.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                      <div>
+                        <p className="text-sm font-medium text-slate-800">{doc.title || doc.document_number}</p>
+                        <p className="text-xs text-slate-500">{doc.document_number}</p>
+                      </div>
+                      <Badge className={agreementV2StatusClass[doc.status] || 'bg-slate-100 text-slate-600'}>
+                        {agreementV2StatusLabel[doc.status] || doc.status}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
 
             {/* Inspections */}
             <Card className="p-6">
