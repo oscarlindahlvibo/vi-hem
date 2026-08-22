@@ -39,6 +39,8 @@ import { ScreenSettingsPage } from './pages/ScreenSettingsPage';
 import { GuestLaundryPage } from './pages/GuestLaundryPage';
 import { FinancePage } from './pages/FinancePage';
 import { FinanceV2Page } from './modules/finance-v2/pages/FinanceV2Page';
+import { AgreementsV2Page } from './modules/agreements-v2/pages/AgreementsV2Page';
+import { PublicAgreementSignPage } from './modules/agreements-v2/pages/PublicAgreementSignPage';
 import { TenantInvoicesPage } from './pages/TenantInvoicesPage';
 import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { StaffDocumentScannerPage } from './pages/StaffDocumentScannerPage';
@@ -132,10 +134,17 @@ function isGuestLaundryRoute() {
   return path === '/laundry-guest' || hashPath === '/laundry-guest';
 }
 
+function isAgreementSignRoute() {
+  const path = normalizeAppPath(window.location.pathname);
+  const hashPath = normalizeAppPath(window.location.hash.replace(/^#/, '').split('?')[0] || '/');
+  return path === '/sign' || hashPath === '/sign';
+}
+
 function AppInner() {
   const { user, loading, passwordRecovery } = useAuth();
   const isScreenPath = isScreenRoute();
   const isGuestLaundryPath = isGuestLaundryRoute();
+  const isAgreementSignPath = isAgreementSignRoute();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [notificationCount, setNotificationCount] = useState(0);
   const [chatNotificationCount, setChatNotificationCount] = useState(0);
@@ -315,6 +324,8 @@ function AppInner() {
 
   if (isGuestLaundryPath) return <GuestLaundryPage />;
 
+  if (isAgreementSignPath) return <PublicAgreementSignPage />;
+
   if (isScreenPath) return <ScreenDisplayPage />;
 
   if (!user) return <LoginPage />;
@@ -476,6 +487,13 @@ function AppInner() {
       case 'tenant-invoices':
         if (!isTenant || !enabledModules.finance) return renderDashboard();
         return <TenantInvoicesPage />;
+
+      case 'agreements-v2':
+        // BETA, enabled for every organisation from day one -- no module
+        // gate, unlike Ekonomi V2. Legacy contracts (InspectionsPage /
+        // ApartmentPage) stay untouched and reachable in parallel.
+        if (!isStaff) return renderDashboard();
+        return <AgreementsV2Page />;
 
       case 'skatteverket':
         if (!isAdmin || !enabledModules.skatteverket) return renderDashboard();

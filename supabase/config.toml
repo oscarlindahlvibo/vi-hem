@@ -400,6 +400,14 @@ verify_jwt = false
 [functions.vihem-accounted-healthcheck]
 verify_jwt = false
 
+# Avtal V2 (BETA) public signing surface -- external signers authenticate
+# purely via a secure per-signer token in the request body, never a
+# Supabase session (see supabase/functions/vihem-agreements-public/index.ts
+# and docs/agreements-v2.md). Same --no-verify-jwt deploy caveat as
+# vihem-accounted-webhook above.
+[functions.vihem-agreements-public]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

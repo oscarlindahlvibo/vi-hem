@@ -1,0 +1,171 @@
+// Read-only block renderer -- used by the editor's preview pane AND the
+// public signing page. Deliberately the SAME component in both places: what
+// a signer sees must be exactly what staff previewed, no second render path
+// to drift out of sync.
+import type { AgreementBlock, AgreementParty, AgreementSigner } from '../types';
+
+function formatCurrency(amount: string, unit: string): string {
+  const n = Number(amount.replace(',', '.'));
+  if (!Number.isFinite(n)) return `${amount} ${unit}`.trim();
+  return `${n.toLocaleString('sv-SE', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${unit}`.trim();
+}
+
+export function BlockRenderer({
+  blocks,
+  parties = [],
+  signers = [],
+}: {
+  blocks: AgreementBlock[];
+  parties?: Pick<AgreementParty, 'display_name' | 'party_type'>[];
+  signers?: Pick<AgreementSigner, 'name' | 'role_title'>[];
+}) {
+  return (
+    <div className="space-y-3 text-sm text-slate-800">
+      {blocks.map((block) => (
+        <BlockView key={block.id} block={block} parties={parties} signers={signers} />
+      ))}
+    </div>
+  );
+}
+
+function BlockView({
+  block,
+  parties,
+  signers,
+}: {
+  block: AgreementBlock;
+  parties: Pick<AgreementParty, 'display_name' | 'party_type'>[];
+  signers: Pick<AgreementSigner, 'name' | 'role_title'>[];
+}) {
+  const c = block.content || {};
+  switch (block.block_type) {
+    case 'heading':
+      return <h1 className="text-2xl font-bold text-slate-900">{c.text || ''}</h1>;
+    case 'subheading':
+      return <h2 className="text-lg font-semibold text-slate-900">{c.text || ''}</h2>;
+    case 'paragraph':
+      return <p className="whitespace-pre-wrap leading-relaxed">{c.text || ''}</p>;
+    case 'callout': {
+      const toneClass = c.tone === 'warning' ? 'border-amber-300 bg-amber-50 text-amber-900' : c.tone === 'success' ? 'border-green-300 bg-green-50 text-green-900' : 'border-blue-300 bg-blue-50 text-blue-900';
+      return <div className={`rounded-lg border px-4 py-3 whitespace-pre-wrap ${toneClass}`}>{c.text || ''}</div>;
+    }
+    case 'party': {
+      const party = parties[c.party_index || 0];
+      return (
+        <div className="rounded-lg border border-slate-200 px-4 py-3">
+          <p className="text-xs font-medium uppercase text-slate-500">Avtalspart</p>
+          <p className="font-semibold text-slate-900">{party?.display_name || '(part ej vald)'}</p>
+        </div>
+      );
+    }
+    case 'contact_info':
+      return <p className="whitespace-pre-wrap text-slate-600">{c.text || ''}</p>;
+    case 'date':
+      return (
+        <p>
+          <span className="font-medium">{c.label || 'Datum'}:</span> {c.value || '—'}
+        </p>
+      );
+    case 'dynamic_field':
+      return (
+        <p>
+          <span className="font-medium">{c.label || ''}:</span> {c.token || ''}
+        </p>
+      );
+    case 'price':
+      return (
+        <div className="flex items-center justify-between border-b border-slate-100 py-1.5">
+          <span>{c.label || ''}</span>
+          <span className="font-semibold">{formatCurrency(String(c.amount || ''), String(c.unit || 'kr'))}</span>
+        </div>
+      );
+    case 'table': {
+      const headers: string[] = c.headers || [];
+      const rows: string[][] = c.rows || [];
+      return (
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50 text-left">
+                {headers.map((h, i) => (
+                  <th key={i} className="px-3 py-2 font-medium text-slate-600">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={ri} className="border-b border-slate-100 last:border-0">
+                  {row.map((cell, ci) => (
+                    <td key={ci} className="px-3 py-2">{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+    case 'bullet_list': {
+      const items: string[] = c.items || [];
+      return (
+        <ul className="list-disc space-y-1 pl-5">
+          {items.map((item, i) => <li key={i}>{item}</li>)}
+        </ul>
+      );
+    }
+    case 'checklist': {
+      const items: { text: string; checked?: boolean }[] = c.items || [];
+      return (
+        <ul className="space-y-1">
+          {items.map((item, i) => (
+            <li key={i} className="flex items-start gap-2">
+              <span className="mt-0.5">{item.checked ? '☑' : '☐'}</span>
+              <span>{item.text}</span>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    case 'image':
+      return c.url ? <img src={c.url} alt={c.alt || ''} className="max-h-64 rounded-lg border border-slate-200 object-contain" /> : <div className="rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-slate-400">Ingen bild vald</div>;
+    case 'divider':
+      return <hr className="border-slate-200" />;
+    case 'page_break':
+      return <div className="my-2 border-t-2 border-dashed border-slate-300 pt-2 text-center text-xs text-slate-400">— Sidbrytning —</div>;
+    case 'terms':
+      return (
+        <div>
+          {c.title && <h3 className="mb-1 font-semibold text-slate-900">{c.title}</h3>}
+          <p className="whitespace-pre-wrap text-slate-700">{c.text || ''}</p>
+        </div>
+      );
+    case 'signature_block': {
+      const signer = signers[c.signer_index || 0];
+      return (
+        <div className="rounded-lg border-2 border-dashed border-slate-300 px-4 py-6 text-center">
+          <p className="text-xs uppercase text-slate-400">Signatur</p>
+          <p className="mt-1 font-medium text-slate-700">{signer?.name || '(signatär ej vald)'}</p>
+          {signer?.role_title && <p className="text-sm text-slate-500">{signer.role_title}</p>}
+        </div>
+      );
+    }
+    case 'attachment_ref':
+      return <p className="text-blue-700">📎 {c.label || 'Se bilaga'}</p>;
+    case 'fillable_text':
+      return (
+        <div className="rounded-lg border border-dashed border-blue-300 bg-blue-50/50 px-3 py-2">
+          <p className="text-xs font-medium text-blue-700">{c.label || 'Fyll i'}</p>
+          <p className="text-sm text-blue-400">{c.placeholder || 'Mottagaren fyller i detta fält'}</p>
+        </div>
+      );
+    case 'checkbox_consent':
+      return (
+        <label className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2">
+          <input type="checkbox" disabled className="mt-1 h-4 w-4" />
+          <span>{c.text || ''}</span>
+        </label>
+      );
+    default:
+      return null;
+  }
+}

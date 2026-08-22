@@ -56,6 +56,25 @@ export async function sendMailWithAttachment(
     attachment: MailAttachment;
   },
 ): Promise<void> {
+  return sendMail(config, params);
+}
+
+/**
+ * Plain-text send with an OPTIONAL attachment -- added for Avtal V2's
+ * signing-link notification emails, which have no attachment to carry.
+ * sendMailWithAttachment (above) is kept as a thin wrapper so existing
+ * callers (vihem-accounted-scanner-forward) are unaffected.
+ */
+export async function sendMail(
+  config: SmtpConfig,
+  params: {
+    toEmail: string;
+    toName?: string;
+    subject: string;
+    text: string;
+    attachment?: MailAttachment;
+  },
+): Promise<void> {
   const message = buildMimeMessage({
     fromEmail: config.fromEmail,
     fromName: config.fromName,
@@ -75,16 +94,31 @@ function buildMimeMessage(input: {
   toName: string;
   subject: string;
   text: string;
-  attachment: MailAttachment;
+  attachment?: MailAttachment;
 }) {
-  const mixedBoundary = `vihem-mixed-${crypto.randomUUID()}`;
-  const attachmentBase64 = wrapBase64(bytesToBase64(input.attachment.bytes));
-
-  return [
+  const headers = [
     `From: ${formatAddress(input.fromName, input.fromEmail)}`,
     `To: ${formatAddress(input.toName, input.toEmail)}`,
     `Subject: ${encodeHeader(input.subject)}`,
     "MIME-Version: 1.0",
+  ];
+
+  if (!input.attachment) {
+    return [
+      ...headers,
+      'Content-Type: text/plain; charset="UTF-8"',
+      "Content-Transfer-Encoding: base64",
+      "",
+      wrapBase64(bytesToBase64(new TextEncoder().encode(input.text))),
+      "",
+    ].join("\r\n");
+  }
+
+  const mixedBoundary = `vihem-mixed-${crypto.randomUUID()}`;
+  const attachmentBase64 = wrapBase64(bytesToBase64(input.attachment.bytes));
+
+  return [
+    ...headers,
     `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
     "",
     `--${mixedBoundary}`,
