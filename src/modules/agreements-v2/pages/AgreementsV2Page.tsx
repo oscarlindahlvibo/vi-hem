@@ -279,7 +279,7 @@ function NewDocumentModal({ organisationId, onClose, onCreated }: { organisation
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-bold text-slate-900">Nytt dokument</h2>
         <div className="mt-4 space-y-4">
           <div>
@@ -1130,12 +1130,12 @@ function SigningStep({
       ) : (
         <div className="space-y-3">
           {signers.map((signer) => (
-            <div key={signer.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
-              <div>
-                <p className="font-medium text-slate-900">{signer.name}</p>
-                <p className="text-xs text-slate-500">{signer.role_title} · {signer.signing_method === 'bankid' ? 'BankID' : 'Handskriven signatur'}</p>
+            <div key={signer.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="min-w-0">
+                <p className="truncate font-medium text-slate-900">{signer.name}</p>
+                <p className="truncate text-xs text-slate-500">{signer.role_title} · {signer.signing_method === 'bankid' ? 'BankID' : 'Handskriven signatur'}</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-2">
                 <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">{signer.status}</span>
                 {signer.status !== 'signed' && signer.status !== 'declined' && ['sent', 'viewed'].includes(agreementStatus) && (
                   <button onClick={() => handleRemind(signer.id!)} className="flex items-center gap-1 text-xs font-medium text-blue-600"><Bell className="h-3 w-3" /> Påminn</button>
@@ -1183,16 +1183,16 @@ function AttachmentsStep({ detail, organisationId, editable, onChanged, onError 
       ) : (
         <div className="space-y-2">
           {detail.attachments.map((a) => (
-            <div key={a.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3">
-              <div className="flex items-center gap-2">
-                <Paperclip className="h-4 w-4 text-slate-400" />
-                <div>
-                  <p className="text-sm font-medium text-slate-800">{a.name}</p>
+            <div key={a.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <Paperclip className="h-4 w-4 shrink-0 text-slate-400" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-slate-800">{a.name}</p>
                   <p className="text-xs text-slate-400">{(a.file_size / 1024).toFixed(0)} kB{a.included_in_version_id ? ' · ingår i skickad version' : ''}</p>
                 </div>
               </div>
               {editable && !a.included_in_version_id && (
-                <button onClick={() => handleRemove(a)} className="text-slate-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                <button onClick={() => handleRemove(a)} className="shrink-0 text-slate-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
               )}
             </div>
           ))}
@@ -1279,9 +1279,9 @@ function SignatureVerificationCard({ signature, signer }: { signature: Agreement
   const isBankId = signature.method === 'bankid';
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-      <div className="flex items-center justify-between px-4 py-3">
-        <p className="font-semibold text-slate-900">{(signature.signature_name || signer?.name || 'Okänd signatär').toUpperCase()}</p>
-        <span className="flex items-center gap-1 text-xs font-medium text-slate-500">
+      <div className="flex items-center justify-between gap-2 px-4 py-3">
+        <p className="min-w-0 truncate font-semibold text-slate-900">{(signature.signature_name || signer?.name || 'Okänd signatär').toUpperCase()}</p>
+        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-slate-500">
           {isBankId ? <Fingerprint className="h-3.5 w-3.5" /> : <PenLine className="h-3.5 w-3.5" />}
           {isBankId ? 'BankID' : 'Handskriven'}
         </span>

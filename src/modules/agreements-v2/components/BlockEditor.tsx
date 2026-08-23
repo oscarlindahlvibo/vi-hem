@@ -260,10 +260,16 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
       </select>
       <div className="space-y-2">
         {items.map((item, i) => (
-          <div key={i} className={`grid items-center gap-1.5 ${deductionType !== 'none' ? 'grid-cols-[1fr_4rem_5.5rem_auto_auto]' : 'grid-cols-[1fr_4rem_5.5rem_auto]'}`}>
-            <input placeholder="Vara/tjänst" value={item.description} onChange={(e) => updateItem(i, { description: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
-            <input placeholder="Antal" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
-            <input placeholder="Á-pris" value={item.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+          // flex-wrap rather than a fixed grid template -- a grid-cols-[...]
+          // with several fixed-width columns doesn't have anywhere to give
+          // on a narrow phone and either overflows or crushes the
+          // description input. Wrapping lets "Vara/tjänst" take the full
+          // width on its own row, with Antal/Á-pris/Arbete/ta-bort flowing
+          // onto the next line only when they don't fit.
+          <div key={i} className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-100 p-2 sm:border-0 sm:p-0">
+            <input placeholder="Vara/tjänst" value={item.description} onChange={(e) => updateItem(i, { description: e.target.value })} className="min-w-0 flex-1 basis-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm sm:basis-auto" />
+            <input placeholder="Antal" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} className="w-16 min-w-0 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+            <input placeholder="Á-pris" value={item.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} className="w-20 min-w-0 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
             {deductionType !== 'none' && (
               <label className="flex items-center gap-1 text-xs text-slate-500" title="Räknas denna rad som arbetskostnad (inte material)?">
                 <input type="checkbox" checked={Boolean(item.deduction_eligible)} onChange={(e) => updateItem(i, { deduction_eligible: e.target.checked })} />

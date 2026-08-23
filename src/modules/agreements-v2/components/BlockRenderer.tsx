@@ -89,9 +89,9 @@ function BlockView({
       );
     case 'price':
       return (
-        <div className="flex items-center justify-between border-b border-slate-100 py-1.5">
-          <span>{c.label || ''}</span>
-          <span className="font-semibold">{formatCurrency(String(c.amount || ''), String(c.unit || 'kr'))}</span>
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 py-1.5">
+          <span className="min-w-0 flex-1 break-words">{c.label || ''}</span>
+          <span className="shrink-0 whitespace-nowrap font-semibold">{formatCurrency(String(c.amount || ''), String(c.unit || 'kr'))}</span>
         </div>
       );
     case 'price_table': {
@@ -112,12 +112,12 @@ function BlockView({
           </div>
           <div className="mt-3 space-y-2">
             {items.map((item, i) => (
-              <div key={i} className="flex items-center justify-between text-sm">
-                <span className="text-slate-700">
+              <div key={i} className="flex items-start justify-between gap-3 text-sm">
+                <span className="min-w-0 flex-1 break-words text-slate-700">
                   {item.description || '—'}
                   {deductionType !== 'none' && item.deduction_eligible && <span className="ml-1.5 text-xs text-green-600">(arbete)</span>}
                 </span>
-                <span className="text-slate-500">{item.quantity} × {item.unit_price} kr</span>
+                <span className="shrink-0 whitespace-nowrap text-slate-500">{item.quantity} × {item.unit_price} kr</span>
               </div>
             ))}
           </div>
