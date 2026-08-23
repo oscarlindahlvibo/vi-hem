@@ -118,26 +118,39 @@ redigerarens live-förhandsgranskning och `BlockRenderer`; PDF-generatorn
 den kör i Deno, inte webbläsaren — se den filens kommentar för varför en
 delad modul inte används över den gränsen.
 
-**RUT-/ROT-avdrag.** Varje `price_table`-block kan sättas till
-`deduction_type: 'none' | 'rut' | 'rot'`. Varje rad har en egen
-`deduction_eligible`-boolean ("Arbete") — avdrag beräknas ENDAST på rader
-markerade så, aldrig på hela fakturan, eftersom Skatteverket aldrig ger
-avdrag på material. Avdragsprocenten (`deduction_rate`) är ett fritt,
-redigerbart procenttal — INTE hårdkodad — med 50 (Rutavdrag) / 30
-(Rotavdrag) som startvärden när man växlar avdragstyp
-(`DEFAULT_DEDUCTION_RATE` i `priceTable.ts`), plus en textrad i UI:t som
-ber personalen kontrollera aktuell procent hos Skatteverket innan
-utskick. Beräkning: avdragsunderlaget är arbetskostnaden INKL. moms för
-de markerade raderna (`eligibleNetto * (1 + vat_rate/100)`), avdraget är
-`avdragsunderlag * avdragsprocent/100`, och "Att betala" är
-`total - avdrag`. Köparens personnummer (`deduction_personal_number`,
-krävs av Skatteverket för en RUT/ROT-ansökan) är ett eget fält på
-blocket snarare än härlett från part/signatär, så det fungerar även för
-en offert utan uppsatt signatär än. Verifierat med en riktig
-PDF-genereringskörning (10h städning á 500 kr som arbete + 300 kr
-material, 25% moms, 50% rutavdrag → Netto 5300, Moms 1325, Total 6625,
-Rutavdrag -3125, Att betala 3500 — samtliga siffror stämde, ingen
-WinAnsi-korruption).
+**RUT-/ROT-avdrag — PER RAD, inte per block** (omarbetat samma dag efter
+att ha jämfört med ett referensverktyg). Varje rad i `price_table` har en
+egen `deduction_type: 'none' | 'rut' | 'rot'`. Medvetet INTE en enda
+inställning för hela blocket: en riktig offert kan blanda t.ex. en
+rutberättigad städrad, en rotberättigad renoveringsrad och en vanlig
+materialrad i samma prisspecifikation, och Skatteverket räknar varje
+avdragstyp mot bara de rader som faktiskt kvalificerar — aldrig mot hela
+fakturan, och aldrig mot material. Redigeringen sker i en egen liten
+modal per rad (`PriceItemModal` i `BlockEditor.tsx` — Namn/Antal/
+Á-pris/Avdrag som tre knappar), inte längre en hopträngd inline-kryssruta
+i radens flex-rad — samma "klicka på raden för att redigera"-mönster som
+referensverktyget använder, fast utan dess Rabatt/AI-funktioner som
+aldrig efterfrågades. En rad med avdrag visar en liten grön "RUT"/"ROT"-
+badge både i redigeraren och i förhandsgranskningen.
+
+Avdragsprocenten är TVÅ separata fria, redigerbara fält
+(`rut_rate`/`rot_rate`, inte längre ett enda `deduction_rate`) eftersom
+RUT och ROT kan förekomma samtidigt i samma block med olika procentsatser
+— INTE hårdkodade, med 50 (Rutavdrag) / 30 (Rotavdrag) som startvärden
+(`DEFAULT_DEDUCTION_RATE` i `priceTable.ts`), plus samma textrad som förut
+som ber personalen kontrollera aktuell procent hos Skatteverket innan
+utskick. Beräkning per typ: avdragsunderlaget är summan av arbetskostnaden
+INKL. moms för just de raderna av den typen
+(`nettoFör(typ) * (1 + vat_rate/100)`), avdraget är
+`underlag * respektive_procent/100`, och "Att betala" är
+`total - rutavdrag - rotavdrag`. Köparens personnummer
+(`deduction_personal_number`) är fortfarande ett enda fält på blocket
+(en köpare per dokument, oavsett hur många rader som har avdrag).
+Verifierat med en riktig PDF-genereringskörning med BÅDA typerna blandade
+i samma block (5h städning å 400 kr som RUT + 10h renovering å 600 kr
+som ROT + 1500 kr material utan avdrag, 25% moms, 50%/30% avdrag →
+Netto 9500, Moms 2375, Total 11875, Rutavdrag -1250, Rotavdrag -2250,
+Att betala 8375 — samtliga siffror stämde, ingen WinAnsi-korruption).
 
 Varje blocktyp har en `defaultContent()`-fabrik och en liten
 fältdefinition (`text`/`textarea`/`select`/`rows`/`checklist_items`/

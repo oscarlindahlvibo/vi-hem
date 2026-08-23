@@ -236,17 +236,30 @@ function AttachmentRefFields({
  * variable-length line-item array with a live-computed total isn't
  * something the generic BlockFieldDef kinds ('rows', 'table_grid', ...)
  * express. */
+const DEDUCTION_BADGE_LABEL: Record<DeductionType, string> = { none: '', rut: 'RUT', rot: 'ROT' };
+
+/** Each item opens its own edit modal (Namn/Antal/Á-pris/Avdrag) rather than
+ * cramming every field into the row -- a per-row RUT/ROT choice needs more
+ * room than a tiny inline checkbox gave it, and matches how staff already
+ * expect this from other quote tools. The row itself stays a compact
+ * summary (description, qty × price, a RUT/ROT badge when set) so a
+ * multi-line quote is still scannable at a glance. */
 function PriceTableFields({ content, onChange }: { content: Record<string, any>; onChange: (content: Record<string, any>) => void }) {
-  const items: PriceTableItem[] = Array.isArray(content.items) && content.items.length > 0 ? content.items : [{ description: '', quantity: '1', unit_price: '', deduction_eligible: false }];
-  const deductionType: DeductionType = content.deduction_type || 'none';
+  const items: PriceTableItem[] = Array.isArray(content.items) && content.items.length > 0 ? content.items : [{ description: '', quantity: '1', unit_price: '', deduction_type: 'none' }];
   const totals = calcPriceTable({ ...content, items });
+  const hasRut = items.some((it) => it.deduction_type === 'rut');
+  const hasRot = items.some((it) => it.deduction_type === 'rot');
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   const updateItem = (i: number, patch: Partial<PriceTableItem>) => {
     onChange({ ...content, items: items.map((it, ii) => (ii === i ? { ...it, ...patch } : it)) });
   };
-  const addItem = () => onChange({ ...content, items: [...items, { description: '', quantity: '1', unit_price: '', deduction_eligible: false }] });
+  const addItem = () => {
+    const nextItems = [...items, { description: '', quantity: '1', unit_price: '', deduction_type: 'none' as DeductionType }];
+    onChange({ ...content, items: nextItems });
+    setEditingIndex(nextItems.length - 1);
+  };
   const removeItem = (i: number) => onChange({ ...content, items: items.filter((_, ii) => ii !== i) });
-  const setDeductionType = (type: DeductionType) => onChange({ ...content, deduction_type: type, deduction_rate: DEFAULT_DEDUCTION_RATE[type] });
 
   return (
     <div className="space-y-3">
@@ -258,24 +271,25 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
         <option value="fixed">Fast pris</option>
         <option value="recurring">Löpande räkning</option>
       </select>
-      <div className="space-y-2">
+
+      <div className="space-y-1.5">
         {items.map((item, i) => (
-          // flex-wrap rather than a fixed grid template -- a grid-cols-[...]
-          // with several fixed-width columns doesn't have anywhere to give
-          // on a narrow phone and either overflows or crushes the
-          // description input. Wrapping lets "Vara/tjänst" take the full
-          // width on its own row, with Antal/Á-pris/Arbete/ta-bort flowing
-          // onto the next line only when they don't fit.
-          <div key={i} className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-100 p-2 sm:border-0 sm:p-0">
-            <input placeholder="Vara/tjänst" value={item.description} onChange={(e) => updateItem(i, { description: e.target.value })} className="min-w-0 flex-1 basis-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 sm:basis-auto" />
-            <input placeholder="Antal" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} className="w-16 min-w-0 rounded-lg border border-slate-200 px-2 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-            <input placeholder="Á-pris" value={item.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} className="w-20 min-w-0 rounded-lg border border-slate-200 px-2 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-            {deductionType !== 'none' && (
-              <label className="flex items-center gap-1 text-xs text-slate-500" title="Räknas denna rad som arbetskostnad (inte material)?">
-                <input type="checkbox" checked={Boolean(item.deduction_eligible)} onChange={(e) => updateItem(i, { deduction_eligible: e.target.checked })} />
-                Arbete
-              </label>
-            )}
+          <div key={i} className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setEditingIndex(i)}
+              className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/50 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium text-slate-800">{item.description || 'Namnlös rad'}</span>
+                <span className="flex items-center gap-1.5 text-xs text-slate-500">
+                  {item.quantity || '0'} × {item.unit_price || '0'} kr
+                  {item.deduction_type && item.deduction_type !== 'none' && (
+                    <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">{DEDUCTION_BADGE_LABEL[item.deduction_type]}</span>
+                  )}
+                </span>
+              </span>
+            </button>
             <IconButton onClick={() => removeItem(i)} title="Ta bort rad" danger disabled={items.length <= 1}><Trash2 className="h-3.5 w-3.5" /></IconButton>
           </div>
         ))}
@@ -288,50 +302,127 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
         </select>
       </div>
 
-      <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-medium text-slate-600">Avdrag</label>
-          <select value={deductionType} onChange={(e) => setDeductionType(e.target.value as DeductionType)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
-            <option value="none">Inget</option>
-            <option value="rut">Rutavdrag</option>
-            <option value="rot">Rotavdrag</option>
-          </select>
-        </div>
-        {deductionType !== 'none' && (
-          <>
-            <p className="text-xs text-slate-500">Markera vilka rader som är arbetskostnad ovan — avdrag ges aldrig på material. Kontrollera aktuell avdragsprocent hos Skatteverket innan dokumentet skickas.</p>
+      {(hasRut || hasRot) && (
+        <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs font-medium text-slate-600">Avdrag</p>
+          <p className="text-xs text-slate-500">Kontrollera aktuell avdragsprocent hos Skatteverket innan dokumentet skickas.</p>
+          {hasRut && (
             <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-500">Avdrag (%)</label>
+              <label className="w-28 text-xs text-slate-500">Rutavdrag (%)</label>
               <input
                 type="number"
-                value={content.deduction_rate ?? DEFAULT_DEDUCTION_RATE[deductionType]}
-                onChange={(e) => onChange({ ...content, deduction_rate: Number(e.target.value) })}
+                value={content.rut_rate ?? DEFAULT_DEDUCTION_RATE.rut}
+                onChange={(e) => onChange({ ...content, rut_rate: Number(e.target.value) })}
                 className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-xs transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
-            <input
-              type="text"
-              placeholder="Köparens personnummer (ÅÅÅÅMMDD-XXXX)"
-              value={content.deduction_personal_number || ''}
-              onChange={(e) => onChange({ ...content, deduction_personal_number: e.target.value })}
-              className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            />
-          </>
-        )}
-      </div>
+          )}
+          {hasRot && (
+            <div className="flex items-center gap-2">
+              <label className="w-28 text-xs text-slate-500">Rotavdrag (%)</label>
+              <input
+                type="number"
+                value={content.rot_rate ?? DEFAULT_DEDUCTION_RATE.rot}
+                onChange={(e) => onChange({ ...content, rot_rate: Number(e.target.value) })}
+                className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-xs transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
+          )}
+          <input
+            type="text"
+            placeholder="Köparens personnummer (ÅÅÅÅMMDD-XXXX)"
+            value={content.deduction_personal_number || ''}
+            onChange={(e) => onChange({ ...content, deduction_personal_number: e.target.value })}
+            className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          />
+        </div>
+      )}
 
       <div className="space-y-0.5 border-t border-slate-100 pt-2 text-sm">
         <div className="flex justify-between text-slate-500"><span>Netto</span><span>{formatSek(totals.netto)}</span></div>
         <div className="flex justify-between text-slate-500"><span>Moms</span><span>{formatSek(totals.moms)}</span></div>
         <div className="flex justify-between font-semibold text-slate-900"><span>Total</span><span>{formatSek(totals.total)}</span></div>
-        {deductionType !== 'none' && (
-          <>
-            <div className="flex justify-between text-green-700"><span>{deductionType === 'rut' ? 'Rutavdrag' : 'Rotavdrag'}</span><span>-{formatSek(totals.deductionAmount)}</span></div>
-            <div className="flex justify-between border-t border-slate-100 pt-1 font-semibold text-slate-900"><span>Att betala</span><span>{formatSek(totals.amountToPay)}</span></div>
-          </>
+        {hasRut && <div className="flex justify-between text-green-700"><span>Rutavdrag</span><span>-{formatSek(totals.rutAmount)}</span></div>}
+        {hasRot && <div className="flex justify-between text-green-700"><span>Rotavdrag</span><span>-{formatSek(totals.rotAmount)}</span></div>}
+        {(hasRut || hasRot) && (
+          <div className="flex justify-between border-t border-slate-100 pt-1 font-semibold text-slate-900"><span>Att betala</span><span>{formatSek(totals.amountToPay)}</span></div>
         )}
       </div>
+
+      {editingIndex !== null && items[editingIndex] && (
+        <PriceItemModal
+          item={items[editingIndex]}
+          onClose={() => setEditingIndex(null)}
+          onChange={(patch) => updateItem(editingIndex, patch)}
+        />
+      )}
     </div>
+  );
+}
+
+function PriceItemModal({
+  item,
+  onClose,
+  onChange,
+}: {
+  item: PriceTableItem;
+  onClose: () => void;
+  onChange: (patch: Partial<PriceTableItem>) => void;
+}) {
+  return (
+    <Modal open onClose={onClose} title="Redigera rad" size="sm">
+      <div className="space-y-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600">Namn</label>
+          <input
+            autoFocus
+            value={item.description}
+            onChange={(e) => onChange({ description: e.target.value })}
+            placeholder="Vara/tjänst"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Antal</label>
+            <input
+              value={item.quantity}
+              onChange={(e) => onChange({ quantity: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Á-pris (kr)</label>
+            <input
+              value={item.unit_price}
+              onChange={(e) => onChange({ unit_price: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600">Avdrag</label>
+          <div className="flex gap-1.5">
+            {([['none', 'Inget'], ['rut', 'Rutavdrag'], ['rot', 'Rotavdrag']] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => onChange({ deduction_type: value })}
+                className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${
+                  (item.deduction_type || 'none') === value
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-slate-500">Avdrag ges aldrig på material, bara på arbetskostnaden för raden.</p>
+        </div>
+        <button onClick={onClose} className="w-full rounded-lg bg-blue-600 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700">Klar</button>
+      </div>
+    </Modal>
   );
 }
 

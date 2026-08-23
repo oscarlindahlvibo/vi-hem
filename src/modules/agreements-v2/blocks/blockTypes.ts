@@ -110,9 +110,9 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
     defaultContent: () => ({
       price_form: 'fixed',
       vat_rate: 25,
-      items: [{ description: '', quantity: '1', unit_price: '', deduction_eligible: false }],
-      deduction_type: 'none',
-      deduction_rate: 0,
+      items: [{ description: '', quantity: '1', unit_price: '', deduction_type: 'none' }],
+      rut_rate: 50,
+      rot_rate: 30,
       deduction_personal_number: '',
     }),
     // Rendered by the special-cased PriceTableFields in BlockEditor.tsx --
