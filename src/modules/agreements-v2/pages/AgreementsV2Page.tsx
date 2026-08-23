@@ -121,7 +121,7 @@ export function AgreementsV2Page() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900">
+        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900">
           Avtal & offerter
           <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">BETA</span>
         </h1>
@@ -133,7 +133,7 @@ export function AgreementsV2Page() {
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`px-4 py-2 text-sm font-medium ${tab === key ? 'border-b-2 border-blue-600 text-blue-700' : 'text-slate-500 hover:text-slate-700'}`}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${tab === key ? 'border-b-2 border-blue-600 text-blue-700' : 'text-slate-500 hover:text-slate-700'}`}
           >
             {label}
           </button>
@@ -185,20 +185,20 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Sök dokument, motpart, nummer..."
-            className="w-64 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+            className="w-64 rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           />
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm">
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
             <option value="all">Alla statusar</option>
             {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm">
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
             <option value="all">Alla typer</option>
             <option value="agreement">Avtal</option>
             <option value="offer">Offert</option>
             <option value="other">Övrigt</option>
           </select>
         </div>
-        <button onClick={() => setNewOpen(true)} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+        <button onClick={() => setNewOpen(true)} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700">
           <Plus className="h-4 w-4" /> Nytt dokument
         </button>
       </div>
@@ -212,7 +212,7 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
           <p className="mt-2 text-sm text-slate-500">Inga dokument matchar filtret ännu.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
+        <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
@@ -225,7 +225,7 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
             </thead>
             <tbody>
               {items.map((item) => (
-                <tr key={item.id} onClick={() => onOpen(item.id)} className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                <tr key={item.id} onClick={() => onOpen(item.id)} className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50">
                   <td className="px-4 py-2.5">
                     <p className="font-medium text-slate-900">{item.title || '(namnlöst dokument)'}</p>
                     <p className="text-xs text-slate-400">{item.document_number}</p>
@@ -289,7 +289,7 @@ function NewDocumentModal({ organisationId, onClose, onCreated }: { organisation
                 <button
                   key={value}
                   onClick={() => { setDocumentType(value); setTemplateId(''); }}
-                  className={`rounded-lg border px-3 py-2 text-sm font-medium ${documentType === value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${documentType === value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                 >
                   {label}
                 </button>
@@ -298,19 +298,19 @@ function NewDocumentModal({ organisationId, onClose, onCreated }: { organisation
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700">Titel</label>
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="T.ex. Hyresavtal lgh 12A" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="T.ex. Hyresavtal lgh 12A" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700">Utgångspunkt</label>
-            <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
               <option value="">Tomt dokument</option>
               {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>
           {error && <p className="text-sm text-red-700">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">
-            <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600">Avbryt</button>
-            <button onClick={handleCreate} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+            <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">Avbryt</button>
+            <button onClick={handleCreate} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
               {saving ? 'Skapar...' : 'Skapa'}
             </button>
           </div>
@@ -453,7 +453,7 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <button onClick={handleBack} className="flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700">
+        <button onClick={handleBack} className="flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-700">
           <ArrowLeft className="h-4 w-4" /> Tillbaka till arkivet
         </button>
         <div className="flex items-center gap-2">
@@ -463,7 +463,7 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
       </div>
 
       <div>
-        <h1 className="text-xl font-bold text-slate-900">{agreement.title || '(namnlöst dokument)'}</h1>
+        <h1 className="text-xl font-bold tracking-tight text-slate-900">{agreement.title || '(namnlöst dokument)'}</h1>
         <p className="text-sm text-slate-400">{agreement.document_number}</p>
       </div>
 
@@ -491,7 +491,7 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
           <button
             key={key}
             onClick={() => handleTabClick(key)}
-            className={`flex items-center gap-1.5 whitespace-nowrap px-4 py-2 text-sm font-medium ${step === key ? 'border-b-2 border-blue-600 text-blue-700' : 'text-slate-500 hover:text-slate-700'}`}
+            className={`flex items-center gap-1.5 whitespace-nowrap px-4 py-2 text-sm font-medium transition-colors ${step === key ? 'border-b-2 border-blue-600 text-blue-700' : 'text-slate-500 hover:text-slate-700'}`}
           >
             <Icon className="h-3.5 w-3.5" /> {label}
           </button>
@@ -552,8 +552,8 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
 function StatusCard({ agreement }: { agreement: Agreement }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-xl border border-slate-200 bg-white">
-      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-4 py-3 text-left">
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-left transition-colors hover:bg-slate-50">
         <span className="flex items-center gap-2">
           <span className={`h-2.5 w-2.5 rounded-full ${STATUS_DOT_COLORS[agreement.status]}`} />
           <span className="text-sm font-semibold text-slate-800">{STATUS_LABELS[agreement.status]}</span>
@@ -662,8 +662,8 @@ function ActionTile({ icon: Icon, label, onClick, primary, disabled }: { icon: R
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`flex w-full flex-col items-center gap-1 rounded-xl px-3 py-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
-        primary ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+      className={`flex w-full flex-col items-center gap-1 rounded-xl px-3 py-3 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none ${
+        primary ? 'bg-blue-600 text-white shadow-sm hover:bg-blue-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
       }`}
     >
       <Icon className="h-5 w-5" />
@@ -739,9 +739,9 @@ function ContentStep({
         <div className="mb-2 flex items-center justify-between">
           <p className="text-sm font-medium text-slate-700">Block</p>
           <div className="flex gap-2">
-            <button onClick={() => setPreview((v) => !v)} className="text-xs font-medium text-slate-500 underline lg:hidden">{preview ? 'Redigera' : 'Förhandsgranska'}</button>
+            <button onClick={() => setPreview((v) => !v)} className="text-xs font-medium text-slate-500 underline transition-colors hover:text-slate-700 lg:hidden">{preview ? 'Redigera' : 'Förhandsgranska'}</button>
             {editable && (
-              <button onClick={handleSave} disabled={saving} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+              <button onClick={handleSave} disabled={saving} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
                 {saving ? 'Sparar...' : 'Spara innehåll'}
               </button>
             )}
@@ -759,7 +759,7 @@ function ContentStep({
       </div>
       <div className={preview ? '' : 'hidden lg:block'}>
         <p className="mb-2 text-sm font-medium text-slate-700">Förhandsgranskning</p>
-        <div className="rounded-xl border border-slate-200 bg-white p-6">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
           <BlockRenderer blocks={blocks} parties={parties} signers={signers} attachments={attachments} resolveAttachmentUrl={resolveAttachmentUrl} />
         </div>
       </div>
@@ -855,10 +855,10 @@ function PartiesStep({
             </div>
             <div className="flex-1 pb-4">
               <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{PARTY_TYPE_LABELS[party.party_type] || party.party_type}</p>
-              <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <select value={party.party_type} onChange={(e) => updateParty(i, { party_type: e.target.value as any })} className="rounded-lg border border-slate-200 px-2 py-1 text-xs">
+                    <select value={party.party_type} onChange={(e) => updateParty(i, { party_type: e.target.value as any })} className="rounded-lg border border-slate-200 px-2 py-1 text-xs transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
                       <option value="manual">Manuellt angiven</option>
                       <option value="internal_org">Eget bolag</option>
                       <option value="contact">Kontakt/kund i VI-HEM</option>
@@ -866,16 +866,16 @@ function PartiesStep({
                     </select>
                     {party.source_type && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-600">Från systemet</span>}
                   </div>
-                  <button onClick={() => removeParty(i)} className="text-slate-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                  <button onClick={() => removeParty(i)} className="text-slate-400 transition-colors hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <input placeholder="Namn" value={party.display_name} onChange={(e) => updateParty(i, { display_name: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-                  <input placeholder="Org.nr/pers.nr (valfritt)" value={party.org_number} onChange={(e) => updateParty(i, { org_number: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-                  <input placeholder="E-post" value={party.email} onChange={(e) => updateParty(i, { email: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-                  <input placeholder="Telefon" value={party.phone} onChange={(e) => updateParty(i, { phone: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-                  <input placeholder="Adress" value={party.address} onChange={(e) => updateParty(i, { address: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm sm:col-span-2" />
+                  <input placeholder="Namn" value={party.display_name} onChange={(e) => updateParty(i, { display_name: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                  <input placeholder="Org.nr/pers.nr (valfritt)" value={party.org_number} onChange={(e) => updateParty(i, { org_number: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                  <input placeholder="E-post" value={party.email} onChange={(e) => updateParty(i, { email: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                  <input placeholder="Telefon" value={party.phone} onChange={(e) => updateParty(i, { phone: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                  <input placeholder="Adress" value={party.address} onChange={(e) => updateParty(i, { address: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 sm:col-span-2" />
                 </div>
-                <button onClick={() => addAsSigner(party)} className="mt-2 flex items-center gap-1.5 text-xs font-medium text-blue-600">
+                <button onClick={() => addAsSigner(party)} className="mt-2 flex items-center gap-1.5 text-xs font-medium text-blue-600 transition-colors hover:text-blue-700">
                   <Plus className="h-3 w-3" /> Lägg också till som signatär
                 </button>
               </div>
@@ -884,12 +884,12 @@ function PartiesStep({
         ))}
       </div>
       <div className="flex flex-wrap gap-3">
-        <button onClick={() => setPickerOpen(true)} className="flex items-center gap-1.5 text-sm font-medium text-blue-600"><Plus className="h-4 w-4" /> Välj från systemet</button>
-        <button onClick={addManualParty} className="flex items-center gap-1.5 text-sm font-medium text-slate-500"><Plus className="h-4 w-4" /> Lägg till manuellt</button>
+        <button onClick={() => setPickerOpen(true)} className="flex items-center gap-1.5 text-sm font-medium text-blue-600 transition-colors hover:text-blue-700"><Plus className="h-4 w-4" /> Välj från systemet</button>
+        <button onClick={addManualParty} className="flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-700"><Plus className="h-4 w-4" /> Lägg till manuellt</button>
       </div>
       {editable && (
         <div>
-          <button onClick={handleSave} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+          <button onClick={handleSave} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
             {saving ? 'Sparar...' : 'Spara parter'}
           </button>
         </div>
@@ -936,7 +936,7 @@ function ExistingPartyPickerModal({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Sök namn eller e-post..."
-          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
         />
         {loading && <p className="text-sm text-slate-500">Laddar...</p>}
         {!loading && groups.map((group) => {
@@ -958,7 +958,7 @@ function ExistingPartyPickerModal({
                           onPick({ party_type: o.party_type, display_name: o.display_name, org_number: o.org_number, email: o.email, phone: o.phone, address: o.address, source_type: o.source_type, source_id: o.source_id }, false);
                           onClose();
                         }}
-                        className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                        className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
                       >
                         Lägg till
                       </button>
@@ -967,7 +967,7 @@ function ExistingPartyPickerModal({
                           onPick({ party_type: o.party_type, display_name: o.display_name, org_number: o.org_number, email: o.email, phone: o.phone, address: o.address, source_type: o.source_type, source_id: o.source_id }, true);
                           onClose();
                         }}
-                        className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700"
+                        className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700"
                       >
                         + Signatär
                       </button>
@@ -1073,18 +1073,18 @@ function SigningStep({
         <>
           <div className="space-y-3">
             {signers.map((signer, i) => (
-              <div key={i} className="rounded-xl border border-slate-200 bg-white p-4">
+              <div key={i} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
                 <div className="mb-2 flex items-center justify-between">
                   <p className="text-xs font-medium uppercase text-slate-400">Signatär {i + 1}</p>
-                  <button onClick={() => removeSigner(i)} className="text-slate-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                  <button onClick={() => removeSigner(i)} className="text-slate-400 transition-colors hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <input placeholder="Namn" value={signer.name} onChange={(e) => updateSigner(i, { name: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-                  <input placeholder="Roll/titel" value={signer.role_title} onChange={(e) => updateSigner(i, { role_title: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-                  <input placeholder="E-post" value={signer.email} onChange={(e) => updateSigner(i, { email: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-                  <input placeholder="Mobilnummer" value={signer.phone} onChange={(e) => updateSigner(i, { phone: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-                  <input placeholder="Personnummer (för BankID)" value={signer.personal_number} onChange={(e) => updateSigner(i, { personal_number: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-                  <select value={signer.signing_method} onChange={(e) => updateSigner(i, { signing_method: e.target.value as any })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm">
+                  <input placeholder="Namn" value={signer.name} onChange={(e) => updateSigner(i, { name: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                  <input placeholder="Roll/titel" value={signer.role_title} onChange={(e) => updateSigner(i, { role_title: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                  <input placeholder="E-post" value={signer.email} onChange={(e) => updateSigner(i, { email: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                  <input placeholder="Mobilnummer" value={signer.phone} onChange={(e) => updateSigner(i, { phone: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                  <input placeholder="Personnummer (för BankID)" value={signer.personal_number} onChange={(e) => updateSigner(i, { personal_number: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                  <select value={signer.signing_method} onChange={(e) => updateSigner(i, { signing_method: e.target.value as any })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
                     <option value="handwritten">Handskriven signatur</option>
                     <option value="bankid">BankID (kommer snart)</option>
                   </select>
@@ -1107,10 +1107,10 @@ function SigningStep({
                 </div>
               </div>
             )}
-            <button onClick={addSigner} className="flex items-center gap-1.5 text-sm font-medium text-blue-600"><Plus className="h-4 w-4" /> Lägg till signatär manuellt</button>
+            <button onClick={addSigner} className="flex items-center gap-1.5 text-sm font-medium text-blue-600 transition-colors hover:text-blue-700"><Plus className="h-4 w-4" /> Lägg till signatär manuellt</button>
           </div>
           <div>
-            <button onClick={handleSave} disabled={saving} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 disabled:opacity-50">
+            <button onClick={handleSave} disabled={saving} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50">
               {saving ? 'Sparar...' : 'Spara signatärer'}
             </button>
           </div>
@@ -1122,7 +1122,7 @@ function SigningStep({
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={smsChannel} onChange={(e) => setSmsChannel(e.target.checked)} /> SMS</label>
             </div>
             <p className="mb-3 text-xs text-slate-500">Innehållet fryses som en oföränderlig version i samma ögonblick dokumentet skickas — senare ändringar av t.ex. hyresgästens uppgifter påverkar aldrig ett redan skickat dokument.</p>
-            <button onClick={handleSend} disabled={sending || signers.length === 0} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+            <button onClick={handleSend} disabled={sending || signers.length === 0} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
               <Send className="h-4 w-4" /> {sending ? 'Skickar...' : 'Skicka för signering'}
             </button>
           </div>
@@ -1130,7 +1130,7 @@ function SigningStep({
       ) : (
         <div className="space-y-3">
           {signers.map((signer) => (
-            <div key={signer.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-4">
+            <div key={signer.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="min-w-0">
                 <p className="truncate font-medium text-slate-900">{signer.name}</p>
                 <p className="truncate text-xs text-slate-500">{signer.role_title} · {signer.signing_method === 'bankid' ? 'BankID' : 'Handskriven signatur'}</p>
@@ -1138,13 +1138,13 @@ function SigningStep({
               <div className="flex shrink-0 items-center gap-2">
                 <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">{signer.status}</span>
                 {signer.status !== 'signed' && signer.status !== 'declined' && ['sent', 'viewed'].includes(agreementStatus) && (
-                  <button onClick={() => handleRemind(signer.id!)} className="flex items-center gap-1 text-xs font-medium text-blue-600"><Bell className="h-3 w-3" /> Påminn</button>
+                  <button onClick={() => handleRemind(signer.id!)} className="flex items-center gap-1 text-xs font-medium text-blue-600 transition-colors hover:text-blue-700"><Bell className="h-3 w-3" /> Påminn</button>
                 )}
               </div>
             </div>
           ))}
           {!['signed', 'accepted', 'declined', 'rejected', 'cancelled', 'archived'].includes(agreementStatus) && (
-            <button onClick={handleCancel} className="flex items-center gap-1.5 text-sm font-medium text-red-600"><XCircle className="h-4 w-4" /> Avbryt dokumentet</button>
+            <button onClick={handleCancel} className="flex items-center gap-1.5 text-sm font-medium text-red-600 transition-colors hover:text-red-700"><XCircle className="h-4 w-4" /> Avbryt dokumentet</button>
           )}
         </div>
       )}
@@ -1183,7 +1183,7 @@ function AttachmentsStep({ detail, organisationId, editable, onChanged, onError 
       ) : (
         <div className="space-y-2">
           {detail.attachments.map((a) => (
-            <div key={a.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3">
+            <div key={a.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
               <div className="flex min-w-0 items-center gap-2">
                 <Paperclip className="h-4 w-4 shrink-0 text-slate-400" />
                 <div className="min-w-0">
@@ -1192,7 +1192,7 @@ function AttachmentsStep({ detail, organisationId, editable, onChanged, onError 
                 </div>
               </div>
               {editable && !a.included_in_version_id && (
-                <button onClick={() => handleRemove(a)} className="shrink-0 text-slate-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                <button onClick={() => handleRemove(a)} className="shrink-0 text-slate-400 transition-colors hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
               )}
             </div>
           ))}
@@ -1278,7 +1278,7 @@ function parseUserAgent(ua: string): string {
 function SignatureVerificationCard({ signature, signer }: { signature: AgreementSignature; signer?: AgreementSigner }) {
   const isBankId = signature.method === 'bankid';
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-sm">
       <div className="flex items-center justify-between gap-2 px-4 py-3">
         <p className="min-w-0 truncate font-semibold text-slate-900">{(signature.signature_name || signer?.name || 'Okänd signatär').toUpperCase()}</p>
         <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-slate-500">
@@ -1371,7 +1371,7 @@ function TemplatesTab({ organisationId }: { organisationId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button onClick={handleCreate} disabled={creating} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+        <button onClick={handleCreate} disabled={creating} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700">
           <Plus className="h-4 w-4" /> Ny mall
         </button>
       </div>
@@ -1383,16 +1383,16 @@ function TemplatesTab({ organisationId }: { organisationId: string }) {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {templates.map((t) => (
-            <div key={t.id} className="rounded-xl border border-slate-200 bg-white p-4">
+            <div key={t.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
               <div className="mb-1 flex items-center justify-between">
                 <p className="font-medium text-slate-900">{t.name}</p>
                 <span className={`rounded-full px-2 py-0.5 text-xs ${t.status === 'active' ? 'bg-green-100 text-green-700' : t.status === 'archived' ? 'bg-slate-100 text-slate-500' : 'bg-amber-100 text-amber-700'}`}>{t.status}</span>
               </div>
               <p className="mb-3 text-xs text-slate-500">{t.document_type === 'agreement' ? 'Avtal' : t.document_type === 'offer' ? 'Offert' : 'Övrigt'}{t.category ? ` · ${t.category}` : ''}</p>
               <div className="flex gap-2 text-xs font-medium">
-                <button onClick={() => setSelectedId(t.id)} className="text-blue-600">Redigera</button>
-                <button onClick={() => handleDuplicate(t.id)} className="text-slate-500">Duplicera</button>
-                <button onClick={() => handleArchive(t.id, t.status)} className="text-slate-500">{t.status === 'archived' ? 'Återställ' : 'Arkivera'}</button>
+                <button onClick={() => setSelectedId(t.id)} className="transition-colors hover:text-blue-700 text-blue-600">Redigera</button>
+                <button onClick={() => handleDuplicate(t.id)} className="transition-colors hover:text-slate-700 text-slate-500">Duplicera</button>
+                <button onClick={() => handleArchive(t.id, t.status)} className="transition-colors hover:text-slate-700 text-slate-500">{t.status === 'archived' ? 'Återställ' : 'Arkivera'}</button>
               </div>
             </div>
           ))}
@@ -1449,13 +1449,13 @@ function TemplateEditor({ templateId, onBack }: { templateId: string; onBack: ()
         <ArrowLeft className="h-4 w-4" /> Tillbaka till mallar
       </button>
       <div className="grid gap-2 sm:grid-cols-2">
-        <input value={template.name} onChange={(e) => setTemplate({ ...template, name: e.target.value })} onBlur={() => handleSaveMeta({ name: template.name })} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold" />
-        <input value={template.category} onChange={(e) => setTemplate({ ...template, category: e.target.value })} onBlur={() => handleSaveMeta({ category: template.category })} placeholder="Kategori" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+        <input value={template.name} onChange={(e) => setTemplate({ ...template, name: e.target.value })} onBlur={() => handleSaveMeta({ name: template.name })} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+        <input value={template.category} onChange={(e) => setTemplate({ ...template, category: e.target.value })} onBlur={() => handleSaveMeta({ category: template.category })} placeholder="Kategori" className="rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
       </div>
       {message && <p className="text-sm text-green-700">{message}</p>}
       {error && <p className="text-sm text-red-700">{error}</p>}
       <div className="flex justify-end">
-        <button onClick={handleSaveBlocks} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+        <button onClick={handleSaveBlocks} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
           {saving ? 'Sparar...' : 'Spara innehåll'}
         </button>
       </div>

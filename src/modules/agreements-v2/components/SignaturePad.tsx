@@ -76,7 +76,7 @@ export function SignaturePad({ onChange, height = 180 }: { onChange: (dataUrl: s
       <canvas
         ref={canvasRef}
         style={{ height, touchAction: 'none' }}
-        className="w-full rounded-xl border-2 border-dashed border-slate-300 bg-white"
+        className="w-full rounded-xl border-2 border-dashed border-slate-300 bg-white transition-colors"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishStroke}
@@ -84,7 +84,7 @@ export function SignaturePad({ onChange, height = 180 }: { onChange: (dataUrl: s
       />
       <div className="flex items-center justify-between">
         <p className="text-xs text-slate-500">Skriv din namnteckning ovan med finger, penna eller mus.</p>
-        <button type="button" onClick={clear} className="text-xs font-medium text-slate-500 underline">Rensa</button>
+        <button type="button" onClick={clear} className="text-xs font-medium text-slate-500 underline transition-colors hover:text-slate-700">Rensa</button>
       </div>
     </div>
   );

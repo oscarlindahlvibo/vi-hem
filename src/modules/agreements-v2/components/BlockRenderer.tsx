@@ -99,7 +99,7 @@ function BlockView({
       const totals = calcPriceTable(c as Partial<PriceTableContent>);
       const deductionType: DeductionType = c.deduction_type || 'none';
       return (
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap gap-2">
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
               Prisform: {c.price_form === 'recurring' ? 'Löpande räkning' : 'Fast pris'}
@@ -292,7 +292,7 @@ function AttachmentEmbed({
       )}
       {url && isImage && <img src={url} alt={attachment.name} className="w-full rounded border border-slate-200" />}
       {url && !isPdf && !isImage && (
-        <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-700 underline">Öppna {attachment.name}</a>
+        <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-700 underline transition-colors hover:text-blue-800">Öppna {attachment.name}</a>
       )}
     </div>
   );

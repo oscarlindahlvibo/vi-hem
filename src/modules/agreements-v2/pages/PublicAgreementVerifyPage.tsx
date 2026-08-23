@@ -69,7 +69,7 @@ export function PublicAgreementVerifyPage() {
 
             <div className="rounded-2xl bg-white p-5 shadow-sm">
               <p className="text-xs font-medium uppercase text-slate-400">{result.document_number}</p>
-              <h1 className="mt-0.5 text-xl font-bold text-slate-900">{result.title}</h1>
+              <h1 className="mt-0.5 text-xl font-bold tracking-tight text-slate-900">{result.title}</h1>
               <p className="mt-2 text-sm text-slate-600">
                 Status: <span className="font-medium text-slate-900">{STATUS_LABELS[result.status] || result.status}</span>
               </p>

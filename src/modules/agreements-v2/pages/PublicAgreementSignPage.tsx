@@ -106,18 +106,18 @@ export function PublicAgreementSignPage() {
           <>
             <div className="mb-4 rounded-2xl bg-white p-5 shadow-sm">
               <p className="text-xs font-medium uppercase text-slate-400">{view.agreement.document_number}</p>
-              <h1 className="mt-0.5 text-xl font-bold text-slate-900">{view.agreement.title}</h1>
+              <h1 className="mt-0.5 text-xl font-bold tracking-tight text-slate-900">{view.agreement.title}</h1>
               <p className="mt-1 text-sm text-slate-500">Till: {view.signer.name}{view.signer.role_title ? ` (${view.signer.role_title})` : ''}</p>
             </div>
 
             {mode === 'signed' && (
-              <div className="rounded-2xl bg-green-50 p-6 text-center">
+              <div className="rounded-2xl bg-green-50 p-6 text-center shadow-sm">
                 <CheckCircle2 className="mx-auto h-10 w-10 text-green-600" />
                 <p className="mt-2 font-semibold text-green-900">Du har signerat detta dokument.</p>
               </div>
             )}
             {mode === 'declined' && (
-              <div className="rounded-2xl bg-slate-100 p-6 text-center">
+              <div className="rounded-2xl bg-slate-100 p-6 text-center shadow-sm">
                 <XCircle className="mx-auto h-10 w-10 text-slate-500" />
                 <p className="mt-2 font-semibold text-slate-700">Du har avböjt detta dokument.</p>
               </div>
@@ -140,7 +140,7 @@ export function PublicAgreementSignPage() {
                     <p className="mb-2 text-sm font-semibold text-slate-700">Bilagor</p>
                     <div className="space-y-2">
                       {view.attachments.map((a) => (
-                        <button key={a.id} onClick={() => handleDownloadAttachment(a.id)} className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:bg-slate-50">
+                        <button key={a.id} onClick={() => handleDownloadAttachment(a.id)} className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition-colors hover:bg-slate-50">
                           <span>{a.name}</span>
                           <Download className="h-4 w-4 text-slate-400" />
                         </button>
@@ -152,7 +152,7 @@ export function PublicAgreementSignPage() {
                 {mode === 'read' && (
                   <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white p-4 shadow-lg">
                     <div className="mx-auto flex max-w-2xl gap-3">
-                      <button onClick={handleDecline} disabled={saving} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600">
+                      <button onClick={handleDecline} disabled={saving} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50">
                         Avböj
                       </button>
                       {view.signer.signing_method === 'bankid' ? (
@@ -160,7 +160,7 @@ export function PublicAgreementSignPage() {
                           BankID-signering kommer snart
                         </button>
                       ) : (
-                        <button onClick={() => setMode('sign')} className="flex-[2] rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700">
+                        <button onClick={() => setMode('sign')} className="flex-[2] rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700">
                           Granska & signera
                         </button>
                       )}
@@ -176,15 +176,15 @@ export function PublicAgreementSignPage() {
                       value={signatureName}
                       onChange={(e) => setSignatureName(e.target.value)}
                       placeholder="Ditt namn"
-                      className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     />
                     <SignaturePad onChange={setSignatureImage} />
                     {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
                     <div className="mt-4 flex gap-3">
-                      <button onClick={() => setMode('read')} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600">
+                      <button onClick={() => setMode('read')} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50">
                         Tillbaka
                       </button>
-                      <button onClick={handleSign} disabled={saving} className="flex-[2] rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                      <button onClick={handleSign} disabled={saving} className="flex-[2] rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
                         {saving ? 'Signerar...' : 'Signera dokumentet'}
                       </button>
                     </div>

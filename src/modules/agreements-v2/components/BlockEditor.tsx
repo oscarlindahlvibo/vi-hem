@@ -81,7 +81,7 @@ export function BlockEditor({
       <button
         type="button"
         onClick={() => setPickerOpen(true)}
-        className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-3 text-sm font-medium text-slate-500 hover:border-blue-400 hover:text-blue-600"
+        className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-3 text-sm font-medium text-slate-500 transition-colors hover:border-blue-400 hover:text-blue-600"
       >
         <Plus className="h-4 w-4" /> Lägg till block
       </button>
@@ -93,7 +93,7 @@ export function BlockEditor({
               key={def.type}
               type="button"
               onClick={() => addBlock(def.type)}
-              className="rounded-lg border border-slate-100 px-3 py-2.5 text-left text-sm hover:border-blue-200 hover:bg-blue-50"
+              className="rounded-lg border border-slate-100 px-3 py-2.5 text-left text-sm transition-colors hover:border-blue-200 hover:bg-blue-50"
             >
               <p className="font-medium text-slate-800">{def.label}</p>
               <p className="text-xs text-slate-500">{def.description}</p>
@@ -131,7 +131,7 @@ function BlockRow({
   const def = blockTypeDef(block.block_type);
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3">
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md">
       <div className="mb-2 flex items-center justify-between">
         <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">{def.label}</span>
         <div className="flex items-center gap-1">
@@ -200,7 +200,7 @@ function AttachmentRefFields({
             const chosen = attachments.find((a) => a.id === e.target.value);
             onChange({ ...content, attachment_id: e.target.value, label: chosen?.name || content.label });
           }}
-          className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+          className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
         >
           <option value="">Välj en redan uppladdad bilaga...</option>
           {attachments.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -209,7 +209,7 @@ function AttachmentRefFields({
       {selected && (
         <p className="flex items-center gap-1.5 text-xs text-green-700"><Paperclip className="h-3 w-3" /> {selected.name}</p>
       )}
-      <label className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:border-blue-400 hover:text-blue-600">
+      <label className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-blue-400 hover:text-blue-600">
         <Upload className="h-3.5 w-3.5" />
         {uploading ? 'Laddar upp...' : 'Bifoga PDF från telefonen eller datorn'}
         <input
@@ -226,7 +226,7 @@ function AttachmentRefFields({
         value={content.label || ''}
         onChange={(e) => onChange({ ...content, label: e.target.value })}
         placeholder="Etikett i dokumentet"
-        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
       />
     </div>
   );
@@ -253,7 +253,7 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
       <select
         value={content.price_form || 'fixed'}
         onChange={(e) => onChange({ ...content, price_form: e.target.value })}
-        className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+        className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
       >
         <option value="fixed">Fast pris</option>
         <option value="recurring">Löpande räkning</option>
@@ -267,9 +267,9 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
           // width on its own row, with Antal/Á-pris/Arbete/ta-bort flowing
           // onto the next line only when they don't fit.
           <div key={i} className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-100 p-2 sm:border-0 sm:p-0">
-            <input placeholder="Vara/tjänst" value={item.description} onChange={(e) => updateItem(i, { description: e.target.value })} className="min-w-0 flex-1 basis-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm sm:basis-auto" />
-            <input placeholder="Antal" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} className="w-16 min-w-0 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
-            <input placeholder="Á-pris" value={item.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} className="w-20 min-w-0 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+            <input placeholder="Vara/tjänst" value={item.description} onChange={(e) => updateItem(i, { description: e.target.value })} className="min-w-0 flex-1 basis-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 sm:basis-auto" />
+            <input placeholder="Antal" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} className="w-16 min-w-0 rounded-lg border border-slate-200 px-2 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+            <input placeholder="Á-pris" value={item.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} className="w-20 min-w-0 rounded-lg border border-slate-200 px-2 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
             {deductionType !== 'none' && (
               <label className="flex items-center gap-1 text-xs text-slate-500" title="Räknas denna rad som arbetskostnad (inte material)?">
                 <input type="checkbox" checked={Boolean(item.deduction_eligible)} onChange={(e) => updateItem(i, { deduction_eligible: e.target.checked })} />
@@ -280,10 +280,10 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
           </div>
         ))}
       </div>
-      <button type="button" onClick={addItem} className="flex items-center gap-1.5 text-xs font-medium text-blue-600"><Plus className="h-3.5 w-3.5" /> Vara/tjänst</button>
+      <button type="button" onClick={addItem} className="flex items-center gap-1.5 text-xs font-medium text-blue-600 transition-colors hover:text-blue-700"><Plus className="h-3.5 w-3.5" /> Vara/tjänst</button>
       <div className="flex items-center gap-2">
         <label className="text-xs text-slate-500">Moms</label>
-        <select value={content.vat_rate ?? 25} onChange={(e) => onChange({ ...content, vat_rate: Number(e.target.value) })} className="rounded-lg border border-slate-200 px-2 py-1 text-xs">
+        <select value={content.vat_rate ?? 25} onChange={(e) => onChange({ ...content, vat_rate: Number(e.target.value) })} className="rounded-lg border border-slate-200 px-2 py-1 text-xs transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
           {[25, 12, 6, 0].map((rate) => <option key={rate} value={rate}>{rate}%</option>)}
         </select>
       </div>
@@ -291,7 +291,7 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
       <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
         <div className="flex items-center gap-2">
           <label className="text-xs font-medium text-slate-600">Avdrag</label>
-          <select value={deductionType} onChange={(e) => setDeductionType(e.target.value as DeductionType)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs">
+          <select value={deductionType} onChange={(e) => setDeductionType(e.target.value as DeductionType)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
             <option value="none">Inget</option>
             <option value="rut">Rutavdrag</option>
             <option value="rot">Rotavdrag</option>
@@ -306,7 +306,7 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
                 type="number"
                 value={content.deduction_rate ?? DEFAULT_DEDUCTION_RATE[deductionType]}
                 onChange={(e) => onChange({ ...content, deduction_rate: Number(e.target.value) })}
-                className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-xs"
+                className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-xs transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
             <input
@@ -314,7 +314,7 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
               placeholder="Köparens personnummer (ÅÅÅÅMMDD-XXXX)"
               value={content.deduction_personal_number || ''}
               onChange={(e) => onChange({ ...content, deduction_personal_number: e.target.value })}
-              className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+              className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
           </>
         )}
@@ -342,7 +342,7 @@ function IconButton({ onClick, disabled, title, danger, children }: { onClick: (
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`rounded-md p-1.5 disabled:opacity-30 ${danger ? 'text-red-500 hover:bg-red-50' : 'text-slate-500 hover:bg-slate-100'}`}
+      className={`rounded-md p-1.5 transition-colors disabled:opacity-30 ${danger ? 'text-red-500 hover:bg-red-50' : 'text-slate-500 hover:bg-slate-100'}`}
     >
       {children}
     </button>
@@ -364,7 +364,7 @@ function BlockFields({ def, content, onChange }: { def: BlockFieldDef[]; content
                 value={content[field.key] || ''}
                 onChange={(e) => set(field.key, e.target.value)}
                 placeholder={field.placeholder || field.label}
-                className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+                className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               />
             );
           case 'textarea':
@@ -375,7 +375,7 @@ function BlockFields({ def, content, onChange }: { def: BlockFieldDef[]; content
                 onChange={(e) => set(field.key, e.target.value)}
                 placeholder={field.placeholder || field.label}
                 rows={3}
-                className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+                className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               />
             );
           case 'select':
@@ -384,7 +384,7 @@ function BlockFields({ def, content, onChange }: { def: BlockFieldDef[]; content
                 key={field.key}
                 value={content[field.key] || ''}
                 onChange={(e) => set(field.key, e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+                className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               >
                 {(field.options || []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
@@ -399,12 +399,12 @@ function BlockFields({ def, content, onChange }: { def: BlockFieldDef[]; content
                       type="text"
                       value={item}
                       onChange={(e) => set(field.key, items.map((it, ii) => (ii === i ? e.target.value : it)))}
-                      className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+                      className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     />
                     <button type="button" onClick={() => set(field.key, items.filter((_, ii) => ii !== i))} className="rounded-md px-2 text-slate-400 hover:bg-slate-100">×</button>
                   </div>
                 ))}
-                <button type="button" onClick={() => set(field.key, [...items, ''])} className="text-xs font-medium text-blue-600">+ Lägg till rad</button>
+                <button type="button" onClick={() => set(field.key, [...items, ''])} className="text-xs font-medium text-blue-600 transition-colors hover:text-blue-700">+ Lägg till rad</button>
               </div>
             );
           }
@@ -419,12 +419,12 @@ function BlockFields({ def, content, onChange }: { def: BlockFieldDef[]; content
                       type="text"
                       value={item.text}
                       onChange={(e) => set(field.key, items.map((it, ii) => (ii === i ? { ...it, text: e.target.value } : it)))}
-                      className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+                      className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     />
                     <button type="button" onClick={() => set(field.key, items.filter((_, ii) => ii !== i))} className="rounded-md px-2 text-slate-400 hover:bg-slate-100">×</button>
                   </div>
                 ))}
-                <button type="button" onClick={() => set(field.key, [...items, { text: '', checked: false }])} className="text-xs font-medium text-blue-600">+ Lägg till punkt</button>
+                <button type="button" onClick={() => set(field.key, [...items, { text: '', checked: false }])} className="text-xs font-medium text-blue-600 transition-colors hover:text-blue-700">+ Lägg till punkt</button>
               </div>
             );
           }
@@ -437,19 +437,19 @@ function BlockFields({ def, content, onChange }: { def: BlockFieldDef[]; content
               <div key={field.key} className="space-y-1.5 overflow-x-auto">
                 <div className="flex gap-1.5">
                   {headers.map((h, ci) => (
-                    <input key={ci} value={h} onChange={(e) => setHeaders(headers.map((hh, ii) => (ii === ci ? e.target.value : hh)))} className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium" />
+                    <input key={ci} value={h} onChange={(e) => setHeaders(headers.map((hh, ii) => (ii === ci ? e.target.value : hh)))} className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
                   ))}
-                  <button type="button" onClick={() => { setHeaders([...headers, `Kolumn ${headers.length + 1}`]); setRows(rows.map((r) => [...r, ''])); }} className="rounded-md px-2 text-xs text-blue-600">+ kolumn</button>
+                  <button type="button" onClick={() => { setHeaders([...headers, `Kolumn ${headers.length + 1}`]); setRows(rows.map((r) => [...r, ''])); }} className="rounded-md px-2 text-xs text-blue-600 transition-colors hover:text-blue-700">+ kolumn</button>
                 </div>
                 {rows.map((row, ri) => (
                   <div key={ri} className="flex gap-1.5">
                     {row.map((cell, ci) => (
-                      <input key={ci} value={cell} onChange={(e) => setRows(rows.map((r, rri) => (rri === ri ? r.map((c, cci) => (cci === ci ? e.target.value : c)) : r)))} className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-xs" />
+                      <input key={ci} value={cell} onChange={(e) => setRows(rows.map((r, rri) => (rri === ri ? r.map((c, cci) => (cci === ci ? e.target.value : c)) : r)))} className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-xs transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
                     ))}
-                    <button type="button" onClick={() => setRows(rows.filter((_, rri) => rri !== ri))} className="rounded-md px-2 text-xs text-slate-400">×</button>
+                    <button type="button" onClick={() => setRows(rows.filter((_, rri) => rri !== ri))} className="rounded-md px-2 text-xs text-slate-400 transition-colors hover:text-red-600">×</button>
                   </div>
                 ))}
-                <button type="button" onClick={() => setRows([...rows, headers.map(() => '')])} className="text-xs font-medium text-blue-600">+ Lägg till rad</button>
+                <button type="button" onClick={() => setRows([...rows, headers.map(() => '')])} className="text-xs font-medium text-blue-600 transition-colors hover:text-blue-700">+ Lägg till rad</button>
               </div>
             );
           }
