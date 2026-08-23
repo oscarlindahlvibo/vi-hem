@@ -40,6 +40,7 @@ import { GuestLaundryPage } from './pages/GuestLaundryPage';
 import { FinancePage } from './pages/FinancePage';
 import { FinanceV2Page } from './modules/finance-v2/pages/FinanceV2Page';
 import { AgreementsV2Page } from './modules/agreements-v2/pages/AgreementsV2Page';
+import { AgreementsV3Page } from './modules/agreements-v3/pages/AgreementsV3Page';
 import { PublicAgreementSignPage } from './modules/agreements-v2/pages/PublicAgreementSignPage';
 import { PublicAgreementVerifyPage } from './modules/agreements-v2/pages/PublicAgreementVerifyPage';
 import { TenantInvoicesPage } from './pages/TenantInvoicesPage';
@@ -504,6 +505,13 @@ function AppInner() {
         // ApartmentPage) stay untouched and reachable in parallel.
         if (!isStaff) return renderDashboard();
         return <AgreementsV2Page />;
+
+      case 'agreements-v3':
+        // A redesign PREVIEW of just the document-building canvas, reusing
+        // V2's real API/data so edits are directly comparable -- not a
+        // decided replacement yet, see agreements-v3/pages/AgreementsV3Page.tsx.
+        if (!isStaff) return renderDashboard();
+        return <AgreementsV3Page />;
 
       case 'skatteverket':
         if (!isAdmin || !enabledModules.skatteverket) return renderDashboard();
