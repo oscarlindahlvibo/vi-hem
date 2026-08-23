@@ -149,14 +149,35 @@ function blockToLines(block: AgreementBlock): TextLine[] {
       // -- duplicated rather than shared across the browser/edge-function
       // boundary (see that module's header), so keep the two in sync.
       const toNumber = (v: unknown) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) ? n : 0; };
-      const items: { description?: string; quantity?: string; unit_price?: string }[] = Array.isArray(c.items) ? c.items : [];
+      const items: { description?: string; quantity?: string; unit_price?: string; deduction_eligible?: boolean }[] = Array.isArray(c.items) ? c.items : [];
       const netto = items.reduce((sum, item) => sum + toNumber(item.quantity) * toNumber(item.unit_price), 0);
       const vatRate = toNumber(c.vat_rate);
       const moms = netto * (vatRate / 100);
       const total = Math.round(netto + moms);
-      const lines: TextLine[] = [{ text: `Prisform: ${c.price_form === "recurring" ? "Löpande räkning" : "Fast pris"}`, font: "F2", size: 10, gapAfter: 3 }];
-      for (const item of items) lines.push({ text: `${text(item.description)}   ${text(item.quantity)} x ${text(item.unit_price)} kr`, font: "F1", size: 9 });
-      lines.push({ text: `Netto: ${netto.toFixed(2)} kr   Moms: ${moms.toFixed(2)} kr   Total inkl. moms: ${total.toFixed(2)} kr`, font: "F2", size: 9, gapAfter: 4 });
+      const deductionType = c.deduction_type === "rut" || c.deduction_type === "rot" ? c.deduction_type : "none";
+      const deductionLabel = deductionType === "rut" ? "Rutavdrag" : "Rotavdrag";
+      const eligibleNetto = deductionType === "none" ? 0 : items.reduce((sum, item) => sum + (item.deduction_eligible ? toNumber(item.quantity) * toNumber(item.unit_price) : 0), 0);
+      const deductionBase = eligibleNetto * (1 + vatRate / 100);
+      const deductionRate = deductionType === "none" ? 0 : toNumber(c.deduction_rate);
+      const deductionAmount = deductionBase * (deductionRate / 100);
+      const amountToPay = total - deductionAmount;
+
+      const lines: TextLine[] = [{
+        text: `Prisform: ${c.price_form === "recurring" ? "Löpande räkning" : "Fast pris"}` + (deductionType !== "none" ? `   ${deductionLabel} ${deductionRate}%` : ""),
+        font: "F2", size: 10, gapAfter: 3,
+      }];
+      for (const item of items) {
+        const marker = deductionType !== "none" && item.deduction_eligible ? " (arbete)" : "";
+        lines.push({ text: `${text(item.description)}${marker}   ${text(item.quantity)} x ${text(item.unit_price)} kr`, font: "F1", size: 9 });
+      }
+      lines.push({ text: `Netto: ${netto.toFixed(2)} kr   Moms: ${moms.toFixed(2)} kr   Total inkl. moms: ${total.toFixed(2)} kr`, font: "F2", size: 9, gapAfter: deductionType === "none" ? 4 : 2 });
+      if (deductionType !== "none") {
+        const pnr = text(c.deduction_personal_number);
+        lines.push({
+          text: `${deductionLabel}${pnr ? ` (${pnr})` : ""}: -${deductionAmount.toFixed(2)} kr   Att betala: ${amountToPay.toFixed(2)} kr`,
+          font: "F2", size: 9, gapAfter: 4,
+        });
+      }
       return lines;
     }
     case "table": {

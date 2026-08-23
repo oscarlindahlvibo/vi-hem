@@ -8,7 +8,7 @@ import { ArrowDown, ArrowUp, Copy, Paperclip, Plus, Trash2, Upload } from 'lucid
 import { Modal } from '../../../components/ui';
 import type { AgreementBlock, BlockType } from '../types';
 import { BLOCK_TYPES, blockTypeDef, createBlock, type BlockFieldDef } from '../blocks/blockTypes';
-import { calcPriceTable, formatSek, type PriceTableItem } from '../blocks/priceTable';
+import { calcPriceTable, DEFAULT_DEDUCTION_RATE, formatSek, type DeductionType, type PriceTableItem } from '../blocks/priceTable';
 
 export interface AttachmentOption {
   id: string;
@@ -237,14 +237,16 @@ function AttachmentRefFields({
  * something the generic BlockFieldDef kinds ('rows', 'table_grid', ...)
  * express. */
 function PriceTableFields({ content, onChange }: { content: Record<string, any>; onChange: (content: Record<string, any>) => void }) {
-  const items: PriceTableItem[] = Array.isArray(content.items) && content.items.length > 0 ? content.items : [{ description: '', quantity: '1', unit_price: '' }];
+  const items: PriceTableItem[] = Array.isArray(content.items) && content.items.length > 0 ? content.items : [{ description: '', quantity: '1', unit_price: '', deduction_eligible: false }];
+  const deductionType: DeductionType = content.deduction_type || 'none';
   const totals = calcPriceTable({ ...content, items });
 
   const updateItem = (i: number, patch: Partial<PriceTableItem>) => {
     onChange({ ...content, items: items.map((it, ii) => (ii === i ? { ...it, ...patch } : it)) });
   };
-  const addItem = () => onChange({ ...content, items: [...items, { description: '', quantity: '1', unit_price: '' }] });
+  const addItem = () => onChange({ ...content, items: [...items, { description: '', quantity: '1', unit_price: '', deduction_eligible: false }] });
   const removeItem = (i: number) => onChange({ ...content, items: items.filter((_, ii) => ii !== i) });
+  const setDeductionType = (type: DeductionType) => onChange({ ...content, deduction_type: type, deduction_rate: DEFAULT_DEDUCTION_RATE[type] });
 
   return (
     <div className="space-y-3">
@@ -258,10 +260,16 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
       </select>
       <div className="space-y-2">
         {items.map((item, i) => (
-          <div key={i} className="grid grid-cols-[1fr_4rem_5.5rem_auto] items-center gap-1.5">
+          <div key={i} className={`grid items-center gap-1.5 ${deductionType !== 'none' ? 'grid-cols-[1fr_4rem_5.5rem_auto_auto]' : 'grid-cols-[1fr_4rem_5.5rem_auto]'}`}>
             <input placeholder="Vara/tjänst" value={item.description} onChange={(e) => updateItem(i, { description: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
             <input placeholder="Antal" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
             <input placeholder="Á-pris" value={item.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+            {deductionType !== 'none' && (
+              <label className="flex items-center gap-1 text-xs text-slate-500" title="Räknas denna rad som arbetskostnad (inte material)?">
+                <input type="checkbox" checked={Boolean(item.deduction_eligible)} onChange={(e) => updateItem(i, { deduction_eligible: e.target.checked })} />
+                Arbete
+              </label>
+            )}
             <IconButton onClick={() => removeItem(i)} title="Ta bort rad" danger disabled={items.length <= 1}><Trash2 className="h-3.5 w-3.5" /></IconButton>
           </div>
         ))}
@@ -273,10 +281,49 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
           {[25, 12, 6, 0].map((rate) => <option key={rate} value={rate}>{rate}%</option>)}
         </select>
       </div>
+
+      <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-slate-600">Avdrag</label>
+          <select value={deductionType} onChange={(e) => setDeductionType(e.target.value as DeductionType)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs">
+            <option value="none">Inget</option>
+            <option value="rut">Rutavdrag</option>
+            <option value="rot">Rotavdrag</option>
+          </select>
+        </div>
+        {deductionType !== 'none' && (
+          <>
+            <p className="text-xs text-slate-500">Markera vilka rader som är arbetskostnad ovan — avdrag ges aldrig på material. Kontrollera aktuell avdragsprocent hos Skatteverket innan dokumentet skickas.</p>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-500">Avdrag (%)</label>
+              <input
+                type="number"
+                value={content.deduction_rate ?? DEFAULT_DEDUCTION_RATE[deductionType]}
+                onChange={(e) => onChange({ ...content, deduction_rate: Number(e.target.value) })}
+                className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-xs"
+              />
+            </div>
+            <input
+              type="text"
+              placeholder="Köparens personnummer (ÅÅÅÅMMDD-XXXX)"
+              value={content.deduction_personal_number || ''}
+              onChange={(e) => onChange({ ...content, deduction_personal_number: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+            />
+          </>
+        )}
+      </div>
+
       <div className="space-y-0.5 border-t border-slate-100 pt-2 text-sm">
         <div className="flex justify-between text-slate-500"><span>Netto</span><span>{formatSek(totals.netto)}</span></div>
         <div className="flex justify-between text-slate-500"><span>Moms</span><span>{formatSek(totals.moms)}</span></div>
         <div className="flex justify-between font-semibold text-slate-900"><span>Total</span><span>{formatSek(totals.total)}</span></div>
+        {deductionType !== 'none' && (
+          <>
+            <div className="flex justify-between text-green-700"><span>{deductionType === 'rut' ? 'Rutavdrag' : 'Rotavdrag'}</span><span>-{formatSek(totals.deductionAmount)}</span></div>
+            <div className="flex justify-between border-t border-slate-100 pt-1 font-semibold text-slate-900"><span>Att betala</span><span>{formatSek(totals.amountToPay)}</span></div>
+          </>
+        )}
       </div>
     </div>
   );

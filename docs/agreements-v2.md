@@ -102,11 +102,42 @@ Inget i migrationerna rör `vihem_contract_signatures`, `vihem_documents`,
 
 ## 4. Blockeditorn
 
-20 blocktyper (`src/modules/agreements-v2/blocks/blockTypes.ts`): Rubrik,
+21 blocktyper (`src/modules/agreements-v2/blocks/blockTypes.ts`): Rubrik,
 Underrubrik, Brödtext, Informationsruta, Avtalspart, Kontaktuppgifter,
-Datum, Dynamiskt fält, Pris/belopp, Tabell, Punktlista, Checklista,
-Bild/logotyp, Avdelare, Sidbrytning, Villkor, Signaturblock, Bilaga/PDF,
-Fritextfält (mottagaren fyller i), Checkbox (mottagaren måste godkänna).
+Datum, Dynamiskt fält, Pris/belopp, Prisspecifikation (se nedan), Tabell,
+Punktlista, Checklista, Bild/logotyp, Avdelare, Sidbrytning, Villkor,
+Signaturblock, Bilaga/PDF, Fritextfält (mottagaren fyller i), Checkbox
+(mottagaren måste godkänna).
+
+**Prisspecifikation** (`price_table`, tillagd samma dag som RUT/ROT-stödet
+nedan) — flera rader (vara/tjänst, antal, á-pris), en momssats, och
+beräknad Netto/Moms/Öresavrundning/Total. Beräkningen
+(`calcPriceTable()` i `blocks/priceTable.ts`) delas mellan
+redigerarens live-förhandsgranskning och `BlockRenderer`; PDF-generatorn
+(`_shared/agreement-pdf.ts`) duplicerar samma aritmetik separat eftersom
+den kör i Deno, inte webbläsaren — se den filens kommentar för varför en
+delad modul inte används över den gränsen.
+
+**RUT-/ROT-avdrag.** Varje `price_table`-block kan sättas till
+`deduction_type: 'none' | 'rut' | 'rot'`. Varje rad har en egen
+`deduction_eligible`-boolean ("Arbete") — avdrag beräknas ENDAST på rader
+markerade så, aldrig på hela fakturan, eftersom Skatteverket aldrig ger
+avdrag på material. Avdragsprocenten (`deduction_rate`) är ett fritt,
+redigerbart procenttal — INTE hårdkodad — med 50 (Rutavdrag) / 30
+(Rotavdrag) som startvärden när man växlar avdragstyp
+(`DEFAULT_DEDUCTION_RATE` i `priceTable.ts`), plus en textrad i UI:t som
+ber personalen kontrollera aktuell procent hos Skatteverket innan
+utskick. Beräkning: avdragsunderlaget är arbetskostnaden INKL. moms för
+de markerade raderna (`eligibleNetto * (1 + vat_rate/100)`), avdraget är
+`avdragsunderlag * avdragsprocent/100`, och "Att betala" är
+`total - avdrag`. Köparens personnummer (`deduction_personal_number`,
+krävs av Skatteverket för en RUT/ROT-ansökan) är ett eget fält på
+blocket snarare än härlett från part/signatär, så det fungerar även för
+en offert utan uppsatt signatär än. Verifierat med en riktig
+PDF-genereringskörning (10h städning á 500 kr som arbete + 300 kr
+material, 25% moms, 50% rutavdrag → Netto 5300, Moms 1325, Total 6625,
+Rutavdrag -3125, Att betala 3500 — samtliga siffror stämde, ingen
+WinAnsi-korruption).
 
 Varje blocktyp har en `defaultContent()`-fabrik och en liten
 fältdefinition (`text`/`textarea`/`select`/`rows`/`checklist_items`/
