@@ -104,6 +104,17 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
     ],
   },
   {
+    type: 'price_table',
+    label: 'Prisspecifikation',
+    description: 'Flera rader med antal/á-pris, moms och totalsumma',
+    defaultContent: () => ({ price_form: 'fixed', vat_rate: 25, items: [{ description: '', quantity: '1', unit_price: '' }] }),
+    // Rendered by the special-cased PriceTableFields in BlockEditor.tsx --
+    // the line-item array with a live-computed total needs bespoke UI, same
+    // reason attachment_ref has its own component instead of a generic
+    // BlockFieldDef entry.
+    fields: [],
+  },
+  {
     type: 'table',
     label: 'Tabell',
     description: 'Enkel tabell med rubrikrad',

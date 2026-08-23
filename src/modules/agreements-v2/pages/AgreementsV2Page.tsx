@@ -36,6 +36,7 @@ import type {
   AgreementDocumentType,
   AgreementListItem,
   AgreementParty,
+  AgreementSignature,
   AgreementSigner,
   AgreementStatus,
   AgreementTemplate,
@@ -44,7 +45,7 @@ import type {
 import { BlockEditor } from '../components/BlockEditor';
 import { BlockRenderer } from '../components/BlockRenderer';
 import { Modal } from '../../../components/ui';
-import { ArchiveIcon, ArrowLeft, Bell, Download, FileSignature, FileText, Paperclip, Plus, RefreshCw, Send, Trash2, Users, XCircle } from 'lucide-react';
+import { ArchiveIcon, ArrowLeft, Bell, ChevronDown, Download, Edit3, FileSignature, FileText, Fingerprint, Globe, MoreHorizontal, Paperclip, PenLine, Plus, RefreshCw, Send, Trash2, Users, XCircle } from 'lucide-react';
 
 function describeError(err: unknown): string {
   if (err instanceof AgreementApiError) return err.message;
@@ -78,6 +79,28 @@ const STATUS_COLORS: Record<AgreementStatus, string> = {
   expired: 'bg-red-100 text-red-700',
   cancelled: 'bg-slate-200 text-slate-500',
   archived: 'bg-slate-100 text-slate-500',
+};
+
+const STATUS_DOT_COLORS: Record<AgreementStatus, string> = {
+  draft: 'bg-slate-400',
+  ready: 'bg-blue-500',
+  sent: 'bg-amber-500',
+  viewed: 'bg-amber-500',
+  partially_signed: 'bg-amber-500',
+  signed: 'bg-green-500',
+  accepted: 'bg-green-500',
+  declined: 'bg-red-500',
+  rejected: 'bg-red-500',
+  expired: 'bg-red-500',
+  cancelled: 'bg-slate-300',
+  archived: 'bg-slate-300',
+};
+
+const PARTY_TYPE_LABELS: Record<string, string> = {
+  manual: 'Manuellt angiven',
+  internal_org: 'Eget bolag',
+  contact: 'Kontakt/kund i VI-HEM',
+  company: 'Företag',
 };
 
 function Badge({ status }: { status: AgreementStatus }) {
@@ -439,21 +462,21 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
         </div>
       </div>
 
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">{agreement.title || '(namnlöst dokument)'}</h1>
-          <p className="text-sm text-slate-400">{agreement.document_number}</p>
-        </div>
-        {agreement.final_pdf_storage_path && (
-          <FinalPdfActions
-            agreementId={agreement.id}
-            storagePath={agreement.final_pdf_storage_path}
-            documentNumber={agreement.document_number}
-            onMessage={setMessage}
-            onError={setError}
-          />
-        )}
+      <div>
+        <h1 className="text-xl font-bold text-slate-900">{agreement.title || '(namnlöst dokument)'}</h1>
+        <p className="text-sm text-slate-400">{agreement.document_number}</p>
       </div>
+
+      <StatusCard agreement={agreement} />
+
+      <ActionRow
+        agreement={agreement}
+        editable={editable}
+        onEdit={() => setStep('content')}
+        onMessage={setMessage}
+        onError={setError}
+        onChanged={load}
+      />
 
       {message && <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p>}
 
@@ -517,35 +540,65 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
         />
       )}
       {step === 'attachments' && <AttachmentsStep detail={detail} organisationId={organisationId} editable={editable} onChanged={refreshDetail} onError={setError} />}
-      {step === 'history' && <HistoryStep events={detail.audit_events} />}
+      {step === 'history' && <HistoryStep events={detail.audit_events} signers={detail.signers} signatures={detail.signatures} />}
     </div>
   );
 }
 
-// The final signed PDF (generated once every required signer has signed --
-// see _shared/agreement-completion.ts) lives in the private `vihem-agreements`
-// storage bucket. Staff already have direct RLS-backed read access to it, so
-// downloading is just a short-lived signed URL, same pattern as
-// pages/DocumentsPage.tsx -- no dedicated edge function needed. "Skicka
-// igen" re-runs the same generate-and-email step on demand (e.g. a party's
-// email bounced) rather than only firing once automatically.
-function FinalPdfActions({
-  agreementId,
-  storagePath,
-  documentNumber,
+/** A rounded status summary with a colour dot (same convention as the Badge
+ * pill) and a chevron that expands to the document's key dates -- doesn't
+ * change what data is available, just gives the always-visible header a
+ * place to put it instead of only the Historik tab. */
+function StatusCard({ agreement }: { agreement: Agreement }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white">
+      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-4 py-3 text-left">
+        <span className="flex items-center gap-2">
+          <span className={`h-2.5 w-2.5 rounded-full ${STATUS_DOT_COLORS[agreement.status]}`} />
+          <span className="text-sm font-semibold text-slate-800">{STATUS_LABELS[agreement.status]}</span>
+        </span>
+        <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="space-y-1 border-t border-slate-100 px-4 py-3 text-sm text-slate-600">
+          <p>Typ: {agreement.category || '—'}</p>
+          {agreement.sent_at && <p>Skickad: {new Date(agreement.sent_at).toLocaleString('sv-SE')}</p>}
+          {agreement.completed_at && <p>Signerad: {new Date(agreement.completed_at).toLocaleString('sv-SE')}</p>}
+          {agreement.valid_until && <p>Giltig till: {agreement.valid_until}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Icon-tile action row (Redigera / Ladda ner / Mer), the same shape as the
+ * reference design this replaces a plain text-link row with. "Redigera"
+ * jumps to the content tab; "Ladda ner" and the "Mer" menu's "Skicka igen"
+ * reuse the same signed-URL/resend logic the old FinalPdfActions had, just
+ * restyled as tiles instead of small outline buttons. */
+function ActionRow({
+  agreement,
+  editable,
+  onEdit,
   onMessage,
   onError,
+  onChanged,
 }: {
-  agreementId: string;
-  storagePath: string;
-  documentNumber: string;
+  agreement: Agreement;
+  editable: boolean;
+  onEdit: () => void;
   onMessage: (m: string) => void;
   onError: (m: string) => void;
+  onChanged: () => void;
 }) {
   const [downloading, setDownloading] = useState(false);
   const [resending, setResending] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const hasFinalPdf = Boolean(agreement.final_pdf_storage_path);
 
   const handleDownload = async () => {
+    if (!agreement.final_pdf_storage_path) return;
     setDownloading(true);
     // Opens the tab synchronously, inside the click handler's own call
     // stack, then redirects it once the signed URL resolves -- Safari
@@ -555,7 +608,7 @@ function FinalPdfActions({
     try {
       const { data, error } = await supabase.storage
         .from('vihem-agreements')
-        .createSignedUrl(storagePath, 60 * 5, { download: `${documentNumber}.pdf` });
+        .createSignedUrl(agreement.final_pdf_storage_path, 60 * 5, { download: `${agreement.document_number}.pdf` });
       if (error || !data?.signedUrl) throw error || new Error('Kunde inte skapa nedladdningslänk.');
       if (newTab) newTab.location.href = data.signedUrl;
       else onError('Kunde inte öppna PDF:en (popup blockerad). Tillåt popup-fönster och försök igen.');
@@ -568,12 +621,14 @@ function FinalPdfActions({
   };
 
   const handleResend = async () => {
+    setMenuOpen(false);
     setResending(true);
     try {
-      const result = await resendFinalPdf(agreementId);
+      const result = await resendFinalPdf(agreement.id);
       const ok = (result.deliveries || []).filter((d) => d.ok).length;
       const failed = (result.deliveries || []).filter((d) => !d.ok).length;
       onMessage(failed > 0 ? `PDF skickades till ${ok} part(er), misslyckades för ${failed}.` : `PDF skickades till ${ok} part(er).`);
+      onChanged();
     } catch (err) {
       onError(describeError(err));
     } finally {
@@ -582,22 +637,38 @@ function FinalPdfActions({
   };
 
   return (
-    <div className="flex shrink-0 items-center gap-2">
-      <button
-        onClick={handleDownload}
-        disabled={downloading}
-        className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-      >
-        <Download className="h-3.5 w-3.5" /> {downloading ? 'Öppnar...' : 'Ladda ner PDF'}
-      </button>
-      <button
-        onClick={handleResend}
-        disabled={resending}
-        className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-      >
-        <RefreshCw className="h-3.5 w-3.5" /> {resending ? 'Skickar...' : 'Skicka igen'}
-      </button>
+    <div className="grid grid-cols-3 gap-2">
+      <ActionTile icon={Edit3} label="Redigera" onClick={onEdit} primary disabled={!editable} />
+      <ActionTile icon={Download} label={downloading ? 'Öppnar...' : 'Ladda ner'} onClick={handleDownload} disabled={!hasFinalPdf || downloading} />
+      <div className="relative">
+        <ActionTile icon={MoreHorizontal} label="Mer" onClick={() => setMenuOpen((v) => !v)} disabled={!hasFinalPdf} />
+        {menuOpen && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+            <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+              <button onClick={handleResend} disabled={resending} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                <RefreshCw className="h-3.5 w-3.5" /> {resending ? 'Skickar...' : 'Skicka igen (PDF)'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
+  );
+}
+
+function ActionTile({ icon: Icon, label, onClick, primary, disabled }: { icon: React.ComponentType<{ className?: string }>; label: string; onClick: () => void; primary?: boolean; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex w-full flex-col items-center gap-1 rounded-xl px-3 py-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
+        primary ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+      }`}
+    >
+      <Icon className="h-5 w-5" />
+      {label}
+    </button>
   );
 }
 
@@ -773,32 +844,45 @@ function PartiesStep({
       <p className="text-sm text-slate-500">
         En part kan vara en intern juridisk person, en känd kontakt/kund i VI-HEM, eller helt manuellt angiven — det krävs inte att motparten redan finns i systemet.
       </p>
-      {parties.map((party, i) => (
-        <div key={i} className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <select value={party.party_type} onChange={(e) => updateParty(i, { party_type: e.target.value as any })} className="rounded-lg border border-slate-200 px-2 py-1 text-xs">
-                <option value="manual">Manuellt angiven</option>
-                <option value="internal_org">Eget bolag</option>
-                <option value="contact">Kontakt/kund i VI-HEM</option>
-                <option value="company">Företag</option>
-              </select>
-              {party.source_type && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-600">Från systemet</span>}
+      <div>
+        {parties.map((party, i) => (
+          <div key={i} className="flex gap-3">
+            <div className="flex flex-col items-center">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white">
+                {String(i + 1).padStart(2, '0')}
+              </div>
+              {i < parties.length - 1 && <div className="w-px flex-1 bg-blue-200" />}
             </div>
-            <button onClick={() => removeParty(i)} className="text-slate-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+            <div className="flex-1 pb-4">
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{PARTY_TYPE_LABELS[party.party_type] || party.party_type}</p>
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <select value={party.party_type} onChange={(e) => updateParty(i, { party_type: e.target.value as any })} className="rounded-lg border border-slate-200 px-2 py-1 text-xs">
+                      <option value="manual">Manuellt angiven</option>
+                      <option value="internal_org">Eget bolag</option>
+                      <option value="contact">Kontakt/kund i VI-HEM</option>
+                      <option value="company">Företag</option>
+                    </select>
+                    {party.source_type && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-600">Från systemet</span>}
+                  </div>
+                  <button onClick={() => removeParty(i)} className="text-slate-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input placeholder="Namn" value={party.display_name} onChange={(e) => updateParty(i, { display_name: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
+                  <input placeholder="Org.nr/pers.nr (valfritt)" value={party.org_number} onChange={(e) => updateParty(i, { org_number: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
+                  <input placeholder="E-post" value={party.email} onChange={(e) => updateParty(i, { email: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
+                  <input placeholder="Telefon" value={party.phone} onChange={(e) => updateParty(i, { phone: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
+                  <input placeholder="Adress" value={party.address} onChange={(e) => updateParty(i, { address: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm sm:col-span-2" />
+                </div>
+                <button onClick={() => addAsSigner(party)} className="mt-2 flex items-center gap-1.5 text-xs font-medium text-blue-600">
+                  <Plus className="h-3 w-3" /> Lägg också till som signatär
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <input placeholder="Namn" value={party.display_name} onChange={(e) => updateParty(i, { display_name: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-            <input placeholder="Org.nr/pers.nr (valfritt)" value={party.org_number} onChange={(e) => updateParty(i, { org_number: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-            <input placeholder="E-post" value={party.email} onChange={(e) => updateParty(i, { email: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-            <input placeholder="Telefon" value={party.phone} onChange={(e) => updateParty(i, { phone: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
-            <input placeholder="Adress" value={party.address} onChange={(e) => updateParty(i, { address: e.target.value })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm sm:col-span-2" />
-          </div>
-          <button onClick={() => addAsSigner(party)} className="mt-2 flex items-center gap-1.5 text-xs font-medium text-blue-600">
-            <Plus className="h-3 w-3" /> Lägg också till som signatär
-          </button>
-        </div>
-      ))}
+        ))}
+      </div>
       <div className="flex flex-wrap gap-3">
         <button onClick={() => setPickerOpen(true)} className="flex items-center gap-1.5 text-sm font-medium text-blue-600"><Plus className="h-4 w-4" /> Välj från systemet</button>
         <button onClick={addManualParty} className="flex items-center gap-1.5 text-sm font-medium text-slate-500"><Plus className="h-4 w-4" /> Lägg till manuellt</button>
@@ -1130,7 +1214,7 @@ function AttachmentsStep({ detail, organisationId, editable, onChanged, onError 
   );
 }
 
-function HistoryStep({ events }: { events: AgreementAuditEvent[] }) {
+function HistoryStep({ events, signers, signatures }: { events: AgreementAuditEvent[]; signers: AgreementSigner[]; signatures: AgreementSignature[] }) {
   const labels: Record<string, string> = {
     created: 'Dokumentet skapades',
     sent: 'Skickades för signering',
@@ -1144,19 +1228,86 @@ function HistoryStep({ events }: { events: AgreementAuditEvent[] }) {
     declined: 'Signatär avböjde',
     completed: 'Dokumentet slutfördes',
     cancelled: 'Dokumentet avbröts',
+    final_pdf_generated: 'Slutlig PDF genererades',
+    final_pdf_resent: 'Slutlig PDF skickades igen',
+    pdf_sent_email: 'Slutlig PDF mejlades till en part',
+    pdf_delivery_failed: 'Leverans av slutlig PDF misslyckades',
   };
   return (
-    <div className="space-y-3">
-      {events.length === 0 && <p className="text-sm text-slate-500">Ingen historik ännu.</p>}
-      {events.map((e) => (
-        <div key={e.id} className="flex items-start gap-3 rounded-lg border border-slate-100 px-3 py-2">
-          <div className="mt-0.5 h-2 w-2 flex-shrink-0 rounded-full bg-blue-400" />
-          <div>
-            <p className="text-sm text-slate-800">{labels[e.event_type] || e.event_type}</p>
-            <p className="text-xs text-slate-400">{new Date(e.created_at).toLocaleString('sv-SE')}</p>
-          </div>
+    <div className="space-y-5">
+      {signatures.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-sm font-semibold text-slate-700">Verifikat på signering</p>
+          {signatures.map((sig) => (
+            <SignatureVerificationCard key={sig.id} signature={sig} signer={signers.find((s) => s.id === sig.signer_id)} />
+          ))}
         </div>
-      ))}
+      )}
+      <div className="space-y-3">
+        {events.length === 0 && <p className="text-sm text-slate-500">Ingen historik ännu.</p>}
+        {events.map((e) => (
+          <div key={e.id} className="flex items-start gap-3 rounded-lg border border-slate-100 px-3 py-2">
+            <div className="mt-0.5 h-2 w-2 flex-shrink-0 rounded-full bg-blue-400" />
+            <div>
+              <p className="text-sm text-slate-800">{labels[e.event_type] || e.event_type}</p>
+              <p className="text-xs text-slate-400">{new Date(e.created_at).toLocaleString('sv-SE')}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function maskPersonalNumber(value: string): string {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length < 4) return value;
+  return `${'*'.repeat(digits.length - 4)}${digits.slice(-4)}`;
+}
+
+/** Deliberately light -- just enough to show "Chrome, iOS" the way the
+ * reference design does, not a real device-detection library. Falls back
+ * to the raw string if nothing recognisable matches. */
+function parseUserAgent(ua: string): string {
+  if (!ua) return '—';
+  const browser = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Okänd webbläsare';
+  const os = /iPhone|iPad|iOS/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mac OS X/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : 'Okänt OS';
+  return `${browser}, ${os}`;
+}
+
+function SignatureVerificationCard({ signature, signer }: { signature: AgreementSignature; signer?: AgreementSigner }) {
+  const isBankId = signature.method === 'bankid';
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+      <div className="flex items-center justify-between px-4 py-3">
+        <p className="font-semibold text-slate-900">{(signature.signature_name || signer?.name || 'Okänd signatär').toUpperCase()}</p>
+        <span className="flex items-center gap-1 text-xs font-medium text-slate-500">
+          {isBankId ? <Fingerprint className="h-3.5 w-3.5" /> : <PenLine className="h-3.5 w-3.5" />}
+          {isBankId ? 'BankID' : 'Handskriven'}
+        </span>
+      </div>
+      <div className="space-y-2 border-t border-slate-200 bg-white px-4 py-3 text-sm">
+        {isBankId && signature.bankid_personal_number && (
+          <div>
+            <p className="text-xs text-slate-400">Personnummer</p>
+            <p className="text-slate-800">{maskPersonalNumber(signature.bankid_personal_number)}</p>
+          </div>
+        )}
+        <div>
+          <p className="text-xs text-slate-400">Datum & tid</p>
+          <p className="text-slate-800">{new Date(signature.signed_at).toLocaleString('sv-SE')}</p>
+        </div>
+        {signature.ip_address && (
+          <div>
+            <p className="flex items-center gap-1 text-xs text-slate-400"><Globe className="h-3 w-3" /> IP-adress</p>
+            <p className="text-slate-800">{signature.ip_address}</p>
+          </div>
+        )}
+        <div>
+          <p className="text-xs text-slate-400">Webbläsare & OS</p>
+          <p className="text-slate-800">{parseUserAgent(signature.user_agent)}</p>
+        </div>
+      </div>
     </div>
   );
 }

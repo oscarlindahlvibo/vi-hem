@@ -4,6 +4,7 @@
 // to drift out of sync.
 import { useEffect, useState } from 'react';
 import type { AgreementAttachment, AgreementBlock, AgreementParty, AgreementSigner } from '../types';
+import { calcPriceTable, formatSek, type PriceTableContent, type PriceTableItem } from '../blocks/priceTable';
 
 type RendererAttachment = Pick<AgreementAttachment, 'id' | 'name' | 'content_type'>;
 
@@ -93,6 +94,31 @@ function BlockView({
           <span className="font-semibold">{formatCurrency(String(c.amount || ''), String(c.unit || 'kr'))}</span>
         </div>
       );
+    case 'price_table': {
+      const items: PriceTableItem[] = Array.isArray(c.items) ? c.items : [];
+      const totals = calcPriceTable(c as Partial<PriceTableContent>);
+      return (
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+            Prisform: {c.price_form === 'recurring' ? 'Löpande räkning' : 'Fast pris'}
+          </span>
+          <div className="mt-3 space-y-2">
+            {items.map((item, i) => (
+              <div key={i} className="flex items-center justify-between text-sm">
+                <span className="text-slate-700">{item.description || '—'}</span>
+                <span className="text-slate-500">{item.quantity} × {item.unit_price} kr</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-sm">
+            <div className="flex justify-between text-slate-500"><span>Netto</span><span>{formatSek(totals.netto)}</span></div>
+            <div className="flex justify-between text-slate-500"><span>Moms</span><span>{formatSek(totals.moms)}</span></div>
+            <div className="flex justify-between text-slate-500"><span>Öresavrundning</span><span>{formatSek(totals.roundOff)}</span></div>
+            <div className="flex justify-between border-t border-slate-100 pt-1 font-semibold text-slate-900"><span>Total inkl. moms</span><span>{formatSek(totals.total)}</span></div>
+          </div>
+        </div>
+      );
+    }
     case 'table': {
       const headers: string[] = c.headers || [];
       const rows: string[][] = c.rows || [];

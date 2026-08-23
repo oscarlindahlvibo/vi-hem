@@ -66,6 +66,7 @@ export type BlockType =
   | 'date'
   | 'dynamic_field'
   | 'price'
+  | 'price_table'
   | 'table'
   | 'bullet_list'
   | 'checklist'
@@ -213,6 +214,21 @@ export interface AgreementAuditEvent {
   metadata?: Record<string, unknown>;
 }
 
+/** One completed signature's evidence -- the same data the final PDF's
+ * "Signaturer och verifiering" section renders (see
+ * _shared/agreement-pdf.ts), surfaced to staff in-app too. */
+export interface AgreementSignature {
+  id: string;
+  signer_id: string;
+  method: SigningMethod;
+  signature_name: string;
+  bankid_personal_number: string | null;
+  bankid_reference: string | null;
+  ip_address: string | null;
+  user_agent: string;
+  signed_at: string;
+}
+
 // ── Detail payload ───────────────────────────────────────────────────────
 
 export interface AgreementDetail {
@@ -224,6 +240,7 @@ export interface AgreementDetail {
   entity_links: AgreementEntityLink[];
   versions: AgreementVersion[];
   audit_events: AgreementAuditEvent[];
+  signatures: AgreementSignature[];
 }
 
 // ── Public signing view ──────────────────────────────────────────────────

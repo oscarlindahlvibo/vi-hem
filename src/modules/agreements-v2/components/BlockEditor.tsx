@@ -8,6 +8,7 @@ import { ArrowDown, ArrowUp, Copy, Paperclip, Plus, Trash2, Upload } from 'lucid
 import { Modal } from '../../../components/ui';
 import type { AgreementBlock, BlockType } from '../types';
 import { BLOCK_TYPES, blockTypeDef, createBlock, type BlockFieldDef } from '../blocks/blockTypes';
+import { calcPriceTable, formatSek, type PriceTableItem } from '../blocks/priceTable';
 
 export interface AttachmentOption {
   id: string;
@@ -142,6 +143,8 @@ function BlockRow({
       </div>
       {block.block_type === 'attachment_ref' ? (
         <AttachmentRefFields content={block.content} onChange={onUpdate} attachments={attachments} onUploadAttachment={onUploadAttachment} />
+      ) : block.block_type === 'price_table' ? (
+        <PriceTableFields content={block.content} onChange={onUpdate} />
       ) : (
         <BlockFields def={def.fields} content={block.content} onChange={onUpdate} />
       )}
@@ -225,6 +228,56 @@ function AttachmentRefFields({
         placeholder="Etikett i dokumentet"
         className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
       />
+    </div>
+  );
+}
+
+/** Special-cased for the same reason AttachmentRefFields is: a
+ * variable-length line-item array with a live-computed total isn't
+ * something the generic BlockFieldDef kinds ('rows', 'table_grid', ...)
+ * express. */
+function PriceTableFields({ content, onChange }: { content: Record<string, any>; onChange: (content: Record<string, any>) => void }) {
+  const items: PriceTableItem[] = Array.isArray(content.items) && content.items.length > 0 ? content.items : [{ description: '', quantity: '1', unit_price: '' }];
+  const totals = calcPriceTable({ ...content, items });
+
+  const updateItem = (i: number, patch: Partial<PriceTableItem>) => {
+    onChange({ ...content, items: items.map((it, ii) => (ii === i ? { ...it, ...patch } : it)) });
+  };
+  const addItem = () => onChange({ ...content, items: [...items, { description: '', quantity: '1', unit_price: '' }] });
+  const removeItem = (i: number) => onChange({ ...content, items: items.filter((_, ii) => ii !== i) });
+
+  return (
+    <div className="space-y-3">
+      <select
+        value={content.price_form || 'fixed'}
+        onChange={(e) => onChange({ ...content, price_form: e.target.value })}
+        className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+      >
+        <option value="fixed">Fast pris</option>
+        <option value="recurring">Löpande räkning</option>
+      </select>
+      <div className="space-y-2">
+        {items.map((item, i) => (
+          <div key={i} className="grid grid-cols-[1fr_4rem_5.5rem_auto] items-center gap-1.5">
+            <input placeholder="Vara/tjänst" value={item.description} onChange={(e) => updateItem(i, { description: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+            <input placeholder="Antal" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+            <input placeholder="Á-pris" value={item.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+            <IconButton onClick={() => removeItem(i)} title="Ta bort rad" danger disabled={items.length <= 1}><Trash2 className="h-3.5 w-3.5" /></IconButton>
+          </div>
+        ))}
+      </div>
+      <button type="button" onClick={addItem} className="flex items-center gap-1.5 text-xs font-medium text-blue-600"><Plus className="h-3.5 w-3.5" /> Vara/tjänst</button>
+      <div className="flex items-center gap-2">
+        <label className="text-xs text-slate-500">Moms</label>
+        <select value={content.vat_rate ?? 25} onChange={(e) => onChange({ ...content, vat_rate: Number(e.target.value) })} className="rounded-lg border border-slate-200 px-2 py-1 text-xs">
+          {[25, 12, 6, 0].map((rate) => <option key={rate} value={rate}>{rate}%</option>)}
+        </select>
+      </div>
+      <div className="space-y-0.5 border-t border-slate-100 pt-2 text-sm">
+        <div className="flex justify-between text-slate-500"><span>Netto</span><span>{formatSek(totals.netto)}</span></div>
+        <div className="flex justify-between text-slate-500"><span>Moms</span><span>{formatSek(totals.moms)}</span></div>
+        <div className="flex justify-between font-semibold text-slate-900"><span>Total</span><span>{formatSek(totals.total)}</span></div>
+      </div>
     </div>
   );
 }

@@ -80,7 +80,7 @@ Deno.serve(async (req: Request) => {
         const agreement = await assertAgreementInOrg(agreementId);
         if (agreement instanceof Response) return agreement;
 
-        const [{ data: full }, { data: blocks }, { data: parties }, { data: signers }, { data: attachments }, { data: links }, { data: versions }, { data: auditEvents }] = await Promise.all([
+        const [{ data: full }, { data: blocks }, { data: parties }, { data: signers }, { data: attachments }, { data: links }, { data: versions }, { data: auditEvents }, { data: signatures }] = await Promise.all([
           db.from("vihem_agreements").select("*").eq("id", agreementId).single(),
           db.from("vihem_agreement_blocks").select("*").eq("agreement_id", agreementId).order("position"),
           db.from("vihem_agreement_parties").select("*").eq("agreement_id", agreementId).order("position"),
@@ -89,8 +89,12 @@ Deno.serve(async (req: Request) => {
           db.from("vihem_agreement_entity_links").select("*").eq("agreement_id", agreementId),
           db.from("vihem_agreement_versions").select("id, version_number, content_hash, frozen_at").eq("agreement_id", agreementId).order("version_number", { ascending: false }),
           db.from("vihem_agreement_audit_events").select("*").eq("agreement_id", agreementId).order("created_at", { ascending: false }).limit(100),
+          // Signature evidence (method, IP, user-agent, BankID reference) --
+          // same data the final PDF's verification section renders, surfaced
+          // to staff in-app. Never exposed on the public/signer-facing side.
+          db.from("vihem_agreement_signatures").select("id, signer_id, method, signature_name, bankid_personal_number, bankid_reference, ip_address, user_agent, signed_at").eq("agreement_id", agreementId),
         ]);
-        return json({ data: { agreement: full, blocks, parties, signers, attachments, entity_links: links, versions, audit_events: auditEvents } });
+        return json({ data: { agreement: full, blocks, parties, signers, attachments, entity_links: links, versions, audit_events: auditEvents, signatures } });
       }
 
       case "create_agreement": {

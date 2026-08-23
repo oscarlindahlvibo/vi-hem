@@ -144,6 +144,21 @@ function blockToLines(block: AgreementBlock): TextLine[] {
       return [{ text: `${text(c.label)}: ${text(c.token)}`, font: "F1", size: 10, gapAfter: 3 }];
     case "price":
       return [{ text: `${text(c.label)}  ${text(c.amount)} ${text(c.unit) || "kr"}`, font: "F1", size: 10, gapAfter: 3 }];
+    case "price_table": {
+      // Mirrors calcPriceTable() in src/modules/agreements-v2/blocks/priceTable.ts
+      // -- duplicated rather than shared across the browser/edge-function
+      // boundary (see that module's header), so keep the two in sync.
+      const toNumber = (v: unknown) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) ? n : 0; };
+      const items: { description?: string; quantity?: string; unit_price?: string }[] = Array.isArray(c.items) ? c.items : [];
+      const netto = items.reduce((sum, item) => sum + toNumber(item.quantity) * toNumber(item.unit_price), 0);
+      const vatRate = toNumber(c.vat_rate);
+      const moms = netto * (vatRate / 100);
+      const total = Math.round(netto + moms);
+      const lines: TextLine[] = [{ text: `Prisform: ${c.price_form === "recurring" ? "Löpande räkning" : "Fast pris"}`, font: "F2", size: 10, gapAfter: 3 }];
+      for (const item of items) lines.push({ text: `${text(item.description)}   ${text(item.quantity)} x ${text(item.unit_price)} kr`, font: "F1", size: 9 });
+      lines.push({ text: `Netto: ${netto.toFixed(2)} kr   Moms: ${moms.toFixed(2)} kr   Total inkl. moms: ${total.toFixed(2)} kr`, font: "F2", size: 9, gapAfter: 4 });
+      return lines;
+    }
     case "table": {
       const headers: string[] = Array.isArray(c.headers) ? c.headers.map(text) : [];
       const rows: string[][] = Array.isArray(c.rows) ? c.rows : [];
