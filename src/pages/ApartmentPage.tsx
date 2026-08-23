@@ -29,7 +29,8 @@ import {
   Modal,
 } from '../components/ui';
 import { formatDate, formatCurrency } from '../lib/utils';
-import { BANKID_ENABLED, bankIDLaunchUrl, collectBankIDOrder, initiateBankIDSign } from '../lib/bankid';
+import { BANKID_ENABLED, initiateBankIDSign } from '../lib/bankid';
+import { useBankIdFlow } from '../hooks/useBankIdFlow';
 import { buildGeneratedDocumentWithImages } from '../lib/generatedDocuments';
 import { Tenancy, Apartment, Property } from '../types';
 import { listMyAgreements } from '../modules/agreements-v2/api';
@@ -141,12 +142,28 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState('');
   const [signMethod, setSignMethod] = useState<'name' | 'bankid'>('name');
-  const [bankIdStatus, setBankIdStatus] = useState('');
-  const [bankIdQrImage, setBankIdQrImage] = useState<string | null>(null);
+  const bankId = useBankIdFlow('sign');
+  const bankIdBusy = bankId.status === 'starting' || bankId.status === 'redirecting' || bankId.status === 'pending';
 
   useEffect(() => {
     fetchData();
   }, [user?.id]);
+
+  // The BankID signature itself is already written to vihem_contract_signatures
+  // server-side by vihem-bankid's `collect` action once the order completes --
+  // this just closes the modal and refetches so the UI reflects it.
+  useEffect(() => {
+    if (bankId.status !== 'complete') return;
+    setShowSignModal(false);
+    setSigningContract(null);
+    fetchData();
+    bankId.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bankId.status]);
+
+  useEffect(() => {
+    if (bankId.status === 'failed' && bankId.error) setSignError(bankId.error);
+  }, [bankId.status, bankId.error]);
 
   const fetchData = async () => {
     if (!user?.id) {
@@ -211,39 +228,23 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
   const handleSignContract = async () => {
     if (!signingContract) return;
     if (signMethod === 'name' && (!signature || !signatureName.trim())) return;
-    setSigning(true);
     setSignError('');
+    if (signMethod === 'bankid') {
+      // Completion/failure are handled by the two useEffects above --
+      // `bankId`'s own status drives the button's loading/disabled state
+      // (bankIdBusy) instead of the `signing` flag the handwritten-signature
+      // path below uses, since this is a multi-step, poll-driven flow
+      // rather than a single request.
+      bankId.start(() => initiateBankIDSign(
+        { environment: 'test', edgeFunctionUrl: '' },
+        '',
+        'Godkänn och signera hyresavtalet i VI-HEM.',
+        signingContract.id,
+      ));
+      return;
+    }
+    setSigning(true);
     try {
-      if (signMethod === 'bankid') {
-        setBankIdStatus('Startar BankID-signering...');
-        const order = await initiateBankIDSign(
-          { environment: 'test', edgeFunctionUrl: '' },
-          '',
-          'Godkänn och signera hyresavtalet i VI-HEM.',
-          signingContract.id,
-        );
-        setBankIdQrImage(order.qrImage || null);
-        setBankIdStatus('Öppna BankID-appen och godkänn avtalet.');
-        const launchUrl = bankIDLaunchUrl(order);
-        if (launchUrl) window.open(launchUrl, '_blank', 'noopener,noreferrer');
-
-        for (let attempt = 0; attempt < 45; attempt += 1) {
-          await new Promise(resolve => window.setTimeout(resolve, 2000));
-          const result = await collectBankIDOrder({ environment: 'test', edgeFunctionUrl: '' }, order.orderRef);
-          if (result.status === 'pending') {
-            setBankIdStatus('Väntar på godkännande i BankID-appen...');
-            continue;
-          }
-          if (result.status === 'failed') throw new Error(result.error || 'BankID-signeringen avbröts eller misslyckades.');
-          setBankIdStatus('Avtalet signerades.');
-          setShowSignModal(false);
-          setSigningContract(null);
-          setBankIdQrImage(null);
-          fetchData();
-          return;
-        }
-        throw new Error('BankID-sessionen tog för lång tid. Försök igen.');
-      }
       const signedAt = new Date().toISOString();
       let generatedDocumentId = signingContract.document_id || null;
 
@@ -286,8 +287,6 @@ Signeringsmetod: Handskriven signatur`,
       setShowSignModal(false);
       setSignature('');
       setSignatureName('');
-      setBankIdStatus('');
-      setBankIdQrImage(null);
       setSigningContract(null);
       fetchData();
     } catch (error) {
@@ -304,8 +303,7 @@ Signeringsmetod: Handskriven signatur`,
     setSignature('');
     setSignatureName(user?.name || '');
     setSignError('');
-    setBankIdStatus('');
-    setBankIdQrImage(null);
+    bankId.reset();
     setShowSignModal(true);
   };
 
@@ -659,7 +657,7 @@ Signeringsmetod: Handskriven signatur`,
       </div>
 
       {/* Sign Contract Modal */}
-      <Modal open={showSignModal} onClose={() => { setShowSignModal(false); setSignature(''); setSignatureName(''); setSignError(''); setBankIdStatus(''); setBankIdQrImage(null); setSigningContract(null); }} title="Signera hyresavtal" size="lg">
+      <Modal open={showSignModal} onClose={() => { setShowSignModal(false); setSignature(''); setSignatureName(''); setSignError(''); setSigningContract(null); bankId.reset(); }} title="Signera hyresavtal" size="lg">
         {signingContract && (
           <div className="space-y-4">
             {signingContract.contract_content && (
@@ -734,8 +732,8 @@ Signeringsmetod: Handskriven signatur`,
                   Du omdirigeras till BankID-appen för att signera avtalet med din elektroniska ID-handling.
                   Signaturen är rättsligt bindande.
                 </p>
-                {bankIdStatus && <p className="text-xs font-semibold text-blue-700">{bankIdStatus}</p>}
-                {bankIdQrImage && <img src={bankIdQrImage} alt="QR-kod för BankID" className="mx-auto h-40 w-40 rounded-lg border border-slate-200 bg-white p-2" />}
+                {bankId.message && <p className="text-xs font-semibold text-blue-700">{bankId.message}</p>}
+                {bankId.qrImage && <img src={bankId.qrImage} alt="QR-kod för BankID" className="mx-auto h-40 w-40 rounded-lg border border-slate-200 bg-white p-2" />}
                 {!BANKID_ENABLED && (
                   <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                     BankID-integration är inte aktiverad i det här systemet ännu.
@@ -747,14 +745,14 @@ Signeringsmetod: Handskriven signatur`,
             {signError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{signError}</div>}
 
             <div className="flex gap-3 pt-2">
-              <Button variant="secondary" onClick={() => { setShowSignModal(false); setSignature(''); setSignatureName(''); setSignError(''); setBankIdStatus(''); setBankIdQrImage(null); setSigningContract(null); }} className="flex-1">
+              <Button variant="secondary" onClick={() => { setShowSignModal(false); setSignature(''); setSignatureName(''); setSignError(''); setSigningContract(null); bankId.reset(); }} className="flex-1">
                 Avbryt
               </Button>
               <Button
                 variant="primary"
                 onClick={handleSignContract}
-                disabled={(signMethod === 'name' && (!signature || !signatureName.trim())) || (signMethod === 'bankid' && !BANKID_ENABLED) || signing}
-                loading={signing}
+                disabled={(signMethod === 'name' && (!signature || !signatureName.trim())) || (signMethod === 'bankid' && !BANKID_ENABLED) || (signMethod === 'bankid' ? bankIdBusy : signing)}
+                loading={signMethod === 'bankid' ? bankIdBusy : signing}
                 className="flex-1 gap-1"
               >
                 {signMethod === 'bankid' ? (

@@ -1,21 +1,23 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Mail, Lock, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ShieldCheck, X } from 'lucide-react';
 import { AppLogo } from './AppLogo';
 import { Button } from './ui';
 import { passwordResetRedirectUrl } from '../lib/authUrls';
+import { initiateBankIDAuth } from '../lib/bankid';
+import { useBankIdFlow } from '../hooks/useBankIdFlow';
 
 export function LoginPage() {
-  const { signIn, signInWithBankID, bankIDAvailable } = useAuth();
+  const { signIn, bankIDAvailable } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [bankIDLoading, setBankIDLoading] = useState(false);
   const [forgotMode, setForgotMode] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const bankId = useBankIdFlow('auth');
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -26,13 +28,29 @@ export function LoginPage() {
     setLoading(false);
   }
 
-  async function handleBankIDLogin() {
+  function handleBankIDLogin() {
     setError('');
-    setBankIDLoading(true);
-    const { error } = await signInWithBankID(email);
-    if (error) setError(error);
-    setBankIDLoading(false);
+    if (!email.trim()) { setError('Ange din e-postadress innan du väljer BankID.'); return; }
+    bankId.start(() => initiateBankIDAuth({ environment: 'test', edgeFunctionUrl: '' }, '', email.trim()));
   }
+
+  // The hook only gets the user through BankID approval + a magic link --
+  // actually finishing the sign-in (navigating to it) is this page's job,
+  // same as any other post-auth redirect.
+  useEffect(() => {
+    if (bankId.status !== 'complete') return;
+    if (bankId.result?.magic_link) {
+      window.location.assign(bankId.result.magic_link);
+    } else {
+      setError('BankID godkändes, men kontot saknar en användbar e-postadress.');
+    }
+  }, [bankId.status, bankId.result]);
+
+  useEffect(() => {
+    if (bankId.error) setError(bankId.error);
+  }, [bankId.error]);
+
+  const bankIdBusy = bankId.status === 'starting' || bankId.status === 'redirecting' || bankId.status === 'pending';
 
   async function handleForgotPassword(e: React.FormEvent) {
     e.preventDefault();
@@ -68,29 +86,47 @@ export function LoginPage() {
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           {/* BankID login */}
           <div className="mb-6">
-            <button
-              type="button"
-              onClick={handleBankIDLogin}
-              disabled={bankIDLoading}
-              className={`w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl font-semibold text-sm transition-all border-2 ${
-                bankIDAvailable
-                  ? 'bg-[#193E4F] hover:bg-[#122e3c] text-white border-[#193E4F] hover:border-[#122e3c] cursor-pointer'
-                  : 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed'
-              }`}
-              title={bankIDAvailable ? 'Logga in med BankID' : 'BankID-integration är inte aktiverad ännu'}
-            >
-              <BankIDIcon className="w-6 h-6 flex-shrink-0" />
-              <span>{bankIDLoading ? 'Öppnar BankID ...' : 'Logga in med BankID'}</span>
-              {!bankIDAvailable && (
-                <span className="ml-auto text-xs bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full font-normal">
-                  Kommer snart
-                </span>
-              )}
-            </button>
-            {!bankIDAvailable && (
-              <p className="text-xs text-slate-400 text-center mt-2">
-                BankID-inloggning aktiveras när integrationen är konfigurerad.
-              </p>
+            {bankIdBusy ? (
+              <div className="rounded-xl border-2 border-[#193E4F]/20 bg-slate-50 p-5 text-center">
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-[#193E4F]">
+                    <BankIDIcon className="h-5 w-5 flex-shrink-0" /> BankID
+                  </span>
+                  <button type="button" onClick={bankId.reset} className="text-slate-400 hover:text-slate-600" title="Avbryt">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                {bankId.qrImage && (
+                  <img src={bankId.qrImage} alt="QR-kod för BankID" className="mx-auto mb-3 h-44 w-44 rounded-lg border border-slate-200 bg-white p-2" />
+                )}
+                <p className="text-sm text-slate-600">{bankId.message || 'Startar BankID...'}</p>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleBankIDLogin}
+                  className={`w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl font-semibold text-sm transition-all border-2 ${
+                    bankIDAvailable
+                      ? 'bg-[#193E4F] hover:bg-[#122e3c] text-white border-[#193E4F] hover:border-[#122e3c] cursor-pointer'
+                      : 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed'
+                  }`}
+                  title={bankIDAvailable ? 'Logga in med BankID' : 'BankID-integration är inte aktiverad ännu'}
+                >
+                  <BankIDIcon className="w-6 h-6 flex-shrink-0" />
+                  <span>Logga in med BankID</span>
+                  {!bankIDAvailable && (
+                    <span className="ml-auto text-xs bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full font-normal">
+                      Kommer snart
+                    </span>
+                  )}
+                </button>
+                {!bankIDAvailable && (
+                  <p className="text-xs text-slate-400 text-center mt-2">
+                    BankID-inloggning aktiveras när integrationen är konfigurerad.
+                  </p>
+                )}
+              </>
             )}
           </div>
 
