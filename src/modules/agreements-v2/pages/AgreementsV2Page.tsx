@@ -547,13 +547,20 @@ function FinalPdfActions({
 
   const handleDownload = async () => {
     setDownloading(true);
+    // Opens the tab synchronously, inside the click handler's own call
+    // stack, then redirects it once the signed URL resolves -- Safari
+    // silently blocks `window.open()` as a popup once it happens after an
+    // `await`, since it's no longer within the original click gesture.
+    const newTab = window.open('', '_blank');
     try {
       const { data, error } = await supabase.storage
         .from('vihem-agreements')
         .createSignedUrl(storagePath, 60 * 5, { download: `${documentNumber}.pdf` });
       if (error || !data?.signedUrl) throw error || new Error('Kunde inte skapa nedladdningslänk.');
-      window.open(data.signedUrl, '_blank');
+      if (newTab) newTab.location.href = data.signedUrl;
+      else onError('Kunde inte öppna PDF:en (popup blockerad). Tillåt popup-fönster och försök igen.');
     } catch (err) {
+      newTab?.close();
       onError(describeError(err));
     } finally {
       setDownloading(false);

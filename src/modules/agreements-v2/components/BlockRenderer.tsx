@@ -191,10 +191,17 @@ function BlockView({
 
 // Fetches its own signed URL (via whichever resolver the caller supplied --
 // a public signing token or a staff Supabase session, see the two call
-// sites) and embeds the attachment inline: an <iframe> for PDFs, an <img>
-// for images, a plain link for anything else. The point of the "signature
-// disappears" bug report this replaces a bare link for is letting a signer
-// actually read what they're about to sign without leaving the page.
+// sites), then downloads the bytes itself and re-embeds them as a `blob:`
+// URL rather than pointing the <iframe>/<img> straight at the signed
+// storage URL. Storage/CDN backends commonly answer with
+// `X-Frame-Options`/`Content-Security-Policy: frame-ancestors` that block
+// being framed from a different origin (app.vi-hem.se vs. the storage
+// project's own domain) -- that response header makes the iframe render
+// silently blank, no console error, nothing for `onError` to catch. A
+// `blob:` URL is same-origin by construction, so it sidesteps that
+// entirely. The point of the "signature disappears" bug report this
+// replaces a bare link for is letting a signer actually read what they're
+// about to sign without leaving the page.
 function AttachmentEmbed({
   attachment,
   label,
@@ -209,12 +216,21 @@ function AttachmentEmbed({
 
   useEffect(() => {
     let cancelled = false;
+    let objectUrl: string | null = null;
     setUrl(null);
     setError(false);
-    resolveUrl(attachment.id)
-      .then((resolved) => { if (!cancelled) setUrl(resolved); })
-      .catch(() => { if (!cancelled) setError(true); });
-    return () => { cancelled = true; };
+    (async () => {
+      const signedUrl = await resolveUrl(attachment.id);
+      const response = await fetch(signedUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      objectUrl = URL.createObjectURL(blob);
+      if (!cancelled) setUrl(objectUrl);
+    })().catch(() => { if (!cancelled) setError(true); });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [attachment.id, resolveUrl]);
 
   const isPdf = attachment.content_type === 'application/pdf';

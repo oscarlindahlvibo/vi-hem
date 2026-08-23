@@ -69,10 +69,19 @@ export function PublicAgreementSignPage() {
   };
 
   const handleDownloadAttachment = async (attachmentId: string) => {
+    // Opens the tab SYNCHRONOUSLY, inside the click handler's own call
+    // stack, then redirects it once the URL resolves -- Safari/WebKit
+    // (this page is often opened from an in-app browser, e.g. Meddelanden)
+    // silently blocks `window.open()` as a popup the moment it happens
+    // after an `await`, since it's no longer within the original click
+    // gesture.
+    const newTab = window.open('', '_blank');
     try {
       const { url } = await getAttachmentDownloadUrl(token, attachmentId);
-      window.open(url, '_blank');
+      if (newTab) newTab.location.href = url;
+      else setError('Kunde inte öppna bilagan (popup blockerad). Tillåt popup-fönster och försök igen.');
     } catch {
+      newTab?.close();
       setError('Kunde inte öppna bilagan.');
     }
   };
