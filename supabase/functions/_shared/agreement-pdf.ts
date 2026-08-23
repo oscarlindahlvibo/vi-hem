@@ -151,18 +151,22 @@ function blockToLines(block: AgreementBlock): TextLine[] {
       // Deduction type is PER ITEM (a quote can mix RUT-eligible rows with
       // ROT-eligible rows with plain rows), never a single flag for the
       // whole block.
+      // VAT is PER ITEM too (a quote can mix e.g. 25% goods with a 12%
+      // catering row) -- each item carries its own vat_rate rather than one
+      // rate for the whole block.
       const toNumber = (v: unknown) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) ? n : 0; };
-      const items: { description?: string; quantity?: string; unit_price?: string; deduction_type?: string }[] = Array.isArray(c.items) ? c.items : [];
+      const items: { description?: string; quantity?: string; unit_price?: string; vat_rate?: number; deduction_type?: string }[] = Array.isArray(c.items) ? c.items : [];
       const lineNetto = (item: { quantity?: string; unit_price?: string }) => toNumber(item.quantity) * toNumber(item.unit_price);
+      const itemVatRate = (item: { vat_rate?: number }) => (item.vat_rate === undefined || item.vat_rate === null ? 25 : toNumber(item.vat_rate));
+      const lineMoms = (item: { quantity?: string; unit_price?: string; vat_rate?: number }) => lineNetto(item) * (itemVatRate(item) / 100);
       const netto = items.reduce((sum, item) => sum + lineNetto(item), 0);
-      const vatRate = toNumber(c.vat_rate);
-      const moms = netto * (vatRate / 100);
+      const moms = items.reduce((sum, item) => sum + lineMoms(item), 0);
       const total = Math.round(netto + moms);
       const hasRut = items.some((item) => item.deduction_type === "rut");
       const hasRot = items.some((item) => item.deduction_type === "rot");
-      const nettoFor = (type: string) => items.reduce((sum, item) => sum + (item.deduction_type === type ? lineNetto(item) : 0), 0);
-      const rutAmount = nettoFor("rut") * (1 + vatRate / 100) * (toNumber(c.rut_rate) / 100);
-      const rotAmount = nettoFor("rot") * (1 + vatRate / 100) * (toNumber(c.rot_rate) / 100);
+      const baseFor = (type: string) => items.reduce((sum, item) => sum + (item.deduction_type === type ? lineNetto(item) + lineMoms(item) : 0), 0);
+      const rutAmount = baseFor("rut") * (toNumber(c.rut_rate) / 100);
+      const rotAmount = baseFor("rot") * (toNumber(c.rot_rate) / 100);
       const amountToPay = total - rutAmount - rotAmount;
 
       const badges: string[] = [];
@@ -174,7 +178,7 @@ function blockToLines(block: AgreementBlock): TextLine[] {
       }];
       for (const item of items) {
         const marker = item.deduction_type === "rut" ? " (RUT)" : item.deduction_type === "rot" ? " (ROT)" : "";
-        lines.push({ text: `${text(item.description)}${marker}   ${text(item.quantity)} x ${text(item.unit_price)} kr`, font: "F1", size: 9 });
+        lines.push({ text: `${text(item.description)}${marker}   ${text(item.quantity)} x ${text(item.unit_price)} kr (moms ${itemVatRate(item)}%)`, font: "F1", size: 9 });
       }
       lines.push({ text: `Netto: ${netto.toFixed(2)} kr   Moms: ${moms.toFixed(2)} kr   Total inkl. moms: ${total.toFixed(2)} kr`, font: "F2", size: 9, gapAfter: hasRut || hasRot ? 2 : 4 });
       const pnr = text(c.deduction_personal_number);

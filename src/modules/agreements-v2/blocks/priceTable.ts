@@ -7,11 +7,18 @@
 // sharing a module across the browser/edge-function boundary.
 export type DeductionType = 'none' | 'rut' | 'rot';
 
+export const VAT_RATES = [25, 12, 6, 0] as const;
+export const DEFAULT_VAT_RATE = 25;
+
 export interface PriceTableItem {
   description: string;
   quantity: string;
   unit_price: string;
-  /** Per-item, not per-block: a single quote can genuinely mix RUT-eligible
+  /** Per item, not per block -- a single quote can genuinely mix VAT rates
+   * (e.g. 25% goods with a 12% catering line), so each row prices and
+   * taxes itself independently rather than sharing one rate. */
+  vat_rate: number;
+  /** Per item, not per block: a single quote can genuinely mix RUT-eligible
    * rows (e.g. cleanup) with ROT-eligible rows (e.g. renovation) with
    * regular rows in between (materials) -- Skatteverket calculates each
    * deduction separately against only the rows that actually qualify for
@@ -21,7 +28,6 @@ export interface PriceTableItem {
 
 export interface PriceTableContent {
   price_form: 'fixed' | 'recurring';
-  vat_rate: number;
   items: PriceTableItem[];
   /** Percent, editable rather than hardcoded: RUT/ROT rates are set by
    * government budget decisions and change over time, so this module
@@ -62,21 +68,34 @@ function toNumber(value: string | number | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Reads a row's VAT rate with a fallback for rows saved before per-item
+ * VAT existed (block used to carry a single `vat_rate` -- old content
+ * objects may still have that key sitting unused alongside items that
+ * predate this field). Never throws on old data, just assumes the
+ * standard rate. */
+function itemVatRate(item: Pick<PriceTableItem, 'vat_rate'> & { vat_rate?: unknown }): number {
+  return item.vat_rate === undefined || item.vat_rate === null ? DEFAULT_VAT_RATE : toNumber(item.vat_rate as number);
+}
+
 export function lineTotal(item: Pick<PriceTableItem, 'quantity' | 'unit_price'>): number {
   return toNumber(item.quantity) * toNumber(item.unit_price);
+}
+
+export function lineMoms(item: Pick<PriceTableItem, 'quantity' | 'unit_price' | 'vat_rate'>): number {
+  return lineTotal(item) * (itemVatRate(item) / 100);
 }
 
 export function calcPriceTable(content: Partial<PriceTableContent>): PriceTableTotals {
   const items = Array.isArray(content.items) ? content.items : [];
   const netto = items.reduce((sum, item) => sum + lineTotal(item), 0);
-  const vatRate = toNumber(content.vat_rate);
-  const moms = netto * (vatRate / 100);
+  const moms = items.reduce((sum, item) => sum + lineMoms(item), 0);
   const roundedTotal = Math.round(netto + moms);
   const roundOff = roundedTotal - (netto + moms);
 
-  const nettoFor = (type: DeductionType) => items.reduce((sum, item) => sum + (item.deduction_type === type ? lineTotal(item) : 0), 0);
-  const rutBase = nettoFor('rut') * (1 + vatRate / 100);
-  const rotBase = nettoFor('rot') * (1 + vatRate / 100);
+  const baseFor = (type: DeductionType) =>
+    items.reduce((sum, item) => sum + (item.deduction_type === type ? lineTotal(item) + lineMoms(item) : 0), 0);
+  const rutBase = baseFor('rut');
+  const rotBase = baseFor('rot');
   const rutAmount = rutBase * (toNumber(content.rut_rate) / 100);
   const rotAmount = rotBase * (toNumber(content.rot_rate) / 100);
   const amountToPay = roundedTotal - rutAmount - rotAmount;

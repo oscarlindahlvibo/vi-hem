@@ -8,7 +8,7 @@ import { ArrowDown, ArrowUp, Copy, Paperclip, Plus, Trash2, Upload } from 'lucid
 import { Modal } from '../../../components/ui';
 import type { AgreementBlock, BlockType } from '../types';
 import { BLOCK_TYPES, blockTypeDef, createBlock, type BlockFieldDef } from '../blocks/blockTypes';
-import { calcPriceTable, DEFAULT_DEDUCTION_RATE, formatSek, type DeductionType, type PriceTableItem } from '../blocks/priceTable';
+import { calcPriceTable, DEFAULT_DEDUCTION_RATE, DEFAULT_VAT_RATE, formatSek, VAT_RATES, type DeductionType, type PriceTableItem } from '../blocks/priceTable';
 
 export interface AttachmentOption {
   id: string;
@@ -245,7 +245,7 @@ const DEDUCTION_BADGE_LABEL: Record<DeductionType, string> = { none: '', rut: 'R
  * summary (description, qty × price, a RUT/ROT badge when set) so a
  * multi-line quote is still scannable at a glance. */
 function PriceTableFields({ content, onChange }: { content: Record<string, any>; onChange: (content: Record<string, any>) => void }) {
-  const items: PriceTableItem[] = Array.isArray(content.items) && content.items.length > 0 ? content.items : [{ description: '', quantity: '1', unit_price: '', deduction_type: 'none' }];
+  const items: PriceTableItem[] = Array.isArray(content.items) && content.items.length > 0 ? content.items : [{ description: '', quantity: '1', unit_price: '', vat_rate: DEFAULT_VAT_RATE, deduction_type: 'none' }];
   const totals = calcPriceTable({ ...content, items });
   const hasRut = items.some((it) => it.deduction_type === 'rut');
   const hasRot = items.some((it) => it.deduction_type === 'rot');
@@ -255,7 +255,11 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
     onChange({ ...content, items: items.map((it, ii) => (ii === i ? { ...it, ...patch } : it)) });
   };
   const addItem = () => {
-    const nextItems = [...items, { description: '', quantity: '1', unit_price: '', deduction_type: 'none' as DeductionType }];
+    // New rows default to the previous row's VAT rate (falling back to the
+    // standard 25%) rather than always 25% -- a quote that's already
+    // mostly 12%/6% shouldn't make you re-pick the rate on every new row.
+    const previousVatRate = items[items.length - 1]?.vat_rate ?? DEFAULT_VAT_RATE;
+    const nextItems = [...items, { description: '', quantity: '1', unit_price: '', vat_rate: previousVatRate, deduction_type: 'none' as DeductionType }];
     onChange({ ...content, items: nextItems });
     setEditingIndex(nextItems.length - 1);
   };
@@ -284,6 +288,7 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
                 <span className="block truncate text-sm font-medium text-slate-800">{item.description || 'Namnlös rad'}</span>
                 <span className="flex items-center gap-1.5 text-xs text-slate-500">
                   {item.quantity || '0'} × {item.unit_price || '0'} kr
+                  <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">moms {item.vat_rate ?? DEFAULT_VAT_RATE}%</span>
                   {item.deduction_type && item.deduction_type !== 'none' && (
                     <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">{DEDUCTION_BADGE_LABEL[item.deduction_type]}</span>
                   )}
@@ -295,12 +300,6 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
         ))}
       </div>
       <button type="button" onClick={addItem} className="flex items-center gap-1.5 text-xs font-medium text-blue-600 transition-colors hover:text-blue-700"><Plus className="h-3.5 w-3.5" /> Vara/tjänst</button>
-      <div className="flex items-center gap-2">
-        <label className="text-xs text-slate-500">Moms</label>
-        <select value={content.vat_rate ?? 25} onChange={(e) => onChange({ ...content, vat_rate: Number(e.target.value) })} className="rounded-lg border border-slate-200 px-2 py-1 text-xs transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
-          {[25, 12, 6, 0].map((rate) => <option key={rate} value={rate}>{rate}%</option>)}
-        </select>
-      </div>
 
       {(hasRut || hasRot) && (
         <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -398,6 +397,25 @@ function PriceItemModal({
               onChange={(e) => onChange({ unit_price: e.target.value })}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
+          </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600">Moms</label>
+          <div className="flex gap-1.5">
+            {VAT_RATES.map((rate) => (
+              <button
+                key={rate}
+                type="button"
+                onClick={() => onChange({ vat_rate: rate })}
+                className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${
+                  (item.vat_rate ?? DEFAULT_VAT_RATE) === rate
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {rate}%
+              </button>
+            ))}
           </div>
         </div>
         <div>

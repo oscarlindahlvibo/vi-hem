@@ -109,8 +109,7 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
     description: 'Flera rader med antal/á-pris, moms, totalsumma och valfritt RUT-/ROT-avdrag',
     defaultContent: () => ({
       price_form: 'fixed',
-      vat_rate: 25,
-      items: [{ description: '', quantity: '1', unit_price: '', deduction_type: 'none' }],
+      items: [{ description: '', quantity: '1', unit_price: '', vat_rate: 25, deduction_type: 'none' }],
       rut_rate: 50,
       rot_rate: 30,
       deduction_personal_number: '',

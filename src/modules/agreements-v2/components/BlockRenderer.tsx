@@ -118,7 +118,9 @@ function BlockView({
                     <span className="ml-1.5 rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">{badgeLabel[item.deduction_type]}</span>
                   )}
                 </span>
-                <span className="shrink-0 whitespace-nowrap text-slate-500">{item.quantity} × {item.unit_price} kr</span>
+                <span className="shrink-0 whitespace-nowrap text-slate-500">
+                  {item.quantity} × {item.unit_price} kr <span className="text-xs text-slate-400">(moms {item.vat_rate}%)</span>
+                </span>
               </div>
             ))}
           </div>

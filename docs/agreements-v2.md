@@ -110,13 +110,17 @@ Signaturblock, Bilaga/PDF, Fritextfält (mottagaren fyller i), Checkbox
 (mottagaren måste godkänna).
 
 **Prisspecifikation** (`price_table`, tillagd samma dag som RUT/ROT-stödet
-nedan) — flera rader (vara/tjänst, antal, á-pris), en momssats, och
-beräknad Netto/Moms/Öresavrundning/Total. Beräkningen
-(`calcPriceTable()` i `blocks/priceTable.ts`) delas mellan
-redigerarens live-förhandsgranskning och `BlockRenderer`; PDF-generatorn
-(`_shared/agreement-pdf.ts`) duplicerar samma aritmetik separat eftersom
-den kör i Deno, inte webbläsaren — se den filens kommentar för varför en
-delad modul inte används över den gränsen.
+nedan) — flera rader (vara/tjänst, antal, á-pris), **momssats PER RAD**
+(inte en delad momssats för hela blocket — en offert kan blanda t.ex.
+25% vara med 12% catering), och beräknad Netto/Moms/Öresavrundning/
+Total. Beräkningen (`calcPriceTable()` i `blocks/priceTable.ts`) delas
+mellan redigerarens live-förhandsgranskning och `BlockRenderer`;
+PDF-generatorn (`_shared/agreement-pdf.ts`) duplicerar samma aritmetik
+separat eftersom den kör i Deno, inte webbläsaren — se den filens
+kommentar för varför en delad modul inte används över den gränsen. Momsen
+väljs som tre knappar (25/12/6/0%) i radens redigeringsmodal (se nedan);
+en ny rad ärver föregående rads momssats som startvärde istf. att alltid
+börja om på 25%.
 
 **RUT-/ROT-avdrag — PER RAD, inte per block** (omarbetat samma dag efter
 att ha jämfört med ett referensverktyg). Varje rad i `price_table` har en
@@ -151,6 +155,10 @@ i samma block (5h städning å 400 kr som RUT + 10h renovering å 600 kr
 som ROT + 1500 kr material utan avdrag, 25% moms, 50%/30% avdrag →
 Netto 9500, Moms 2375, Total 11875, Rutavdrag -1250, Rotavdrag -2250,
 Att betala 8375 — samtliga siffror stämde, ingen WinAnsi-korruption).
+Momsen per rad testad separat, i samma körning som blandade avdragstyper
+(vara 25%/RUT-städning 25%/ROT-renovering 12%/catering 12% i samma
+block → Netto 9600, Moms 1542, Total 11142, Rutavdrag -1250, Rotavdrag
+-2016, Att betala 7876 — stämde exakt).
 
 Varje blocktyp har en `defaultContent()`-fabrik och en liten
 fältdefinition (`text`/`textarea`/`select`/`rows`/`checklist_items`/
