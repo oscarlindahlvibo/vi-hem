@@ -177,6 +177,25 @@ sammanhang: mallredigering, avtalsredigering (förhandsgranskning), och den
 publika signeringssidan — så det som en signatär ser är alltid exakt vad
 som förhandsgranskades, aldrig en andra renderingsväg som kan divergera.
 
+**Innehållsfliken bytte "Lägg till block"-mönster (samma dag).** Byggde
+först en fristående förhandsvisning ("Avtalsskapare V3", egen menypost)
+av en ny dokumentbyggare efter en referensdesign användaren visade — en
+ikonsidopanel med blockkategorier (Rubrik/Part/Pris/Text/Signatur/Bild/
+Bilaga/Villkor/Layout, se `blocks/blockCategories.ts`) med en utfällbar
+panel av de faktiska blocktyperna i varje kategori, plus ett toppfält med
+en Redigera/Förhandsgranska-växel. Efter att användaren testat den och
+föredrog den framför originalet flyttades den in i `ContentStep`
+(innehållsfliken i den riktiga avtalsredigeraren) och V3-menyposten togs
+bort — allt under samma flik, som begärt. `BlockRow` exporterades från
+`BlockEditor.tsx` (tidigare privat) så innehållsfliken kan rendera
+blockraderna direkt utan att gå via hela `BlockEditor`-komponenten,
+vars modalbaserade "Lägg till block"-knapp fortfarande används oförändrad
+av mallredigeraren (`TemplateEditor` längre ner i samma fil) — den ytan
+ingick inte i vad som skulle bytas ut. Sparlogik, auto-spara vid
+flikbyte och bekräftelse-innan-du-lämnar (punkt 22) är opåverkade;
+enda skillnaden är hur block läggs till och hur redigera/förhandsgranska
+växlas.
+
 ## 5. Dynamiska fält och immutable snapshot
 
 `{{namespace.fält}}` i valfri textsträng i ett blocks `content`.

@@ -33,6 +33,7 @@ import type {
   AgreementAuditEvent,
   AgreementBlock,
   AgreementDetail,
+  BlockType,
   AgreementDocumentType,
   AgreementListItem,
   AgreementParty,
@@ -42,8 +43,10 @@ import type {
   AgreementTemplate,
   ExistingPartyOption,
 } from '../types';
-import { BlockEditor } from '../components/BlockEditor';
+import { BlockEditor, BlockRow } from '../components/BlockEditor';
 import { BlockRenderer } from '../components/BlockRenderer';
+import { blockTypeDef, createBlock } from '../blocks/blockTypes';
+import { BLOCK_CATEGORIES } from '../blocks/blockCategories';
 import { Modal } from '../../../components/ui';
 import { ArchiveIcon, ArrowLeft, Bell, ChevronDown, Download, Edit3, FileSignature, FileText, Fingerprint, Globe, MoreHorizontal, Paperclip, PenLine, Plus, RefreshCw, Send, Trash2, Users, XCircle } from 'lucide-react';
 
@@ -698,7 +701,8 @@ function ContentStep({
   onAttachmentsChanged: () => void;
 }) {
   const [saving, setSaving] = useState(false);
-  const [preview, setPreview] = useState(false);
+  const [mode, setMode] = useState<'edit' | 'preview'>('edit');
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   const handleSave = async () => {
     setSaving(true);
@@ -733,34 +737,124 @@ function ContentStep({
     [attachments],
   );
 
+  const addBlock = (type: BlockType) => {
+    onBlocksChange([...blocks, createBlock(type)]);
+    setActiveCategory(null);
+  };
+  const updateBlock = (id: string, content: Record<string, any>) => onBlocksChange(blocks.map((b) => (b.id === id ? { ...b, content } : b)));
+  const removeBlock = (id: string) => onBlocksChange(blocks.filter((b) => b.id !== id));
+  const duplicateBlock = (id: string) => {
+    const index = blocks.findIndex((b) => b.id === id);
+    if (index === -1) return;
+    const copy = { ...blocks[index], id: crypto.randomUUID() };
+    onBlocksChange([...blocks.slice(0, index + 1), copy, ...blocks.slice(index + 1)]);
+  };
+  const moveBlock = (id: string, direction: -1 | 1) => {
+    const index = blocks.findIndex((b) => b.id === id);
+    const target = index + direction;
+    if (index === -1 || target < 0 || target >= blocks.length) return;
+    const next = [...blocks];
+    [next[index], next[target]] = [next[target], next[index]];
+    onBlocksChange(next);
+  };
+
+  const activeCategoryDef = BLOCK_CATEGORIES.find((c) => c.key === activeCategory) || null;
+
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-sm font-medium text-slate-700">Block</p>
-          <div className="flex gap-2">
-            <button onClick={() => setPreview((v) => !v)} className="text-xs font-medium text-slate-500 underline transition-colors hover:text-slate-700 lg:hidden">{preview ? 'Redigera' : 'Förhandsgranska'}</button>
-            {editable && (
-              <button onClick={handleSave} disabled={saving} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
-                {saving ? 'Sparar...' : 'Spara innehåll'}
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+        <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">
+          <button
+            onClick={() => setMode('edit')}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${mode === 'edit' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Redigera
+          </button>
+          <button
+            onClick={() => { setMode('preview'); setActiveCategory(null); }}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${mode === 'preview' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Förhandsgranska
+          </button>
+        </div>
+        {editable && (
+          <button onClick={handleSave} disabled={saving} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
+            {saving ? 'Sparar...' : 'Spara innehåll'}
+          </button>
+        )}
+      </div>
+      {!editable && <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-700">Dokumentet är skickat och kan inte längre redigeras direkt.</p>}
+
+      <div className="flex" style={{ minHeight: 480 }}>
+        {mode === 'edit' && editable && (
+          <div className="flex w-20 shrink-0 flex-col items-center gap-1 border-r border-slate-200 bg-slate-50 py-4">
+            {BLOCK_CATEGORIES.map((cat) => (
+              <button
+                key={cat.key}
+                onClick={() => setActiveCategory((c) => (c === cat.key ? null : cat.key))}
+                className={`flex w-16 flex-col items-center gap-1 rounded-xl py-2 text-[11px] font-medium transition-colors ${
+                  activeCategory === cat.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:bg-white/60'
+                }`}
+              >
+                <span className={`flex h-8 w-8 items-center justify-center rounded-lg text-white ${cat.color}`}>
+                  <cat.icon className="h-4 w-4" />
+                </span>
+                {cat.label}
               </button>
+            ))}
+          </div>
+        )}
+
+        {activeCategoryDef && (
+          <div className="w-60 shrink-0 space-y-1.5 overflow-y-auto border-r border-slate-200 bg-white p-3">
+            <p className="mb-1 px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">{activeCategoryDef.label}</p>
+            {activeCategoryDef.types.map((type) => {
+              const def = blockTypeDef(type);
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => addBlock(type)}
+                  className="block w-full rounded-lg border border-slate-100 px-3 py-2.5 text-left transition-colors hover:border-blue-200 hover:bg-blue-50"
+                >
+                  <p className="text-sm font-medium text-slate-800">{def.label}</p>
+                  <p className="text-xs text-slate-500">{def.description}</p>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto bg-slate-50 p-6">
+          <div className="mx-auto max-w-2xl rounded-xl bg-white p-8 shadow-sm">
+            {mode === 'edit' && editable ? (
+              blocks.length === 0 ? (
+                <div className="rounded-xl border-2 border-dashed border-slate-300 px-6 py-16 text-center text-sm text-slate-500">
+                  Välj ett block i panelen till vänster för att börja bygga dokumentet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {blocks.map((block, i) => (
+                    <BlockRow
+                      key={block.id}
+                      block={block}
+                      isFirst={i === 0}
+                      isLast={i === blocks.length - 1}
+                      onUpdate={(content) => updateBlock(block.id, content)}
+                      onRemove={() => removeBlock(block.id)}
+                      onDuplicate={() => duplicateBlock(block.id)}
+                      onMoveUp={() => moveBlock(block.id, -1)}
+                      onMoveDown={() => moveBlock(block.id, 1)}
+                      attachments={attachments.map((a) => ({ id: a.id, name: a.name }))}
+                      onUploadAttachment={handleUploadAttachment}
+                    />
+                  ))}
+                </div>
+              )
+            ) : (
+              <BlockRenderer blocks={blocks} parties={parties} signers={signers} attachments={attachments} resolveAttachmentUrl={resolveAttachmentUrl} />
             )}
           </div>
-        </div>
-        {!editable && <p className="mb-2 text-xs text-amber-700">Dokumentet är skickat och kan inte längre redigeras direkt.</p>}
-        <div className={preview ? 'hidden lg:block' : ''}>
-          <BlockEditor
-            blocks={blocks}
-            onChange={onBlocksChange}
-            attachments={attachments.map((a) => ({ id: a.id, name: a.name }))}
-            onUploadAttachment={handleUploadAttachment}
-          />
-        </div>
-      </div>
-      <div className={preview ? '' : 'hidden lg:block'}>
-        <p className="mb-2 text-sm font-medium text-slate-700">Förhandsgranskning</p>
-        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <BlockRenderer blocks={blocks} parties={parties} signers={signers} attachments={attachments} resolveAttachmentUrl={resolveAttachmentUrl} />
         </div>
       </div>
     </div>
