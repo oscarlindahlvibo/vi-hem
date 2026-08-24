@@ -3,6 +3,7 @@ import { Users, Plus, Edit2, ShieldCheck, KeyRound, Clock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { createUserAccount, sendUserPasswordResetEmail } from '../lib/userAdmin';
+import { normalizePersonalNumber } from '../lib/bankid';
 import {
   Card,
   Badge,
@@ -115,6 +116,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     phone: '',
     role: 'staff',
     active: true,
+    bankid_personal_number: '',
   });
 
   useEffect(() => {
@@ -183,6 +185,12 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   );
 
   const handleSaveStaff = async () => {
+    const rawPno = staffFormData.bankid_personal_number.trim();
+    const normalizedPno = rawPno ? normalizePersonalNumber(rawPno) : null;
+    if (rawPno && !normalizedPno) {
+      setSaveError('Personnumret måste vara 10 eller 12 siffror, t.ex. 199001011234 eller 900101-1234.');
+      return;
+    }
     setSaveError('');
     setSaving(true);
     try {
@@ -195,6 +203,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
             phone: staffFormData.phone,
             role: staffFormData.role,
             active: staffFormData.active,
+            bankid_personal_number: normalizedPno,
           })
           .eq('id', editingStaff.id);
         if (error) throw error;
@@ -211,6 +220,13 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
           role: staffFormData.role as Profile['role'],
           organisation_id: user?.organisation_id,
         });
+        // Personnummer isn't part of vihem-create-user's own input --
+        // written as a direct follow-up update instead, same as every
+        // other admin-editable profile field this page manages post-creation.
+        if (normalizedPno && result.user_id) {
+          const { error: pnoError } = await supabase.from('vihem_profiles').update({ bankid_personal_number: normalizedPno }).eq('id', result.user_id);
+          if (pnoError) throw pnoError;
+        }
         setShowStaffModal(false);
         resetForm();
         fetchStaff();
@@ -225,7 +241,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   };
 
   const resetForm = () => {
-    setStaffFormData({ name: '', email: '', phone: '', role: 'staff', active: true });
+    setStaffFormData({ name: '', email: '', phone: '', role: 'staff', active: true, bankid_personal_number: '' });
     setScheduleRows(defaultScheduleRows());
     setSaveError('');
   };
@@ -315,6 +331,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       phone: staffMember.phone || '',
       role: staffMember.role || 'staff',
       active: staffMember.active !== false,
+      bankid_personal_number: staffMember.bankid_personal_number || '',
     });
     setEditingStaff(staffMember);
     fetchStaffSchedule(staffMember.id);
@@ -545,6 +562,12 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
             value={staffFormData.phone}
             onChange={(e) => setStaffFormData({ ...staffFormData, phone: e.target.value })}
             placeholder="T.ex. 070-123 45 67"
+          />
+          <Input
+            label="Personnummer (för BankID-inloggning)"
+            value={staffFormData.bankid_personal_number}
+            onChange={(e) => setStaffFormData({ ...staffFormData, bankid_personal_number: e.target.value })}
+            placeholder="T.ex. 199001011234 eller 900101-1234"
           />
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Roll</label>

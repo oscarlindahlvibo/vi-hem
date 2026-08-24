@@ -30,8 +30,7 @@ export function LoginPage() {
 
   function handleBankIDLogin() {
     setError('');
-    if (!email.trim()) { setError('Ange din e-postadress innan du väljer BankID.'); return; }
-    bankId.start(() => initiateBankIDAuth({ environment: 'test', edgeFunctionUrl: '' }, '', email.trim()));
+    bankId.start(() => initiateBankIDAuth({ environment: 'test', edgeFunctionUrl: '' }, ''));
   }
 
   // The hook only gets the user through BankID approval + a magic link --

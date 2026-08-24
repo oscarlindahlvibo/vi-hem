@@ -37,14 +37,23 @@ Deno.serve(async (req) => {
     }
 
     if (action === "start_auth") {
-      const email = String(body.email || "").trim().toLowerCase();
-      if (!email) return json({ error: "Ange e-postadressen som hör till ditt VI-HEM-konto först." }, 400);
-      const { data: target } = await db.from("vihem_profiles").select("id,organisation_id").ilike("email", email).maybeSingle();
-      if (!target?.organisation_id) return json({ error: "Kontot kunde inte kopplas till en organisation." }, 404);
-      const settings = await getSettings(db, target.organisation_id);
-      if (!settings?.enabled || !settings.login_enabled) return json({ error: "BankID-inloggning är inte aktiverad för organisationen." }, 403);
+      // BankID login doesn't ask who's signing in up front -- the person is
+      // identified afterwards in "collect" below, by matching the
+      // personnummer BankID returns against vihem_profiles.bankid_personal_number
+      // (set on the profile ahead of time by an admin). Starting the order
+      // still needs ONE organisation's BankSignering API credentials before
+      // anyone has identified themselves, though, so this picks the only
+      // organisation with BankID login enabled -- correct as long as VI-HEM
+      // runs as a single organisation, which is the only case that exists
+      // anywhere in this codebase today (there is no pre-auth
+      // org-resolution mechanism, e.g. by subdomain, anywhere else either).
+      const { data: enabledOrgs } = await db.from("vihem_bankid_settings").select("organisation_id").eq("enabled", true).eq("login_enabled", true);
+      if (!enabledOrgs || enabledOrgs.length === 0) return json({ error: "BankID-inloggning är inte aktiverad." }, 403);
+      if (enabledOrgs.length > 1) return json({ error: "BankID-inloggning kan inte avgöra vilken organisation -- kontakta support." }, 409);
+      const organisationId = enabledOrgs[0].organisation_id;
+      const settings = await getSettings(db, organisationId);
       const order = await startProvider(settings, "Logga in i VI-HEM med BankID", "", req);
-      await db.from("vihem_bankid_orders").insert({ organisation_id: target.organisation_id, order_ref: order.orderRef, flow: "auth", requested_email: email });
+      await db.from("vihem_bankid_orders").insert({ organisation_id: organisationId, order_ref: order.orderRef, flow: "auth" });
       return json({ ok: true, ...order });
     }
 
@@ -79,9 +88,11 @@ Deno.serve(async (req) => {
         if (error) throw error;
         return json({ ...result, signed: true });
       }
-      const { data: target } = await db.from("vihem_profiles").select("id,email").ilike("email", order.requested_email || "").maybeSingle();
-      if (!target?.email) return json({ ...result, login_ready: false, error: "BankID godkändes men kontot saknar e-postadress." });
-      await db.from("vihem_profiles").update({ bankid_personal_number: pno, bankid_linked_at: new Date().toISOString(), auth_method: "both" }).eq("id", target.id);
+      const normalizedPno = pno.replace(/\D/g, "");
+      if (!normalizedPno) return json({ ...result, login_ready: false, error: "BankID godkändes men inget personnummer kunde läsas." });
+      const { data: target } = await db.from("vihem_profiles").select("id,email").eq("organisation_id", order.organisation_id).eq("bankid_personal_number", normalizedPno).maybeSingle();
+      if (!target?.email) return json({ ...result, login_ready: false, error: "Inget VI-HEM-konto är kopplat till detta BankID. Be en administratör lägga till ditt personnummer på ditt konto." });
+      await db.from("vihem_profiles").update({ bankid_linked_at: new Date().toISOString(), auth_method: "both" }).eq("id", target.id);
       const link = await db.auth.admin.generateLink({ type: "magiclink", email: target.email, options: { redirectTo: Deno.env.get("VIHEM_PUBLIC_APP_URL") || "https://app.vi-hem.se" } });
       return json({ ...result, login_ready: true, magic_link: link.data?.properties?.action_link || null });
     }

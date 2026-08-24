@@ -14,8 +14,8 @@ async function invoke<T>(body: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
-export function initiateBankIDAuth(_config: BankIDConfig, _endUserIp: string, email: string) {
-  return invoke<BankIDAuthOrder>({ action: 'start_auth', email });
+export function initiateBankIDAuth(_config: BankIDConfig, _endUserIp: string) {
+  return invoke<BankIDAuthOrder>({ action: 'start_auth' });
 }
 export function initiateBankIDSign(_config: BankIDConfig, _endUserIp: string, userVisibleData: string, contractId: string) {
   return invoke<BankIDSignOrder>({ action: 'start_sign', user_visible_data: userVisibleData, contract_id: contractId });
@@ -26,6 +26,23 @@ export function generateBankIDQRContent(_qrStartToken: string, _qrStartSecret: s
 
 export function bankIDLaunchUrl(order: BankIDAuthOrder) {
   return order.autoStartToken ? `https://app.bankid.com/?autostarttoken=${encodeURIComponent(order.autoStartToken)}&redirect=${encodeURIComponent(window.location.origin)}` : '';
+}
+/** Normalizes an admin-typed personnummer (10 or 12 digits, with or
+ * without a dash) into the 12-digit, no-separator form BankID's
+ * CompletionData.User.PersonalNumber always uses -- vihem_profiles.bankid_personal_number
+ * must be stored in this exact form for the auth "collect" lookup in
+ * vihem-bankid/index.ts to match. Returns '' if it can't be normalized to
+ * a plausible personnummer (caller should treat that as invalid input). */
+export function normalizePersonalNumber(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 12) return digits;
+  if (digits.length === 10) {
+    const yy = parseInt(digits.slice(0, 2), 10);
+    const currentYY = new Date().getFullYear() % 100;
+    const century = yy <= currentYY ? '20' : '19';
+    return century + digits;
+  }
+  return '';
 }
 export function formatPersonalNumber(pno: string) { const digits = pno.replace(/\D/g, ''); return digits.length === 12 ? `${digits.slice(0, 8)}-${digits.slice(8)}` : pno; }
 export function maskPersonalNumber(pno: string) { const digits = pno.replace(/\D/g, ''); return digits.length === 12 ? `${digits.slice(0, 8)}-****` : '****'; }

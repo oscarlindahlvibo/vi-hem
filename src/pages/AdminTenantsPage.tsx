@@ -3,6 +3,7 @@ import { Users, Plus, Edit2, Home, Mail, Phone, KeyRound, FileSignature } from '
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { createUserAccount, sendUserPasswordResetEmail } from '../lib/userAdmin';
+import { normalizePersonalNumber } from '../lib/bankid';
 import {
   Card,
   Badge,
@@ -43,6 +44,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
     email: '',
     phone: '',
     active: true,
+    bankid_personal_number: '',
     // Tenancy fields (for new tenant)
     property_id: '',
     apartment_id: '',
@@ -119,13 +121,19 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
   };
 
   const handleSaveTenant = async () => {
+    const rawPno = tenantFormData.bankid_personal_number.trim();
+    const normalizedPno = rawPno ? normalizePersonalNumber(rawPno) : null;
+    if (rawPno && !normalizedPno) {
+      setSaveError('Personnumret måste vara 10 eller 12 siffror, t.ex. 199001011234 eller 900101-1234.');
+      return;
+    }
     setSaving(true);
     setSaveError('');
     try {
       if (editingTenant) {
         const { error } = await supabase
           .from('vihem_profiles')
-          .update({ name: tenantFormData.name, phone: tenantFormData.phone, active: tenantFormData.active })
+          .update({ name: tenantFormData.name, phone: tenantFormData.phone, active: tenantFormData.active, bankid_personal_number: normalizedPno })
           .eq('id', editingTenant.id);
         if (error) throw error;
       } else {
@@ -136,6 +144,14 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
           role: 'tenant',
           organisation_id: user?.organisation_id,
         });
+
+        // Personnummer isn't part of vihem-create-user's own input --
+        // written as a direct follow-up update instead, same as every
+        // other admin-editable profile field this page manages post-creation.
+        if (normalizedPno && newAccount.user_id) {
+          const { error: pnoError } = await supabase.from('vihem_profiles').update({ bankid_personal_number: normalizedPno }).eq('id', newAccount.user_id);
+          if (pnoError) throw pnoError;
+        }
 
         // Create tenancy if apartment selected
         if (newAccount.user_id && tenantFormData.apartment_id && tenantFormData.start_date) {
@@ -162,7 +178,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
       }
       setShowTenantModal(false);
       setEditingTenant(null);
-      setTenantFormData({ name: '', email: '', phone: '', active: true, property_id: '', apartment_id: '', start_date: '', monthly_rent: '' });
+      setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '' });
       fetchData();
     } catch (error: any) {
       console.error('Error saving tenant:', error);
@@ -199,6 +215,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
       email: tenant.email || '',
       phone: tenant.phone || '',
       active: tenant.active !== false,
+      bankid_personal_number: tenant.bankid_personal_number || '',
       property_id: '',
       apartment_id: '',
       start_date: '',
@@ -232,7 +249,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
             <Button
               onClick={() => {
                 setEditingTenant(null);
-                setTenantFormData({ name: '', email: '', phone: '', active: true, property_id: '', apartment_id: '', start_date: '', monthly_rent: '' });
+                setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '' });
                 setShowTenantModal(true);
               }}
               variant="primary"
@@ -490,6 +507,12 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                 value={tenantFormData.phone}
                 onChange={(e) => setTenantFormData({ ...tenantFormData, phone: e.target.value })}
                 placeholder="T.ex. 070-123 45 67"
+              />
+              <Input
+                label="Personnummer (för BankID-inloggning)"
+                value={tenantFormData.bankid_personal_number}
+                onChange={(e) => setTenantFormData({ ...tenantFormData, bankid_personal_number: e.target.value })}
+                placeholder="T.ex. 199001011234 eller 900101-1234"
               />
               {editingTenant && (
                 <label className="flex items-center gap-2 cursor-pointer">

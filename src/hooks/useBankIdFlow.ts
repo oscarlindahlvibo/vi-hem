@@ -90,7 +90,16 @@ export function useBankIdFlow(intent: 'auth' | 'sign'): BankIdFlowState {
         const r = await collectBankIDOrder({ environment: 'test', edgeFunctionUrl: '' }, orderRef);
         if (cancelled.current) return;
         if (r.status === 'failed') { finish('failed', r, r.error || 'BankID avbröts eller misslyckades.'); return; }
-        if (r.status === 'complete') { finish('complete', r); return; }
+        if (r.status === 'complete') {
+          // A completed BankID order can still fail to resolve to a VI-HEM
+          // login (login_ready: false, e.g. no profile matches the
+          // personnummer) -- that's a failure for this flow even though
+          // BankID itself succeeded, so the caller's error banner (not the
+          // success path) is what should show r.error.
+          if (r.login_ready === false) { finish('failed', r, r.error || 'BankID godkändes, men kunde inte kopplas till ett VI-HEM-konto.'); return; }
+          finish('complete', r);
+          return;
+        }
         setMessage('Väntar på godkännande i BankID-appen...');
         poll(orderRef, attempt + 1);
       } catch (err) {
