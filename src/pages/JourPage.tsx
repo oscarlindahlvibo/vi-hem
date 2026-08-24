@@ -6,7 +6,7 @@
 // server-side i databasen (se supabase/migrations/20260826100000_jour_module.sql)
 // -- detta är bara läsningar/skrivningar direkt via supabase-js + RLS,
 // samma mönster som AdminStaffPage.tsx/listMyAgreements().
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select } from '../components/ui';
@@ -26,7 +26,38 @@ const VIEW_MODES: ViewMode[] = ['day', 'week', 'twoweeks', 'month'];
 const VIEW_MODE_LABELS: Record<ViewMode, string> = { day: 'Dag', week: 'Vecka', twoweeks: '14 dagar', month: 'Månad' };
 const VIEW_MODE_DAYS: Record<ViewMode, number> = { day: 1, week: 7, twoweeks: 14, month: 30 };
 const VIEW_MODE_COL_MIN: Record<ViewMode, number> = { day: 220, week: 110, twoweeks: 64, month: 44 };
+const MOBILE_COL_MIN: Record<ViewMode, number> = { day: 140, week: 60, twoweeks: 36, month: 26 };
+const MOBILE_GUTTER_PX = 44;
 const HOUR_TICKS = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24];
+
+// Dagbeskedets schema-Gantt (både desktop och mobil) har fem tillstånd
+// per jourtyp: ljus = ordinarie schemaläggning, mörk = tagit över någon
+// annans pass via byte, brun/grön/röd är GEMENSAMMA över alla jourtyper
+// (bytt bort / ute för byte / frånvarande betyder samma sak oavsett
+// vilken jourtyp det gäller). Separat från DUTY_BADGE_CLASS m.fl. ovan,
+// som fortfarande används av Byten/Mitt schema/Behörighet-flikarna --
+// den här paletten gäller bara schemavisualiseringen.
+type DutyState = 'scheduled' | 'claimed' | 'given_away' | 'offered' | 'absent';
+const SCHEDULED_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-300', sno: 'bg-yellow-300', stad: 'bg-purple-300' };
+const CLAIMED_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-800', sno: 'bg-yellow-600', stad: 'bg-purple-800' };
+const GIVEN_AWAY_CLASS = 'bg-amber-800';
+const OFFERED_CLASS = 'bg-emerald-500';
+const ABSENT_CLASS = 'bg-red-500';
+const STATE_CLASS: Record<JourDutyType, Record<DutyState, string>> = {
+  fastighet: { scheduled: SCHEDULED_CLASS.fastighet, claimed: CLAIMED_CLASS.fastighet, given_away: GIVEN_AWAY_CLASS, offered: OFFERED_CLASS, absent: ABSENT_CLASS },
+  sno: { scheduled: SCHEDULED_CLASS.sno, claimed: CLAIMED_CLASS.sno, given_away: GIVEN_AWAY_CLASS, offered: OFFERED_CLASS, absent: ABSENT_CLASS },
+  stad: { scheduled: SCHEDULED_CLASS.stad, claimed: CLAIMED_CLASS.stad, given_away: GIVEN_AWAY_CLASS, offered: OFFERED_CLASS, absent: ABSENT_CLASS },
+};
+const STATE_LABELS: Record<DutyState, string> = { scheduled: 'Schemalagd', claimed: 'Tagit över', given_away: 'Bytt bort', offered: 'Ute för byte', absent: 'Frånvarande' };
+type Segment = { start: number; end: number; state: DutyState; shiftId?: string };
+
+function stateTextClass(state: DutyState) { return state === 'scheduled' ? 'text-slate-900' : 'text-white'; }
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return parts.map((p) => p[0]).join('').slice(0, 2).toUpperCase();
+}
 
 function dateKey(value: Date) { return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`; }
 function fmtTime(value: string) { return new Date(value).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }); }
@@ -106,9 +137,12 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
   const [viewMode, setViewMode] = useState<ViewMode>('twoweeks');
   const [anchor, setAnchor] = useState(() => anchorForMode('twoweeks', new Date()));
   const [shifts, setShifts] = useState<JourShift[]>([]);
-  const [openOfferShiftIds, setOpenOfferShiftIds] = useState<Set<string>>(new Set());
+  const [offers, setOffers] = useState<JourSwapOffer[]>([]);
+  const [absences, setAbsences] = useState<{ user_id: string; start_date: string; end_date: string }[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedDayIdx, setSelectedDayIdx] = useState(0);
+  const [scrubTime, setScrubTime] = useState(() => new Date());
+  const mobileRowsRef = useRef<HTMLDivElement | null>(null);
+  const draggingRef = useRef(false);
   const [managing, setManaging] = useState<JourShift | null>(null);
   const [manageMode, setManageMode] = useState<'menu' | 'offer' | 'split' | 'assign' | 'delete'>('menu');
   const [manageError, setManageError] = useState('');
@@ -130,45 +164,28 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
     setLoading(true);
     const from = days[0].toISOString();
     const to = new Date(days[days.length - 1].getTime() + 86400000).toISOString();
-    const [{ data: shiftRows }, { data: offerRows }] = await Promise.all([
+    const [{ data: shiftRows }, { data: offerRows }, { data: absenceRows }] = await Promise.all([
       supabase.from('vihem_jour_shifts').select('*').eq('organisation_id', organisationId).lt('starts_at', to).gt('ends_at', from).order('starts_at'),
-      supabase.from('vihem_jour_swap_offers').select('shift_id').eq('organisation_id', organisationId).eq('status', 'open'),
+      supabase.from('vihem_jour_swap_offers').select('*').eq('organisation_id', organisationId).in('status', ['open', 'claimed']),
+      supabase.rpc('vihem_jour_absence_overlaps', { p_from: dateKey(days[0]), p_to: dateKey(days[days.length - 1]) }),
     ]);
     setShifts((shiftRows || []) as JourShift[]);
-    setOpenOfferShiftIds(new Set((offerRows || []).map((o: any) => o.shift_id)));
+    setOffers((offerRows || []) as JourSwapOffer[]);
+    setAbsences((absenceRows || []) as { user_id: string; start_date: string; end_date: string }[]);
     setLoading(false);
   }, [organisationId, days]);
 
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    const todayIdx = days.findIndex((d) => dateKey(d) === dateKey(new Date()));
-    setSelectedDayIdx(todayIdx >= 0 ? todayIdx : 0);
+    const now = new Date();
+    const windowStart = days[0]?.getTime();
+    const windowEnd = days[days.length - 1] ? days[days.length - 1].getTime() + 86400000 : undefined;
+    if (windowStart !== undefined && windowEnd !== undefined && now.getTime() >= windowStart && now.getTime() < windowEnd) setScrubTime(now);
+    else if (windowStart !== undefined) setScrubTime(new Date(windowStart));
   }, [days]);
 
-  const selectedDayShifts = useMemo(() => {
-    const selectedDay = days[selectedDayIdx];
-    if (!selectedDay) return [];
-    const dayStart = new Date(selectedDay); dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(dayStart); dayEnd.setDate(dayStart.getDate() + 1);
-    return shifts
-      .filter((s) => new Date(s.starts_at) < dayEnd && new Date(s.ends_at) > dayStart)
-      .sort((a, b) => {
-        if (DUTY_ORDER[a.duty_type] !== DUTY_ORDER[b.duty_type]) return DUTY_ORDER[a.duty_type] - DUTY_ORDER[b.duty_type];
-        if (a.user_id === null) return 1;
-        if (b.user_id === null) return -1;
-        return (profilesById.get(a.user_id)?.name || '').localeCompare(profilesById.get(b.user_id)?.name || '');
-      })
-      .map((s) => {
-        const shiftStart = new Date(s.starts_at);
-        const shiftEnd = new Date(s.ends_at);
-        const clippedStart = shiftStart < dayStart ? dayStart : shiftStart;
-        const clippedEnd = shiftEnd > dayEnd ? dayEnd : shiftEnd;
-        const spansWholeDay = clippedStart <= dayStart && clippedEnd >= dayEnd;
-        const spansMultipleDays = shiftStart < dayStart || shiftEnd > dayEnd;
-        return { shift: s, clippedStart, clippedEnd, spansWholeDay, spansMultipleDays };
-      });
-  }, [shifts, selectedDayIdx, days, profilesById]);
+  const openOfferShiftIds = useMemo(() => new Set(offers.filter((o) => o.status === 'open').map((o) => o.shift_id)), [offers]);
 
   const position = (value: string) => Math.max(0, Math.min(windowDays - 1, Math.floor((new Date(value).getTime() - days[0].getTime()) / 86400000)));
   const span = (start: string, end: string) => Math.max(1, Math.min(windowDays - position(start), Math.ceil((new Date(end).getTime() - Math.max(new Date(start).getTime(), days[0].getTime())) / 86400000)));
@@ -184,15 +201,130 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
   const isTodayColumn = isDayMode && dateKey(days[0]) === dateKey(new Date());
   const nowPct = hourPosition(new Date().toISOString()) * 100;
 
+  const shiftById = useMemo(() => new Map(shifts.map((s) => [s.id, s])), [shifts]);
+
   const rowKeys = useMemo(() => {
     const seen = new Map<string, { user_id: string | null; duty_type: JourDutyType }>();
     for (const s of shifts) seen.set(`${s.user_id ?? 'unassigned'}:${s.duty_type}`, { user_id: s.user_id, duty_type: s.duty_type });
+    for (const o of offers) {
+      if (o.status !== 'claimed') continue;
+      const shift = shiftById.get(o.shift_id);
+      if (!shift) continue;
+      seen.set(`${o.offered_by}:${shift.duty_type}`, { user_id: o.offered_by, duty_type: shift.duty_type });
+    }
     return Array.from(seen.values()).sort((a, b) => {
       if (a.user_id === null) return 1;
       if (b.user_id === null) return -1;
       return (profilesById.get(a.user_id)?.name || '').localeCompare(profilesById.get(b.user_id)?.name || '');
     });
-  }, [shifts, profilesById]);
+  }, [shifts, offers, shiftById, profilesById]);
+
+  // Segment per rad: dels raden ÄGARENS aktuella pass (ljus = ordinarie,
+  // mörk = tagit över via byte, med grön/röd som överlägg för en
+  // annonserad/frånvarande del), dels BRUNA "bytt bort"-segment
+  // rekonstruerade från klaimade annonser där personen var `offered_by`
+  // -- de har inget kvarvarande pass just då (ägarskapet flyttades),
+  // men ska ändå synas i deras rad som att de gav bort tiden.
+  const segmentsByRowKey = useMemo(() => {
+    const map = new Map<string, Segment[]>();
+    const pushSegment = (key: string, segment: Segment) => {
+      if (segment.end <= segment.start) return;
+      map.set(key, [...(map.get(key) || []), segment]);
+    };
+    const absenceRanges = (userId: string | null) => userId ? absences.filter((a) => a.user_id === userId).map((a) => ({ start: new Date(a.start_date + 'T00:00:00').getTime(), end: new Date(a.end_date + 'T00:00:00').getTime() + 86400000 })) : [];
+
+    for (const row of rowKeys) {
+      const key = `${row.user_id ?? 'unassigned'}:${row.duty_type}`;
+      const rowShifts = shifts.filter((s) => s.user_id === row.user_id && s.duty_type === row.duty_type);
+      const absenceRangesForRow = absenceRanges(row.user_id);
+      for (const s of rowShifts) {
+        const shiftStart = new Date(s.starts_at).getTime();
+        const shiftEnd = new Date(s.ends_at).getTime();
+        const baseState: DutyState = s.notes === 'Byte av pass' ? 'claimed' : 'scheduled';
+        const openOffer = offers.find((o) => o.status === 'open' && o.shift_id === s.id);
+        const offerStart = openOffer ? new Date(openOffer.offer_start_at || s.starts_at).getTime() : null;
+        const offerEnd = openOffer ? new Date(openOffer.offer_end_at || s.ends_at).getTime() : null;
+        const points = new Set<number>([shiftStart, shiftEnd]);
+        if (offerStart !== null) points.add(Math.max(shiftStart, Math.min(shiftEnd, offerStart)));
+        if (offerEnd !== null) points.add(Math.max(shiftStart, Math.min(shiftEnd, offerEnd)));
+        for (const range of absenceRangesForRow) {
+          points.add(Math.max(shiftStart, Math.min(shiftEnd, range.start)));
+          points.add(Math.max(shiftStart, Math.min(shiftEnd, range.end)));
+        }
+        const sortedPoints = Array.from(points).sort((a, b) => a - b);
+        for (let i = 0; i < sortedPoints.length - 1; i++) {
+          const segStart = sortedPoints[i];
+          const segEnd = sortedPoints[i + 1];
+          if (segEnd <= segStart) continue;
+          const mid = (segStart + segEnd) / 2;
+          const isAbsent = absenceRangesForRow.some((range) => mid >= range.start && mid < range.end);
+          const isOffered = offerStart !== null && offerEnd !== null && mid >= offerStart && mid < offerEnd;
+          pushSegment(key, { start: segStart, end: segEnd, state: isAbsent ? 'absent' : isOffered ? 'offered' : baseState, shiftId: s.id });
+        }
+      }
+      if (row.user_id !== null) {
+        for (const o of offers) {
+          if (o.status !== 'claimed' || o.offered_by !== row.user_id) continue;
+          const shift = shiftById.get(o.shift_id);
+          if (!shift || shift.duty_type !== row.duty_type) continue;
+          const start = new Date(o.claim_start_at || shift.starts_at).getTime();
+          const end = new Date(o.claim_end_at || shift.ends_at).getTime();
+          pushSegment(key, { start, end, state: 'given_away' });
+        }
+      }
+    }
+    for (const [key, segments] of map) map.set(key, segments.sort((a, b) => a.start - b.start));
+    return map;
+  }, [rowKeys, shifts, offers, absences, shiftById]);
+
+  const onDutyAtScrub = useMemo(() => {
+    const t = scrubTime.getTime();
+    const result: { user_id: string; duty_type: JourDutyType }[] = [];
+    for (const row of rowKeys) {
+      if (row.user_id === null) continue;
+      const key = `${row.user_id}:${row.duty_type}`;
+      const segments = segmentsByRowKey.get(key) || [];
+      const active = segments.find((seg) => t >= seg.start && t < seg.end && (seg.state === 'scheduled' || seg.state === 'claimed' || seg.state === 'offered'));
+      if (active) result.push({ user_id: row.user_id, duty_type: row.duty_type });
+    }
+    return result.sort((a, b) => DUTY_ORDER[a.duty_type] - DUTY_ORDER[b.duty_type] || (profilesById.get(a.user_id)?.name || '').localeCompare(profilesById.get(b.user_id)?.name || ''));
+  }, [rowKeys, segmentsByRowKey, scrubTime, profilesById]);
+
+  const scrubFraction = windowDays > 0 ? Math.max(0, Math.min(1, (scrubTime.getTime() - dayStartMs) / (windowDays * 86400000))) : 0;
+
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const scrubFromClientX = (clientX: number) => {
+    const el = mobileRowsRef.current;
+    if (!el || !days[0]) return;
+    const rect = el.getBoundingClientRect();
+    const contentWidth = rect.width - MOBILE_GUTTER_PX;
+    if (contentWidth <= 0) return;
+    const fraction = Math.max(0, Math.min(1, (clientX - rect.left - MOBILE_GUTTER_PX) / contentWidth));
+    setScrubTime(new Date(days[0].getTime() + fraction * windowDays * 86400000));
+  };
+  const handleScrubPointerDown = (e: React.PointerEvent) => {
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+    draggingRef.current = false;
+  };
+  const handleScrubPointerMove = (e: React.PointerEvent) => {
+    if (!dragStartRef.current) return;
+    const dx = Math.abs(e.clientX - dragStartRef.current.x);
+    const dy = Math.abs(e.clientY - dragStartRef.current.y);
+    if (dx > 6 || dy > 6) draggingRef.current = true;
+    if (draggingRef.current) scrubFromClientX(e.clientX);
+  };
+  const handleScrubPointerUp = (e: React.PointerEvent) => {
+    if (!dragStartRef.current) { return; }
+    if (!draggingRef.current) {
+      const target = (e.target as HTMLElement).closest('[data-shift-id]');
+      const shiftId = target?.getAttribute('data-shift-id');
+      const shift = shiftId ? shiftById.get(shiftId) : undefined;
+      if (isAdmin && shift) openManageModal(shift);
+      else scrubFromClientX(e.clientX);
+    }
+    dragStartRef.current = null;
+    draggingRef.current = false;
+  };
 
   const openManageModal = (shift: JourShift) => {
     if (!isAdmin) return;
@@ -327,50 +459,103 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-4 border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-500" /> Fastighetsjour</span>
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-orange-500" /> Snöjour</span>
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Städjour</span>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
+        <span className="flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-full ${SCHEDULED_CLASS.fastighet}`} /> Fastighetsjour</span>
+        <span className="flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-full ${SCHEDULED_CLASS.sno}`} /> Snöjour</span>
+        <span className="flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-full ${SCHEDULED_CLASS.stad}`} /> Städjour</span>
+        <span className="mx-1 h-3 border-l border-slate-200" />
+        <span className="flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-full ${CLAIMED_CLASS.fastighet}`} /> Tagit över</span>
+        <span className="flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-full ${GIVEN_AWAY_CLASS}`} /> Bytt bort</span>
+        <span className="flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-full ${OFFERED_CLASS}`} /> Ute för byte</span>
+        <span className="flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-full ${ABSENT_CLASS}`} /> Frånvarande</span>
       </div>
       {loading ? (
         <div className="p-10 text-center text-sm text-slate-500">Laddar...</div>
       ) : (
         <>
           <div className="md:hidden">
-            <div className="flex gap-2 overflow-x-auto border-b border-slate-100 p-3">
-              {days.map((day, i) => {
-                const isToday = dateKey(day) === dateKey(new Date());
-                const isSelected = i === selectedDayIdx;
-                return (
-                  <button
-                    key={dateKey(day)}
-                    onClick={() => setSelectedDayIdx(i)}
-                    className={`flex shrink-0 flex-col items-center rounded-lg border px-3 py-2 text-xs transition-colors ${isSelected ? 'border-blue-600 bg-blue-50 text-blue-700 font-semibold' : isToday ? 'border-blue-200 text-blue-600' : 'border-slate-200 text-slate-500'}`}
+            <div className="overflow-x-auto">
+              <div className="relative" style={{ minWidth: `${MOBILE_GUTTER_PX + windowDays * MOBILE_COL_MIN[viewMode]}px` }}>
+                <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `${MOBILE_GUTTER_PX}px repeat(${windowDays}, minmax(${MOBILE_COL_MIN[viewMode]}px, 1fr))` }}>
+                  <div />
+                  {days.map((day) => (
+                    <div key={dateKey(day)} className={`border-l border-slate-200 px-1 py-1.5 text-center text-[10px] leading-tight ${dateKey(day) === dateKey(new Date()) ? 'bg-blue-50 text-blue-700' : 'text-slate-500'}`}>
+                      {isDayMode ? (
+                        <div className="flex items-center justify-between px-0.5 text-[9px] text-slate-400">
+                          {HOUR_TICKS.filter((_, i) => i % 2 === 0).map((h) => <span key={h}>{String(h).padStart(2, '0')}</span>)}
+                        </div>
+                      ) : (
+                        <>
+                          <div>{day.toLocaleDateString('sv-SE', { weekday: 'short' })}</div>
+                          <strong>{day.getDate()}/{day.getMonth() + 1}</strong>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {rowKeys.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-slate-500">Inga jourpass under den här perioden.</div>
+                ) : (
+                  <div
+                    ref={mobileRowsRef}
+                    className="relative select-none"
+                    style={{ touchAction: 'pan-y' }}
+                    onPointerDown={handleScrubPointerDown}
+                    onPointerMove={handleScrubPointerMove}
+                    onPointerUp={handleScrubPointerUp}
                   >
-                    <span>{day.toLocaleDateString('sv-SE', { weekday: 'short' })}</span>
-                    <strong>{day.getDate()} {day.toLocaleDateString('sv-SE', { month: 'short' })}</strong>
-                  </button>
-                );
-              })}
-            </div>
-            {selectedDayShifts.length === 0 ? (
-              <div className="p-8 text-center text-sm text-slate-500">Ingen jour {days[selectedDayIdx]?.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}.</div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {selectedDayShifts.map(({ shift: s, clippedStart, clippedEnd, spansWholeDay, spansMultipleDays }) => (
-                  <div key={s.id} onClick={() => openManageModal(s)} className={`flex items-center gap-3 p-4 ${isAdmin ? 'cursor-pointer transition-colors hover:bg-slate-50' : ''}`}>
-                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DUTY_DOT_CLASS[s.duty_type]}`} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold text-slate-800">{s.user_id === null ? UNASSIGNED_LABEL : profilesById.get(s.user_id)?.name || 'Okänd'}</p>
-                      <p className="text-xs text-slate-500">
-                        {DUTY_LABELS[s.duty_type]} · {spansWholeDay ? 'Hela dagen' : `${fmtTime(clippedStart.toISOString())} - ${fmtTime(clippedEnd.toISOString())}`}
-                      </p>
-                      {spansMultipleDays && <p className="text-xs text-slate-400">Hela passet: {fmtDateTime(s.starts_at)} - {fmtDateTime(s.ends_at)}</p>}
+                    {rowKeys.map((row) => {
+                      const key = `${row.user_id ?? 'unassigned'}:${row.duty_type}`;
+                      const segments = segmentsByRowKey.get(key) || [];
+                      const label = row.user_id === null ? '—' : initials(profilesById.get(row.user_id)?.name || '?');
+                      return (
+                        <div key={key} className="grid items-center border-b border-slate-100" style={{ gridTemplateColumns: `${MOBILE_GUTTER_PX}px repeat(${windowDays}, minmax(${MOBILE_COL_MIN[viewMode]}px, 1fr))`, height: '30px' }}>
+                          <div className="flex justify-center">
+                            <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[9px] font-bold ${row.user_id === null ? 'bg-slate-100 text-slate-400' : `${SCHEDULED_CLASS[row.duty_type]} text-slate-900`}`}>{label}</span>
+                          </div>
+                          <div className="relative h-full" style={{ gridColumn: `2 / span ${windowDays}` }}>
+                            {segments.map((seg, i) => {
+                              const startIso = new Date(seg.start).toISOString();
+                              const endIso = new Date(seg.end).toISOString();
+                              const leftPct = isDayMode ? hourPosition(startIso) * 100 : (position(startIso) / windowDays) * 100;
+                              const widthPct = isDayMode ? hourSpan(startIso, endIso) * 100 : (span(startIso, endIso) / windowDays) * 100;
+                              return (
+                                <div
+                                  key={`${seg.shiftId || 'given'}-${i}`}
+                                  data-shift-id={seg.shiftId || ''}
+                                  className={`absolute top-1 h-4 rounded ${STATE_CLASS[row.duty_type][seg.state]}`}
+                                  style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-emerald-600" style={{ left: `calc(${(1 - scrubFraction) * MOBILE_GUTTER_PX}px + ${scrubFraction * 100}%)` }} />
+                    <div className="pointer-events-none absolute -top-5 z-30 -translate-x-1/2 whitespace-nowrap rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{ left: `calc(${(1 - scrubFraction) * MOBILE_GUTTER_PX}px + ${scrubFraction * 100}%)` }}>
+                      {scrubTime.toLocaleDateString('sv-SE', { weekday: 'short' })} {scrubTime.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
                     </div>
                   </div>
-                ))}
+                )}
               </div>
-            )}
+            </div>
+            <div className="border-t border-slate-200 p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Personal i tjänst {scrubTime.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' })} {scrubTime.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+              </p>
+              {onDutyAtScrub.length ? (
+                <div className="space-y-2">
+                  {onDutyAtScrub.map(({ user_id, duty_type }) => (
+                    <div key={`${user_id}:${duty_type}`} className="flex items-center gap-2 text-sm">
+                      <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-slate-900 ${SCHEDULED_CLASS[duty_type]}`}>{initials(profilesById.get(user_id)?.name || '?')}</span>
+                      <Badge className={DUTY_BADGE_CLASS[duty_type]}>{DUTY_LABELS[duty_type]}</Badge>
+                      <span className="truncate font-medium text-slate-800">{profilesById.get(user_id)?.name || 'Okänd'}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="text-sm text-slate-500">Ingen jour just då.</p>}
+            </div>
           </div>
           <div className="hidden overflow-x-auto md:block">
           <div style={{ minWidth: `${200 + windowDays * VIEW_MODE_COL_MIN[viewMode]}px` }}>
@@ -398,9 +583,10 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
               <div className="p-10 text-center text-sm text-slate-500">Inga jourpass under den här perioden.</div>
             ) : (
               rowKeys.map((row) => {
-                const rowShifts = shifts.filter((s) => s.user_id === row.user_id && s.duty_type === row.duty_type);
+                const key = `${row.user_id ?? 'unassigned'}:${row.duty_type}`;
+                const segments = segmentsByRowKey.get(key) || [];
                 return (
-                  <div key={`${row.user_id ?? 'unassigned'}:${row.duty_type}`} className="grid min-h-[64px] border-b border-slate-200" style={{ gridTemplateColumns: `200px repeat(${windowDays}, minmax(${VIEW_MODE_COL_MIN[viewMode]}px, 1fr))` }}>
+                  <div key={key} className="grid min-h-[64px] border-b border-slate-200" style={{ gridTemplateColumns: `200px repeat(${windowDays}, minmax(${VIEW_MODE_COL_MIN[viewMode]}px, 1fr))` }}>
                     <div className="border-r border-slate-200 p-3">
                       <p className="truncate font-semibold text-slate-800">{row.user_id === null ? UNASSIGNED_LABEL : profilesById.get(row.user_id)?.name || 'Okänd'}</p>
                       <Badge className={DUTY_BADGE_CLASS[row.duty_type]}>{DUTY_LABELS[row.duty_type]}</Badge>
@@ -410,17 +596,20 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
                         ? HOUR_TICKS.map((h) => <div key={h} className="absolute top-0 h-full border-l border-slate-100" style={{ left: `${(h / 24) * 100}%` }} />)
                         : days.map((day) => <div key={dateKey(day)} className="absolute top-0 h-full border-l border-slate-100" style={{ left: `${(days.indexOf(day) / windowDays) * 100}%` }} />)}
                       {isTodayColumn && <div className="absolute top-0 z-20 h-full border-l-2 border-red-400" style={{ left: `${nowPct}%` }} />}
-                      {rowShifts.map((s) => {
-                        const sameDay = dateKey(new Date(s.starts_at)) === dateKey(new Date(s.ends_at));
-                        const label = sameDay ? `${fmtTime(s.starts_at)}-${fmtTime(s.ends_at)}` : `${fmtDate(s.starts_at)} ${fmtTime(s.starts_at)} - ${fmtDate(s.ends_at)} ${fmtTime(s.ends_at)}`;
-                        const leftPct = isDayMode ? hourPosition(s.starts_at) * 100 : (position(s.starts_at) / windowDays) * 100;
-                        const widthPct = isDayMode ? hourSpan(s.starts_at, s.ends_at) * 100 : (span(s.starts_at, s.ends_at) / windowDays) * 100;
+                      {segments.map((seg, i) => {
+                        const startIso = new Date(seg.start).toISOString();
+                        const endIso = new Date(seg.end).toISOString();
+                        const sameDay = dateKey(new Date(seg.start)) === dateKey(new Date(seg.end));
+                        const label = sameDay ? `${fmtTime(startIso)}-${fmtTime(endIso)}` : `${fmtDate(startIso)} ${fmtTime(startIso)} - ${fmtDate(endIso)} ${fmtTime(endIso)}`;
+                        const leftPct = isDayMode ? hourPosition(startIso) * 100 : (position(startIso) / windowDays) * 100;
+                        const widthPct = isDayMode ? hourSpan(startIso, endIso) * 100 : (span(startIso, endIso) / windowDays) * 100;
+                        const shift = seg.shiftId ? shiftById.get(seg.shiftId) : undefined;
                         return (
                           <div
-                            key={s.id}
-                            title={`${fmtDateTime(s.starts_at)} - ${fmtDateTime(s.ends_at)}${isAdmin ? ' (klicka för att hantera)' : ''}`}
-                            onClick={() => openManageModal(s)}
-                            className={`absolute z-10 mx-0.5 mt-3 h-8 overflow-hidden rounded-lg px-2 py-1 text-xs font-semibold text-white shadow-sm ${DUTY_BAR_CLASS[s.duty_type]} ${isAdmin ? 'cursor-pointer' : ''}`}
+                            key={`${seg.shiftId || 'given'}-${i}`}
+                            title={`${STATE_LABELS[seg.state]}: ${fmtDateTime(startIso)} - ${fmtDateTime(endIso)}${isAdmin && shift ? ' (klicka för att hantera)' : ''}`}
+                            onClick={() => shift && openManageModal(shift)}
+                            className={`absolute z-10 mx-0.5 mt-3 h-8 overflow-hidden rounded-lg px-2 py-1 text-xs font-semibold shadow-sm ${STATE_CLASS[row.duty_type][seg.state]} ${stateTextClass(seg.state)} ${isAdmin && shift ? 'cursor-pointer' : ''}`}
                             style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
                           >
                             {label}

@@ -110,7 +110,64 @@ inte i frontend-kod eller en edge-funktion:
   fräscha annonser som klaim-triggern skapar åt kvarvarande delar av ett
   obemannat pass, eftersom de också går via ett vanligt INSERT.
 
-## 3. Modul & frontend
+## 3. Schema-Gantt: fem tillstånd per jourtyp
+
+Dagbeskedets Gantt (både desktop och mobil) visar inte bara "vem har
+jour", utan VILKET TILLSTÅND passet är i just nu, med en egen palett
+(`STATE_CLASS` i `JourPage.tsx`, separat från de badge-färger
+Byten/Mitt schema/Behörighet använder):
+
+- **Ljus nyans per jourtyp** (blå/gul/lila) -- ordinarie schemaläggning
+  (`source`-agnostisk, bara "det här är personens eget pass").
+- **Mörk nyans per jourtyp** -- personen har TAGIT ÖVER passet via ett
+  byte. Härleds direkt från `vihem_jour_shifts.notes = 'Byte av pass'`,
+  som klaim-triggern redan sätter.
+- **Brun** (gemensam för alla jourtyper) -- personen har BYTT BORT
+  tiden till någon annan. Det finns inget kvarvarande passrad för detta
+  (ägarskapet flyttades), så det REKONSTRUERAS från klaimade annonser
+  där personen var `offered_by`, med `claim_start_at`/`claim_end_at`
+  som exakt intervall -- samma händelse som ger mottagaren ett mörkt
+  segment ger alltså avsändaren ett brunt segment i sin egen rad.
+- **Grön** (gemensam) -- passet (eller en del av det) är ute för byte
+  just nu (`vihem_jour_swap_offers.status = 'open'`), klippt till
+  `offer_start_at`/`offer_end_at`.
+- **Röd** (gemensam) -- personen är samtidigt godkänt frånvaroanmäld
+  (`vihem_staff_absence_requests.status = 'approved'`) under en period
+  då de annars skulle setts som schemalagda/tagit över/ute för byte --
+  röd målas ÖVER den färgen för den överlappande delen, högst
+  prioritet. Hämtas via `vihem_jour_absence_overlaps(from, to)`, en
+  SECURITY DEFINER-funktion som medvetet läcker NÄR (start/slutdatum)
+  men aldrig VARFÖR (`absence_type`/`comment` exponeras inte) -- en
+  avgränsad avvikelse från `vihem_staff_absence_requests`s annars
+  strikta RLS (personal ser annars bara sina egna anmälningar), motiverad
+  av att ett delat jourschema behöver kunna visa "ej i tjänst" för alla
+  som tittar på det, inte bara admin.
+
+Ett pass delas vid varje brytpunkt (passets egna gränser, den
+annonserade delens gränser, en frånvaros gränser) till en sorterad
+lista av segment, var och en färgad efter vilket tillstånd som gäller
+just då -- samma brytpunktsmönster som klaim-triggerns delning i
+databasen, fast i frontend för visualisering.
+
+### Mobil: person-rader med initialer, timelinjal och dragbart tidsreglage
+
+Mobilvyn (under `md`) fick en större omarbetning för att likna
+Daedalos referensvyer: smala rader (en per person och jourtyp, initialer
+istället för namn i en färgad cirkel -- `initials()`), en timelinjal i
+huvudet (dag/vecka/14-dagars/månads-header, eller en 24-timmarsklocka i
+dagläge), och ett DRAGBART tidsreglage (grön linje + klockslags-bubbla)
+som scrubbar en `scrubTime`-state över hela det synliga fönstret via
+pekar-events (`onPointerDown/Move/Up`, `touch-action: pan-y` så
+vertikal sidscroll fortfarande fungerar). Ett kort drag (< 6px) tolkas
+som ett TAPP istället för en drag -- tappar man på ett segment öppnar
+det "Hantera jourpass" (samma modal som desktop-Gantten), annars
+flyttar tappet reglaget dit. Under Gantt-tabellen visas "PERSONAL I
+TJÄNST [scrubbat klockslag]" -- alla som har status schemalagd/tagit
+över/ute för byte (INTE bytt bort eller frånvarande) vid exakt den
+scrubbade tidpunkten, med initialer, jourtyp-badge och fullt namn --
+uppdateras reaktivt i realtid när reglaget dras.
+
+## 4. Modul & frontend
 
 Registrerad som en valfri modul (`vihem_module_registry` +
 `vihem_organisation_modules`), avstängd som standard -- aktiveras per
@@ -199,7 +256,7 @@ mönster som `AdminStaffPage.tsx`/`listMyAgreements()`) -- ingen
 edge-funktion behövs eftersom all atomär logik redan ligger i
 databasen.
 
-## 4. Verifiering
+## 5. Verifiering
 
 ### Ursprunglig implementation
 
@@ -315,7 +372,49 @@ via den befintliga RLS-policyn på `vihem_jour_swap_offers`.
 - All testdata skapad och raderad efteråt; modulen återställd till
   avstängd.
 
-## 5. Kvarstående (inte byggt)
+### Schema-Gantt: fem tillstånd, mobilt reglage (denna utökning)
+
+Byggd via ett realistiskt scenario med den RIKTIGA byteskedjan (inte
+handskrivna testrader): Erik annonserade en delmängd av sitt pass,
+Maja klaimade den, plus en separat öppen oklaimad annons på Marias
+hela snöjourspass, plus en godkänd sjukanmälan för Erik som delvis
+överlappar hans schemalagda tid.
+Resultatet verifierat både i databasen och i webbläsaren (som riktig
+inloggad admin):
+
+- Alla fem tillstånd renderades med rätt färg OCH rätt tidsintervall
+  samtidigt i Eriks rad (röd → ljusblå → brun → ljusblå i kronologisk
+  ordning), Majas rad (mörkblå för den klaimade delen), Marias rad
+  (grön för hela det oklaimade passet) -- bekräftat via DOM-inspektion
+  av varje stapels `title`-attribut och Tailwind-klass.
+- Hover-tooltippen ("klicka för att hantera") visas bara på segment
+  som har en verklig underliggande passrad (`shiftId` satt) -- det
+  BRUNA segmentet (rekonstruerat, ingen kvarvarande rad) saknar
+  korrekt klick-affordansen.
+- Tryck på ett segment (utan drag) öppnar "Hantera jourpass" för RÄTT
+  underliggande pass, verifierat genom att simulera en riktig
+  pointerdown/pointerup på en specifik stapel och läsa av vilket pass
+  som öppnades.
+- Det dragbara tidsreglaget testat genom att simulera tryck (utan
+  rörelse, vilket enligt "kort tryck = tapp"-logiken ändå flyttar
+  reglaget om trycket inte landar på ett segment) på olika tidpunkter:
+  reglaget hoppade till exakt rätt klockslag varje gång, och
+  "PERSONAL I TJÄNST"-listan uppdaterades reaktivt -- Erik försvann
+  ur listan när reglaget flyttades in i hans bruna (bytt bort) eller
+  röda (frånvarande) segment, Maja dök upp i exakt samma ögonblick
+  hans bruna segment började.
+- Dag-, Vecka- och 14-dagarsvyerna alla testade i mobilbredd (375px)
+  -- smala rader, initialer i cirklar, korrekt tidslinjal-header
+  (timlinjal i dagläge, datumkolumner annars) i samtliga.
+- `vihem_jour_absence_overlaps` verifierad direkt mot databasen som en
+  ANNAN användare än den frånvaroanmälda (Maja såg Eriks godkända
+  frånvaro men inte en tredje persons ännu ej godkända anmälan) --
+  bekräftar att funktionen korrekt kringgår den annars strikta RLS:en
+  utan att läcka anmälningar som inte är godkända.
+- All testdata (pass, annonser, behörigheter, frånvaroanmälan) skapad
+  och raderad efteråt; modulen återställd till avstängd.
+
+## 6. Kvarstående (inte byggt)
 
 - Ingen automatisk generering (t.ex. ett cron-jobb som förlänger
   schemat N veckor framåt) -- admin klickar "Generera jourpass" manuellt
