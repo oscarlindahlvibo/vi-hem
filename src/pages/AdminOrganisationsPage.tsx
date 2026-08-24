@@ -6,6 +6,7 @@ import {
   Landmark,
   CalendarDays,
   MessageSquareText,
+  ShieldAlert,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
@@ -65,6 +66,7 @@ interface OrgFormData {
   rental_management_enabled: boolean;
   inventory_management_enabled: boolean;
   skatteverket_enabled: boolean;
+  jour_enabled: boolean;
   active: boolean;
 }
 
@@ -95,6 +97,7 @@ const defaultForm: OrgFormData = {
   rental_management_enabled: false,
   inventory_management_enabled: false,
   skatteverket_enabled: false,
+  jour_enabled: false,
   active: true,
 };
 
@@ -238,7 +241,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       const { data: moduleRows } = await supabase
         .from('vihem_organisation_modules')
         .select('organisation_id, module_key, enabled')
-        .in('module_key', ['customer_projects', 'short_stay', 'year_planning', 'meetings', 'finance', 'rental_management', 'inventory_management', 'skatteverket']);
+        .in('module_key', ['customer_projects', 'short_stay', 'year_planning', 'meetings', 'finance', 'rental_management', 'inventory_management', 'skatteverket', 'jour']);
 
       const nextOrgModules = (moduleRows || []).reduce((acc, row: any) => {
         const organisationId = row.organisation_id as string;
@@ -422,6 +425,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             enabled: form.skatteverket_enabled,
             limits: {},
           },
+          {
+            module_key: 'jour',
+            enabled: form.jour_enabled,
+            limits: {},
+          },
         ]);
       } else {
         const { data: createdOrg, error } = await supabase
@@ -474,6 +482,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
               enabled: form.skatteverket_enabled,
               limits: {},
             },
+            {
+              module_key: 'jour',
+              enabled: form.jour_enabled,
+              limits: {},
+            },
           ]);
         }
 
@@ -523,6 +536,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       rental_management_enabled: Boolean(moduleState.rental_management),
       inventory_management_enabled: Boolean(moduleState.inventory_management),
       skatteverket_enabled: Boolean(moduleState.skatteverket),
+      jour_enabled: Boolean(moduleState.jour),
       active: org.active,
     });
     setEditingOrg(org);
@@ -534,7 +548,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       .from('vihem_organisation_modules')
       .select('module_key, enabled')
       .eq('organisation_id', org.id)
-      .in('module_key', ['year_planning', 'meetings', 'finance', 'rental_management', 'inventory_management', 'skatteverket']);
+      .in('module_key', ['year_planning', 'meetings', 'finance', 'rental_management', 'inventory_management', 'skatteverket', 'jour']);
 
     if (!error) {
       const rows = (data || []) as Array<{ module_key: ModuleKey; enabled: boolean }>;
@@ -546,6 +560,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         rental_management_enabled: Boolean(rows.find(row => row.module_key === 'rental_management')?.enabled),
         inventory_management_enabled: Boolean(rows.find(row => row.module_key === 'inventory_management')?.enabled),
         skatteverket_enabled: Boolean(rows.find(row => row.module_key === 'skatteverket')?.enabled),
+        jour_enabled: Boolean(rows.find(row => row.module_key === 'jour')?.enabled),
       }));
     }
   };
@@ -1285,6 +1300,25 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                 </span>
                 <span className="block text-xs text-slate-500">
                   Ger admin en bolagsseparerad översikt över skatteåtaganden, deklarationer och myndighetssynk.
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.jour_enabled}
+                onChange={e => setForm({ ...form, jour_enabled: e.target.checked })}
+                className="mt-1 w-4 h-4 rounded border-slate-300"
+              />
+              <span>
+                <span className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <ShieldAlert className="w-4 h-4 text-blue-600" /> Aktivera Jour
+                </span>
+                <span className="block text-xs text-slate-500">
+                  Ger personal fastighetsjour och snöjour -- schema, dagbesked och passbyten.
                 </span>
               </span>
             </label>

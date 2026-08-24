@@ -22,7 +22,8 @@ export type ModuleKey =
   | 'inventory_management'
   | 'crm'
   | 'ai'
-  | 'skatteverket';
+  | 'skatteverket'
+  | 'jour';
 
 export interface Organisation {
   id: string;
@@ -1982,4 +1983,81 @@ export interface DirectDebitMandate {
   tenancy?: Tenancy | null;
   tenant?: Profile | null;
   finance_customer?: FinanceCustomer | null;
+}
+
+// ── Jour (on-call: fastighetsjour / snöjour) ────────────────────────────
+// One data model, duty_type as a field on every row -- a person can hold
+// BOTH types at once (two separate rows), never two overlapping shifts of
+// the SAME type (enforced by a real Postgres EXCLUDE constraint, see
+// migration 20260826100000_jour_module.sql).
+
+export type JourDutyType = 'fastighet' | 'sno';
+
+export interface JourEligibility {
+  id: string;
+  organisation_id: string;
+  user_id: string;
+  duty_type: JourDutyType;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JourRotationTemplate {
+  id: string;
+  organisation_id: string;
+  duty_type: JourDutyType;
+  name: string;
+  anchor_date: string;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JourRotationTemplateSlot {
+  id: string;
+  template_id: string;
+  sort_order: number;
+  user_id: string;
+  duration_days: number;
+  created_at: string;
+}
+
+export interface JourShift {
+  id: string;
+  organisation_id: string;
+  duty_type: JourDutyType;
+  user_id: string;
+  starts_at: string;
+  ends_at: string;
+  source: 'manual' | 'template';
+  rotation_template_id: string | null;
+  notes: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  user?: Pick<Profile, 'id' | 'name'> | null;
+}
+
+export type JourSwapOfferStatus = 'open' | 'claimed' | 'cancelled' | 'expired';
+
+export interface JourSwapOffer {
+  id: string;
+  organisation_id: string;
+  shift_id: string;
+  offered_by: string;
+  allow_partial: boolean;
+  note: string;
+  status: JourSwapOfferStatus;
+  claimed_by: string | null;
+  claim_start_at: string | null;
+  claim_end_at: string | null;
+  claimed_shift_id: string | null;
+  claimed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  shift?: JourShift | null;
+  offerer?: Pick<Profile, 'id' | 'name'> | null;
 }
