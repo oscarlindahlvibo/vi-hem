@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Plus, Edit2, ShieldCheck, KeyRound, Clock } from 'lucide-react';
+import { Users, Plus, Edit2, ShieldCheck, KeyRound, RefreshCw, Clock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { createUserAccount, sendUserPasswordResetEmail } from '../lib/userAdmin';
+import { createUserAccount, resetUserPassword, sendUserPasswordResetEmail } from '../lib/userAdmin';
 import { normalizePersonalNumber } from '../lib/bankid';
 import {
   Card,
@@ -106,6 +106,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   const [saveError, setSaveError] = useState('');
   const [createdCredentials, setCreatedCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
   const [resetCredentials, setResetCredentials] = useState<{ email: string } | null>(null);
+  const [generatedCredentials, setGeneratedCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
   const [resettingUserId, setResettingUserId] = useState('');
   const [scheduleRows, setScheduleRows] = useState<ScheduleFormRow[]>([]);
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(defaultNotificationSettings);
@@ -351,6 +352,23 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     }
   };
 
+  // Generates a new temporary password directly, for sharing with the
+  // staff member (e.g. verbally, SMS) instead of relying on them
+  // receiving a reset email -- separate action from handleResetPassword
+  // above, which just sends a link. They change it themselves after
+  // logging in, same as the temp password shown right after creation.
+  const handleGeneratePassword = async (staffMember: Profile) => {
+    try {
+      setResettingUserId(staffMember.id);
+      const result = await resetUserPassword(staffMember.id);
+      setGeneratedCredentials({ email: result.email, tempPassword: result.temp_password });
+    } catch (err: any) {
+      alert(err.message || 'Kunde inte generera nytt lösenord');
+    } finally {
+      setResettingUserId('');
+    }
+  };
+
   if (loading) return <LoadingPage />;
 
   return (
@@ -450,6 +468,14 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                         <KeyRound className="w-4 h-4 text-slate-500" />
                       </button>
                       <button
+                        onClick={() => handleGeneratePassword(staffMember)}
+                        title="Generera nytt lösenord"
+                        disabled={resettingUserId === staffMember.id}
+                        className="p-2 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        <RefreshCw className="w-4 h-4 text-slate-500" />
+                      </button>
+                      <button
                         onClick={() => openEditStaffModal(staffMember)}
                         className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
                       >
@@ -517,6 +543,14 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                             className="p-2 hover:bg-slate-100 rounded-lg inline-block transition-colors disabled:opacity-50"
                           >
                             <KeyRound className="w-4 h-4 text-slate-500" />
+                          </button>
+                          <button
+                            onClick={() => handleGeneratePassword(staffMember)}
+                            title="Generera nytt lösenord"
+                            disabled={resettingUserId === staffMember.id}
+                            className="p-2 hover:bg-slate-100 rounded-lg inline-block transition-colors disabled:opacity-50"
+                          >
+                            <RefreshCw className="w-4 h-4 text-slate-500" />
                           </button>
                           <button
                             onClick={() => openEditStaffModal(staffMember)}
@@ -703,6 +737,33 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
               </p>
             </div>
             <Button variant="primary" className="w-full" onClick={() => setResetCredentials(null)}>
+              Stäng
+            </Button>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!generatedCredentials}
+        onClose={() => setGeneratedCredentials(null)}
+        title="Nytt lösenord genererat"
+      >
+        {generatedCredentials && (
+          <div className="space-y-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <p className="text-sm font-semibold text-green-900 mb-1">Lösenordet är uppdaterat</p>
+              <p className="text-sm text-green-800">
+                Användaren kan logga in med <strong>{generatedCredentials.email}</strong> och lösenordet nedan.
+              </p>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <p className="text-xs font-semibold text-amber-900 uppercase mb-2">Tillfälligt lösenord</p>
+              <p className="text-xs text-amber-700 mb-2">Dela lösenordet säkert och be användaren byta det efter inloggning.</p>
+              <code className="block bg-white border border-amber-200 rounded px-3 py-2 text-sm font-mono text-amber-900 select-all">
+                {generatedCredentials.tempPassword}
+              </code>
+            </div>
+            <Button variant="primary" className="w-full" onClick={() => setGeneratedCredentials(null)}>
               Stäng
             </Button>
           </div>

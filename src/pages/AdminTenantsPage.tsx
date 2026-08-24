@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Plus, Edit2, Home, Mail, Phone, KeyRound, FileSignature } from 'lucide-react';
+import { Users, Plus, Edit2, Home, Mail, Phone, KeyRound, RefreshCw, FileSignature } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { createUserAccount, sendUserPasswordResetEmail } from '../lib/userAdmin';
+import { createUserAccount, resetUserPassword, sendUserPasswordResetEmail } from '../lib/userAdmin';
 import { normalizePersonalNumber } from '../lib/bankid';
 import {
   Card,
@@ -38,6 +38,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
   const [saveError, setSaveError] = useState('');
   const [createdCredentials, setCreatedCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
   const [resetCredentials, setResetCredentials] = useState<{ email: string } | null>(null);
+  const [generatedCredentials, setGeneratedCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
   const [resettingUserId, setResettingUserId] = useState('');
   const [tenantFormData, setTenantFormData] = useState({
     name: '',
@@ -237,6 +238,23 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
     }
   };
 
+  // Generates a new temporary password directly, for sharing with the
+  // tenant (e.g. verbally, SMS) instead of relying on them receiving a
+  // reset email -- separate action from handleResetPassword above, which
+  // just sends a link. The tenant changes it themselves after logging in,
+  // same as the temp password shown right after creating an account.
+  const handleGeneratePassword = async (tenant: Profile) => {
+    try {
+      setResettingUserId(tenant.id);
+      const result = await resetUserPassword(tenant.id);
+      setGeneratedCredentials({ email: result.email, tempPassword: result.temp_password });
+    } catch (err: any) {
+      alert(err.message || 'Kunde inte generera nytt lösenord');
+    } finally {
+      setResettingUserId('');
+    }
+  };
+
   if (loading) return <LoadingPage />;
 
   return (
@@ -309,17 +327,28 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                           <td className="py-3 px-4 text-sm font-medium text-slate-700">
                             {countActiveTenancies(tenant.id)}
                           </td>
-                          <td className="py-3 px-4 text-right">
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
                             <button
                               onClick={(event) => {
                                 event.stopPropagation();
                                 handleResetPassword(tenant);
                               }}
                               disabled={resettingUserId === tenant.id}
-                              title="Återställ lösenord"
+                              title="Skicka återställningslänk via e-post"
                               className="p-2 hover:bg-slate-100 rounded-lg inline-block transition-colors disabled:opacity-50"
                             >
                               <KeyRound className="w-4 h-4 text-slate-500" />
+                            </button>
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleGeneratePassword(tenant);
+                              }}
+                              disabled={resettingUserId === tenant.id}
+                              title="Generera nytt lösenord"
+                              className="p-2 hover:bg-slate-100 rounded-lg inline-block transition-colors disabled:opacity-50"
+                            >
+                              <RefreshCw className="w-4 h-4 text-slate-500" />
                             </button>
                           </td>
                         </tr>
@@ -365,10 +394,18 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                   <button
                     onClick={() => handleResetPassword(selectedTenant)}
                     disabled={resettingUserId === selectedTenant.id}
-                    title="Återställ lösenord"
+                    title="Skicka återställningslänk via e-post"
                     className="p-2 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
                   >
                     <KeyRound className="w-4 h-4 text-slate-600" />
+                  </button>
+                  <button
+                    onClick={() => handleGeneratePassword(selectedTenant)}
+                    disabled={resettingUserId === selectedTenant.id}
+                    title="Generera nytt lösenord"
+                    className="p-2 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw className="w-4 h-4 text-slate-600" />
                   </button>
                   <button
                     onClick={() => openEditTenantModal(selectedTenant)}
@@ -709,6 +746,33 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
               </p>
             </div>
             <Button variant="primary" className="w-full" onClick={() => setResetCredentials(null)}>
+              Stäng
+            </Button>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!generatedCredentials}
+        onClose={() => setGeneratedCredentials(null)}
+        title="Nytt lösenord genererat"
+      >
+        {generatedCredentials && (
+          <div className="space-y-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <p className="text-sm font-semibold text-green-900 mb-1">Lösenordet är uppdaterat</p>
+              <p className="text-sm text-green-800">
+                Hyresgästen kan logga in med <strong>{generatedCredentials.email}</strong> och lösenordet nedan.
+              </p>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <p className="text-xs font-semibold text-amber-900 uppercase mb-2">Tillfälligt lösenord</p>
+              <p className="text-xs text-amber-700 mb-2">Dela lösenordet säkert och be hyresgästen byta det efter inloggning.</p>
+              <code className="block bg-white border border-amber-200 rounded px-3 py-2 text-sm font-mono text-amber-900 select-all">
+                {generatedCredentials.tempPassword}
+              </code>
+            </div>
+            <Button variant="primary" className="w-full" onClick={() => setGeneratedCredentials(null)}>
               Stäng
             </Button>
           </div>
