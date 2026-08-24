@@ -23,8 +23,6 @@ Deno.serve(async (req: Request) => {
   const auth = await authenticate(req);
   if (!isAuthContext(auth)) return auth;
   const { role, organisation_id: callerOrgId } = auth.callerProfile;
-  if (!STAFF_ROLES.includes(role)) return errorJson("FORBIDDEN", "Du saknar behörighet för avtalsmodulen.", 403);
-  const isSuperadmin = role === "superadmin";
   const db = auth.adminClient;
 
   let body: any;
@@ -34,6 +32,51 @@ Deno.serve(async (req: Request) => {
     return errorJson("VALIDATION_ERROR", "Ogiltig JSON.", 400);
   }
   const action = String(body?.action || "");
+
+  // Not staff-only: any logged-in signer (tenant included) opening their
+  // OWN pending document from inside the portal, rather than digging up
+  // the emailed/texted link. Everything below this is staff/admin-only.
+  if (action === "get_my_signing_link") {
+    const agreementId = String(body?.agreement_id || "");
+    const { data: signer } = await db.from("vihem_agreement_signers").select("*").eq("agreement_id", agreementId).eq("profile_id", auth.callerId).maybeSingle();
+    if (!signer) return errorJson("NOT_FOUND", "Du är inte signatär på detta dokument.", 404);
+    if (signer.status === "signed") return errorJson("INVALID_STATUS", "Du har redan signerat detta dokument.", 409);
+    if (signer.status === "declined") return errorJson("INVALID_STATUS", "Du har redan avböjt detta dokument.", 409);
+    const { data: agreement } = await db.from("vihem_agreements").select("id, current_version_id, status").eq("id", agreementId).maybeSingle();
+    if (!agreement || !agreement.current_version_id) return errorJson("NOT_FOUND", "Dokumentet hittades inte.", 404);
+
+    // Same revoke-and-reissue pattern as "remind" below -- a stored token
+    // hash can never be re-derived into the raw token, so this always
+    // mints a fresh one rather than trying to recover an existing link.
+    const { data: existingRequest } = await db
+      .from("vihem_agreement_signature_requests")
+      .select("id, revoked_at, expires_at")
+      .eq("signer_id", signer.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingRequest && !existingRequest.revoked_at && new Date(existingRequest.expires_at) > new Date()) {
+      await db.from("vihem_agreement_signature_requests").update({ revoked_at: new Date().toISOString() }).eq("id", existingRequest.id);
+    }
+    const token = generateSigningToken();
+    const tokenHash = await hashSigningToken(token);
+    const { error: reqErr } = await db
+      .from("vihem_agreement_signature_requests")
+      .insert({
+        agreement_id: agreementId,
+        signer_id: signer.id,
+        agreement_version_id: agreement.current_version_id,
+        token_hash: tokenHash,
+        expires_at: new Date(Date.now() + REQUEST_TTL_DAYS * 86400000).toISOString(),
+      });
+    if (reqErr) return errorJson("INTERNAL_ERROR", reqErr.message, 500);
+
+    const appUrl = Deno.env.get("VIHEM_PUBLIC_APP_URL") || "https://app.vi-hem.se";
+    return json({ data: { url: buildSigningUrl(appUrl, token) } });
+  }
+
+  if (!STAFF_ROLES.includes(role)) return errorJson("FORBIDDEN", "Du saknar behörighet för avtalsmodulen.", 403);
+  const isSuperadmin = role === "superadmin";
 
   async function loadAgreement(agreementId: string) {
     const { data, error } = await db.from("vihem_agreements").select("*").eq("id", agreementId).maybeSingle();

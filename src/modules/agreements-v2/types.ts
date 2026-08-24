@@ -57,6 +57,14 @@ export interface AgreementListItem {
   sent_at: string | null;
   completed_at: string | null;
   valid_until: string | null;
+  /** The CALLING user's own signer status on this agreement (not the
+   * agreement's overall status -- those differ on a multi-signer
+   * document once some but not all have signed). Only set by
+   * listMyAgreements(); null for every other list endpoint, and null if
+   * the caller isn't a signer on this document at all (shouldn't happen
+   * for listMyAgreements(), which is scoped to signer rows to begin
+   * with, but the join is best-effort). */
+  my_signer_status: SignerStatus | null;
 }
 
 // ── Blocks ────────────────────────────────────────────────────────────────

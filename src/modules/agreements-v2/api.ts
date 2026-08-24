@@ -137,12 +137,30 @@ export async function listExistingPartyOptions(organisationId: string): Promise<
 }
 
 export async function listMyAgreements(): Promise<AgreementListItem[]> {
-  const { data, error } = await supabase
-    .from('vihem_agreements')
-    .select('id, document_number, document_type, category, title, status, created_at, updated_at, sent_at, completed_at, valid_until')
-    .order('created_at', { ascending: false });
+  const [{ data, error }, { data: userData }] = await Promise.all([
+    supabase
+      .from('vihem_agreements')
+      .select('id, document_number, document_type, category, title, status, created_at, updated_at, sent_at, completed_at, valid_until')
+      .order('created_at', { ascending: false }),
+    supabase.auth.getUser(),
+  ]);
   if (error) throw new AgreementApiError('DB_READ_FAILED', error.message);
-  return (data ?? []) as AgreementListItem[];
+  const agreements = (data ?? []) as Array<Omit<AgreementListItem, 'my_signer_status'>>;
+  if (!userData.user || agreements.length === 0) {
+    return agreements.map((a) => ({ ...a, my_signer_status: null }));
+  }
+  // A second, separate query rather than a join -- the agreement's own
+  // "signer self read" RLS policy and the signers table's are two
+  // different policies (see vihem_agreement_signers/vihem_agreements
+  // policies), and PostgREST embeds don't re-evaluate RLS per embedded
+  // row the way two plain selects reliably do.
+  const { data: signers } = await supabase
+    .from('vihem_agreement_signers')
+    .select('agreement_id, status')
+    .eq('profile_id', userData.user.id)
+    .in('agreement_id', agreements.map((a) => a.id));
+  const statusByAgreement = new Map((signers ?? []).map((s: any) => [s.agreement_id, s.status]));
+  return agreements.map((a) => ({ ...a, my_signer_status: statusByAgreement.get(a.id) ?? null }));
 }
 
 // ── Attachments ──────────────────────────────────────────────────────────
@@ -213,6 +231,18 @@ export function cancelAgreement(agreementId: string): Promise<{ ok: boolean }> {
 }
 export function resendFinalPdf(agreementId: string): Promise<{ ok: boolean; deliveries?: { party: string; email: string; ok: boolean; error?: string }[] }> {
   return invokeWorkflow('resend_final_pdf', { agreement_id: agreementId });
+}
+/**
+ * For an already logged-in signer (e.g. a tenant) opening their own
+ * pending document from inside the portal instead of an emailed/texted
+ * link -- mints a fresh signing-link URL (same /sign?token=... page as
+ * every other signer uses) scoped to whichever of THEIR OWN signer rows
+ * matches this agreement. Not staff-only, unlike every other function in
+ * this section -- see vihem-agreements-workflow/index.ts's early
+ * get_my_signing_link branch.
+ */
+export function getMySigningLink(agreementId: string): Promise<{ url: string }> {
+  return invokeWorkflow('get_my_signing_link', { agreement_id: agreementId });
 }
 
 // ── Public signing (used by PublicAgreementSignPage) ────────────────────

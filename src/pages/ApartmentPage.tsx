@@ -33,7 +33,7 @@ import { BANKID_ENABLED, initiateBankIDSign } from '../lib/bankid';
 import { useBankIdFlow } from '../hooks/useBankIdFlow';
 import { buildGeneratedDocumentWithImages } from '../lib/generatedDocuments';
 import { Tenancy, Apartment, Property } from '../types';
-import { listMyAgreements } from '../modules/agreements-v2/api';
+import { getMySigningLink, listMyAgreements, AgreementApiError } from '../modules/agreements-v2/api';
 import type { AgreementListItem } from '../modules/agreements-v2/types';
 
 interface ContactInfo {
@@ -134,6 +134,7 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
   const [inspections, setInspections] = useState<any[]>([]);
   const [contracts, setContracts] = useState<any[]>([]);
   const [agreementsV2, setAgreementsV2] = useState<AgreementListItem[]>([]);
+  const [openingAgreementId, setOpeningAgreementId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSignModal, setShowSignModal] = useState(false);
   const [signingContract, setSigningContract] = useState<any>(null);
@@ -351,6 +352,22 @@ Signeringsmetod: Handskriven signatur`,
     archived: 'bg-slate-100 text-slate-500',
   };
 
+  // Mints a fresh signing link for THIS tenant's own signer row and
+  // navigates there directly -- same /sign?token=... page every other
+  // signer uses, just without needing to dig up an emailed/texted link.
+  // Full navigation (not SPA routing): that page is deliberately
+  // standalone, no Layout chrome (see its own header comment).
+  const handleOpenAgreementV2 = async (agreementId: string) => {
+    setOpeningAgreementId(agreementId);
+    try {
+      const { url } = await getMySigningLink(agreementId);
+      window.location.href = url;
+    } catch (err) {
+      alert(err instanceof AgreementApiError ? err.message : 'Kunde inte öppna dokumentet.');
+      setOpeningAgreementId(null);
+    }
+  };
+
   const inspectionTypeLabel: Record<string, string> = {
     move_in: 'Inflyttning',
     move_out: 'Utflyttning',
@@ -527,10 +544,13 @@ Signeringsmetod: Handskriven signatur`,
 
             {/* Agreements V2 (beta) -- documents where this tenant is a
                 signer, e.g. sent for signing via the new Avtal V2 module.
-                Read-only here: creating/managing happens on the staff
-                side, this just lets the tenant see status. Separate card
-                from the legacy "Hyresavtal" one above -- different data
-                source, never merged. */}
+                Creating/managing still happens on the staff side, but
+                pending signatures are actionable here -- clicking one
+                mints a fresh signing link (getMySigningLink) and takes
+                the tenant straight to it, no need to dig up the emailed/
+                texted link separately. Separate card from the legacy
+                "Hyresavtal" one above -- different data source, never
+                merged. */}
             {agreementsV2.length > 0 && (
               <Card className="p-6">
                 <div className="flex items-center gap-2 mb-4">
@@ -538,17 +558,30 @@ Signeringsmetod: Handskriven signatur`,
                   <h3 className="text-base font-semibold text-slate-800">Avtal</h3>
                 </div>
                 <div className="space-y-3">
-                  {agreementsV2.map((doc) => (
-                    <div key={doc.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                      <div>
-                        <p className="text-sm font-medium text-slate-800">{doc.title || doc.document_number}</p>
-                        <p className="text-xs text-slate-500">{doc.document_number}</p>
+                  {agreementsV2.map((doc) => {
+                    const needsMySignature = doc.my_signer_status === 'pending' || doc.my_signer_status === 'sent' || doc.my_signer_status === 'viewed';
+                    return (
+                      <div
+                        key={doc.id}
+                        onClick={needsMySignature ? () => handleOpenAgreementV2(doc.id) : undefined}
+                        className={`flex items-center justify-between p-3 bg-slate-50 rounded-lg ${needsMySignature ? 'cursor-pointer transition-colors hover:bg-slate-100' : ''}`}
+                      >
+                        <div>
+                          <p className="text-sm font-medium text-slate-800">{doc.title || doc.document_number}</p>
+                          <p className="text-xs text-slate-500">{doc.document_number}</p>
+                        </div>
+                        {needsMySignature ? (
+                          <span className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
+                            {openingAgreementId === doc.id ? 'Öppnar...' : 'Granska & signera'}
+                          </span>
+                        ) : (
+                          <Badge className={agreementV2StatusClass[doc.status] || 'bg-slate-100 text-slate-600'}>
+                            {agreementV2StatusLabel[doc.status] || doc.status}
+                          </Badge>
+                        )}
                       </div>
-                      <Badge className={agreementV2StatusClass[doc.status] || 'bg-slate-100 text-slate-600'}>
-                        {agreementV2StatusLabel[doc.status] || doc.status}
-                      </Badge>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </Card>
             )}

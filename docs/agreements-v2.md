@@ -1034,3 +1034,87 @@ rätt block, och sammanställningssidan `Grundkostnad: 8000.00 kr` + `+
 Tvättmaskin & torktumlare: 500.00 kr` + internetraden markerad `(ej
 valt)` och exkluderad, `Totalt: 8500.00 kr` — exakt (8000 + 500,
 internetraden korrekt uteslutet).
+
+## 26. Hyresavtalsmallar, signering i portalen och Dokument-sidan (tillagd samma dag)
+
+Tre separata men sammanhängande tillägg, alla i ett svep: färdiga mallar
+motsvarande V1:s "hyresavtal lägenhet"/"hyresavtal lokal", ett sätt för
+en hyresgäst att faktiskt signera direkt i sin egen inloggade portal
+(inte bara via mejl/SMS-länk), och en bro till "Dokument"-sidan så det
+signerade avtalet dyker upp där tenanten redan är van att leta.
+
+**Mallar** (migration `20260824140000_agreement_v2_lease_templates.sql`):
+två `vihem_agreement_templates`-rader, "Hyresavtal - Lägenhet" och
+"Hyresavtal - Lokal", portade från V1:s §-numrerade
+fritextmallar (`InspectionsPage.tsx`s `generateApartmentContractText`/
+`generatePremisesContractText`) till Avtal V2:s blockmodell -- samma
+juridiska boilerplate och paragrafstruktur, men `{{tenant.name}}`/
+`{{apartment.address}}`/`{{organisation.name}}`-dynamiska fält istället
+för hårdkodad text, och en riktig `price_table` för hyran (moms/RUT/ROT
+tillgängligt om det någonsin blir aktuellt, till skillnad från V1:s
+fritextrad). Seedas per organisation (`INSERT ... SELECT ... FROM
+vihem_organisations`), inte mot ett hårdkodat organisation_id -- se
+migrationens header för samma "en organisation i praktiken idag"-
+resonemang som redan gäller för BankID-inloggningens organisationsval.
+
+**Signering direkt i portalen**: `vihem-agreements-workflow` fick en ny
+action, `get_my_signing_link` -- till skillnad från modulens övriga
+actions (staff-only) är denna öppen för VILKEN inloggad signatär som
+helst (hyresgäst inkluderad), men strikt scopad till signatärrader där
+`profile_id` matchar anroparens egen `auth.uid()`. Mintar en färsk
+signeringslänk (samma revoke-och-återutfärda-mönster som `remind`
+redan använder -- en lagrad tokenhash kan aldrig göras om till
+klartext) och returnerar URL:en istället för att skicka den via
+mejl/SMS. `ApartmentPage.tsx`s befintliga "Avtal"-kort (tidigare
+skrivskyddat, bara status) är nu klickbart när `my_signer_status`
+(nytt fält på `listMyAgreements()`s resultat, en andra RLS-scopad
+fråga mot `vihem_agreement_signers where profile_id = auth.uid()`
+eftersom agreement-radens EGEN status inte räcker på ett
+flersignatärsdokument) visar att just den här hyresgästen fortfarande
+behöver agera -- klick mintar länken och navigerar dit direkt (samma
+fristående `/sign?token=...`-sida alla andra signatärer redan
+använder).
+
+**Bro till Dokument-sidan**: `maybeCompleteAgreement()` i
+`_shared/agreement-signing.ts` (redan den delade completion-logiken för
+både handskriven och BankID-signering, se avsnitt 10) fick ett nytt
+sista steg -- när ett avtal med en `vihem_agreement_entity_links`-koppling
+av typen `tenant` blir färdigsignerat, kopieras den slutliga PDF:en in i
+`vihem-documents`-bucketen (INTE refererad på plats i
+`vihem-agreements`-bucketen, vars lagringspolicyer avsiktligt är
+staff-only) och en `vihem_documents`-rad skapas
+(`visibility:'tenant'`, `contract_status:'signed'`,
+`document_category` härledd från avtalets kategori-text). Det gör att
+`DocumentsPage.tsx` -- redan byggd för att läsa `storage_bucket`/
+`storage_path` och redan läsbar av vilken aktiv profil som helst mot
+den bucketen -- visar det signerade avtalet utan någon ändring i den
+sidan alls. Best-effort: ett avtal utan hyresgäst-koppling (t.ex. ett
+B2B-avtal) har helt enkelt inget att spegla, inte ett fel.
+
+**Verifiering**: `npm run typecheck`/`eslint`/`build` gröna,
+Deno-sidan typkontrollerad separat. Mallarnas dynamiska fält kördes
+genom den RIKTIGA `resolveBlocks()`/`mergeEntityContext()`-koden
+(samma `esbuild`-till-Node-teknik som tidigare verifieringar denna
+session) med en realistisk hyresgäst/lägenhet/fastighets-kontext --
+samtliga tokens (`{{tenant.name}}`, `{{apartment.address}}`,
+`{{organisation.name}}` osv.) löstes korrekt till rätt värden. Hela
+completion-kedjan kördes med den RIKTIGA `maybeCompleteAgreement()`-
+koden mot ett riktigt testavtal med en riktig hyresgästprofil och en
+`tenant`-entitetslänk: status gick till `signed`, en riktig
+`vihem_documents`-rad skapades med rätt `tenant_id`/
+`document_category`/bucket/sökväg, och PDF:en kopierades verkligen till
+`vihem-documents`-bucketen (bekräftat via en riktig
+storage-listning). `get_my_signing_link`s autentiseringsspärr testad
+live (avvisar anrop utan giltig session). All testdata (testavtal,
+signatärer, entitetslänkar, den kopierade PDF:en) skapad och raderad i
+den lokala databasen efteråt.
+
+**Inte gjort**: en fullständig klick-för-klick-verifiering av
+`get_my_signing_link`s lyckade väg (mint länk → navigera → signera) som
+en riktigt inloggad hyresgäst i webbläsaren -- den lokala
+Auth-tjänstens lösenordsinloggning slutade fungera under en tidigare
+verifiering samma dag (miljöfel, inte relaterat till denna kod, se
+avsnitt 10:s motsvarande notering). Kompenserat av att den underliggande
+databaslogiken är strukturellt identisk med `remind`-actionen (redan
+bevisat fungerande mönster) och autentiseringsspärren är verifierad på
+riktigt.
