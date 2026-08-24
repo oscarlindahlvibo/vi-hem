@@ -123,6 +123,17 @@ organisation i Organisationer-sidan (superadmin) eller direkt i databasen.
   tidszoner med positiv offset (t.ex. Europe/Stockholm) -- detta orsakade
   tidigare att "idag" (både pill-markeringen och auto-valet) visade FEL
   dag.
+  **Vygranularitet är valbar**: Dag/Vecka/14 dagar/Månad
+  (`ViewMode`, `VIEW_MODE_DAYS` = 1/7/14/30), en knappgrupp ovanför
+  tidslinjen. Att byta vy hoppar tillbaka till "idag" för den nya
+  granulariteten (`anchorForMode()`) istället för att behålla en
+  eventuellt udda deljusterad startpunkt. Kolumnbredden per dag
+  (`VIEW_MODE_COL_MIN`) är bredare i Dag/Vecka-läge (plats för
+  tid-etiketter) och smalare i 14-dagars/Månads-läge (fler kolumner
+  måste rymmas). Gantt-stapelns synliga text visar nu klockslag, inte
+  bara datum -- `HH:MM-HH:MM` när passet ligger inom en enda dag,
+  annars fullt datum+tid för start/slut -- så att en delning mitt på
+  dygnet är läsbar direkt i stapeln, inte bara i hover-tooltippen.
   **Admin kan klicka på ett pass** (både i Gantt-stapeln och
   mobil-listraden) för att öppna "Hantera jourpass" med fyra
   handlingar: **Annonsera för byte** (samma annons-flöde som "Mitt

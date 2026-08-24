@@ -20,7 +20,12 @@ const DUTY_BADGE_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-100
 const DUTY_DOT_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-500', sno: 'bg-orange-500', stad: 'bg-emerald-500' };
 const DUTY_ORDER: Record<JourDutyType, number> = { fastighet: 0, sno: 1, stad: 2 };
 const UNASSIGNED_LABEL = 'Obemannat';
-const WINDOW_DAYS = 14;
+
+type ViewMode = 'day' | 'week' | 'twoweeks' | 'month';
+const VIEW_MODES: ViewMode[] = ['day', 'week', 'twoweeks', 'month'];
+const VIEW_MODE_LABELS: Record<ViewMode, string> = { day: 'Dag', week: 'Vecka', twoweeks: '14 dagar', month: 'Månad' };
+const VIEW_MODE_DAYS: Record<ViewMode, number> = { day: 1, week: 7, twoweeks: 14, month: 30 };
+const VIEW_MODE_COL_MIN: Record<ViewMode, number> = { day: 220, week: 110, twoweeks: 64, month: 44 };
 
 function dateKey(value: Date) { return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`; }
 function fmtTime(value: string) { return new Date(value).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }); }
@@ -91,8 +96,14 @@ export function JourPage() {
 
 // ── Dagbesked: Gantt-liknande tidslinje ─────────────────────────────────
 
+function anchorForMode(mode: ViewMode, base: Date) {
+  if (mode === 'day') { const d = new Date(base); d.setHours(0, 0, 0, 0); return d; }
+  return startOfWeek(base);
+}
+
 function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId }: { organisationId: string; profilesById: Map<string, Pick<Profile, 'id' | 'name'>>; profiles: Pick<Profile, 'id' | 'name'>[]; isAdmin: boolean; userId: string }) {
-  const [anchor, setAnchor] = useState(() => startOfWeek(new Date()));
+  const [viewMode, setViewMode] = useState<ViewMode>('twoweeks');
+  const [anchor, setAnchor] = useState(() => anchorForMode('twoweeks', new Date()));
   const [shifts, setShifts] = useState<JourShift[]>([]);
   const [openOfferShiftIds, setOpenOfferShiftIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -109,12 +120,15 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
   const [splitAt, setSplitAt] = useState('');
   const [splitSecondOwner, setSplitSecondOwner] = useState('');
   const [assignTo, setAssignTo] = useState('');
-  const days = useMemo(() => Array.from({ length: WINDOW_DAYS }, (_, i) => { const d = new Date(anchor); d.setDate(anchor.getDate() + i); return d; }), [anchor]);
+  const windowDays = VIEW_MODE_DAYS[viewMode];
+  const days = useMemo(() => Array.from({ length: windowDays }, (_, i) => { const d = new Date(anchor); d.setDate(anchor.getDate() + i); return d; }), [anchor, windowDays]);
+
+  const changeViewMode = (mode: ViewMode) => { setViewMode(mode); setAnchor(anchorForMode(mode, new Date())); };
 
   const load = useCallback(async () => {
     setLoading(true);
     const from = days[0].toISOString();
-    const to = new Date(days[WINDOW_DAYS - 1].getTime() + 86400000).toISOString();
+    const to = new Date(days[days.length - 1].getTime() + 86400000).toISOString();
     const [{ data: shiftRows }, { data: offerRows }] = await Promise.all([
       supabase.from('vihem_jour_shifts').select('*').eq('organisation_id', organisationId).lt('starts_at', to).gt('ends_at', from).order('starts_at'),
       supabase.from('vihem_jour_swap_offers').select('shift_id').eq('organisation_id', organisationId).eq('status', 'open'),
@@ -155,8 +169,8 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
       });
   }, [shifts, selectedDayIdx, days, profilesById]);
 
-  const position = (value: string) => Math.max(0, Math.min(WINDOW_DAYS - 1, Math.floor((new Date(value).getTime() - days[0].getTime()) / 86400000)));
-  const span = (start: string, end: string) => Math.max(1, Math.min(WINDOW_DAYS - position(start), Math.ceil((new Date(end).getTime() - Math.max(new Date(start).getTime(), days[0].getTime())) / 86400000)));
+  const position = (value: string) => Math.max(0, Math.min(windowDays - 1, Math.floor((new Date(value).getTime() - days[0].getTime()) / 86400000)));
+  const span = (start: string, end: string) => Math.max(1, Math.min(windowDays - position(start), Math.ceil((new Date(end).getTime() - Math.max(new Date(start).getTime(), days[0].getTime())) / 86400000)));
 
   const rowKeys = useMemo(() => {
     const seen = new Map<string, { user_id: string | null; duty_type: JourDutyType }>();
@@ -280,12 +294,25 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
         <div>
           <h2 className="font-semibold text-slate-900">Dagbesked</h2>
-          <p className="text-sm text-slate-500">Vem som har jour, {WINDOW_DAYS} dagar framåt från valt datum.</p>
+          <p className="text-sm text-slate-500">Vem som har jour, {windowDays} {windowDays === 1 ? 'dag' : 'dagar'} framåt från valt datum.</p>
         </div>
-        <div className="flex gap-2">
-          <Button size="sm" variant="secondary" onClick={() => { const next = new Date(anchor); next.setDate(anchor.getDate() - WINDOW_DAYS); setAnchor(next); }}><ArrowLeft className="h-4 w-4" /></Button>
-          <Button size="sm" variant="secondary" onClick={() => setAnchor(startOfWeek(new Date()))}>Idag</Button>
-          <Button size="sm" variant="secondary" onClick={() => { const next = new Date(anchor); next.setDate(anchor.getDate() + WINDOW_DAYS); setAnchor(next); }}><ArrowRight className="h-4 w-4" /></Button>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
+            {VIEW_MODES.map((mode) => (
+              <button
+                key={mode}
+                onClick={() => changeViewMode(mode)}
+                className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${viewMode === mode ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+              >
+                {VIEW_MODE_LABELS[mode]}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" onClick={() => { const next = new Date(anchor); next.setDate(anchor.getDate() - windowDays); setAnchor(next); }}><ArrowLeft className="h-4 w-4" /></Button>
+            <Button size="sm" variant="secondary" onClick={() => setAnchor(anchorForMode(viewMode, new Date()))}>Idag</Button>
+            <Button size="sm" variant="secondary" onClick={() => { const next = new Date(anchor); next.setDate(anchor.getDate() + windowDays); setAnchor(next); }}><ArrowRight className="h-4 w-4" /></Button>
+          </div>
         </div>
       </div>
       <div className="flex items-center gap-4 border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
@@ -334,8 +361,8 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
             )}
           </div>
           <div className="hidden overflow-x-auto md:block">
-          <div className="min-w-[1120px]">
-            <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `200px repeat(${WINDOW_DAYS}, minmax(64px, 1fr))` }}>
+          <div style={{ minWidth: `${200 + windowDays * VIEW_MODE_COL_MIN[viewMode]}px` }}>
+            <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `200px repeat(${windowDays}, minmax(${VIEW_MODE_COL_MIN[viewMode]}px, 1fr))` }}>
               <div className="p-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Person</div>
               {days.map((day) => (
                 <div key={dateKey(day)} className={`border-l border-slate-200 p-2 text-center text-xs ${dateKey(day) === dateKey(new Date()) ? 'bg-blue-50 text-blue-700' : 'text-slate-500'}`}>
@@ -350,24 +377,28 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
               rowKeys.map((row) => {
                 const rowShifts = shifts.filter((s) => s.user_id === row.user_id && s.duty_type === row.duty_type);
                 return (
-                  <div key={`${row.user_id ?? 'unassigned'}:${row.duty_type}`} className="grid min-h-[64px] border-b border-slate-200" style={{ gridTemplateColumns: `200px repeat(${WINDOW_DAYS}, minmax(64px, 1fr))` }}>
+                  <div key={`${row.user_id ?? 'unassigned'}:${row.duty_type}`} className="grid min-h-[64px] border-b border-slate-200" style={{ gridTemplateColumns: `200px repeat(${windowDays}, minmax(${VIEW_MODE_COL_MIN[viewMode]}px, 1fr))` }}>
                     <div className="border-r border-slate-200 p-3">
                       <p className="truncate font-semibold text-slate-800">{row.user_id === null ? UNASSIGNED_LABEL : profilesById.get(row.user_id)?.name || 'Okänd'}</p>
                       <Badge className={DUTY_BADGE_CLASS[row.duty_type]}>{DUTY_LABELS[row.duty_type]}</Badge>
                     </div>
-                    <div className={`relative col-span-${WINDOW_DAYS} bg-white`} style={{ gridColumn: `2 / span ${WINDOW_DAYS}` }}>
-                      {days.map((day) => <div key={dateKey(day)} className="absolute top-0 h-full border-l border-slate-100" style={{ left: `${(days.indexOf(day) / WINDOW_DAYS) * 100}%` }} />)}
-                      {rowShifts.map((s) => (
-                        <div
-                          key={s.id}
-                          title={`${fmtDateTime(s.starts_at)} - ${fmtDateTime(s.ends_at)}${isAdmin ? ' (klicka för att hantera)' : ''}`}
-                          onClick={() => openManageModal(s)}
-                          className={`absolute z-10 mx-0.5 mt-3 h-8 overflow-hidden rounded-lg px-2 py-1 text-xs font-semibold text-white shadow-sm ${DUTY_BAR_CLASS[s.duty_type]} ${isAdmin ? 'cursor-pointer' : ''}`}
-                          style={{ left: `${(position(s.starts_at) / WINDOW_DAYS) * 100}%`, width: `${(span(s.starts_at, s.ends_at) / WINDOW_DAYS) * 100}%` }}
-                        >
-                          {fmtDate(s.starts_at)}-{fmtDate(s.ends_at)}
-                        </div>
-                      ))}
+                    <div className="relative bg-white" style={{ gridColumn: `2 / span ${windowDays}` }}>
+                      {days.map((day) => <div key={dateKey(day)} className="absolute top-0 h-full border-l border-slate-100" style={{ left: `${(days.indexOf(day) / windowDays) * 100}%` }} />)}
+                      {rowShifts.map((s) => {
+                        const sameDay = dateKey(new Date(s.starts_at)) === dateKey(new Date(s.ends_at));
+                        const label = sameDay ? `${fmtTime(s.starts_at)}-${fmtTime(s.ends_at)}` : `${fmtDate(s.starts_at)} ${fmtTime(s.starts_at)} - ${fmtDate(s.ends_at)} ${fmtTime(s.ends_at)}`;
+                        return (
+                          <div
+                            key={s.id}
+                            title={`${fmtDateTime(s.starts_at)} - ${fmtDateTime(s.ends_at)}${isAdmin ? ' (klicka för att hantera)' : ''}`}
+                            onClick={() => openManageModal(s)}
+                            className={`absolute z-10 mx-0.5 mt-3 h-8 overflow-hidden rounded-lg px-2 py-1 text-xs font-semibold text-white shadow-sm ${DUTY_BAR_CLASS[s.duty_type]} ${isAdmin ? 'cursor-pointer' : ''}`}
+                            style={{ left: `${(position(s.starts_at) / windowDays) * 100}%`, width: `${(span(s.starts_at, s.ends_at) / windowDays) * 100}%` }}
+                          >
+                            {label}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );
