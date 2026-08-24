@@ -9,7 +9,23 @@ export interface BankIDResult { personalNumber: string; name: string; signature:
 
 async function invoke<T>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('vihem-bankid', { body });
-  if (error) throw new BankIDError('requestFailed', data?.error || error.message || 'BankID-anropet misslyckades.');
+  if (error) {
+    // On a non-2xx response, supabase-js leaves `data` null and `error` a
+    // generic FunctionsHttpError ("Edge Function returned a non-2xx status
+    // code") -- the actual {error: "..."} body vihem-bankid/index.ts sent
+    // is only reachable via error.context, the raw Response object. Same
+    // fix as AgreementApiError's unwrap() in modules/agreements-v2/api.ts.
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const parsed = await context.clone().json();
+        if (parsed?.error) throw new BankIDError(String(parsed.hintCode || 'failed'), String(parsed.error));
+      } catch (parseErr) {
+        if (parseErr instanceof BankIDError) throw parseErr;
+      }
+    }
+    throw new BankIDError('requestFailed', error.message || 'BankID-anropet misslyckades.');
+  }
   if (data?.error) throw new BankIDError(String(data.hintCode || 'failed'), String(data.error));
   return data as T;
 }
