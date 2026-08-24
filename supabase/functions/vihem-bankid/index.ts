@@ -70,11 +70,24 @@ Deno.serve(async (req) => {
       return json({ ok: true, ...order });
     }
 
+    if (action === "start_link") {
+      // Self-service "koppla mitt konto till BankID" for an already
+      // logged-in user (any role) -- gets a real, BankID-verified
+      // personnummer onto their own profile so a FUTURE start_auth login
+      // can find them, without needing an admin to type it in by hand.
+      if (!profile?.organisation_id) return json({ error: "Du måste vara inloggad för att koppla BankID." }, 401);
+      const settings = await getSettings(db, profile.organisation_id);
+      if (!settings?.enabled || !settings.login_enabled) return json({ error: "BankID-inloggning är inte aktiverad för organisationen." }, 403);
+      const order = await startProvider(settings, "Koppla ditt BankID till ditt VI-HEM-konto", "", req);
+      await db.from("vihem_bankid_orders").insert({ organisation_id: profile.organisation_id, order_ref: order.orderRef, flow: "link", user_id: profile.id });
+      return json({ ok: true, ...order });
+    }
+
     if (action === "collect") {
       const orderRef = String(body.order_ref || "");
       const { data: order } = await db.from("vihem_bankid_orders").select("*").eq("order_ref", orderRef).maybeSingle();
       if (!order || new Date(order.expires_at) < new Date()) return json({ error: "BankID-sessionen har gått ut." }, 410);
-      if (order.flow === "sign" && (!profile || profile.id !== order.user_id)) return json({ error: "Obehörig signering." }, 403);
+      if ((order.flow === "sign" || order.flow === "link") && (!profile || profile.id !== order.user_id)) return json({ error: order.flow === "sign" ? "Obehörig signering." : "Obehörig länkning." }, 403);
       const settings = await getSettings(db, order.organisation_id);
       const result = await collectProvider(settings, orderRef);
       if (result.status === "pending") return json(result);
@@ -87,6 +100,20 @@ Deno.serve(async (req) => {
         const { error } = await db.from("vihem_contract_signatures").update({ tenant_bankid_personal_number: pno, tenant_bankid_signature: completion.signature || "", tenant_bankid_signed_at: now, tenant_signature_method: "bankid", tenant_signed_at: now, tenant_signature_name: completion.user?.name || "", status: "signed" }).eq("id", order.contract_id);
         if (error) throw error;
         return json({ ...result, signed: true });
+      }
+      if (order.flow === "link") {
+        // Unlike start_auth's login flow, the user is already identified
+        // (order.user_id, set by start_link below from the authenticated
+        // caller) -- this just writes the BankID-VERIFIED personnummer onto
+        // THEIR OWN profile. Never trust a personnummer typed into a form
+        // for this; it must come from an actual completed BankID order.
+        const normalizedPno = pno.replace(/\D/g, "");
+        if (!normalizedPno) return json({ ...result, linked: false, error: "BankID godkändes men inget personnummer kunde läsas." });
+        const { data: conflict } = await db.from("vihem_profiles").select("id").eq("organisation_id", order.organisation_id).eq("bankid_personal_number", normalizedPno).neq("id", order.user_id).maybeSingle();
+        if (conflict) return json({ ...result, linked: false, error: "Detta BankID är redan kopplat till ett annat VI-HEM-konto." });
+        const { error } = await db.from("vihem_profiles").update({ bankid_personal_number: normalizedPno, bankid_linked_at: new Date().toISOString(), auth_method: profile.auth_method === "password" ? "both" : "bankid" }).eq("id", order.user_id);
+        if (error) throw error;
+        return json({ ...result, linked: true });
       }
       const normalizedPno = pno.replace(/\D/g, "");
       if (!normalizedPno) return json({ ...result, login_ready: false, error: "BankID godkändes men inget personnummer kunde läsas." });
@@ -102,7 +129,7 @@ Deno.serve(async (req) => {
 });
 
 function getAuthClient(req: Request) { const headers = { Authorization: req.headers.get("Authorization") || "" }; return { client: createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers } }) }; }
-async function getProfile(db: any, id: string) { const { data } = await db.from("vihem_profiles").select("id,role,organisation_id,email").eq("id", id).maybeSingle(); return data; }
+async function getProfile(db: any, id: string) { const { data } = await db.from("vihem_profiles").select("id,role,organisation_id,email,auth_method").eq("id", id).maybeSingle(); return data; }
 async function getSettings(db: any, organisationId: string) { const { data } = await db.from("vihem_bankid_settings").select("*").eq("organisation_id", organisationId).maybeSingle(); return data; }
 function publicSettings(s: any) { return { configured: Boolean(s?.encrypted_api_user && s?.encrypted_password && s?.encrypted_company_api_guid), enabled: Boolean(s?.enabled), login_enabled: Boolean(s?.login_enabled), signing_enabled: Boolean(s?.signing_enabled), environment: s?.environment || "test", api_user_hint: s?.api_user_hint || "", company_api_guid_hint: s?.company_api_guid_hint || "", provider_note: s?.provider_note || "", updated_at: s?.updated_at || null }; }
 async function startProvider(s: any, visible: string, nonVisible: string, req: Request) { const credentials = await credentialsFor(s); const response = await fetch(signUrl(s), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...credentials, endUserIp: (req.headers.get("x-forwarded-for") || "0.0.0.0").split(",")[0].trim(), userVisibleData: visible, userNonVisibleData: nonVisible, getQr: true }) }); const data = await response.json(); if (!response.ok) throw new Error(data?.message || `BankSignering start misslyckades (${response.status}).`); const r = data?.apiCallResponse?.Response || data?.Response || data; if (!r?.OrderRef) throw new Error("BankSignering returnerade inget OrderRef."); return { orderRef: String(r.OrderRef), autoStartToken: String(r.AutoStartToken || ""), qrImage: r.QrImage || null }; }

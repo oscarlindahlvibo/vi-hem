@@ -1,16 +1,18 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { ModuleKey, Role } from '../types';
 import { AppLogo } from './AppLogo';
 import { OfflineStatus } from './OfflineStatus';
 import { Button, Input, Modal } from './ui';
+import { useBankIdFlow } from '../hooks/useBankIdFlow';
+import { initiateBankIDLink, formatPersonalNumber } from '../lib/bankid';
 import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
   ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase,
   BedDouble, CalendarDays, Landmark, MessageSquareText, Monitor, ScanLine, SlidersHorizontal,
-  Truck, Package, FileSpreadsheet, Mail, FileSignature,
+  Truck, Package, FileSpreadsheet, Mail, FileSignature, ShieldCheck,
 } from 'lucide-react';
 
 interface NavItem {
@@ -38,7 +40,7 @@ interface LayoutProps {
 }
 
 export function Layout({ children, currentPage, onNavigate, notificationCount = 0, chatNotificationCount = 0, enabledModules = {} }: LayoutProps) {
-  const { user, signOut } = useAuth();
+  const { user, signOut, bankIDAvailable, refreshProfile } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -46,6 +48,10 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordError, setPasswordError] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState('');
+  const [bankIdModalOpen, setBankIdModalOpen] = useState(false);
+  const [bankIdLinkedNotice, setBankIdLinkedNotice] = useState(false);
+  const bankIdLink = useBankIdFlow('link');
+  const bankIdBusy = bankIdLink.status === 'starting' || bankIdLink.status === 'redirecting' || bankIdLink.status === 'pending';
 
   const navGroups: NavGroup[] = [
     { label: 'Hem', icon: <Home className="w-5 h-5" />, items: [
@@ -174,6 +180,15 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     setConfirmPassword('');
   };
 
+  // The hook only takes the user through BankID approval -- the profile
+  // row is already updated server-side by then (vihem-bankid's collect
+  // action for flow "link"), so this just pulls that change into `user`.
+  useEffect(() => {
+    if (bankIdLink.status !== 'complete') return;
+    setBankIdLinkedNotice(true);
+    refreshProfile();
+  }, [bankIdLink.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="min-h-screen flex bg-[var(--vihem-canvas)] text-slate-900">
       <OfflineStatus />
@@ -226,6 +241,15 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
             <KeyRound className="w-4 h-4" />
             Byt lösenord
           </button>
+          {bankIDAvailable && (
+            <button
+              onClick={() => { setBankIdLinkedNotice(false); setBankIdModalOpen(true); }}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              {user?.bankid_personal_number ? 'BankID kopplat' : 'Koppla BankID'}
+            </button>
+          )}
           <button onClick={signOut} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950">
             <LogOut className="w-4 h-4" />
             Logga ut
@@ -297,6 +321,19 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
                 <KeyRound className="w-4 h-4" />
                 Byt lösenord
               </button>
+              {bankIDAvailable && (
+                <button
+                  onClick={() => {
+                    setBankIdLinkedNotice(false);
+                    setBankIdModalOpen(true);
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm text-slate-600 hover:bg-slate-100"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  {user?.bankid_personal_number ? 'BankID kopplat' : 'Koppla BankID'}
+                </button>
+              )}
               <button onClick={signOut} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm text-slate-600 hover:bg-slate-100">
                 <LogOut className="w-4 h-4" />
                 Logga ut
@@ -382,6 +419,58 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
               Uppdatera
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={bankIdModalOpen}
+        onClose={() => {
+          setBankIdModalOpen(false);
+          bankIdLink.reset();
+        }}
+        title="Koppla BankID"
+      >
+        <div className="space-y-4">
+          {bankIdBusy ? (
+            <div className="rounded-xl border-2 border-[#193E4F]/20 bg-slate-50 p-5 text-center">
+              {bankIdLink.qrImage && (
+                <img src={bankIdLink.qrImage} alt="QR-kod för BankID" className="mx-auto mb-3 h-44 w-44 rounded-lg border border-slate-200 bg-white p-2" />
+              )}
+              <p className="text-sm text-slate-600">{bankIdLink.message || 'Startar BankID...'}</p>
+            </div>
+          ) : (
+            <>
+              {bankIdLinkedNotice && bankIdLink.status === 'complete' && (
+                <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+                  BankID kopplat till ditt konto.
+                </div>
+              )}
+              {bankIdLink.error && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  {bankIdLink.error}
+                </div>
+              )}
+              {user?.bankid_personal_number ? (
+                <p className="text-sm text-slate-600">
+                  Ditt konto är kopplat till BankID ({formatPersonalNumber(user.bankid_personal_number)}
+                  {user.bankid_linked_at ? `, sedan ${new Date(user.bankid_linked_at).toLocaleDateString('sv-SE')}` : ''}).
+                  Legitimera dig igen nedan om du vill koppla om till ett annat BankID.
+                </p>
+              ) : (
+                <p className="text-sm text-slate-600">
+                  Koppla ditt konto till BankID för att kunna logga in utan lösenord nästa gång -- legitimera dig en gång nedan så känner VI-HEM igen dig via BankID hädanefter.
+                </p>
+              )}
+              <Button
+                variant="primary"
+                className="w-full justify-center gap-2"
+                onClick={() => { setBankIdLinkedNotice(false); bankIdLink.start(() => initiateBankIDLink({ environment: 'test', edgeFunctionUrl: '' }, '')); }}
+              >
+                <ShieldCheck className="h-4 w-4" />
+                {user?.bankid_personal_number ? 'Koppla om BankID' : 'Starta BankID'}
+              </Button>
+            </>
+          )}
         </div>
       </Modal>
     </div>

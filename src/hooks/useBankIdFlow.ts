@@ -47,7 +47,7 @@ export interface BankIdFlowState {
  * a pending sign order must never get picked up as if it were a login
  * order, or vice versa, if both happen to be mid-flight in the same
  * browser tab lineage. */
-export function useBankIdFlow(intent: 'auth' | 'sign'): BankIdFlowState {
+export function useBankIdFlow(intent: 'auth' | 'sign' | 'link'): BankIdFlowState {
   const storageKey = `${STORAGE_PREFIX}${intent}`;
   const [status, setStatus] = useState<BankIdFlowStatus>('idle');
   const [qrImage, setQrImage] = useState<string | null>(null);
@@ -93,10 +93,12 @@ export function useBankIdFlow(intent: 'auth' | 'sign'): BankIdFlowState {
         if (r.status === 'complete') {
           // A completed BankID order can still fail to resolve to a VI-HEM
           // login (login_ready: false, e.g. no profile matches the
-          // personnummer) -- that's a failure for this flow even though
-          // BankID itself succeeded, so the caller's error banner (not the
-          // success path) is what should show r.error.
-          if (r.login_ready === false) { finish('failed', r, r.error || 'BankID godkändes, men kunde inte kopplas till ett VI-HEM-konto.'); return; }
+          // personnummer) or fail to link (linked: false, e.g. that
+          // personnummer already belongs to a different account) -- both
+          // are failures for this flow even though BankID itself
+          // succeeded, so the caller's error banner (not the success path)
+          // is what should show r.error.
+          if (r.login_ready === false || r.linked === false) { finish('failed', r, r.error || 'BankID godkändes, men kunde inte kopplas till ett VI-HEM-konto.'); return; }
           finish('complete', r);
           return;
         }

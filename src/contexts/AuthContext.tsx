@@ -8,10 +8,15 @@ interface AuthContextType {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   /**
-   * Links the current user's account to a BankID personal number.
-   * Should be called after a successful BankID auth order resolves.
+   * Re-fetches the current user's own profile row. The BankID "link my
+   * account" flow (useBankIdFlow('link') + vihem-bankid's start_link/collect
+   * actions) writes bankid_personal_number server-side once BankID itself
+   * has verified it -- this just pulls that change into `user` afterwards,
+   * it never accepts a personnummer as input (a self-reported one, not
+   * verified by an actual BankID order, would let someone claim to be
+   * anybody).
    */
-  linkBankID: (personalNumber: string, linkedAt: string) => Promise<{ error: string | null }>;
+  refreshProfile: () => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   passwordRecovery: boolean;
   finishPasswordRecovery: () => Promise<void>;
@@ -23,7 +28,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   signIn: async () => ({ error: null }),
-  linkBankID: async () => ({ error: null }),
+  refreshProfile: async () => ({ error: null }),
   signOut: async () => {},
   passwordRecovery: false,
   finishPasswordRecovery: async () => {},
@@ -195,20 +200,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error: null };
   }
 
-  async function linkBankID(personalNumber: string, linkedAt: string): Promise<{ error: string | null }> {
+  async function refreshProfile(): Promise<{ error: string | null }> {
     if (!user) return { error: 'Inte inloggad.' };
-    const { error } = await supabase
-      .from('vihem_profiles')
-      .update({
-        bankid_personal_number: personalNumber,
-        bankid_linked_at: linkedAt,
-        auth_method: user.auth_method === 'password' ? 'both' : 'bankid',
-      })
-      .eq('id', user.id);
-    if (error) return { error: error.message };
-    const updated = await fetchProfile(user.id);
-    if (updated) setUser(updated);
-    return { error: null };
+    try {
+      const updated = await fetchProfile(user.id);
+      if (updated) setUser(updated);
+      return { error: null };
+    } catch (error) {
+      return { error: profileFetchErrorMessage(error) };
+    }
   }
 
   async function signOut() {
@@ -225,7 +225,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, linkBankID, signOut, passwordRecovery, finishPasswordRecovery, bankIDAvailable: BANKID_ENABLED }}>
+    <AuthContext.Provider value={{ user, loading, signIn, refreshProfile, signOut, passwordRecovery, finishPasswordRecovery, bankIDAvailable: BANKID_ENABLED }}>
       {children}
     </AuthContext.Provider>
   );

@@ -3,7 +3,7 @@ import { supabase } from './supabase';
 export type BankIDEnvironment = 'test' | 'production';
 export interface BankIDConfig { environment: BankIDEnvironment; edgeFunctionUrl: string; }
 export interface BankIDAuthOrder { orderRef: string; autoStartToken: string; qrImage?: string | null; }
-export interface BankIDCollectResult { orderRef: string; status: 'pending' | 'failed' | 'complete'; hintCode?: string; error?: string; login_ready?: boolean; magic_link?: string | null; signed?: boolean; completionData?: { user: { personalNumber: string; name: string; givenName: string; surname: string }; signature: string; ocspResponse: string }; }
+export interface BankIDCollectResult { orderRef: string; status: 'pending' | 'failed' | 'complete'; hintCode?: string; error?: string; login_ready?: boolean; magic_link?: string | null; signed?: boolean; linked?: boolean; completionData?: { user: { personalNumber: string; name: string; givenName: string; surname: string }; signature: string; ocspResponse: string }; }
 export interface BankIDSignOrder extends BankIDAuthOrder { userVisibleData: string; }
 export interface BankIDResult { personalNumber: string; name: string; signature: string; autoStartToken: string; }
 
@@ -19,6 +19,13 @@ export function initiateBankIDAuth(_config: BankIDConfig, _endUserIp: string) {
 }
 export function initiateBankIDSign(_config: BankIDConfig, _endUserIp: string, userVisibleData: string, contractId: string) {
   return invoke<BankIDSignOrder>({ action: 'start_sign', user_visible_data: userVisibleData, contract_id: contractId });
+}
+/** For an already logged-in user connecting their own account to BankID
+ * (see AuthContext.linkBankID and useBankIdFlow('link')) -- writes a
+ * BankID-VERIFIED personnummer onto the caller's own profile, never a
+ * typed one, so a future passwordless start_auth login can find them. */
+export function initiateBankIDLink(_config: BankIDConfig, _endUserIp: string) {
+  return invoke<BankIDAuthOrder>({ action: 'start_link' });
 }
 export function collectBankIDOrder(_config: BankIDConfig, orderRef: string) { return invoke<BankIDCollectResult>({ action: 'collect', order_ref: orderRef }); }
 export function cancelBankIDOrder(_config: BankIDConfig, orderRef: string) { return invoke<void>({ action: 'cancel', order_ref: orderRef }); }
