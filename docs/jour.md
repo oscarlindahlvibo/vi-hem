@@ -10,8 +10,8 @@ det är bara flera rader.
 - `vihem_jour_eligibility` -- vem som är behörig för vilken jourtyp
   (admin sätter, per person och typ).
 - `vihem_jour_rotation_rules` -- ett "grundschema" är INTE längre en delad
-  linjär cykel. Varje rad är en OBEROENDE, redigerbar regel: "person X har
-  jourtypen var `interval_weeks`:e vecka, `duration_weeks` veckor åt
+  linjär cykel. Varje rad är en OBEROENDE, redigerbar regel: "jourtypen
+  upprepas var `interval_weeks`:e vecka, `duration_days` dagar åt
   gången, från `start_date`". Flera regler kan gälla SAMMA person samtidigt
   (t.ex. "var 3:e vecka" + "var 6:e vecka" som två separata rader) -- när
   deras beräknade tillfällen råkar hamna intill varandra i tiden blir det
@@ -20,7 +20,13 @@ det är bara flera rader.
   `_template_slots` (en delad cykel av (person, dagar)-segment i strikt
   turordning), som strukturellt inte kunde uttrycka två oberoende kadenser
   för samma person -- bytet gjordes rakt av eftersom mallmodellen aldrig
-  hann användas på riktigt. Materialiseras till konkreta
+  hann användas på riktigt. `duration_days` (döpt om från `duration_weeks`)
+  behöver inte vara en hel vecka -- t.ex. `start_date` en lördag +
+  `duration_days = 2` ger ett återkommande HELGpass (lördag-söndag),
+  vilket städjour normalt behöver eftersom den bara är bemannad på
+  helger/helgdagar. `user_id` är nullable: en OBEMANNAD regel genererar
+  löpande öppna, plockbara pass istället för pass knutna till en fast
+  person (se nedan). Materialiseras till konkreta
   `vihem_jour_shifts`-rader via `vihem_generate_jour_shifts_from_rule(rule_id, until_date)`
   (en regel) eller bulk-hjälparen
   `vihem_generate_jour_shifts_for_duty_type(organisation_id, duty_type, until_date)`
@@ -28,7 +34,21 @@ det är bara flera rader.
   idempotenta, hoppar över varje del av perioden som redan har ETT
   jourpass av samma typ (oavsett vem det tillhör eller vilken regel som
   skapade det), så en admins manuella justering, eller en annan regels
-  intilliggande tillfälle, aldrig tyst skrivs över av en omkörning.
+  intilliggande tillfälle, aldrig tyst skrivs över av en omkörning. Är
+  regelns `user_id NULL` skapar generatorn -- utöver det obemannade
+  passet -- automatiskt en öppen `vihem_jour_swap_offers`-rad
+  (`offered_by` = regelns skapare, `allow_partial = true`) i SAMMA
+  transaktion, så varje genererat tillfälle är direkt plockbart utan
+  ett extra admin-steg.
+- **Enstaka pass** -- Grundschema-fliken har även "Enstaka pass" per
+  jourtyp: ett engångspass HELT UTANFÖR rotationsreglerna (ingen
+  `rotation_rule_id`), för sådant som inte följer ett återkommande
+  mönster -- en specifik helgdag, en engångsinsats. Admin väljer
+  antingen en person direkt (skapar bara passraden) eller "Obemannat"
+  (skapar passraden OCH en öppen annons i samma steg, exakt samma
+  mönster som Bytens "Skapa öppet pass" -- men enstaka pass byggs i
+  Grundschema-fliken snarare än bytesmarknaden, eftersom det är en
+  schemaläggningshandling, inte ett byte).
   **Handover-klockslag: 07:00 svensk lokal tid**, inte midnatt. Varje
   regel-genererat tillfälle (start OCH slut) beräknas som
   `(datum + tid '07:00') AT TIME ZONE 'Europe/Stockholm'` -- det
@@ -413,6 +433,29 @@ inloggad admin):
   utan att läcka anmälningar som inte är godkända.
 - All testdata (pass, annonser, behörigheter, frånvaroanmälan) skapad
   och raderad efteråt; modulen återställd till avstängd.
+
+### Helgmönster, obemannade regler, enstaka pass (denna utökning)
+
+Verifierat mot en riktig lokal databas och i webbläsaren som inloggad
+admin:
+
+- En regel med `start_date` en lördag och `duration_days = 2`,
+  `interval_weeks = 1`, `user_id = NULL` genererade exakt 13
+  helgtillfällen (lördag 07:00 -- måndag 07:00, dvs. lördag+söndag) över
+  standardfönstret, VARJE tillfälle obemannat MED en automatiskt skapad
+  öppen annons -- bekräftat i Byten-fliken att alla 13 visas som
+  plockbara med noteringen "Genererat obemannat pass". Omkörning gav 0
+  nya rader (idempotent, som tidigare).
+- "Enstaka pass" testat i båda lägena: tilldelat direkt till Erik
+  (skapade bara passraden, ingen annons) och lämnat obemannat (skapade
+  passraden OCH en öppen annons i samma steg) -- båda verifierade direkt
+  mot databasen.
+- Regelformulärets nya "Obemannat"-alternativ och "Antal dagar åt
+  gången"-fält (istället för det gamla veckobaserade) verifierade i
+  UI:t, inklusive att listvyn korrekt visar "Obemannat (genererade pass
+  blir öppna för byte)" istället för ett personnamn.
+- All testdata skapad och raderad efteråt; modulen återställd till
+  avstängd.
 
 ## 6. Kvarstående (inte byggt)
 

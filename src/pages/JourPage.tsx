@@ -1149,9 +1149,12 @@ function BehorighetTab({ organisationId, userId, profiles }: { organisationId: s
 
 // ── Admin: Grundschema (rotationsregler) ─────────────────────────────────
 
-type RuleDraft = { user_id: string; name: string; start_date: string; interval_weeks: string; duration_weeks: string; active: boolean };
+type RuleDraft = { user_id: string; name: string; start_date: string; interval_weeks: string; duration_days: string; active: boolean };
 
-const EMPTY_RULE_DRAFT: RuleDraft = { user_id: '', name: '', start_date: new Date().toISOString().slice(0, 10), interval_weeks: '1', duration_weeks: '1', active: true };
+const EMPTY_RULE_DRAFT: RuleDraft = { user_id: '', name: '', start_date: new Date().toISOString().slice(0, 10), interval_weeks: '1', duration_days: '7', active: true };
+
+type SingleShiftDraft = { start: string; end: string; owner: string };
+const EMPTY_SINGLE_SHIFT_DRAFT: SingleShiftDraft = { start: '', end: '', owner: '' };
 
 function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: string; userId: string; profiles: Pick<Profile, 'id' | 'name'>[] }) {
   const [rules, setRules] = useState<JourRotationRule[]>([]);
@@ -1165,6 +1168,11 @@ function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: 
   const [clearingType, setClearingType] = useState<JourDutyType | null>(null);
   const [untilDate, setUntilDate] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() + 3); return d.toISOString().slice(0, 10); });
   const [generateResult, setGenerateResult] = useState('');
+  const [singleShiftOpen, setSingleShiftOpen] = useState(false);
+  const [singleShiftDutyType, setSingleShiftDutyType] = useState<JourDutyType>('fastighet');
+  const [singleShiftDraft, setSingleShiftDraft] = useState<SingleShiftDraft>(EMPTY_SINGLE_SHIFT_DRAFT);
+  const [singleShiftSaving, setSingleShiftSaving] = useState(false);
+  const [singleShiftError, setSingleShiftError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1191,14 +1199,14 @@ function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: 
 
   const openEditModal = (rule: JourRotationRule) => {
     setModalDutyType(rule.duty_type);
-    setDraft({ user_id: rule.user_id, name: rule.name, start_date: rule.start_date, interval_weeks: String(rule.interval_weeks), duration_weeks: String(rule.duration_weeks), active: rule.active });
+    setDraft({ user_id: rule.user_id || '', name: rule.name, start_date: rule.start_date, interval_weeks: String(rule.interval_weeks), duration_days: String(rule.duration_days), active: rule.active });
     setError('');
     setEditing(rule);
   };
 
   const handleSave = async () => {
-    if (!draft.user_id || !draft.start_date || Number(draft.interval_weeks) <= 0 || Number(draft.duration_weeks) <= 0) {
-      setError('Ange person, startdatum, och positiva veckovärden.');
+    if (!draft.start_date || Number(draft.interval_weeks) <= 0 || Number(draft.duration_days) <= 0) {
+      setError('Ange startdatum och positiva värden för intervall och antal dagar.');
       return;
     }
     setSaving(true);
@@ -1207,11 +1215,11 @@ function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: 
       const payload = {
         organisation_id: organisationId,
         duty_type: modalDutyType,
-        user_id: draft.user_id,
+        user_id: draft.user_id || null,
         name: draft.name,
         start_date: draft.start_date,
         interval_weeks: Number(draft.interval_weeks),
-        duration_weeks: Number(draft.duration_weeks),
+        duration_days: Number(draft.duration_days),
         active: draft.active,
       };
       if (editing === 'new') {
@@ -1227,6 +1235,51 @@ function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: 
       setError(describeError(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openSingleShiftModal = (dutyType: JourDutyType) => {
+    setSingleShiftDutyType(dutyType);
+    setSingleShiftDraft(EMPTY_SINGLE_SHIFT_DRAFT);
+    setSingleShiftError('');
+    setSingleShiftOpen(true);
+  };
+
+  const handleCreateSingleShift = async () => {
+    setSingleShiftError('');
+    if (!singleShiftDraft.start || !singleShiftDraft.end || new Date(singleShiftDraft.end) <= new Date(singleShiftDraft.start)) {
+      setSingleShiftError('Ange ett giltigt intervall (slut måste vara efter start).');
+      return;
+    }
+    setSingleShiftSaving(true);
+    try {
+      const { data: shift, error: shiftErr } = await supabase.from('vihem_jour_shifts').insert({
+        organisation_id: organisationId,
+        duty_type: singleShiftDutyType,
+        user_id: singleShiftDraft.owner || null,
+        starts_at: new Date(singleShiftDraft.start).toISOString(),
+        ends_at: new Date(singleShiftDraft.end).toISOString(),
+        source: 'manual',
+        notes: '',
+        created_by: userId,
+      }).select('id').single();
+      if (shiftErr) throw shiftErr;
+      if (!singleShiftDraft.owner) {
+        const { error: offerErr } = await supabase.from('vihem_jour_swap_offers').insert({
+          organisation_id: organisationId,
+          shift_id: shift.id,
+          offered_by: userId,
+          allow_partial: true,
+          note: '',
+        });
+        if (offerErr) throw offerErr;
+      }
+      setSingleShiftOpen(false);
+      load();
+    } catch (err) {
+      setSingleShiftError(describeError(err));
+    } finally {
+      setSingleShiftSaving(false);
     }
   };
 
@@ -1284,9 +1337,10 @@ function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: 
               <div className="flex items-center gap-2">
                 <Badge className={DUTY_BADGE_CLASS[dt]}>{DUTY_LABELS[dt]}</Badge>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" variant="secondary" onClick={() => handleClear(dt)} loading={clearingType === dt}><Trash2 className="h-3.5 w-3.5" /> Rensa genererade</Button>
                 <Button size="sm" variant="secondary" onClick={() => handleGenerate(dt)} loading={generatingType === dt} disabled={dtRules.length === 0}><RefreshCw className="h-3.5 w-3.5" /> Generera jourpass</Button>
+                <Button size="sm" variant="secondary" onClick={() => openSingleShiftModal(dt)}><Plus className="h-3.5 w-3.5" /> Enstaka pass</Button>
                 <Button size="sm" onClick={() => openNewModal(dt)}><Plus className="h-3.5 w-3.5" /> Ny regel</Button>
               </div>
             </div>
@@ -1298,11 +1352,12 @@ function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: 
                   <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                     <div>
                       <p className="font-semibold text-slate-800">
-                        {profiles.find((p) => p.id === r.user_id)?.name || 'Okänd'}
+                        {r.user_id === null ? UNASSIGNED_LABEL : profiles.find((p) => p.id === r.user_id)?.name || 'Okänd'}
+                        {r.user_id === null && <span className="ml-2 text-xs font-normal text-slate-500">(genererade pass blir öppna för byte)</span>}
                         {!r.active && <Badge className="ml-2 bg-slate-100 text-slate-500">Inaktiv</Badge>}
                       </p>
                       <p className="text-sm text-slate-500">
-                        {r.name ? `${r.name} -- ` : ''}Var {r.interval_weeks}:e vecka, {r.duration_weeks} {r.duration_weeks === 1 ? 'vecka' : 'veckor'} åt gången, från {fmtDate(r.start_date)}
+                        {r.name ? `${r.name} -- ` : ''}Var {r.interval_weeks}:e vecka, {r.duration_days} {r.duration_days === 1 ? 'dag' : 'dagar'} åt gången, från {fmtDate(r.start_date)}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1319,14 +1374,14 @@ function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: 
 
       <Modal open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? `Ny regel -- ${DUTY_LABELS[modalDutyType]}` : `Ändra regel -- ${DUTY_LABELS[modalDutyType]}`}>
         <div className="space-y-4">
-          <Select label="Person" value={draft.user_id} onChange={(e) => setDraft({ ...draft, user_id: e.target.value })} options={[{ value: '', label: 'Välj person' }, ...profiles.map((p) => ({ value: p.id, label: p.name }))]} />
-          <Input label="Namn (valfritt)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="T.ex. Var tredje vecka" />
+          <Select label="Person" value={draft.user_id} onChange={(e) => setDraft({ ...draft, user_id: e.target.value })} options={[{ value: '', label: `${UNASSIGNED_LABEL} (genererade pass blir öppna för byte)` }, ...profiles.map((p) => ({ value: p.id, label: p.name }))]} />
+          <Input label="Namn (valfritt)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="T.ex. Helger" />
           <div className="grid gap-3 sm:grid-cols-3">
             <Input label="Startdatum" type="date" value={draft.start_date} onChange={(e) => setDraft({ ...draft, start_date: e.target.value })} />
             <Input label="Var N:e vecka" type="number" min={1} value={draft.interval_weeks} onChange={(e) => setDraft({ ...draft, interval_weeks: e.target.value })} />
-            <Input label="Antal veckor åt gången" type="number" min={1} value={draft.duration_weeks} onChange={(e) => setDraft({ ...draft, duration_weeks: e.target.value })} />
+            <Input label="Antal dagar åt gången" type="number" min={1} value={draft.duration_days} onChange={(e) => setDraft({ ...draft, duration_days: e.target.value })} />
           </div>
-          <p className="text-xs text-slate-500">Flera regler kan gälla samma person -- t.ex. "var 3:e vecka" och "var 6:e vecka" som två separata regler ger ibland två veckor i rad när de råkar hamna intill varandra.</p>
+          <p className="text-xs text-slate-500">Antal dagar behöver inte vara en hel vecka -- t.ex. 2 dagar med start på en lördag ger ett återkommande helgpass. Flera regler kan gälla samma person -- t.ex. "var 3:e vecka" och "var 6:e vecka" som två separata regler ger ibland två veckor i rad när de råkar hamna intill varandra.</p>
           <label className="flex items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" checked={draft.active} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} className="rounded border-slate-300" />
             Aktiv (inkluderas vid generering av jourpass)
@@ -1335,6 +1390,22 @@ function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: 
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setEditing(null)}>Avbryt</Button>
             <Button onClick={handleSave} loading={saving}>Spara</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={singleShiftOpen} onClose={() => setSingleShiftOpen(false)} title={`Enstaka pass -- ${DUTY_LABELS[singleShiftDutyType]}`}>
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">Skapar ett enskilt jourpass utanför rotationsreglerna, t.ex. en helgdag. Tilldela direkt till en person, eller lämna som "Obemannat" så läggs det automatiskt ut för byte och kan plockas av vem som helst med rätt behörighet.</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input label="Från" type="datetime-local" value={singleShiftDraft.start} onChange={(e) => setSingleShiftDraft({ ...singleShiftDraft, start: e.target.value })} />
+            <Input label="Till" type="datetime-local" value={singleShiftDraft.end} onChange={(e) => setSingleShiftDraft({ ...singleShiftDraft, end: e.target.value })} />
+          </div>
+          <Select label="Tilldelas" value={singleShiftDraft.owner} onChange={(e) => setSingleShiftDraft({ ...singleShiftDraft, owner: e.target.value })} options={[{ value: '', label: `${UNASSIGNED_LABEL} (läggs ut för byte)` }, ...profiles.map((p) => ({ value: p.id, label: p.name }))]} />
+          {singleShiftError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{singleShiftError}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setSingleShiftOpen(false)}>Avbryt</Button>
+            <Button onClick={handleCreateSingleShift} loading={singleShiftSaving}>Skapa</Button>
           </div>
         </div>
       </Modal>

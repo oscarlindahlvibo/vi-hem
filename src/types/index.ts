@@ -2016,11 +2016,16 @@ export interface JourRotationRule {
   id: string;
   organisation_id: string;
   duty_type: JourDutyType;
-  user_id: string;
+  /** null = obemannad regel -- varje genererat tillfälle blir ett
+   * obemannat, plockbart pass (en automatiskt skapad öppen annons)
+   * istället för tilldelat till en fast person. */
+  user_id: string | null;
   name: string;
   start_date: string;
   interval_weeks: number;
-  duration_weeks: number;
+  /** Antal dagar (inte nödvändigtvis hela veckor) varje tillfälle
+   * varar, t.ex. 2 för ett helg-mönster (lördag-söndag). */
+  duration_days: number;
   active: boolean;
   created_by: string | null;
   created_at: string;
