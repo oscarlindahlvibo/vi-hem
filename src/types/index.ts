@@ -1991,7 +1991,7 @@ export interface DirectDebitMandate {
 // the SAME type (enforced by a real Postgres EXCLUDE constraint, see
 // migration 20260826100000_jour_module.sql).
 
-export type JourDutyType = 'fastighet' | 'sno';
+export type JourDutyType = 'fastighet' | 'sno' | 'stad';
 
 export interface JourEligibility {
   id: string;
@@ -2004,36 +2004,43 @@ export interface JourEligibility {
   updated_at: string;
 }
 
-export interface JourRotationTemplate {
+/** A single independent recurring rule: `user_id` has this duty_type
+ * every `interval_weeks` weeks, for `duration_weeks` weeks, starting
+ * from `start_date`. Multiple rules can target the same person (e.g.
+ * "var 3:e vecka" + "var 6:e vecka" as two separate rows) -- when their
+ * occurrences land adjacent in time this naturally produces two
+ * consecutive weeks for that person, which is the point: this replaces
+ * the earlier single-shared-cycle "rotation template" model with
+ * independent rules precisely so that kind of pattern is expressible. */
+export interface JourRotationRule {
   id: string;
   organisation_id: string;
   duty_type: JourDutyType;
+  user_id: string;
   name: string;
-  anchor_date: string;
+  start_date: string;
+  interval_weeks: number;
+  duration_weeks: number;
   active: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export interface JourRotationTemplateSlot {
-  id: string;
-  template_id: string;
-  sort_order: number;
-  user_id: string;
-  duration_days: number;
-  created_at: string;
-}
-
 export interface JourShift {
   id: string;
   organisation_id: string;
   duty_type: JourDutyType;
-  user_id: string;
+  /** null = obemannat (open) -- claimable by anyone eligible, whole or
+   * in part, via a swap offer. See vihem_before_jour_swap_offer_update()
+   * in the jour migrations for why claiming part of an unassigned shift
+   * leaves the remainder(s) unassigned AND re-offered, unlike claiming
+   * part of a normally assigned shift (which reverts to the owner). */
+  user_id: string | null;
   starts_at: string;
   ends_at: string;
   source: 'manual' | 'template';
-  rotation_template_id: string | null;
+  rotation_rule_id: string | null;
   notes: string;
   created_by: string | null;
   created_at: string;
@@ -2051,6 +2058,10 @@ export interface JourSwapOffer {
   allow_partial: boolean;
   note: string;
   status: JourSwapOfferStatus;
+  /** The advertised sub-range of the shift, if the offerer chose to
+   * offer less than the whole thing -- null means "the whole shift". */
+  offer_start_at: string | null;
+  offer_end_at: string | null;
   claimed_by: string | null;
   claim_start_at: string | null;
   claim_end_at: string | null;

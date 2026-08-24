@@ -1,71 +1,128 @@
-# Jour (fastighetsjour & snöjour) — arkitektur och status
+# Jour (fastighetsjour, snöjour & städjour) — arkitektur och status
 
 ## 1. Datamodell
 
-En modell, inte två separata system: `duty_type` (`'fastighet' | 'sno'`) är
-ett fält på varje jourpass, inte en egen tabell/modul per typ. En person
-kan ha fastighets- **och** snöjour samtidigt -- det är bara två rader.
+En modell, inte separata system per jourtyp: `duty_type`
+(`'fastighet' | 'sno' | 'stad'`) är ett fält på varje jourpass, inte en
+egen tabell/modul per typ. En person kan ha flera jourtyper samtidigt --
+det är bara flera rader.
 
 - `vihem_jour_eligibility` -- vem som är behörig för vilken jourtyp
   (admin sätter, per person och typ).
-- `vihem_jour_rotation_templates` + `vihem_jour_rotation_template_slots`
-  -- ett "grundschema" är en ordnad lista av (person, antal dagar)-segment
-  som upprepas cykliskt från ett ankardatum. Materialiseras till konkreta
-  `vihem_jour_shifts`-rader via RPC:n `vihem_generate_jour_shifts_from_template(template_id, until_date)`
-  (admin-only, körs från "Grundschema"-fliken) -- idempotent, hoppar över
-  varje del av perioden som redan har ETT jourpass av samma typ (oavsett
-  vem det tillhör), så en admins manuella justering aldrig tyst skrivs
-  över av en omkörning.
-- `vihem_jour_shifts` -- de faktiska passen. **Dubbelbokning inom samma
-  jourtyp är omöjlig på databasnivå**, inte bara i applikationskod:
+- `vihem_jour_rotation_rules` -- ett "grundschema" är INTE längre en delad
+  linjär cykel. Varje rad är en OBEROENDE, redigerbar regel: "person X har
+  jourtypen var `interval_weeks`:e vecka, `duration_weeks` veckor åt
+  gången, från `start_date`". Flera regler kan gälla SAMMA person samtidigt
+  (t.ex. "var 3:e vecka" + "var 6:e vecka" som två separata rader) -- när
+  deras beräknade tillfällen råkar hamna intill varandra i tiden blir det
+  naturligt två veckor i rad, vilket är precis det uttryckta behovet.
+  Ersatte den ursprungliga `vihem_jour_rotation_templates` +
+  `_template_slots` (en delad cykel av (person, dagar)-segment i strikt
+  turordning), som strukturellt inte kunde uttrycka två oberoende kadenser
+  för samma person -- bytet gjordes rakt av eftersom mallmodellen aldrig
+  hann användas på riktigt. Materialiseras till konkreta
+  `vihem_jour_shifts`-rader via `vihem_generate_jour_shifts_from_rule(rule_id, until_date)`
+  (en regel) eller bulk-hjälparen
+  `vihem_generate_jour_shifts_for_duty_type(organisation_id, duty_type, until_date)`
+  (alla aktiva regler för en jourtyp, en admin-knapptryckning) -- båda
+  idempotenta, hoppar över varje del av perioden som redan har ETT
+  jourpass av samma typ (oavsett vem det tillhör eller vilken regel som
+  skapade det), så en admins manuella justering, eller en annan regels
+  intilliggande tillfälle, aldrig tyst skrivs över av en omkörning.
+- `vihem_jour_shifts` -- de faktiska passen. `user_id` är **nullable**:
+  `NULL` betyder ett obemannat/öppet pass som vem som helst med rätt
+  behörighet kan plocka, helt eller delvis, via bytesmarknaden (se
+  nedan). **Dubbelbokning inom samma jourtyp är omöjlig på
+  databasnivå**, inte bara i applikationskod:
   ```sql
   ALTER TABLE vihem_jour_shifts ADD CONSTRAINT vihem_jour_shifts_no_overlap
     EXCLUDE USING gist (user_id WITH =, duty_type WITH =, tstzrange(starts_at, ends_at) WITH &&);
   ```
   Två överlappande pass av SAMMA typ för SAMMA person är omöjligt att
-  spara. Olika typ (fastighet + snö) överlappar aldrig varandra i denna
-  spärr -- en person får gärna ha båda samtidigt.
-- `vihem_jour_swap_offers` -- bytesmarknaden. En innehavare annonserar sitt
-  eget pass (`allow_partial` styr om bara hela passet kan tas, eller om
-  någon kan ta en valfri del av tidsintervallet). Status
+  spara. Olika typ (fastighet/snö/städ) överlappar aldrig varandra i
+  denna spärr -- en person får gärna ha flera samtidigt. `NULL`
+  `user_id` behandlas som distinkt av EXCLUDE (precis som UNIQUE), så
+  flera obemannade pass av samma typ FÅR överlappa varandra -- rimligt
+  eftersom "dubbelbokning" inte är meningsfullt för ett pass utan ägare.
+- `vihem_jour_swap_offers` -- bytesmarknaden. En innehavare (eller admin,
+  för ett obemannat pass) annonserar. `offer_start_at`/`offer_end_at`
+  (båda NULL som standard = hela passet) är den ANNONSERADE delen -- man
+  kan annonsera ut t.ex. bara torsdagen av en veckolång jour istället för
+  hela passet. `allow_partial` styr om NÅGON kan ta MINDRE än den
+  annonserade delen (inte mindre än hela passet). Status
   `open → claimed | cancelled | expired`.
 
 ## 2. Bytesmarknaden: server-side, atomärt
 
-All affärslogik för byten körs i en `BEFORE UPDATE`-trigger på
-`vihem_jour_swap_offers` (`vihem_before_jour_swap_offer_update`), inte i
-frontend-kod eller en edge-funktion:
+All affärslogik för byten körs i triggers på `vihem_jour_swap_offers`,
+inte i frontend-kod eller en edge-funktion:
 
-- **"Först till kvarn" är atomärt** -- klienten gör en vanlig
+- `vihem_before_jour_swap_offer_insert` (BEFORE INSERT) -- validerar att
+  en annonserad delmängd (`offer_start_at`/`offer_end_at`) ligger inom
+  passets egna gränser.
+- `vihem_before_jour_swap_offer_update` (BEFORE UPDATE) -- klaim/avbryt.
+  **"Först till kvarn" är atomärt** -- klienten gör en vanlig
   `UPDATE ... WHERE status = 'open'`; Postgres rad-lås garanterar att bara
   en av flera samtidiga klaim-försök lyckas (verifierat med två riktiga
   parallella databassessioner, se avsnitt 4).
 - **Behörighetskoll**: klaimaren måste finnas i `vihem_jour_eligibility`
   för rätt jourtyp, annars avvisas klaimet (`RAISE EXCEPTION`, hela
   transaktionen rullas tillbaka).
-- **Delning**: fyra fall hanteras -- helt pass (byt bara `user_id`), klaim
-  från början eller slutet (krymp originalet, ny rad för klaimaren), och
-  klaim från mitten (originalet delas i TVÅ kvarvarande delar åt
-  ursprungspersonen plus en ny rad för klaimaren).
+- **Delning: EN generell brytpunktsalgoritm** hanterar alla lägen (helt
+  pass, del i början/slutet/mitten, med eller utan en delvis annonserad
+  delmängd, tilldelat eller obemannat pass) istället för separata fall.
+  Breakpoints är de sorterade, deduplicerade gränserna
+  (passets start/slut, den annonserade delens start/slut, det klaimade
+  intervallets start/slut). Det klaimade segmentet återanvänder/uppdaterar
+  ORIGINALRADEN (görs FÖRST, innan några andra INSERT, för att undvika en
+  falsk självöverlappning mot originalradens fortfarande-fulla intervall).
+  Varje annat (kvarvarande) segment:
+  - Om originalpasset var **obemannat** (`user_id IS NULL`): förblir
+    obemannat OCH får en FRÄSCH öppen `vihem_jour_swap_offers`-rad
+    (för vidarebefordrar `offered_by`/`allow_partial`/`note` från den
+    gamla annonsen) -- oavsett om segmentet låg inom eller utanför den
+    ursprungligen annonserade delen, eftersom ett obemannat pass inte har
+    någon ägare att återgå till. Det är detta som gör att "plockar någon
+    en del mitt i ett obemannat pass finns det direkt två nya pass att
+    plocka" -- exakt det uttryckta kravet.
+  - Om originalpasset var **tilldelat**: återgår till samma ursprungsägare,
+    INTE återannonserat (matchar hur ett vanligt person-till-person-byte
+    av en del av ett tilldelat pass redan fungerade innan denna
+    utökning).
 - **Dubbelbokningsspärren gäller garanterat även vid byten**: om
   klaimaren redan har ett överlappande pass av samma typ, slår
   EXCLUDE-constraint till på triggerns egen INSERT/UPDATE, hela
   transaktionen rullas tillbaka, annonsen förblir `open`.
 - Notiser: en separat `AFTER INSERT`-trigger
-  (`notify_jour_swap_offered`) mejlar/notifierar alla i
-  `vihem_jour_eligibility` för samma jourtyp (utom annonsören själv) --
-  samma mönster som `notify_staff_absence_submitted()`.
+  (`notify_jour_swap_offered`) notifierar alla i `vihem_jour_eligibility`
+  för samma jourtyp (utom annonsören själv) -- samma mönster som
+  `notify_staff_absence_submitted()`. Gäller "gratis" även för de
+  fräscha annonser som klaim-triggern skapar åt kvarvarande delar av ett
+  obemannat pass, eftersom de också går via ett vanligt INSERT.
 
 ## 3. Modul & frontend
 
 Registrerad som en valfri modul (`vihem_module_registry` +
 `vihem_organisation_modules`), avstängd som standard -- aktiveras per
 organisation i Organisationer-sidan (superadmin) eller direkt i databasen.
-`src/pages/JourPage.tsx` har fem flikar: **Dagbesked** (Gantt-liknande
-tidslinje, adapterad från `RentalPage.tsx`s kalendermönster),
-**Byten** (bytesmarknaden), **Mitt schema** (egna pass +
-"Annonsera byte"), och admin-only **Behörighet** (kryssrutematris) +
-**Grundschema** (rotationsmallar + "Generera jourpass"-knapp).
+`src/pages/JourPage.tsx` har fem flikar:
+
+- **Dagbesked** -- Gantt-liknande tidslinje (adapterad från
+  `RentalPage.tsx`s kalendermönster), en rad per (person eller
+  "Obemannat", jourtyp).
+- **Byten** -- bytesmarknaden. Visar den annonserade delen (inte
+  nödvändigtvis hela passet), en "Obemannat"-badge för öppna pass, och
+  för admin en **"Skapa öppet pass"**-knapp+modal som skapar ett
+  obemannat pass av valfri jourtyp och annonserar det i samma steg.
+  Klaim-modalen begränsar tidsväljaren till den ANNONSERADE delen, inte
+  alltid hela passet.
+- **Mitt schema** -- egna pass + "Annonsera byte" med val mellan "hela
+  passet" och "en del av passet" (datum/tid-väljare för delen).
+- Admin-only **Behörighet** (kryssrutematris, en kolumn per jourtyp i
+  `DUTY_TYPES`) + **Grundschema** (en sektion per jourtyp, rader av
+  redigerbara rotationsregler med "Ändra"/radera, plus en
+  "Generera jourpass"-knapp per jourtyp som anropar
+  `vihem_generate_jour_shifts_for_duty_type`).
 
 Alla läsningar/skrivningar går direkt via supabase-js + RLS (samma
 mönster som `AdminStaffPage.tsx`/`listMyAgreements()`) -- ingen
@@ -74,53 +131,91 @@ databasen.
 
 ## 4. Verifiering
 
-Två riktiga buggar hittades och fixades under verifieringen (inte bara
-typkontrollerat -- körd mot en riktig lokal databas):
+### Ursprunglig implementation
+
+Två riktiga buggar hittades och fixades (mallmodellen, sedan ersatt --
+se ovan):
 
 1. `SUM(duration_days) OVER (...)` returnerar `bigint`, och
-   `date + bigint` finns inte som operator i Postgres -- kastade fel vid
-   varje generering. Fixat med en explicit `::integer`-cast.
-2. RPC-generatorns "hoppa över om redan täckt"-logik kollade bara om
-   klaimaren (SAMMA person) redan hade en överlappande rad -- en admins
-   manuella omplacering till en ANNAN person blev osynlig för spärren,
-   så nästa generering lade en konkurrerande rad ovanpå. Fixat med en
-   explicit `EXISTS`-koll mot ALLA pass av samma typ i intervallet,
-   oavsett vem de tillhör, innan en ny rad ens försöker skapas.
+   `date + bigint` finns inte som operator i Postgres. Fixat med en
+   explicit `::integer`-cast (motsvarande problem finns inte i
+   regelmodellen, som bara använder enkel heltalsaritmetik).
+2. Generatorns "hoppa över om redan täckt"-logik kollade bara samma-person-
+   överlapp, inte alla ägare. Fixat med en explicit `EXISTS`-koll mot ALLA
+   pass av samma typ i intervallet, oavsett ägare -- samma mönster
+   återanvänt i den nya regelbaserade generatorn.
+
+### Städjour + flexibla rotationsregler + obemannade/delade pass (denna utökning)
+
+Två YTTERLIGARE riktiga buggar hittades och fixades i den omskrivna
+klaim-triggern, upptäckta via en regressionstest (klaim av mittendel på
+ett TILLDELAT pass, som redan fungerade innan denna utökning):
+
+1. Villkoret för "ska det kvarvarande segmentet återannonseras?" var
+   först felaktigt kopplat till om segmentet låg INOM den annonserade
+   delen -- det gjorde att ett vanligt TILLDELAT pass' kvarvarande delar
+   (som normalt utgör hela passet, eftersom `offer_start_at`/`_end_at` är
+   NULL som standard) felaktigt återannonserades som obemannade.
+   `ERROR: conflicting key value violates exclusion constraint`. Fixat:
+   villkoret är nu enbart `v_shift.user_id IS NULL` (var passet
+   någonsin tilldelat någon alls), helt oberoende av den annonserade
+   delens gränser.
+2. Brytpunktsloopen bearbetade segment i kronologisk ordning, men koden
+   som omtilldelar ORIGINALRADEN till det klaimade segmentet kördes bara
+   när loopen nådde just det segmentet -- om ett TIDIGARE (kronologiskt
+   först) kvarvarande segment för SAMMA ägare bearbetades först,
+   kolliderade dess INSERT med originalraden som fortfarande hade sitt
+   FULLA, okrympta intervall vid den tidpunkten. Samma felmeddelande som
+   ovan. Fixat: `UPDATE ... WHERE id = v_shift.id` som omtilldelar
+   originalraden till det klaimade segmentet körs nu OVILLKORLIGEN och
+   FÖRST, innan brytpunktsloopen ens startar; loopen hoppar sedan
+   explicit över det klaimade segmentet och hanterar bara genuina
+   kvarvarande bitar via nya INSERT.
 
 Verifierat med riktiga databassessioner (`SET LOCAL role authenticated` +
-`request.jwt.claims`, samma teknik som användes för att testa RLS-policyer
-tidigare i sessionen):
+`request.jwt.claims`) och riktig psql mot en lokal sandbox-databas:
 
-- Två överlappande pass, samma person, samma typ → avvisas av
-  EXCLUDE-constraint.
-- Samma person, överlappande, OLIKA typ → går igenom.
-- Två parallella klaim-uppdateringar på samma annons, riktiga samtidiga
-  databassessioner → exakt en lyckas, den andra får noll påverkade rader
-  utan fel.
-- Alla fyra delningsfall (helt/början/slut/mitt) körda och resulterande
-  radernas start/slut/ägare kontrollerade.
-- Klaim som skulle skapa en dubbelbokning → avvisas, annonsen förblir
-  `open`.
-- Klaim av en icke-behörig person → avvisas.
-- Notistriggern → exakt (och bara) de behöriga för samma jourtyp
-  notifieras, aldrig annonsören själv.
-- RPC-generatorn → rätt rotationssekvens, idempotent omkörning (0 nya
-  rader), utökning av intervallet (bara de nya raderna), och en
-  manuellt omplacerad vecka bevaras korrekt vid omkörning.
-- Fullständig klick-för-klick-verifiering i webbläsaren som en riktig
-  inloggad admin (via token-injektion, se övriga dokument i denna
-  session för tekniken): skapade en rotationsmall, genererade jourpass,
-  bekräftade att Gantt-vyn visar dem korrekt, annonserade ett pass för
-  byte, och bekräftade att annonsen visas i Byten-fliken och att
-  notisen gick fram till rätt person -- allt via faktiska knapptryck,
-  inte bara direkta databasanrop.
-- All testdata skapad och raderad i den lokala databasen efteråt.
+- `vihem_generate_jour_shifts_for_duty_type` med två regler för samma
+  person (var 3:e + var 6:e vecka) → producerade exakt de förväntade
+  tillfällena, INKLUSIVE två fall av två veckor i rad när tillfällena
+  råkade hamna intill varandra -- precis det uttryckta behovet.
+  Idempotent omkörning bekräftad (0 nya rader).
+- `städ` som jourtyp respekterar EXCLUDE-spärren precis som `fastighet`/
+  `sno`.
+- Regressionstest: klaim av mittendel på ett TILLDELAT pass →
+  kvarvarande delar återgår korrekt till ursprungsägaren, INGEN
+  återannonsering (efter de två buggfixarna ovan).
+- Nytt scenario: klaim av mittendel på ett OBEMANNAT pass → tre
+  resulterande pass (obemannat/klaimare/obemannat), tre resulterande
+  annonser (den klaimade + två nya öppna), notiser gick fram för de nya
+  annonserna också (via den redan existerande `AFTER INSERT`-triggern,
+  ingen ny notiskod behövdes).
+- Delvis ANNONSERAT pass (Erik annonserar bara en del av en tvåveckors
+  jour) → klaimarens tidsväljare begränsas korrekt till den annonserade
+  delen, klaim inom den delen fungerar, de yttre delarna återgår till
+  Erik utan återannonsering.
+- Validering av annonsens gränser (annonsera utanför passets egna
+  gränser) → avvisas korrekt av `BEFORE INSERT`-triggern.
+- Fullständig klick-för-klick-verifiering i webbläsaren som TRE riktiga
+  inloggade användare (admin + två personal, via token-injektion):
+  satte behörighet för städjour, skapade två överlappande
+  rotationsregler och genererade jourpass (bekräftade "2 veckor i rad"-
+  mönstret även i Gantt-vyn), skapade ett obemannat städjour-pass som
+  admin, klaimade mittendelen som personal (bekräftade två nya öppna
+  pass i Byten-fliken), annonserade en delmängd av ett eget tilldelat
+  pass, och klaimade en del av DEN delmängden som en tredje person
+  (bekräftade att ytterdelarna återgick utan återannonsering) -- allt
+  via faktiska knapptryck i UI:t, inte bara direkta databasanrop.
+- All testdata (pass, annonser, regler, behörigheter) skapad och
+  raderad i den lokala databasen efteråt; modulen återställd till
+  avstängd för demo-organisationen.
 
 ## 5. Kvarstående (inte byggt)
 
 - Ingen automatisk generering (t.ex. ett cron-jobb som förlänger
-  schemat N veckor framåt) -- admin klickar "Generera jourpass" manuellt.
-  Motiverat av att inget cron-mönster finns i kodbasen att haka i idag.
+  schemat N veckor framåt) -- admin klickar "Generera jourpass" manuellt
+  per jourtyp. Motiverat av att inget cron-mönster finns i kodbasen att
+  haka i idag.
 - Ingen "expired"-hantering av gamla, aldrig plockade annonser (statusen
   finns i CHECK-constrainten men inget sätter den automatiskt).
 - Ingen push-notis/SMS för jourbyten, bara in-app-notisen.

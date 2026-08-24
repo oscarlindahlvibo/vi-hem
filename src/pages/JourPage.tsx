@@ -10,12 +10,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select } from '../components/ui';
-import type { JourDutyType, JourEligibility, JourRotationTemplate, JourRotationTemplateSlot, JourShift, JourSwapOffer, Profile } from '../types';
+import type { JourDutyType, JourEligibility, JourRotationRule, JourShift, JourSwapOffer, Profile } from '../types';
 import { ArrowLeft, ArrowRight, Plus, RefreshCw, ShieldAlert, ShieldCheck, Snowflake, Trash2, Users } from 'lucide-react';
 
-const DUTY_LABELS: Record<JourDutyType, string> = { fastighet: 'Fastighetsjour', sno: 'Snöjour' };
-const DUTY_BAR_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-500 hover:bg-blue-600', sno: 'bg-orange-500 hover:bg-orange-600' };
-const DUTY_BADGE_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-100 text-blue-700', sno: 'bg-orange-100 text-orange-700' };
+const DUTY_TYPES: JourDutyType[] = ['fastighet', 'sno', 'stad'];
+const DUTY_LABELS: Record<JourDutyType, string> = { fastighet: 'Fastighetsjour', sno: 'Snöjour', stad: 'Städjour' };
+const DUTY_BAR_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-500 hover:bg-blue-600', sno: 'bg-orange-500 hover:bg-orange-600', stad: 'bg-emerald-500 hover:bg-emerald-600' };
+const DUTY_BADGE_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-100 text-blue-700', sno: 'bg-orange-100 text-orange-700', stad: 'bg-emerald-100 text-emerald-700' };
+const UNASSIGNED_LABEL = 'Obemannat';
 const WINDOW_DAYS = 14;
 
 function dateKey(value: Date) { return value.toISOString().slice(0, 10); }
@@ -75,7 +77,7 @@ export function JourPage() {
         </div>
 
         {tab === 'dagbesked' && <DagbeskedTab organisationId={user.organisation_id} profilesById={profilesById} />}
-        {tab === 'byten' && <BytenTab userId={user.id} organisationId={user.organisation_id} profilesById={profilesById} onChanged={reload} />}
+        {tab === 'byten' && <BytenTab userId={user.id} organisationId={user.organisation_id} profilesById={profilesById} isAdmin={isAdmin} onChanged={reload} />}
         {tab === 'schema' && <MittSchemaTab userId={user.id} myDutyTypes={myDutyTypes} onChanged={reload} />}
         {isAdmin && tab === 'behorighet' && <BehorighetTab organisationId={user.organisation_id} userId={user.id} profiles={profiles} />}
         {isAdmin && tab === 'grundschema' && <GrundschemaTab organisationId={user.organisation_id} userId={user.id} profiles={profiles} />}
@@ -104,9 +106,13 @@ function DagbeskedTab({ organisationId, profilesById }: { organisationId: string
   const span = (start: string, end: string) => Math.max(1, Math.min(WINDOW_DAYS - position(start), Math.ceil((new Date(end).getTime() - Math.max(new Date(start).getTime(), days[0].getTime())) / 86400000)));
 
   const rowKeys = useMemo(() => {
-    const seen = new Map<string, { user_id: string; duty_type: JourDutyType }>();
-    for (const s of shifts) seen.set(`${s.user_id}:${s.duty_type}`, { user_id: s.user_id, duty_type: s.duty_type });
-    return Array.from(seen.values()).sort((a, b) => (profilesById.get(a.user_id)?.name || '').localeCompare(profilesById.get(b.user_id)?.name || ''));
+    const seen = new Map<string, { user_id: string | null; duty_type: JourDutyType }>();
+    for (const s of shifts) seen.set(`${s.user_id ?? 'unassigned'}:${s.duty_type}`, { user_id: s.user_id, duty_type: s.duty_type });
+    return Array.from(seen.values()).sort((a, b) => {
+      if (a.user_id === null) return 1;
+      if (b.user_id === null) return -1;
+      return (profilesById.get(a.user_id)?.name || '').localeCompare(profilesById.get(b.user_id)?.name || '');
+    });
   }, [shifts, profilesById]);
 
   return (
@@ -125,6 +131,7 @@ function DagbeskedTab({ organisationId, profilesById }: { organisationId: string
       <div className="flex items-center gap-4 border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-500" /> Fastighetsjour</span>
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-orange-500" /> Snöjour</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Städjour</span>
       </div>
       {loading ? (
         <div className="p-10 text-center text-sm text-slate-500">Laddar...</div>
@@ -146,9 +153,9 @@ function DagbeskedTab({ organisationId, profilesById }: { organisationId: string
               rowKeys.map((row) => {
                 const rowShifts = shifts.filter((s) => s.user_id === row.user_id && s.duty_type === row.duty_type);
                 return (
-                  <div key={`${row.user_id}:${row.duty_type}`} className="grid min-h-[64px] border-b border-slate-200" style={{ gridTemplateColumns: `200px repeat(${WINDOW_DAYS}, minmax(64px, 1fr))` }}>
+                  <div key={`${row.user_id ?? 'unassigned'}:${row.duty_type}`} className="grid min-h-[64px] border-b border-slate-200" style={{ gridTemplateColumns: `200px repeat(${WINDOW_DAYS}, minmax(64px, 1fr))` }}>
                     <div className="border-r border-slate-200 p-3">
-                      <p className="truncate font-semibold text-slate-800">{profilesById.get(row.user_id)?.name || 'Okänd'}</p>
+                      <p className="truncate font-semibold text-slate-800">{row.user_id === null ? UNASSIGNED_LABEL : profilesById.get(row.user_id)?.name || 'Okänd'}</p>
                       <Badge className={DUTY_BADGE_CLASS[row.duty_type]}>{DUTY_LABELS[row.duty_type]}</Badge>
                     </div>
                     <div className={`relative col-span-${WINDOW_DAYS} bg-white`} style={{ gridColumn: `2 / span ${WINDOW_DAYS}` }}>
@@ -177,7 +184,7 @@ function DagbeskedTab({ organisationId, profilesById }: { organisationId: string
 
 // ── Byten: bytesmarknad ──────────────────────────────────────────────────
 
-function BytenTab({ userId, organisationId, profilesById, onChanged }: { userId: string; organisationId: string; profilesById: Map<string, Pick<Profile, 'id' | 'name'>>; onChanged: () => void }) {
+function BytenTab({ userId, organisationId, profilesById, isAdmin, onChanged }: { userId: string; organisationId: string; profilesById: Map<string, Pick<Profile, 'id' | 'name'>>; isAdmin: boolean; onChanged: () => void }) {
   const [offers, setOffers] = useState<JourSwapOffer[]>([]);
   const [shiftsById, setShiftsById] = useState<Map<string, JourShift>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -188,6 +195,14 @@ function BytenTab({ userId, organisationId, profilesById, onChanged }: { userId:
   const [claimEnd, setClaimEnd] = useState('');
   const [claimError, setClaimError] = useState('');
   const [claimSaving, setClaimSaving] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createDutyType, setCreateDutyType] = useState<JourDutyType>('fastighet');
+  const [createStart, setCreateStart] = useState('');
+  const [createEnd, setCreateEnd] = useState('');
+  const [createAllowPartial, setCreateAllowPartial] = useState(true);
+  const [createNote, setCreateNote] = useState('');
+  const [createSaving, setCreateSaving] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -210,9 +225,52 @@ function BytenTab({ userId, organisationId, profilesById, onChanged }: { userId:
     setClaiming(offer);
     setClaimMode('whole');
     const shift = shiftsById.get(offer.shift_id);
-    setClaimStart(shift ? toLocalInputValue(shift.starts_at) : '');
-    setClaimEnd(shift ? toLocalInputValue(shift.ends_at) : '');
+    const rangeStart = offer.offer_start_at || shift?.starts_at;
+    const rangeEnd = offer.offer_end_at || shift?.ends_at;
+    setClaimStart(rangeStart ? toLocalInputValue(rangeStart) : '');
+    setClaimEnd(rangeEnd ? toLocalInputValue(rangeEnd) : '');
     setClaimError('');
+  };
+
+  const handleCreateOpenShift = async () => {
+    setCreateError('');
+    if (!createStart || !createEnd || new Date(createEnd) <= new Date(createStart)) {
+      setCreateError('Ange ett giltigt intervall (slut måste vara efter start).');
+      return;
+    }
+    setCreateSaving(true);
+    try {
+      const { data: shift, error: shiftErr } = await supabase.from('vihem_jour_shifts').insert({
+        organisation_id: organisationId,
+        duty_type: createDutyType,
+        user_id: null,
+        starts_at: new Date(createStart).toISOString(),
+        ends_at: new Date(createEnd).toISOString(),
+        source: 'manual',
+        notes: 'Öppet pass',
+        created_by: userId,
+      }).select('id').single();
+      if (shiftErr) throw shiftErr;
+      const { error: offerErr } = await supabase.from('vihem_jour_swap_offers').insert({
+        organisation_id: organisationId,
+        shift_id: shift.id,
+        offered_by: userId,
+        allow_partial: createAllowPartial,
+        note: createNote,
+      });
+      if (offerErr) throw offerErr;
+      setShowCreateModal(false);
+      setCreateStart('');
+      setCreateEnd('');
+      setCreateAllowPartial(true);
+      setCreateNote('');
+      onChanged();
+      load();
+    } catch (err) {
+      setCreateError(describeError(err));
+    } finally {
+      setCreateSaving(false);
+    }
   };
 
   const handleClaim = async () => {
@@ -250,6 +308,11 @@ function BytenTab({ userId, organisationId, profilesById, onChanged }: { userId:
   return (
     <div className="space-y-4">
       {error && <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+      {isAdmin && (
+        <div className="flex justify-end">
+          <Button size="sm" variant="secondary" onClick={() => { setCreateError(''); setShowCreateModal(true); }}><Plus className="h-4 w-4" /> Skapa öppet pass</Button>
+        </div>
+      )}
       {offers.length === 0 ? (
         <EmptyState icon={<Users className="w-12 h-12" />} title="Inga öppna byten" description="Det finns just nu inga jourpass ute för byte." />
       ) : (
@@ -258,16 +321,23 @@ function BytenTab({ userId, organisationId, profilesById, onChanged }: { userId:
             const shift = shiftsById.get(offer.shift_id);
             if (!shift) return null;
             const isOwn = offer.offered_by === userId;
+            const isUnassigned = shift.user_id === null;
+            const rangeStart = offer.offer_start_at || shift.starts_at;
+            const rangeEnd = offer.offer_end_at || shift.ends_at;
             return (
               <Card key={offer.id} className="p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="mb-1 flex items-center gap-2">
                       <Badge className={DUTY_BADGE_CLASS[shift.duty_type]}>{DUTY_LABELS[shift.duty_type]}</Badge>
-                      {offer.allow_partial && <Badge className="bg-slate-100 text-slate-600">Del av pass tillåts</Badge>}
+                      {isUnassigned && <Badge className="bg-slate-100 text-slate-600">{UNASSIGNED_LABEL}</Badge>}
+                      {offer.allow_partial && <Badge className="bg-slate-100 text-slate-600">Del av annonsen tillåts</Badge>}
                     </div>
-                    <p className="text-sm font-semibold text-slate-800">{fmtDateTime(shift.starts_at)} - {fmtDateTime(shift.ends_at)}</p>
-                    <p className="text-sm text-slate-500">Erbjuds av {profilesById.get(offer.offered_by)?.name || 'Okänd'}</p>
+                    <p className="text-sm font-semibold text-slate-800">{fmtDateTime(rangeStart)} - {fmtDateTime(rangeEnd)}</p>
+                    {(offer.offer_start_at || offer.offer_end_at) && (
+                      <p className="text-xs text-slate-400">Del av passet {fmtDateTime(shift.starts_at)} - {fmtDateTime(shift.ends_at)}</p>
+                    )}
+                    <p className="text-sm text-slate-500">{isUnassigned ? 'Skapat av' : 'Erbjuds av'} {profilesById.get(offer.offered_by)?.name || 'Okänd'}</p>
                     {offer.note && <p className="mt-1 text-sm text-slate-600">{offer.note}</p>}
                   </div>
                   {isOwn ? (
@@ -286,19 +356,21 @@ function BytenTab({ userId, organisationId, profilesById, onChanged }: { userId:
         {claiming && (() => {
           const shift = shiftsById.get(claiming.shift_id);
           if (!shift) return null;
+          const rangeStart = claiming.offer_start_at || shift.starts_at;
+          const rangeEnd = claiming.offer_end_at || shift.ends_at;
           return (
             <div className="space-y-4">
-              <p className="text-sm text-slate-600">Passet gäller {fmtDateTime(shift.starts_at)} - {fmtDateTime(shift.ends_at)}.</p>
+              <p className="text-sm text-slate-600">Annonsen gäller {fmtDateTime(rangeStart)} - {fmtDateTime(rangeEnd)}.</p>
               {claiming.allow_partial && (
                 <div className="flex gap-2">
-                  <button onClick={() => setClaimMode('whole')} className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm font-semibold ${claimMode === 'whole' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'}`}>Ta hela passet</button>
-                  <button onClick={() => setClaimMode('partial')} className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm font-semibold ${claimMode === 'partial' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'}`}>Ta del av pass</button>
+                  <button onClick={() => setClaimMode('whole')} className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm font-semibold ${claimMode === 'whole' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'}`}>Ta hela annonsen</button>
+                  <button onClick={() => setClaimMode('partial')} className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm font-semibold ${claimMode === 'partial' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'}`}>Ta del av annonsen</button>
                 </div>
               )}
               {claimMode === 'partial' && (
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Input label="Från" type="datetime-local" value={claimStart} onChange={(e) => setClaimStart(e.target.value)} min={toLocalInputValue(shift.starts_at)} max={toLocalInputValue(shift.ends_at)} />
-                  <Input label="Till" type="datetime-local" value={claimEnd} onChange={(e) => setClaimEnd(e.target.value)} min={toLocalInputValue(shift.starts_at)} max={toLocalInputValue(shift.ends_at)} />
+                  <Input label="Från" type="datetime-local" value={claimStart} onChange={(e) => setClaimStart(e.target.value)} min={toLocalInputValue(rangeStart)} max={toLocalInputValue(rangeEnd)} />
+                  <Input label="Till" type="datetime-local" value={claimEnd} onChange={(e) => setClaimEnd(e.target.value)} min={toLocalInputValue(rangeStart)} max={toLocalInputValue(rangeEnd)} />
                 </div>
               )}
               {claimError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{claimError}</p>}
@@ -310,6 +382,29 @@ function BytenTab({ userId, organisationId, profilesById, onChanged }: { userId:
           );
         })()}
       </Modal>
+
+      {isAdmin && (
+        <Modal open={showCreateModal} onClose={() => setShowCreateModal(false)} title="Skapa öppet pass">
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">Skapar ett obemannat jourpass som direkt läggs ut för byte -- vem som helst med rätt behörighet kan plocka det, helt eller delvis.</p>
+            <Select label="Jourtyp" value={createDutyType} onChange={(e) => setCreateDutyType(e.target.value as JourDutyType)} options={DUTY_TYPES.map((dt) => ({ value: dt, label: DUTY_LABELS[dt] }))} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input label="Från" type="datetime-local" value={createStart} onChange={(e) => setCreateStart(e.target.value)} />
+              <Input label="Till" type="datetime-local" value={createEnd} onChange={(e) => setCreateEnd(e.target.value)} />
+            </div>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={createAllowPartial} onChange={(e) => setCreateAllowPartial(e.target.checked)} className="rounded border-slate-300" />
+              Tillåt att passet plockas i delar
+            </label>
+            <Input label="Anmärkning (valfritt)" value={createNote} onChange={(e) => setCreateNote(e.target.value)} placeholder="T.ex. anledning till att passet är obemannat" />
+            {createError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{createError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setShowCreateModal(false)}>Avbryt</Button>
+              <Button onClick={handleCreateOpenShift} loading={createSaving}>Skapa och annonsera</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -321,6 +416,9 @@ function MittSchemaTab({ userId, myDutyTypes, onChanged }: { userId: string; myD
   const [openOfferShiftIds, setOpenOfferShiftIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [offering, setOffering] = useState<JourShift | null>(null);
+  const [offerScope, setOfferScope] = useState<'whole' | 'partial'>('whole');
+  const [offerStart, setOfferStart] = useState('');
+  const [offerEnd, setOfferEnd] = useState('');
   const [allowPartial, setAllowPartial] = useState(false);
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
@@ -342,6 +440,9 @@ function MittSchemaTab({ userId, myDutyTypes, onChanged }: { userId: string; myD
 
   const openOfferModal = (shift: JourShift) => {
     setOffering(shift);
+    setOfferScope('whole');
+    setOfferStart(toLocalInputValue(shift.starts_at));
+    setOfferEnd(toLocalInputValue(shift.ends_at));
     setAllowPartial(false);
     setNote('');
     setError('');
@@ -349,15 +450,21 @@ function MittSchemaTab({ userId, myDutyTypes, onChanged }: { userId: string; myD
 
   const handleOffer = async () => {
     if (!offering) return;
+    if (offerScope === 'partial' && new Date(offerEnd) <= new Date(offerStart)) {
+      setError('Ange ett giltigt intervall (slut måste vara efter start).');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
       const { error } = await supabase.from('vihem_jour_swap_offers').insert({
-        organisation_id: (await supabase.from('vihem_jour_shifts').select('organisation_id').eq('id', offering.id).single()).data?.organisation_id,
+        organisation_id: offering.organisation_id,
         shift_id: offering.id,
         offered_by: userId,
         allow_partial: allowPartial,
         note,
+        offer_start_at: offerScope === 'partial' ? new Date(offerStart).toISOString() : null,
+        offer_end_at: offerScope === 'partial' ? new Date(offerEnd).toISOString() : null,
       });
       if (error) throw error;
       setOffering(null);
@@ -403,10 +510,20 @@ function MittSchemaTab({ userId, myDutyTypes, onChanged }: { userId: string; myD
       <Modal open={!!offering} onClose={() => setOffering(null)} title="Annonsera pass för byte">
         {offering && (
           <div className="space-y-4">
-            <p className="text-sm text-slate-600">{fmtDateTime(offering.starts_at)} - {fmtDateTime(offering.ends_at)}</p>
+            <p className="text-sm text-slate-600">Passet gäller {fmtDateTime(offering.starts_at)} - {fmtDateTime(offering.ends_at)}.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setOfferScope('whole')} className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm font-semibold ${offerScope === 'whole' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'}`}>Hela passet</button>
+              <button onClick={() => setOfferScope('partial')} className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm font-semibold ${offerScope === 'partial' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'}`}>En del av passet</button>
+            </div>
+            {offerScope === 'partial' && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input label="Från" type="datetime-local" value={offerStart} onChange={(e) => setOfferStart(e.target.value)} min={toLocalInputValue(offering.starts_at)} max={toLocalInputValue(offering.ends_at)} />
+                <Input label="Till" type="datetime-local" value={offerEnd} onChange={(e) => setOfferEnd(e.target.value)} min={toLocalInputValue(offering.starts_at)} max={toLocalInputValue(offering.ends_at)} />
+              </div>
+            )}
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={allowPartial} onChange={(e) => setAllowPartial(e.target.checked)} className="rounded border-slate-300" />
-              Tillåt att passet delas (annan person kan ta en del av tiden)
+              Tillåt att {offerScope === 'partial' ? 'den annonserade delen' : 'passet'} plockas i flera delar
             </label>
             <Input label="Anmärkning (valfritt)" value={note} onChange={(e) => setNote(e.target.value)} placeholder="T.ex. anledning till bytet" />
             {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -470,15 +587,14 @@ function BehorighetTab({ organisationId, userId, profiles }: { organisationId: s
         <thead>
           <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
             <th className="px-4 py-2">Personal</th>
-            <th className="px-4 py-2">Fastighetsjour</th>
-            <th className="px-4 py-2">Snöjour</th>
+            {DUTY_TYPES.map((dt) => <th key={dt} className="px-4 py-2">{DUTY_LABELS[dt]}</th>)}
           </tr>
         </thead>
         <tbody>
           {profiles.map((p) => (
             <tr key={p.id} className="border-b border-slate-100">
               <td className="px-4 py-2.5 font-medium text-slate-800">{p.name}</td>
-              {(['fastighet', 'sno'] as JourDutyType[]).map((dt) => (
+              {DUTY_TYPES.map((dt) => (
                 <td key={dt} className="px-4 py-2.5">
                   <input
                     type="checkbox"
@@ -497,69 +613,80 @@ function BehorighetTab({ organisationId, userId, profiles }: { organisationId: s
   );
 }
 
-// ── Admin: Grundschema (rotationsmallar) ─────────────────────────────────
+// ── Admin: Grundschema (rotationsregler) ─────────────────────────────────
 
-type SlotDraft = { user_id: string; duration_days: string };
+type RuleDraft = { user_id: string; name: string; start_date: string; interval_weeks: string; duration_weeks: string; active: boolean };
+
+const EMPTY_RULE_DRAFT: RuleDraft = { user_id: '', name: '', start_date: new Date().toISOString().slice(0, 10), interval_weeks: '1', duration_weeks: '1', active: true };
 
 function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: string; userId: string; profiles: Pick<Profile, 'id' | 'name'>[] }) {
-  const [templates, setTemplates] = useState<JourRotationTemplate[]>([]);
-  const [slotsByTemplate, setSlotsByTemplate] = useState<Map<string, JourRotationTemplateSlot[]>>(new Map());
+  const [rules, setRules] = useState<JourRotationRule[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [name, setName] = useState('');
-  const [dutyType, setDutyType] = useState<JourDutyType>('fastighet');
-  const [anchorDate, setAnchorDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [slots, setSlots] = useState<SlotDraft[]>([{ user_id: '', duration_days: '7' }]);
+  const [editing, setEditing] = useState<JourRotationRule | 'new' | null>(null);
+  const [modalDutyType, setModalDutyType] = useState<JourDutyType>('fastighet');
+  const [draft, setDraft] = useState<RuleDraft>(EMPTY_RULE_DRAFT);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [generatingType, setGeneratingType] = useState<JourDutyType | null>(null);
   const [untilDate, setUntilDate] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() + 3); return d.toISOString().slice(0, 10); });
   const [generateResult, setGenerateResult] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data: templateRows } = await supabase.from('vihem_jour_rotation_templates').select('*').eq('organisation_id', organisationId).order('created_at', { ascending: false });
-    const list = (templateRows || []) as JourRotationTemplate[];
-    setTemplates(list);
-    if (list.length > 0) {
-      const { data: slotRows } = await supabase.from('vihem_jour_rotation_template_slots').select('*').in('template_id', list.map((t) => t.id)).order('sort_order');
-      const map = new Map<string, JourRotationTemplateSlot[]>();
-      for (const s of (slotRows || []) as JourRotationTemplateSlot[]) map.set(s.template_id, [...(map.get(s.template_id) || []), s]);
-      setSlotsByTemplate(map);
-    }
+    const { data } = await supabase.from('vihem_jour_rotation_rules').select('*').eq('organisation_id', organisationId).order('start_date');
+    setRules((data || []) as JourRotationRule[]);
     setLoading(false);
   }, [organisationId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const addSlot = () => setSlots([...slots, { user_id: '', duration_days: '7' }]);
-  const removeSlot = (i: number) => setSlots(slots.filter((_, ii) => ii !== i));
-  const updateSlot = (i: number, patch: Partial<SlotDraft>) => setSlots(slots.map((s, ii) => (ii === i ? { ...s, ...patch } : s)));
+  const rulesByType = useMemo(() => {
+    const map = new Map<JourDutyType, JourRotationRule[]>();
+    for (const dt of DUTY_TYPES) map.set(dt, []);
+    for (const r of rules) map.get(r.duty_type)?.push(r);
+    return map;
+  }, [rules]);
 
-  const resetForm = () => {
-    setName('');
-    setDutyType('fastighet');
-    setAnchorDate(new Date().toISOString().slice(0, 10));
-    setSlots([{ user_id: '', duration_days: '7' }]);
+  const openNewModal = (dutyType: JourDutyType) => {
+    setModalDutyType(dutyType);
+    setDraft(EMPTY_RULE_DRAFT);
     setError('');
+    setEditing('new');
+  };
+
+  const openEditModal = (rule: JourRotationRule) => {
+    setModalDutyType(rule.duty_type);
+    setDraft({ user_id: rule.user_id, name: rule.name, start_date: rule.start_date, interval_weeks: String(rule.interval_weeks), duration_weeks: String(rule.duration_weeks), active: rule.active });
+    setError('');
+    setEditing(rule);
   };
 
   const handleSave = async () => {
-    if (slots.some((s) => !s.user_id || !s.duration_days || Number(s.duration_days) <= 0)) {
-      setError('Varje segment behöver en person och ett positivt antal dagar.');
+    if (!draft.user_id || !draft.start_date || Number(draft.interval_weeks) <= 0 || Number(draft.duration_weeks) <= 0) {
+      setError('Ange person, startdatum, och positiva veckovärden.');
       return;
     }
     setSaving(true);
     setError('');
     try {
-      const { data: template, error: templateErr } = await supabase.from('vihem_jour_rotation_templates').insert({ organisation_id: organisationId, duty_type: dutyType, name, anchor_date: anchorDate, created_by: userId }).select('id').single();
-      if (templateErr) throw templateErr;
-      const { error: slotsErr } = await supabase.from('vihem_jour_rotation_template_slots').insert(
-        slots.map((s, i) => ({ template_id: template.id, sort_order: i, user_id: s.user_id, duration_days: Number(s.duration_days) }))
-      );
-      if (slotsErr) throw slotsErr;
-      setShowModal(false);
-      resetForm();
+      const payload = {
+        organisation_id: organisationId,
+        duty_type: modalDutyType,
+        user_id: draft.user_id,
+        name: draft.name,
+        start_date: draft.start_date,
+        interval_weeks: Number(draft.interval_weeks),
+        duration_weeks: Number(draft.duration_weeks),
+        active: draft.active,
+      };
+      if (editing === 'new') {
+        const { error } = await supabase.from('vihem_jour_rotation_rules').insert({ ...payload, created_by: userId });
+        if (error) throw error;
+      } else if (editing) {
+        const { error } = await supabase.from('vihem_jour_rotation_rules').update(payload).eq('id', editing.id);
+        if (error) throw error;
+      }
+      setEditing(null);
       load();
     } catch (err) {
       setError(describeError(err));
@@ -568,95 +695,94 @@ function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: 
     }
   };
 
-  const handleDelete = async (template: JourRotationTemplate) => {
-    if (!confirm(`Radera mallen "${template.name}"? Redan genererade jourpass påverkas inte.`)) return;
-    const { error } = await supabase.from('vihem_jour_rotation_templates').delete().eq('id', template.id);
+  const handleDelete = async (rule: JourRotationRule) => {
+    if (!confirm(`Radera regeln "${rule.name || DUTY_LABELS[rule.duty_type]}"? Redan genererade jourpass påverkas inte.`)) return;
+    const { error } = await supabase.from('vihem_jour_rotation_rules').delete().eq('id', rule.id);
     if (error) { alert(describeError(error)); return; }
     load();
   };
 
-  const handleGenerate = async (template: JourRotationTemplate) => {
-    setGeneratingId(template.id);
+  const handleGenerate = async (dutyType: JourDutyType) => {
+    setGeneratingType(dutyType);
     setGenerateResult('');
     try {
-      const { data, error } = await supabase.rpc('vihem_generate_jour_shifts_from_template', { p_template_id: template.id, p_until_date: untilDate });
+      const { data, error } = await supabase.rpc('vihem_generate_jour_shifts_for_duty_type', { p_organisation_id: organisationId, p_duty_type: dutyType, p_until_date: untilDate });
       if (error) throw error;
-      setGenerateResult(`"${template.name}": ${data} nya jourpass skapade.`);
+      setGenerateResult(`${DUTY_LABELS[dutyType]}: ${data} nya jourpass skapade.`);
     } catch (err) {
       alert(describeError(err));
     } finally {
-      setGeneratingId(null);
+      setGeneratingType(null);
     }
   };
 
   if (loading) return <LoadingPage />;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Input label="Generera pass t.o.m." type="date" value={untilDate} onChange={(e) => setUntilDate(e.target.value)} />
-        </div>
-        <Button onClick={() => { resetForm(); setShowModal(true); }}><Plus className="h-4 w-4" /> Ny rotationsmall</Button>
+        <Input label="Generera pass t.o.m." type="date" value={untilDate} onChange={(e) => setUntilDate(e.target.value)} />
       </div>
       {generateResult && <p className="rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">{generateResult}</p>}
 
-      {templates.length === 0 ? (
-        <EmptyState icon={<RefreshCw className="w-12 h-12" />} title="Inga grundscheman" description="Skapa en rotationsmall för att generera återkommande jourpass automatiskt." />
-      ) : (
-        <div className="space-y-3">
-          {templates.map((t) => {
-            const slotsList = slotsByTemplate.get(t.id) || [];
-            const cycleDays = slotsList.reduce((sum, s) => sum + s.duration_days, 0);
-            return (
-              <Card key={t.id} className="p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="mb-1 flex items-center gap-2">
-                      <Badge className={DUTY_BADGE_CLASS[t.duty_type]}>{DUTY_LABELS[t.duty_type]}</Badge>
-                      <h3 className="font-semibold text-slate-900">{t.name || 'Namnlös mall'}</h3>
-                    </div>
-                    <p className="text-sm text-slate-500">Ankardatum {fmtDate(t.anchor_date)}, {cycleDays}-dagarscykel</p>
-                    <p className="mt-1 text-sm text-slate-600">
-                      {slotsList.map((s) => `${profiles.find((p) => p.id === s.user_id)?.name || 'Okänd'} (${s.duration_days}d)`).join(' → ')}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" variant="secondary" onClick={() => handleGenerate(t)} loading={generatingId === t.id}><RefreshCw className="h-3.5 w-3.5" /> Generera jourpass</Button>
-                    <button onClick={() => handleDelete(t)} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-      )}
-
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Ny rotationsmall" size="lg">
-        <div className="space-y-4">
-          <Input label="Namn" value={name} onChange={(e) => setName(e.target.value)} placeholder="T.ex. Vintersäsong rotation" />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Select label="Jourtyp" value={dutyType} onChange={(e) => setDutyType(e.target.value as JourDutyType)} options={[{ value: 'fastighet', label: 'Fastighetsjour' }, { value: 'sno', label: 'Snöjour' }]} />
-            <Input label="Ankardatum (start på cykeln)" type="date" value={anchorDate} onChange={(e) => setAnchorDate(e.target.value)} />
-          </div>
-          <div>
-            <p className="mb-2 text-sm font-medium text-slate-700">Segment i turordning (upprepas i cykel)</p>
-            <div className="space-y-2">
-              {slots.map((s, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <Select value={s.user_id} onChange={(e) => updateSlot(i, { user_id: e.target.value })} options={[{ value: '', label: 'Välj person' }, ...profiles.map((p) => ({ value: p.id, label: p.name }))]} className="flex-1" />
-                  <Input type="number" min={1} value={s.duration_days} onChange={(e) => updateSlot(i, { duration_days: e.target.value })} className="w-24" />
-                  <span className="text-sm text-slate-500">dagar</span>
-                  {slots.length > 1 && <button onClick={() => removeSlot(i)} className="text-slate-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>}
-                </div>
-              ))}
+      {DUTY_TYPES.map((dt) => {
+        const dtRules = rulesByType.get(dt) || [];
+        return (
+          <Card key={dt} className="overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
+              <div className="flex items-center gap-2">
+                <Badge className={DUTY_BADGE_CLASS[dt]}>{DUTY_LABELS[dt]}</Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="secondary" onClick={() => handleGenerate(dt)} loading={generatingType === dt} disabled={dtRules.length === 0}><RefreshCw className="h-3.5 w-3.5" /> Generera jourpass</Button>
+                <Button size="sm" onClick={() => openNewModal(dt)}><Plus className="h-3.5 w-3.5" /> Ny regel</Button>
+              </div>
             </div>
-            <Button size="sm" variant="secondary" className="mt-2" onClick={addSlot}><Plus className="h-3.5 w-3.5" /> Lägg till segment</Button>
+            {dtRules.length === 0 ? (
+              <div className="p-6 text-center text-sm text-slate-500">Inga rotationsregler för {DUTY_LABELS[dt].toLowerCase()} än.</div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {dtRules.map((r) => (
+                  <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+                    <div>
+                      <p className="font-semibold text-slate-800">
+                        {profiles.find((p) => p.id === r.user_id)?.name || 'Okänd'}
+                        {!r.active && <Badge className="ml-2 bg-slate-100 text-slate-500">Inaktiv</Badge>}
+                      </p>
+                      <p className="text-sm text-slate-500">
+                        {r.name ? `${r.name} -- ` : ''}Var {r.interval_weeks}:e vecka, {r.duration_weeks} {r.duration_weeks === 1 ? 'vecka' : 'veckor'} åt gången, från {fmtDate(r.start_date)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="secondary" onClick={() => openEditModal(r)}>Ändra</Button>
+                      <button onClick={() => handleDelete(r)} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        );
+      })}
+
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? `Ny regel -- ${DUTY_LABELS[modalDutyType]}` : `Ändra regel -- ${DUTY_LABELS[modalDutyType]}`}>
+        <div className="space-y-4">
+          <Select label="Person" value={draft.user_id} onChange={(e) => setDraft({ ...draft, user_id: e.target.value })} options={[{ value: '', label: 'Välj person' }, ...profiles.map((p) => ({ value: p.id, label: p.name }))]} />
+          <Input label="Namn (valfritt)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="T.ex. Var tredje vecka" />
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Input label="Startdatum" type="date" value={draft.start_date} onChange={(e) => setDraft({ ...draft, start_date: e.target.value })} />
+            <Input label="Var N:e vecka" type="number" min={1} value={draft.interval_weeks} onChange={(e) => setDraft({ ...draft, interval_weeks: e.target.value })} />
+            <Input label="Antal veckor åt gången" type="number" min={1} value={draft.duration_weeks} onChange={(e) => setDraft({ ...draft, duration_weeks: e.target.value })} />
           </div>
+          <p className="text-xs text-slate-500">Flera regler kan gälla samma person -- t.ex. "var 3:e vecka" och "var 6:e vecka" som två separata regler ger ibland två veckor i rad när de råkar hamna intill varandra.</p>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={draft.active} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} className="rounded border-slate-300" />
+            Aktiv (inkluderas vid generering av jourpass)
+          </label>
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowModal(false)}>Avbryt</Button>
-            <Button onClick={handleSave} loading={saving}>Spara mall</Button>
+            <Button variant="secondary" onClick={() => setEditing(null)}>Avbryt</Button>
+            <Button onClick={handleSave} loading={saving}>Spara</Button>
           </div>
         </div>
       </Modal>
