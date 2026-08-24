@@ -17,6 +17,8 @@ const DUTY_TYPES: JourDutyType[] = ['fastighet', 'sno', 'stad'];
 const DUTY_LABELS: Record<JourDutyType, string> = { fastighet: 'Fastighetsjour', sno: 'Snöjour', stad: 'Städjour' };
 const DUTY_BAR_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-500 hover:bg-blue-600', sno: 'bg-orange-500 hover:bg-orange-600', stad: 'bg-emerald-500 hover:bg-emerald-600' };
 const DUTY_BADGE_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-100 text-blue-700', sno: 'bg-orange-100 text-orange-700', stad: 'bg-emerald-100 text-emerald-700' };
+const DUTY_DOT_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-500', sno: 'bg-orange-500', stad: 'bg-emerald-500' };
+const DUTY_ORDER: Record<JourDutyType, number> = { fastighet: 0, sno: 1, stad: 2 };
 const UNASSIGNED_LABEL = 'Obemannat';
 const WINDOW_DAYS = 14;
 
@@ -92,6 +94,7 @@ function DagbeskedTab({ organisationId, profilesById }: { organisationId: string
   const [anchor, setAnchor] = useState(() => startOfWeek(new Date()));
   const [shifts, setShifts] = useState<JourShift[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedDayIdx, setSelectedDayIdx] = useState(0);
   const days = useMemo(() => Array.from({ length: WINDOW_DAYS }, (_, i) => { const d = new Date(anchor); d.setDate(anchor.getDate() + i); return d; }), [anchor]);
 
   useEffect(() => {
@@ -101,6 +104,26 @@ function DagbeskedTab({ organisationId, profilesById }: { organisationId: string
     supabase.from('vihem_jour_shifts').select('*').eq('organisation_id', organisationId).lt('starts_at', to).gt('ends_at', from).order('starts_at')
       .then(({ data }) => { setShifts((data || []) as JourShift[]); setLoading(false); });
   }, [organisationId, days]);
+
+  useEffect(() => {
+    const todayIdx = days.findIndex((d) => dateKey(d) === dateKey(new Date()));
+    setSelectedDayIdx(todayIdx >= 0 ? todayIdx : 0);
+  }, [days]);
+
+  const selectedDayShifts = useMemo(() => {
+    const selectedDay = days[selectedDayIdx];
+    if (!selectedDay) return [];
+    const dayStart = new Date(selectedDay); dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart); dayEnd.setDate(dayStart.getDate() + 1);
+    return shifts
+      .filter((s) => new Date(s.starts_at) < dayEnd && new Date(s.ends_at) > dayStart)
+      .sort((a, b) => {
+        if (DUTY_ORDER[a.duty_type] !== DUTY_ORDER[b.duty_type]) return DUTY_ORDER[a.duty_type] - DUTY_ORDER[b.duty_type];
+        if (a.user_id === null) return 1;
+        if (b.user_id === null) return -1;
+        return (profilesById.get(a.user_id)?.name || '').localeCompare(profilesById.get(b.user_id)?.name || '');
+      });
+  }, [shifts, selectedDayIdx, days, profilesById]);
 
   const position = (value: string) => Math.max(0, Math.min(WINDOW_DAYS - 1, Math.floor((new Date(value).getTime() - days[0].getTime()) / 86400000)));
   const span = (start: string, end: string) => Math.max(1, Math.min(WINDOW_DAYS - position(start), Math.ceil((new Date(end).getTime() - Math.max(new Date(start).getTime(), days[0].getTime())) / 86400000)));
@@ -136,7 +159,41 @@ function DagbeskedTab({ organisationId, profilesById }: { organisationId: string
       {loading ? (
         <div className="p-10 text-center text-sm text-slate-500">Laddar...</div>
       ) : (
-        <div className="overflow-x-auto">
+        <>
+          <div className="md:hidden">
+            <div className="flex gap-2 overflow-x-auto border-b border-slate-100 p-3">
+              {days.map((day, i) => {
+                const isToday = dateKey(day) === dateKey(new Date());
+                const isSelected = i === selectedDayIdx;
+                return (
+                  <button
+                    key={dateKey(day)}
+                    onClick={() => setSelectedDayIdx(i)}
+                    className={`flex shrink-0 flex-col items-center rounded-lg border px-3 py-2 text-xs transition-colors ${isSelected ? 'border-blue-600 bg-blue-50 text-blue-700 font-semibold' : isToday ? 'border-blue-200 text-blue-600' : 'border-slate-200 text-slate-500'}`}
+                  >
+                    <span>{day.toLocaleDateString('sv-SE', { weekday: 'short' })}</span>
+                    <strong>{day.getDate()} {day.toLocaleDateString('sv-SE', { month: 'short' })}</strong>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedDayShifts.length === 0 ? (
+              <div className="p-8 text-center text-sm text-slate-500">Ingen jour {days[selectedDayIdx]?.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}.</div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {selectedDayShifts.map((s) => (
+                  <div key={s.id} className="flex items-center gap-3 p-4">
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DUTY_DOT_CLASS[s.duty_type]}`} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold text-slate-800">{s.user_id === null ? UNASSIGNED_LABEL : profilesById.get(s.user_id)?.name || 'Okänd'}</p>
+                      <p className="text-xs text-slate-500">{DUTY_LABELS[s.duty_type]} · {fmtDate(s.starts_at)} - {fmtDate(s.ends_at)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
           <div className="min-w-[1120px]">
             <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `200px repeat(${WINDOW_DAYS}, minmax(64px, 1fr))` }}>
               <div className="p-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Person</div>
@@ -176,7 +233,8 @@ function DagbeskedTab({ organisationId, profilesById }: { organisationId: string
               })
             )}
           </div>
-        </div>
+          </div>
+        </>
       )}
     </Card>
   );
