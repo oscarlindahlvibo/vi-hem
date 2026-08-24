@@ -134,6 +134,16 @@ organisation i Organisationer-sidan (superadmin) eller direkt i databasen.
   bara datum -- `HH:MM-HH:MM` när passet ligger inom en enda dag,
   annars fullt datum+tid för start/slut -- så att en delning mitt på
   dygnet är läsbar direkt i stapeln, inte bara i hover-tooltippen.
+  **Dag-läget är en riktig 24-timmarsklocka, inte en dagruta**: en
+  enda kolumn med en timlinjal (00, 02, 04, ..., 22) i huvudet, och
+  passens position/bredd beräknas som en tidsandel av dygnet
+  (`hourPosition()`/`hourSpan()`, klippt till [00:00, 24:00)) istället
+  för hela-dagen-granulariteten `position()`/`span()` som resten av
+  vyerna använder -- annars hade två pass samma dag (t.ex. 02:00-17:00
+  och 17:00-20:00) båda ritats som att de täckte HELA dagens bredd,
+  eftersom day-granulariteten bara känner till "vilken dag", inte "vilken
+  tid på dagen". En röd linje visar nuvarande klockslag när den valda
+  dagen är idag.
   **Admin kan klicka på ett pass** (både i Gantt-stapeln och
   mobil-listraden) för att öppna "Hantera jourpass" med fyra
   handlingar: **Annonsera för byte** (samma annons-flöde som "Mitt

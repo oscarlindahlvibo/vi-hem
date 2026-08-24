@@ -26,6 +26,7 @@ const VIEW_MODES: ViewMode[] = ['day', 'week', 'twoweeks', 'month'];
 const VIEW_MODE_LABELS: Record<ViewMode, string> = { day: 'Dag', week: 'Vecka', twoweeks: '14 dagar', month: 'Månad' };
 const VIEW_MODE_DAYS: Record<ViewMode, number> = { day: 1, week: 7, twoweeks: 14, month: 30 };
 const VIEW_MODE_COL_MIN: Record<ViewMode, number> = { day: 220, week: 110, twoweeks: 64, month: 44 };
+const HOUR_TICKS = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24];
 
 function dateKey(value: Date) { return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`; }
 function fmtTime(value: string) { return new Date(value).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }); }
@@ -171,6 +172,17 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
 
   const position = (value: string) => Math.max(0, Math.min(windowDays - 1, Math.floor((new Date(value).getTime() - days[0].getTime()) / 86400000)));
   const span = (start: string, end: string) => Math.max(1, Math.min(windowDays - position(start), Math.ceil((new Date(end).getTime() - Math.max(new Date(start).getTime(), days[0].getTime())) / 86400000)));
+
+  const isDayMode = viewMode === 'day';
+  const dayStartMs = days[0]?.getTime() ?? 0;
+  const hourPosition = (value: string) => Math.max(0, Math.min(1, (new Date(value).getTime() - dayStartMs) / 86400000));
+  const hourSpan = (start: string, end: string) => {
+    const s = Math.max(dayStartMs, new Date(start).getTime());
+    const e = Math.min(dayStartMs + 86400000, new Date(end).getTime());
+    return Math.max(0.01, (e - s) / 86400000);
+  };
+  const isTodayColumn = isDayMode && dateKey(days[0]) === dateKey(new Date());
+  const nowPct = hourPosition(new Date().toISOString()) * 100;
 
   const rowKeys = useMemo(() => {
     const seen = new Map<string, { user_id: string | null; duty_type: JourDutyType }>();
@@ -366,8 +378,19 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
               <div className="p-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Person</div>
               {days.map((day) => (
                 <div key={dateKey(day)} className={`border-l border-slate-200 p-2 text-center text-xs ${dateKey(day) === dateKey(new Date()) ? 'bg-blue-50 text-blue-700' : 'text-slate-500'}`}>
-                  <div>{day.toLocaleDateString('sv-SE', { weekday: 'short' })}</div>
-                  <strong>{day.getDate()} {day.toLocaleDateString('sv-SE', { month: 'short' })}</strong>
+                  {isDayMode ? (
+                    <>
+                      <div className="mb-1 font-semibold">{day.toLocaleDateString('sv-SE', { weekday: 'short' })} {day.getDate()} {day.toLocaleDateString('sv-SE', { month: 'short' })}</div>
+                      <div className="flex items-center justify-between px-1 text-[10px] font-normal text-slate-400">
+                        {HOUR_TICKS.map((h) => <span key={h}>{String(h).padStart(2, '0')}</span>)}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>{day.toLocaleDateString('sv-SE', { weekday: 'short' })}</div>
+                      <strong>{day.getDate()} {day.toLocaleDateString('sv-SE', { month: 'short' })}</strong>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
@@ -383,17 +406,22 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
                       <Badge className={DUTY_BADGE_CLASS[row.duty_type]}>{DUTY_LABELS[row.duty_type]}</Badge>
                     </div>
                     <div className="relative bg-white" style={{ gridColumn: `2 / span ${windowDays}` }}>
-                      {days.map((day) => <div key={dateKey(day)} className="absolute top-0 h-full border-l border-slate-100" style={{ left: `${(days.indexOf(day) / windowDays) * 100}%` }} />)}
+                      {isDayMode
+                        ? HOUR_TICKS.map((h) => <div key={h} className="absolute top-0 h-full border-l border-slate-100" style={{ left: `${(h / 24) * 100}%` }} />)
+                        : days.map((day) => <div key={dateKey(day)} className="absolute top-0 h-full border-l border-slate-100" style={{ left: `${(days.indexOf(day) / windowDays) * 100}%` }} />)}
+                      {isTodayColumn && <div className="absolute top-0 z-20 h-full border-l-2 border-red-400" style={{ left: `${nowPct}%` }} />}
                       {rowShifts.map((s) => {
                         const sameDay = dateKey(new Date(s.starts_at)) === dateKey(new Date(s.ends_at));
                         const label = sameDay ? `${fmtTime(s.starts_at)}-${fmtTime(s.ends_at)}` : `${fmtDate(s.starts_at)} ${fmtTime(s.starts_at)} - ${fmtDate(s.ends_at)} ${fmtTime(s.ends_at)}`;
+                        const leftPct = isDayMode ? hourPosition(s.starts_at) * 100 : (position(s.starts_at) / windowDays) * 100;
+                        const widthPct = isDayMode ? hourSpan(s.starts_at, s.ends_at) * 100 : (span(s.starts_at, s.ends_at) / windowDays) * 100;
                         return (
                           <div
                             key={s.id}
                             title={`${fmtDateTime(s.starts_at)} - ${fmtDateTime(s.ends_at)}${isAdmin ? ' (klicka för att hantera)' : ''}`}
                             onClick={() => openManageModal(s)}
                             className={`absolute z-10 mx-0.5 mt-3 h-8 overflow-hidden rounded-lg px-2 py-1 text-xs font-semibold text-white shadow-sm ${DUTY_BAR_CLASS[s.duty_type]} ${isAdmin ? 'cursor-pointer' : ''}`}
-                            style={{ left: `${(position(s.starts_at) / windowDays) * 100}%`, width: `${(span(s.starts_at, s.ends_at) / windowDays) * 100}%` }}
+                            style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
                           >
                             {label}
                           </div>
