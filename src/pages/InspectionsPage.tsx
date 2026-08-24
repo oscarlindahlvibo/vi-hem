@@ -35,6 +35,7 @@ import {
   ListChecks,
   Users,
   ChevronRight,
+  Trash2,
 } from 'lucide-react';
 
 interface InspectionsPageProps { onNavigate: (page: string) => void; }
@@ -431,9 +432,11 @@ Namnförtydligande: ___________________    Namnförtydligande: _________________
 
 export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProps) {
   const { user } = useAuth();
+  const canDeleteContract = user?.role === 'admin' || user?.role === 'superadmin';
   const [view, setView] = useState<'inspections' | 'contracts'>('inspections');
   const [inspections, setInspections] = useState<any[]>([]);
   const [contracts, setContracts] = useState<any[]>([]);
+  const [deletingContractId, setDeletingContractId] = useState<string | null>(null);
   const [tenancies, setTenancies] = useState<any[]>([]);
   const [properties, setProperties] = useState<any[]>([]);
   const [apartments, setApartments] = useState<any[]>([]);
@@ -806,6 +809,28 @@ Foton bifogade i systemet: ${photoCount}
     setActiveContractSection('basics');
   };
 
+  const handleDeleteContract = async (contract: any) => {
+    const warning = contract.status === 'signed'
+      ? `"${contract.tenant?.name || contract.id}" är redan signerat -- raderas permanent, inklusive signaturen. Detta går INTE att ångra. Fortsätta?`
+      : `Radera hyresavtalet för "${contract.tenant?.name || contract.id}" permanent? Detta går inte att ångra.`;
+    if (!confirm(warning)) return;
+    setDeletingContractId(contract.id);
+    try {
+      const { error } = await supabase.from('vihem_contract_signatures').delete().eq('id', contract.id);
+      if (error) throw error;
+      // Best-effort: the generated signed-contract document this row may
+      // have created (buildGeneratedDocumentWithImages, a data: URL, no
+      // separate storage object to clean up) shouldn't linger under the
+      // tenant's Dokument page once the contract itself is gone.
+      if (contract.document_id) await supabase.from('vihem_documents').delete().eq('id', contract.document_id);
+      setContracts((prev) => prev.filter((c) => c.id !== contract.id));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Kunde inte radera hyresavtalet.');
+    } finally {
+      setDeletingContractId(null);
+    }
+  };
+
   const sendContractForSigning = async (contract: any) => {
     await supabase.from('vihem_contract_signatures').update({ status: 'pending_tenant' }).eq('id', contract.id);
     if (contract.tenant?.id) {
@@ -997,9 +1022,21 @@ Foton bifogade i systemet: ${photoCount}
                           {contract.contract_type === 'premises' ? 'Lokal' : 'Bostad'}
                         </span>
                       </div>
-                      <Button size="sm" variant="ghost" onClick={() => openEditContract(contract)} className="flex-shrink-0 gap-1">
-                        <Eye className="w-3.5 h-3.5" /> Öppna
-                      </Button>
+                      <div className="flex flex-shrink-0 items-center gap-1">
+                        <Button size="sm" variant="ghost" onClick={() => openEditContract(contract)} className="gap-1">
+                          <Eye className="w-3.5 h-3.5" /> Öppna
+                        </Button>
+                        {canDeleteContract && (
+                          <button
+                            onClick={() => handleDeleteContract(contract)}
+                            disabled={deletingContractId === contract.id}
+                            title="Radera permanent"
+                            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">Skapat {formatDate(contract.created_at)}</span>
@@ -1062,6 +1099,16 @@ Foton bifogade i systemet: ${photoCount}
                             <Button size="sm" variant="ghost" onClick={() => openEditContract(contract)} className="gap-1">
                               <Eye className="w-3.5 h-3.5" /> Öppna
                             </Button>
+                            {canDeleteContract && (
+                              <button
+                                onClick={() => handleDeleteContract(contract)}
+                                disabled={deletingContractId === contract.id}
+                                title="Radera permanent"
+                                className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

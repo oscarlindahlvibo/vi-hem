@@ -73,6 +73,14 @@ export function createAgreement(params: { document_type: AgreementDocumentType; 
 export function updateAgreement(params: { id: string; title?: string; category?: string; notes?: string; valid_until?: string | null; status?: 'draft' | 'ready' }): Promise<Agreement> {
   return invokeAdmin('update_agreement', params);
 }
+/** Admin/superadmin only, any status -- deliberately more permissive than
+ * vihem_agreements' own RLS (draft-only client deletes). Permanently
+ * removes the agreement and everything under it (blocks, parties,
+ * signers, versions, signatures, audit trail, attachments, and any
+ * final-signed PDF copy mirrored into a tenant's Dokument page). */
+export function deleteAgreement(id: string): Promise<{ ok: boolean }> {
+  return invokeAdmin('delete_agreement', { id });
+}
 export function saveBlocks(agreementId: string, blocks: AgreementBlock[]): Promise<{ ok: boolean; count: number }> {
   return invokeAdmin('save_blocks', { agreement_id: agreementId, blocks: blocks.map((b) => ({ block_type: b.block_type, content: b.content })) });
 }

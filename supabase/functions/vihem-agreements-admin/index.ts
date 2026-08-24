@@ -166,6 +166,49 @@ Deno.serve(async (req: Request) => {
         return json({ data });
       }
 
+      case "delete_agreement": {
+        // Admin-only and any status, deliberately more permissive than
+        // vihem_agreements' own RLS ("admin delete draft", draft only) --
+        // that policy governs direct client deletes; this is the explicit
+        // "clean up test data" escape hatch for a real admin action, so it
+        // also allows deleting a sent/signed document (irreversibly losing
+        // its audit trail and signature evidence, hence admin-only).
+        if (!ADMIN_ROLES.includes(role)) return errorJson("FORBIDDEN", "Endast admin kan radera avtal.", 403);
+        const agreementId = String(body?.id || "");
+        const agreement = await assertAgreementInOrg(agreementId);
+        if (agreement instanceof Response) return agreement;
+
+        const { data: full } = await db.from("vihem_agreements").select("final_pdf_storage_path").eq("id", agreementId).maybeSingle();
+        const { data: attachments } = await db.from("vihem_agreement_attachments").select("storage_path").eq("agreement_id", agreementId);
+        const agreementStoragePaths = (attachments || []).map((a: any) => a.storage_path).filter(Boolean);
+        if (full?.final_pdf_storage_path) agreementStoragePaths.push(full.final_pdf_storage_path);
+        if (agreementStoragePaths.length > 0) await db.storage.from("vihem-agreements").remove(agreementStoragePaths);
+
+        // Best-effort: also remove the vihem_documents mirror this
+        // agreement's final PDF may have been copied into (see
+        // _shared/agreement-signing.ts's linkFinalPdfToTenantDocuments) --
+        // otherwise a deleted agreement's signed copy would linger under
+        // the tenant's own Dokument page.
+        const { data: mirrors } = await db.from("vihem_documents").select("id, storage_bucket, storage_path").ilike("storage_path", `%/agreements/${agreementId}/%`);
+        for (const mirror of mirrors || []) {
+          if (mirror.storage_bucket && mirror.storage_path) await db.storage.from(mirror.storage_bucket).remove([mirror.storage_path]);
+        }
+        if (mirrors && mirrors.length > 0) await db.from("vihem_documents").delete().in("id", mirrors.map((m: any) => m.id));
+
+        // Explicit ordered deletes ahead of the agreement row itself: the
+        // ON DELETE CASCADE from vihem_agreements reaches both
+        // vihem_agreement_signatures (agreement_id) and
+        // vihem_agreement_versions (agreement_id) directly, but
+        // vihem_agreement_signatures.agreement_version_id -> versions is
+        // ON DELETE RESTRICT -- deleting signatures first avoids relying
+        // on cascade ordering across that second, indirect path.
+        await db.from("vihem_agreement_signatures").delete().eq("agreement_id", agreementId);
+        await db.from("vihem_agreement_signature_requests").delete().eq("agreement_id", agreementId);
+        const { error: delErr } = await db.from("vihem_agreements").delete().eq("id", agreementId);
+        if (delErr) return errorJson("INTERNAL_ERROR", delErr.message, 500);
+        return json({ data: { ok: true } });
+      }
+
       // ---- Draft blocks -----------------------------------------------------
       case "save_blocks": {
         const agreementId = String(body?.agreement_id || "");

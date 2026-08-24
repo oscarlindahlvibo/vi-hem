@@ -8,6 +8,7 @@ import {
   cancelAgreement,
   createAgreement,
   createTemplate,
+  deleteAgreement,
   duplicateTemplate,
   getAgreement,
   getTemplate,
@@ -152,6 +153,8 @@ export function AgreementsV2Page() {
 // ── Archive tab ──────────────────────────────────────────────────────────
 
 function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen: (id: string) => void }) {
+  const { user } = useAuth();
+  const canDelete = user?.role === 'admin' || user?.role === 'superadmin';
   const [items, setItems] = useState<AgreementListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -159,6 +162,7 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
   const [typeFilter, setTypeFilter] = useState<'all' | AgreementDocumentType>('all');
   const [search, setSearch] = useState('');
   const [newOpen, setNewOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -178,6 +182,23 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
   }, [statusFilter, typeFilter, search]);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleDelete = async (item: AgreementListItem, event: React.MouseEvent) => {
+    event.stopPropagation();
+    const warning = ['signed', 'accepted', 'partially_signed'].includes(item.status)
+      ? `"${item.title || item.document_number}" har redan signatur(er) -- raderas permanent, inklusive signaturerna och revisionsspåret. Detta går INTE att ångra. Fortsätta?`
+      : `Radera "${item.title || item.document_number}" permanent? Detta går inte att ångra.`;
+    if (!confirm(warning)) return;
+    setDeletingId(item.id);
+    try {
+      await deleteAgreement(item.id);
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+    } catch (err) {
+      alert(describeError(err));
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -224,6 +245,7 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
                 <th className="px-4 py-2">Status</th>
                 <th className="px-4 py-2">Skapad</th>
                 <th className="px-4 py-2">Senast ändrad</th>
+                {canDelete && <th className="px-4 py-2" />}
               </tr>
             </thead>
             <tbody>
@@ -237,6 +259,18 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
                   <td className="px-4 py-2.5"><Badge status={item.status} /></td>
                   <td className="px-4 py-2.5 text-slate-500">{new Date(item.created_at).toLocaleDateString('sv-SE')}</td>
                   <td className="px-4 py-2.5 text-slate-500">{new Date(item.updated_at).toLocaleDateString('sv-SE')}</td>
+                  {canDelete && (
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        onClick={(event) => handleDelete(item, event)}
+                        disabled={deletingId === item.id}
+                        title="Radera permanent"
+                        className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
