@@ -229,6 +229,9 @@ export function submitSignature(token: string, params: { signature_image: string
 export function declineSigning(token: string, reason?: string): Promise<{ ok: boolean }> {
   return invokePublic('decline', { token, reason });
 }
+export function updatePackageSelection(token: string, selectedPackageIds: string[]): Promise<{ ok: boolean; selected_package_ids: string[] }> {
+  return invokePublic('update_package_selection', { token, selected_package_ids: selectedPackageIds });
+}
 
 // ── Public verification (used by PublicAgreementVerifyPage) ─────────────
 // A separate edge function/token scheme from signing on purpose -- the

@@ -145,6 +145,8 @@ export function BlockRow({
         <AttachmentRefFields content={block.content} onChange={onUpdate} attachments={attachments} onUploadAttachment={onUploadAttachment} />
       ) : block.block_type === 'price_table' ? (
         <PriceTableFields content={block.content} onChange={onUpdate} />
+      ) : block.block_type === 'package_option' ? (
+        <PackageOptionFields content={block.content} onChange={onUpdate} />
       ) : (
         <BlockFields def={def.fields} content={block.content} onChange={onUpdate} />
       )}
@@ -245,6 +247,56 @@ const DEDUCTION_BADGE_LABEL: Record<DeductionType, string> = { none: '', rut: 'R
  * summary (description, qty × price, a RUT/ROT badge when set) so a
  * multi-line quote is still scannable at a glance. */
 function PriceTableFields({ content, onChange }: { content: Record<string, any>; onChange: (content: Record<string, any>) => void }) {
+  return (
+    <div className="space-y-3">
+      <select
+        value={content.price_form || 'fixed'}
+        onChange={(e) => onChange({ ...content, price_form: e.target.value })}
+        className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+      >
+        <option value="fixed">Fast pris</option>
+        <option value="recurring">Löpande räkning</option>
+      </select>
+      <PriceItemsEditor content={content} onChange={onChange} />
+    </div>
+  );
+}
+
+/** A tillägg (`package_option`) is a price_table wearing a title and
+ * description -- same line items, same moms/avdrag/totals, just with a
+ * "vad heter det här tillvalet" header and a default-checked toggle for
+ * how it should look the first time a signer sees it. */
+function PackageOptionFields({ content, onChange }: { content: Record<string, any>; onChange: (content: Record<string, any>) => void }) {
+  return (
+    <div className="space-y-3">
+      <input
+        type="text"
+        value={content.title || ''}
+        onChange={(e) => onChange({ ...content, title: e.target.value })}
+        placeholder="Titel, t.ex. Tvättmaskin & torktumlare"
+        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+      />
+      <textarea
+        value={content.description || ''}
+        onChange={(e) => onChange({ ...content, description: e.target.value })}
+        placeholder="Beskrivning (valfritt)"
+        rows={2}
+        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+      />
+      <label className="flex items-center gap-2 text-xs text-slate-600">
+        <input type="checkbox" checked={Boolean(content.selected_by_default)} onChange={(e) => onChange({ ...content, selected_by_default: e.target.checked })} />
+        Förvalt (ikryssat när mottagaren först öppnar dokumentet)
+      </label>
+      <PriceItemsEditor content={content} onChange={onChange} />
+    </div>
+  );
+}
+
+/** The line-item list + moms/avdrag section + totals, shared verbatim
+ * between the plain price_table block and package_option's tillägg --
+ * both content shapes are identical price-table data, just with an extra
+ * title/description wrapper in the latter's case. */
+function PriceItemsEditor({ content, onChange }: { content: Record<string, any>; onChange: (content: Record<string, any>) => void }) {
   const items: PriceTableItem[] = Array.isArray(content.items) && content.items.length > 0 ? content.items : [{ description: '', quantity: '1', unit_price: '', vat_rate: DEFAULT_VAT_RATE, deduction_type: 'none' }];
   const totals = calcPriceTable({ ...content, items });
   const hasRut = items.some((it) => it.deduction_type === 'rut');
@@ -267,15 +319,6 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
 
   return (
     <div className="space-y-3">
-      <select
-        value={content.price_form || 'fixed'}
-        onChange={(e) => onChange({ ...content, price_form: e.target.value })}
-        className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-      >
-        <option value="fixed">Fast pris</option>
-        <option value="recurring">Löpande räkning</option>
-      </select>
-
       <div className="space-y-1.5">
         {items.map((item, i) => (
           <div key={i} className="flex items-center gap-1.5">

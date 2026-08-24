@@ -26,7 +26,7 @@ export async function generateAndDeliverFinalPdf(db: SupabaseClient, agreementId
   try {
     const { data: agreement, error: agreementErr } = await db
       .from("vihem_agreements")
-      .select("id, organisation_id, document_number, title, document_type, current_version_id, completed_at, verification_code")
+      .select("id, organisation_id, document_number, title, document_type, current_version_id, completed_at, verification_code, selected_package_ids")
       .eq("id", agreementId)
       .maybeSingle();
     if (agreementErr || !agreement) return { ok: false, error: "Avtalet hittades inte." };
@@ -78,6 +78,7 @@ export async function generateAndDeliverFinalPdf(db: SupabaseClient, agreementId
       contentHash: version.content_hash,
       completedAt: agreement.completed_at || new Date().toISOString(),
       verificationUrl,
+      selectedPackageIds: Array.isArray(agreement.selected_package_ids) ? agreement.selected_package_ids : [],
     });
 
     const storagePath = `${agreement.organisation_id}/${agreementId}/final-signed.pdf`;

@@ -3,7 +3,7 @@
 // isGuestLaundryRoute()/GuestLaundryPage.tsx). No VI-HEM login, no Layout
 // chrome -- a standalone mobile-first page.
 import { useCallback, useEffect, useState } from 'react';
-import { declineSigning, getAttachmentDownloadUrl, getSignView, submitSignature, AgreementApiError } from '../api';
+import { declineSigning, getAttachmentDownloadUrl, getSignView, submitSignature, updatePackageSelection, AgreementApiError } from '../api';
 import type { PublicSignView } from '../types';
 import { BlockRenderer } from '../components/BlockRenderer';
 import { SignaturePad } from '../components/SignaturePad';
@@ -22,6 +22,7 @@ export function PublicAgreementSignPage() {
   const [signatureImage, setSignatureImage] = useState<string | null>(null);
   const [signatureName, setSignatureName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [packageSelection, setPackageSelection] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!token) {
@@ -33,11 +34,27 @@ export function PublicAgreementSignPage() {
       .then((data) => {
         setView(data);
         setSignatureName(data.signer.name || '');
+        setPackageSelection(Object.fromEntries(data.selected_package_ids.map((id) => [id, true])));
         if (data.already_signed || data.signer.status === 'signed') setMode('signed');
         else if (data.signer.status === 'declined') setMode('declined');
       })
       .catch((err) => setError(err instanceof AgreementApiError ? err.message : 'Kunde inte ladda dokumentet.'))
       .finally(() => setLoading(false));
+  }, [token]);
+
+  // Optimistic: flips the checkbox immediately, persists in the
+  // background. A tenant toggling tvättmaskin/internet on and off while
+  // deciding shouldn't feel like it's waiting on a network round-trip each
+  // click; if the save fails they'll see the error banner and can retry
+  // (the checkbox itself doesn't roll back, since the next successful
+  // toggle -- or signing -- reconciles it anyway).
+  const handleTogglePackage = useCallback((blockId: string, selected: boolean) => {
+    setPackageSelection((prev) => {
+      const next = { ...prev, [blockId]: selected };
+      const ids = Object.entries(next).filter(([, v]) => v).map(([id]) => id);
+      updatePackageSelection(token, ids).catch((err) => setError(err instanceof AgreementApiError ? err.message : 'Kunde inte spara valet.'));
+      return next;
+    });
   }, [token]);
 
   const handleSign = async () => {
@@ -132,6 +149,8 @@ export function PublicAgreementSignPage() {
                     signers={[view.signer]}
                     attachments={view.attachments}
                     resolveAttachmentUrl={resolveAttachmentUrl}
+                    packageSelection={packageSelection}
+                    onTogglePackage={handleTogglePackage}
                   />
                 </div>
 

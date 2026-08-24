@@ -4,7 +4,7 @@
 // to drift out of sync.
 import { useEffect, useState } from 'react';
 import type { AgreementAttachment, AgreementBlock, AgreementParty, AgreementSigner } from '../types';
-import { calcPriceTable, formatSek, type PriceTableContent, type PriceTableItem } from '../blocks/priceTable';
+import { calcDocumentTotals, calcPriceTable, formatSek, type PriceTableContent, type PriceTableItem } from '../blocks/priceTable';
 
 type RendererAttachment = Pick<AgreementAttachment, 'id' | 'name' | 'content_type'>;
 
@@ -20,6 +20,8 @@ export function BlockRenderer({
   signers = [],
   attachments = [],
   resolveAttachmentUrl,
+  packageSelection,
+  onTogglePackage,
 }: {
   blocks: AgreementBlock[];
   parties?: Pick<AgreementParty, 'display_name' | 'party_type'>[];
@@ -29,12 +31,69 @@ export function BlockRenderer({
   // block always used to render, so this can't break any existing caller.
   attachments?: RendererAttachment[];
   resolveAttachmentUrl?: (attachmentId: string) => Promise<string>;
+  /** Which `package_option` blocks are currently checked, keyed by block
+   * id. Optional and controlled: pass both this and `onTogglePackage` when
+   * the selection needs to be persisted somewhere (the public signing
+   * page does, against `vihem_agreements.selected_package_ids`); omit both
+   * and the renderer just tracks its own local toggle state, seeded from
+   * each package's `selected_by_default` -- fine for a staff preview,
+   * where nothing needs to survive a re-render. */
+  packageSelection?: Record<string, boolean>;
+  onTogglePackage?: (blockId: string, selected: boolean) => void;
 }) {
+  const [internalSelection, setInternalSelection] = useState<Record<string, boolean>>({});
+
+  const isSelected = (block: AgreementBlock) => {
+    if (packageSelection && block.id in packageSelection) return packageSelection[block.id];
+    if (block.id in internalSelection) return internalSelection[block.id];
+    return Boolean(block.content?.selected_by_default);
+  };
+  const toggle = (block: AgreementBlock) => {
+    const next = !isSelected(block);
+    if (onTogglePackage) onTogglePackage(block.id, next);
+    else setInternalSelection((prev) => ({ ...prev, [block.id]: next }));
+  };
+
+  const totals = calcDocumentTotals(blocks, (blockId) => {
+    const block = blocks.find((b) => b.id === blockId);
+    return block ? isSelected(block) : false;
+  });
+
   return (
     <div className="space-y-3 text-sm text-slate-800">
       {blocks.map((block) => (
-        <BlockView key={block.id} block={block} parties={parties} signers={signers} attachments={attachments} resolveAttachmentUrl={resolveAttachmentUrl} />
+        <BlockView
+          key={block.id}
+          block={block}
+          parties={parties}
+          signers={signers}
+          attachments={attachments}
+          resolveAttachmentUrl={resolveAttachmentUrl}
+          packageSelected={block.block_type === 'package_option' ? isSelected(block) : false}
+          onTogglePackage={() => toggle(block)}
+        />
       ))}
+      {totals.hasPricing && <DocumentTotalsFooter totals={totals} />}
+    </div>
+  );
+}
+
+function DocumentTotalsFooter({ totals }: { totals: ReturnType<typeof calcDocumentTotals> }) {
+  const selectedAddons = totals.addons.filter((a) => a.selected);
+  // Only worth its own summary card when there's actually a choice to
+  // summarise -- a document with just a single price/price_table block and
+  // no tillägg already shows its own total inline, this would just repeat it.
+  if (totals.addons.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Sammanställning</p>
+      <div className="space-y-1">
+        <div className="flex justify-between text-slate-600"><span>Grundkostnad</span><span>{formatSek(totals.base)}</span></div>
+        {selectedAddons.map((a) => (
+          <div key={a.blockId} className="flex justify-between text-slate-600"><span>{a.title}</span><span>{formatSek(a.amount)}</span></div>
+        ))}
+        <div className="flex justify-between border-t border-slate-200 pt-1 text-base font-semibold text-slate-900"><span>Totalt</span><span>{formatSek(totals.grandTotal)}</span></div>
+      </div>
     </div>
   );
 }
@@ -45,12 +104,16 @@ function BlockView({
   signers,
   attachments,
   resolveAttachmentUrl,
+  packageSelected,
+  onTogglePackage,
 }: {
   block: AgreementBlock;
   parties: Pick<AgreementParty, 'display_name' | 'party_type'>[];
   signers: Pick<AgreementSigner, 'name' | 'role_title'>[];
   attachments: RendererAttachment[];
   resolveAttachmentUrl?: (attachmentId: string) => Promise<string>;
+  packageSelected: boolean;
+  onTogglePackage: () => void;
 }) {
   const c = block.content || {};
   switch (block.block_type) {
@@ -94,56 +157,31 @@ function BlockView({
           <span className="shrink-0 whitespace-nowrap font-semibold">{formatCurrency(String(c.amount || ''), String(c.unit || 'kr'))}</span>
         </div>
       );
-    case 'price_table': {
-      const items: PriceTableItem[] = Array.isArray(c.items) ? c.items : [];
-      const totals = calcPriceTable(c as Partial<PriceTableContent>);
-      const hasRut = items.some((it) => it.deduction_type === 'rut');
-      const hasRot = items.some((it) => it.deduction_type === 'rot');
-      const badgeLabel: Record<string, string> = { rut: 'RUT', rot: 'ROT' };
+    case 'price_table':
       return (
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-wrap gap-2">
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-              Prisform: {c.price_form === 'recurring' ? 'Löpande räkning' : 'Fast pris'}
-            </span>
-            {hasRut && <span className="rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700">Rutavdrag {c.rut_rate ?? 0}%</span>}
-            {hasRot && <span className="rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700">Rotavdrag {c.rot_rate ?? 0}%</span>}
-          </div>
-          <div className="mt-3 space-y-2">
-            {items.map((item, i) => (
-              <div key={i} className="flex items-start justify-between gap-3 text-sm">
-                <span className="min-w-0 flex-1 break-words text-slate-700">
-                  {item.description || '—'}
-                  {item.deduction_type && item.deduction_type !== 'none' && (
-                    <span className="ml-1.5 rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">{badgeLabel[item.deduction_type]}</span>
-                  )}
-                </span>
-                <span className="shrink-0 whitespace-nowrap text-slate-500">
-                  {item.quantity} × {item.unit_price} kr <span className="text-xs text-slate-400">(moms {item.vat_rate}%)</span>
-                </span>
+          <PriceTableBody content={c} />
+        </div>
+      );
+    case 'package_option': {
+      const totals = calcPriceTable(c as Partial<PriceTableContent>);
+      return (
+        <div className={`rounded-xl border-2 p-4 transition-colors ${packageSelected ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200 bg-white'}`}>
+          <div className="flex items-start gap-3">
+            {/* The checkbox is the only toggle control -- deliberately NOT
+                a <label> wrapping the whole card, so clicking the price
+                breakdown below doesn't also flip the selection. */}
+            <input type="checkbox" checked={packageSelected} onChange={onTogglePackage} className="mt-1 h-4 w-4 shrink-0 cursor-pointer" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <button type="button" onClick={onTogglePackage} className="min-w-0 break-words text-left font-semibold text-slate-900">{c.title || 'Valbart tillägg'}</button>
+                <span className="shrink-0 whitespace-nowrap font-semibold text-slate-900">{formatSek(totals.amountToPay)}</span>
               </div>
-            ))}
-          </div>
-          <div className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-sm">
-            <div className="flex justify-between text-slate-500"><span>Netto</span><span>{formatSek(totals.netto)}</span></div>
-            <div className="flex justify-between text-slate-500"><span>Moms</span><span>{formatSek(totals.moms)}</span></div>
-            <div className="flex justify-between text-slate-500"><span>Öresavrundning</span><span>{formatSek(totals.roundOff)}</span></div>
-            <div className="flex justify-between border-t border-slate-100 pt-1 font-semibold text-slate-900"><span>Total inkl. moms</span><span>{formatSek(totals.total)}</span></div>
-            {hasRut && (
-              <div className="flex justify-between text-green-700">
-                <span>Rutavdrag{c.deduction_personal_number ? ` (${c.deduction_personal_number})` : ''}</span>
-                <span>-{formatSek(totals.rutAmount)}</span>
+              {c.description && <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-600">{c.description}</p>}
+              <div className="mt-3">
+                <PriceTableBody content={c} compact />
               </div>
-            )}
-            {hasRot && (
-              <div className="flex justify-between text-green-700">
-                <span>Rotavdrag{c.deduction_personal_number ? ` (${c.deduction_personal_number})` : ''}</span>
-                <span>-{formatSek(totals.rotAmount)}</span>
-              </div>
-            )}
-            {(hasRut || hasRot) && (
-              <div className="flex justify-between border-t border-slate-100 pt-1 font-semibold text-slate-900"><span>Att betala</span><span>{formatSek(totals.amountToPay)}</span></div>
-            )}
+            </div>
           </div>
         </div>
       );
@@ -242,6 +280,69 @@ function BlockView({
     default:
       return null;
   }
+}
+
+/** The line-item breakdown + Netto/Moms/avdrag/Total block, shared between
+ * a plain `price_table` block and a `package_option` card -- both content
+ * shapes are the same price-table data, just with a tillägg's title/
+ * description/checkbox wrapped around this. `compact` drops the
+ * "Prisform"-pill header row, which reads oddly repeated across several
+ * tillägg cards in the same document. */
+function PriceTableBody({ content: c, compact = false }: { content: Record<string, any>; compact?: boolean }) {
+  const items: PriceTableItem[] = Array.isArray(c.items) ? c.items : [];
+  const totals = calcPriceTable(c as Partial<PriceTableContent>);
+  const hasRut = items.some((it) => it.deduction_type === 'rut');
+  const hasRot = items.some((it) => it.deduction_type === 'rot');
+  const badgeLabel: Record<string, string> = { rut: 'RUT', rot: 'ROT' };
+  return (
+    <div>
+      {!compact && (
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+            Prisform: {c.price_form === 'recurring' ? 'Löpande räkning' : 'Fast pris'}
+          </span>
+          {hasRut && <span className="rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700">Rutavdrag {c.rut_rate ?? 0}%</span>}
+          {hasRot && <span className="rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700">Rotavdrag {c.rot_rate ?? 0}%</span>}
+        </div>
+      )}
+      <div className={`space-y-2 ${compact ? '' : 'mt-3'}`}>
+        {items.map((item, i) => (
+          <div key={i} className="flex items-start justify-between gap-3 text-sm">
+            <span className="min-w-0 flex-1 break-words text-slate-700">
+              {item.description || '—'}
+              {item.deduction_type && item.deduction_type !== 'none' && (
+                <span className="ml-1.5 rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">{badgeLabel[item.deduction_type]}</span>
+              )}
+            </span>
+            <span className="shrink-0 whitespace-nowrap text-slate-500">
+              {item.quantity} × {item.unit_price} kr <span className="text-xs text-slate-400">(moms {item.vat_rate}%)</span>
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-sm">
+        <div className="flex justify-between text-slate-500"><span>Netto</span><span>{formatSek(totals.netto)}</span></div>
+        <div className="flex justify-between text-slate-500"><span>Moms</span><span>{formatSek(totals.moms)}</span></div>
+        {!compact && <div className="flex justify-between text-slate-500"><span>Öresavrundning</span><span>{formatSek(totals.roundOff)}</span></div>}
+        <div className="flex justify-between border-t border-slate-100 pt-1 font-semibold text-slate-900"><span>Total inkl. moms</span><span>{formatSek(totals.total)}</span></div>
+        {hasRut && (
+          <div className="flex justify-between text-green-700">
+            <span>Rutavdrag{c.deduction_personal_number ? ` (${c.deduction_personal_number})` : ''}</span>
+            <span>-{formatSek(totals.rutAmount)}</span>
+          </div>
+        )}
+        {hasRot && (
+          <div className="flex justify-between text-green-700">
+            <span>Rotavdrag{c.deduction_personal_number ? ` (${c.deduction_personal_number})` : ''}</span>
+            <span>-{formatSek(totals.rotAmount)}</span>
+          </div>
+        )}
+        {(hasRut || hasRot) && (
+          <div className="flex justify-between border-t border-slate-100 pt-1 font-semibold text-slate-900"><span>Att betala</span><span>{formatSek(totals.amountToPay)}</span></div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // Fetches its own signed URL (via whichever resolver the caller supplied --

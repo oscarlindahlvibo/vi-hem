@@ -68,7 +68,7 @@ Deno.serve(async (req: Request) => {
         const { request } = resolved;
 
         const [{ data: agreement }, { data: version }, { data: signer }, { data: parties }, { data: attachments }, { data: existingSignature }] = await Promise.all([
-          db.from("vihem_agreements").select("title, document_number, document_type, status").eq("id", request.agreement_id).single(),
+          db.from("vihem_agreements").select("title, document_number, document_type, status, selected_package_ids").eq("id", request.agreement_id).single(),
           db.from("vihem_agreement_versions").select("id, blocks, content_hash, frozen_at").eq("id", request.agreement_version_id).single(),
           db.from("vihem_agreement_signers").select("id, name, role_title, signing_method, status").eq("id", request.signer_id).single(),
           db.from("vihem_agreement_parties").select("display_name, party_type").eq("agreement_id", request.agreement_id).order("position"),
@@ -97,8 +97,22 @@ Deno.serve(async (req: Request) => {
             parties: (parties || []).map((p: any) => ({ display_name: p.display_name, party_type: p.party_type })),
             attachments: attachments || [],
             already_signed: Boolean(existingSignature),
+            selected_package_ids: Array.isArray(agreement?.selected_package_ids) ? agreement.selected_package_ids : [],
           },
         });
+      }
+
+      case "update_package_selection": {
+        const resolved = await resolveRequest();
+        if (resolved.error) return resolved.error;
+        const { request } = resolved;
+        const { data: signer } = await db.from("vihem_agreement_signers").select("status").eq("id", request.signer_id).maybeSingle();
+        if (!signer) return errorJson("NOT_FOUND", "Signatären hittades inte.", 404);
+        if (signer.status === "signed" || signer.status === "declined") return errorJson("ALREADY_SIGNED", "Dokumentet är redan avgjort och kan inte längre ändras.", 409);
+        const selectedPackageIds = Array.isArray(body?.selected_package_ids) ? body.selected_package_ids.map((v: unknown) => String(v)) : [];
+        const { error: updateErr } = await db.from("vihem_agreements").update({ selected_package_ids: selectedPackageIds }).eq("id", request.agreement_id);
+        if (updateErr) return errorJson("INTERNAL_ERROR", `Kunde inte spara valet: ${updateErr.message}`, 500);
+        return json({ data: { ok: true, selected_package_ids: selectedPackageIds } });
       }
 
       case "get_attachment_url": {

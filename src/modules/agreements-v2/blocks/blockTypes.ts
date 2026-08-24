@@ -121,6 +121,25 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
     fields: [],
   },
   {
+    type: 'package_option',
+    label: 'Valbart tillägg',
+    description: 'Ett tillval mottagaren kan bocka för att lägga till (t.ex. tvättmaskin, internet) -- läggs till grundkostnaden i totalsumman längst ner',
+    defaultContent: () => ({
+      title: 'Nytt tillägg',
+      description: '',
+      selected_by_default: false,
+      price_form: 'fixed',
+      items: [{ description: '', quantity: '1', unit_price: '', vat_rate: 25, deduction_type: 'none' }],
+      rut_rate: 50,
+      rot_rate: 30,
+      deduction_personal_number: '',
+    }),
+    // Same reason as price_table: a title/description plus the exact same
+    // line-item editor, special-cased in BlockEditor.tsx as
+    // PackageOptionFields (which reuses PriceItemsEditor).
+    fields: [],
+  },
+  {
     type: 'table',
     label: 'Tabell',
     description: 'Enkel tabell med rubrikrad',

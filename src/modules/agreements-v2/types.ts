@@ -38,6 +38,11 @@ export interface Agreement {
   archived_at: string | null;
   final_pdf_storage_path: string | null;
   final_pdf_generated_at: string | null;
+  /** Block ids of the `package_option` blocks the signer(s) have currently
+   * chosen to include -- one shared choice for the whole document (a
+   * tenant picks once, not per signer), kept on the agreement itself
+   * rather than per-signature. See docs/agreements-v2.md for why. */
+  selected_package_ids: string[];
 }
 
 export interface AgreementListItem {
@@ -67,6 +72,7 @@ export type BlockType =
   | 'dynamic_field'
   | 'price'
   | 'price_table'
+  | 'package_option'
   | 'table'
   | 'bullet_list'
   | 'checklist'
@@ -252,6 +258,9 @@ export interface PublicSignView {
   parties: { display_name: string; party_type: PartyType }[];
   attachments: { id: string; name: string; description: string; content_type: string; file_size: number }[];
   already_signed: boolean;
+  /** Current shared package-add-on selection for this document -- see
+   * Agreement.selected_package_ids. */
+  selected_package_ids: string[];
 }
 
 // ── Public verification view ─────────────────────────────────────────────

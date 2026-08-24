@@ -52,6 +52,11 @@ export interface AgreementPdfInput {
   contentHash: string;
   completedAt: string;
   verificationUrl: string | null;
+  /** Ids of `package_option` blocks the signer opted into -- see
+   * selected_package_ids on vihem_agreements. Anything not listed here is
+   * rendered as an offered-but-not-included add-on and excluded from the
+   * totals summary. */
+  selectedPackageIds: string[];
 }
 
 const normalize = (value: string) =>
@@ -121,7 +126,56 @@ function charsForSize(size: number): number {
   return Math.max(20, Math.floor(((PAGE_WIDTH - MARGIN * 2) / (size * 0.52))));
 }
 
-function blockToLines(block: AgreementBlock): TextLine[] {
+interface PriceTableItem { description?: string; quantity?: string; unit_price?: string; vat_rate?: number; deduction_type?: string }
+
+/** Mirrors calcPriceTable() in src/modules/agreements-v2/blocks/priceTable.ts
+ * -- duplicated rather than shared across the browser/edge-function
+ * boundary (see that module's header), so keep the two in sync. Shared by
+ * the "price_table" and "package_option" cases below, and by
+ * documentTotalsLines() for the whole-document summary, since a
+ * package_option's content is structurally identical to a price_table's. */
+function priceTableCalc(c: Record<string, unknown>) {
+  const toNumber = (v: unknown) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) ? n : 0; };
+  const items: PriceTableItem[] = Array.isArray(c.items) ? c.items as PriceTableItem[] : [];
+  const lineNetto = (item: PriceTableItem) => toNumber(item.quantity) * toNumber(item.unit_price);
+  const itemVatRate = (item: PriceTableItem) => (item.vat_rate === undefined || item.vat_rate === null ? 25 : toNumber(item.vat_rate));
+  const lineMoms = (item: PriceTableItem) => lineNetto(item) * (itemVatRate(item) / 100);
+  const netto = items.reduce((sum, item) => sum + lineNetto(item), 0);
+  const moms = items.reduce((sum, item) => sum + lineMoms(item), 0);
+  const total = Math.round(netto + moms);
+  const hasRut = items.some((item) => item.deduction_type === "rut");
+  const hasRot = items.some((item) => item.deduction_type === "rot");
+  const baseFor = (type: string) => items.reduce((sum, item) => sum + (item.deduction_type === type ? lineNetto(item) + lineMoms(item) : 0), 0);
+  const rutAmount = baseFor("rut") * (toNumber(c.rut_rate) / 100);
+  const rotAmount = baseFor("rot") * (toNumber(c.rot_rate) / 100);
+  const amountToPay = total - rutAmount - rotAmount;
+  return { items, netto, moms, total, hasRut, hasRot, rutAmount, rotAmount, amountToPay, toNumber, itemVatRate };
+}
+
+function priceTableLines(c: Record<string, unknown>): TextLine[] {
+  const text = (v: unknown) => (v === undefined || v === null ? "" : String(v));
+  const calc = priceTableCalc(c);
+  const { items, netto, moms, total, hasRut, hasRot, rutAmount, rotAmount, amountToPay, toNumber, itemVatRate } = calc;
+  const badges: string[] = [];
+  if (hasRut) badges.push(`Rutavdrag ${toNumber(c.rut_rate)}%`);
+  if (hasRot) badges.push(`Rotavdrag ${toNumber(c.rot_rate)}%`);
+  const lines: TextLine[] = [{
+    text: `Prisform: ${c.price_form === "recurring" ? "Löpande räkning" : "Fast pris"}` + (badges.length ? `   ${badges.join("   ")}` : ""),
+    font: "F2", size: 10, gapAfter: 3,
+  }];
+  for (const item of items) {
+    const marker = item.deduction_type === "rut" ? " (RUT)" : item.deduction_type === "rot" ? " (ROT)" : "";
+    lines.push({ text: `${text(item.description)}${marker}   ${text(item.quantity)} x ${text(item.unit_price)} kr (moms ${itemVatRate(item)}%)`, font: "F1", size: 9 });
+  }
+  lines.push({ text: `Netto: ${netto.toFixed(2)} kr   Moms: ${moms.toFixed(2)} kr   Total inkl. moms: ${total.toFixed(2)} kr`, font: "F2", size: 9, gapAfter: hasRut || hasRot ? 2 : 4 });
+  const pnr = text(c.deduction_personal_number);
+  if (hasRut) lines.push({ text: `Rutavdrag${pnr ? ` (${pnr})` : ""}: -${rutAmount.toFixed(2)} kr`, font: "F2", size: 9 });
+  if (hasRot) lines.push({ text: `Rotavdrag${pnr ? ` (${pnr})` : ""}: -${rotAmount.toFixed(2)} kr`, font: "F2", size: 9 });
+  if (hasRut || hasRot) lines.push({ text: `Att betala: ${amountToPay.toFixed(2)} kr`, font: "F2", size: 9, gapAfter: 4 });
+  return lines;
+}
+
+function blockToLines(block: AgreementBlock, selectedPackageIds: Set<string>): TextLine[] {
   const c = block.content || {};
   const text = (v: unknown) => (v === undefined || v === null ? "" : String(v));
   switch (block.block_type) {
@@ -144,47 +198,25 @@ function blockToLines(block: AgreementBlock): TextLine[] {
       return [{ text: `${text(c.label)}: ${text(c.token)}`, font: "F1", size: 10, gapAfter: 3 }];
     case "price":
       return [{ text: `${text(c.label)}  ${text(c.amount)} ${text(c.unit) || "kr"}`, font: "F1", size: 10, gapAfter: 3 }];
-    case "price_table": {
-      // Mirrors calcPriceTable() in src/modules/agreements-v2/blocks/priceTable.ts
-      // -- duplicated rather than shared across the browser/edge-function
-      // boundary (see that module's header), so keep the two in sync.
-      // Deduction type is PER ITEM (a quote can mix RUT-eligible rows with
-      // ROT-eligible rows with plain rows), never a single flag for the
-      // whole block.
-      // VAT is PER ITEM too (a quote can mix e.g. 25% goods with a 12%
-      // catering row) -- each item carries its own vat_rate rather than one
-      // rate for the whole block.
-      const toNumber = (v: unknown) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) ? n : 0; };
-      const items: { description?: string; quantity?: string; unit_price?: string; vat_rate?: number; deduction_type?: string }[] = Array.isArray(c.items) ? c.items : [];
-      const lineNetto = (item: { quantity?: string; unit_price?: string }) => toNumber(item.quantity) * toNumber(item.unit_price);
-      const itemVatRate = (item: { vat_rate?: number }) => (item.vat_rate === undefined || item.vat_rate === null ? 25 : toNumber(item.vat_rate));
-      const lineMoms = (item: { quantity?: string; unit_price?: string; vat_rate?: number }) => lineNetto(item) * (itemVatRate(item) / 100);
-      const netto = items.reduce((sum, item) => sum + lineNetto(item), 0);
-      const moms = items.reduce((sum, item) => sum + lineMoms(item), 0);
-      const total = Math.round(netto + moms);
-      const hasRut = items.some((item) => item.deduction_type === "rut");
-      const hasRot = items.some((item) => item.deduction_type === "rot");
-      const baseFor = (type: string) => items.reduce((sum, item) => sum + (item.deduction_type === type ? lineNetto(item) + lineMoms(item) : 0), 0);
-      const rutAmount = baseFor("rut") * (toNumber(c.rut_rate) / 100);
-      const rotAmount = baseFor("rot") * (toNumber(c.rot_rate) / 100);
-      const amountToPay = total - rutAmount - rotAmount;
-
-      const badges: string[] = [];
-      if (hasRut) badges.push(`Rutavdrag ${toNumber(c.rut_rate)}%`);
-      if (hasRot) badges.push(`Rotavdrag ${toNumber(c.rot_rate)}%`);
+    case "price_table":
+      // Deduction type AND VAT are PER ITEM (a quote can mix RUT-eligible
+      // rows with ROT-eligible rows with plain rows, and e.g. 25% goods
+      // with a 12% catering row) -- see priceTableCalc().
+      return priceTableLines(c);
+    case "package_option": {
+      // Content is structurally a price_table (see priceTableCalc) plus
+      // title/description/selected_by_default -- see PackageOptionContent
+      // in src/modules/agreements-v2/blocks/priceTable.ts. The final PDF is
+      // an immutable record of what was OFFERED, so an unselected add-on
+      // still lists its price for transparency, just clearly marked as not
+      // included (and excluded from documentTotalsLines()'s total).
+      const selected = selectedPackageIds.has(block.id);
       const lines: TextLine[] = [{
-        text: `Prisform: ${c.price_form === "recurring" ? "Löpande räkning" : "Fast pris"}` + (badges.length ? `   ${badges.join("   ")}` : ""),
-        font: "F2", size: 10, gapAfter: 3,
+        text: `Tillägg: ${text(c.title) || "Valbart tillägg"} -- ${selected ? "VALT (ingår i totalsumman)" : "EJ VALT (ingår ej i totalsumman)"}`,
+        font: "F2", size: 10, gapAfter: 2,
       }];
-      for (const item of items) {
-        const marker = item.deduction_type === "rut" ? " (RUT)" : item.deduction_type === "rot" ? " (ROT)" : "";
-        lines.push({ text: `${text(item.description)}${marker}   ${text(item.quantity)} x ${text(item.unit_price)} kr (moms ${itemVatRate(item)}%)`, font: "F1", size: 9 });
-      }
-      lines.push({ text: `Netto: ${netto.toFixed(2)} kr   Moms: ${moms.toFixed(2)} kr   Total inkl. moms: ${total.toFixed(2)} kr`, font: "F2", size: 9, gapAfter: hasRut || hasRot ? 2 : 4 });
-      const pnr = text(c.deduction_personal_number);
-      if (hasRut) lines.push({ text: `Rutavdrag${pnr ? ` (${pnr})` : ""}: -${rutAmount.toFixed(2)} kr`, font: "F2", size: 9 });
-      if (hasRot) lines.push({ text: `Rotavdrag${pnr ? ` (${pnr})` : ""}: -${rotAmount.toFixed(2)} kr`, font: "F2", size: 9 });
-      if (hasRut || hasRot) lines.push({ text: `Att betala: ${amountToPay.toFixed(2)} kr`, font: "F2", size: 9, gapAfter: 4 });
+      if (text(c.description)) lines.push(...wrapLine(text(c.description), charsForSize(9)).map((t) => ({ text: t, font: "F1" as const, size: 9, gapAfter: 2 })));
+      lines.push(...priceTableLines(c));
       return lines;
     }
     case "table": {
@@ -269,7 +301,7 @@ function partyLine(parties: { display_name: string; party_type: string }[], inde
   return [{ text: `Part: ${party.display_name}`, font: "F2", size: 10, gapAfter: 3 }];
 }
 
-function buildTextLinesFromBlocks(blocks: AgreementBlock[], parties: { display_name: string; party_type: string }[]): TextLine[][] {
+function buildTextLinesFromBlocks(blocks: AgreementBlock[], parties: { display_name: string; party_type: string }[], selectedPackageIds: Set<string>): TextLine[][] {
   // Returns one text-line-group per "text run" -- split at page_break
   // blocks so those always start a fresh page.
   const groups: TextLine[][] = [[]];
@@ -278,10 +310,46 @@ function buildTextLinesFromBlocks(blocks: AgreementBlock[], parties: { display_n
       groups.push([]);
       continue;
     }
-    const lines = block.block_type === "party" ? partyLine(parties, Number((block.content || {}).party_index) || 0) : blockToLines(block);
+    const lines = block.block_type === "party" ? partyLine(parties, Number((block.content || {}).party_index) || 0) : blockToLines(block, selectedPackageIds);
     groups[groups.length - 1].push(...lines);
   }
   return groups.filter((g) => g.length > 0);
+}
+
+/** Mirrors calcDocumentTotals() in
+ * src/modules/agreements-v2/blocks/priceTable.ts -- walks every price/
+ * price_table/package_option block once and produces a single
+ * "Grundkostnad + valda tillägg = Totalt" summary, using the same rule the
+ * live signing page and BlockRenderer use for what counts as selected. */
+function documentTotalsLines(blocks: AgreementBlock[], selectedPackageIds: Set<string>): TextLine[] {
+  let base = 0;
+  let hasPricing = false;
+  const addons: { title: string; amount: number; selected: boolean }[] = [];
+  for (const block of blocks) {
+    const c = block.content || {};
+    if (block.block_type === "price") {
+      hasPricing = true;
+      const n = Number(String((c as Record<string, unknown>).amount ?? "").replace(",", "."));
+      base += Number.isFinite(n) ? n : 0;
+    } else if (block.block_type === "price_table") {
+      hasPricing = true;
+      base += priceTableCalc(c).amountToPay;
+    } else if (block.block_type === "package_option") {
+      hasPricing = true;
+      addons.push({ title: String((c as Record<string, unknown>).title || "Valbart tillägg"), amount: priceTableCalc(c).amountToPay, selected: selectedPackageIds.has(block.id) });
+    }
+  }
+  if (!hasPricing || addons.length === 0) return [];
+  const addonsTotal = addons.filter((a) => a.selected).reduce((sum, a) => sum + a.amount, 0);
+  const lines: TextLine[] = [
+    { text: "Sammanställning", font: "F2", size: 13, gapAfter: 6 },
+    { text: `Grundkostnad: ${base.toFixed(2)} kr`, font: "F1", size: 10, gapAfter: 2 },
+  ];
+  for (const a of addons) {
+    lines.push({ text: `${a.selected ? "+" : "  "} ${a.title}: ${a.amount.toFixed(2)} kr${a.selected ? "" : " (ej valt)"}`, font: "F1", size: 10, gapAfter: 2 });
+  }
+  lines.push({ text: `Totalt: ${(base + addonsTotal).toFixed(2)} kr`, font: "F2", size: 11, gapAfter: 8 });
+  return lines;
 }
 
 function pdfObjectBytes(id: number, body: Uint8Array): Uint8Array {
@@ -357,13 +425,17 @@ export async function buildAgreementPdf(input: AgreementPdfInput): Promise<Uint8
     { text: `Dokumentnummer: ${input.documentNumber}`, font: "F1", size: 9, gapAfter: 10 },
   ];
 
-  const contentGroups = buildTextLinesFromBlocks(input.blocks, input.parties);
+  const selectedPackageIds = new Set(input.selectedPackageIds);
+  const contentGroups = buildTextLinesFromBlocks(input.blocks, input.parties, selectedPackageIds);
   const pages: Page[] = [];
   contentGroups.forEach((group, i) => {
     const withHeader = i === 0 ? [...headerLines, ...group] : group;
     pages.push(...paginateTextLines(withHeader));
   });
   if (pages.length === 0) pages.push({ kind: "text", lines: headerLines });
+
+  const totalsLines = documentTotalsLines(input.blocks, selectedPackageIds);
+  if (totalsLines.length > 0) pages.push(...paginateTextLines(totalsLines));
 
   // ---- Signatures & verification section --------------------------------
   const sigIntro: TextLine[] = [

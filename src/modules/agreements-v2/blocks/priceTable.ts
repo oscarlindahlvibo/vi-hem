@@ -47,6 +47,16 @@ export interface PriceTableContent {
 
 export const DEFAULT_DEDUCTION_RATE: Record<DeductionType, number> = { none: 0, rut: 50, rot: 30 };
 
+/** A `package_option` block's content is a `price_table` (same items/
+ * price_form/rut_rate/rot_rate shape, so `calcPriceTable` works on it
+ * unchanged) plus a title/description and whether it's pre-checked when a
+ * signer first sees the document. */
+export interface PackageOptionContent extends PriceTableContent {
+  title: string;
+  description: string;
+  selected_by_default: boolean;
+}
+
 export interface PriceTableTotals {
   netto: number;
   moms: number;
@@ -105,4 +115,62 @@ export function calcPriceTable(content: Partial<PriceTableContent>): PriceTableT
 
 export function formatSek(amount: number): string {
   return amount.toLocaleString('sv-SE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kr';
+}
+
+export interface DocumentAddonTotal {
+  blockId: string;
+  title: string;
+  amount: number;
+  selected: boolean;
+}
+
+export interface DocumentTotals {
+  /** False when the document has no price/price_table/package_option
+   * blocks at all -- callers use this to decide whether to show a summary
+   * footer, rather than always showing "Totalt: 0,00 kr". */
+  hasPricing: boolean;
+  /** Sum of every `price` and `price_table` block -- the parts of the
+   * document that aren't opt-in. */
+  base: number;
+  /** One entry per `package_option` block, selected or not, so a caller
+   * can render "vad som INTE valdes" too if useful. */
+  addons: DocumentAddonTotal[];
+  addonsTotal: number;
+  grandTotal: number;
+}
+
+/** Walks the whole block list once to total the base (non-optional)
+ * pricing plus whichever `package_option` blocks are currently selected --
+ * "grundkostnad + valda tillägg = totalt", the sum a signer actually sees
+ * change as they toggle add-ons on/off. `isSelected` is injected rather
+ * than read off a fixed field because the browser (live, per-signer
+ * toggle state) and the PDF generator (a fixed, already-decided selection
+ * frozen at completion time) resolve "selected" completely differently. */
+export function calcDocumentTotals(
+  blocks: { id: string; block_type: string; content: any }[],
+  isSelected: (blockId: string, content: any) => boolean,
+): DocumentTotals {
+  let base = 0;
+  let hasPricing = false;
+  const addons: DocumentAddonTotal[] = [];
+  for (const block of blocks) {
+    if (block.block_type === 'price') {
+      hasPricing = true;
+      const n = Number(String(block.content?.amount ?? '').replace(',', '.'));
+      base += Number.isFinite(n) ? n : 0;
+    } else if (block.block_type === 'price_table') {
+      hasPricing = true;
+      base += calcPriceTable(block.content || {}).amountToPay;
+    } else if (block.block_type === 'package_option') {
+      hasPricing = true;
+      addons.push({
+        blockId: block.id,
+        title: block.content?.title || 'Valbart tillägg',
+        amount: calcPriceTable(block.content || {}).amountToPay,
+        selected: isSelected(block.id, block.content),
+      });
+    }
+  }
+  const addonsTotal = addons.filter((a) => a.selected).reduce((sum, a) => sum + a.amount, 0);
+  return { hasPricing, base, addons, addonsTotal, grandTotal: base + addonsTotal };
 }

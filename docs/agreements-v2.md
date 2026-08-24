@@ -908,3 +908,85 @@ binärformat där typecheck i praktiken inte kan fånga fel:
   ord-för-ord mot `vihem-agreements-verify`s faktiska `curl`-testade
   JSON-svar, och ett grönt helprojekt-`tsc`. Bör webbläsarverifieras
   manuellt innan release.
+
+## 25. Valbara tillägg / paket (`package_option`, tillagd samma dag)
+
+En ny blocktyp, **"Valbart tillägg"** (egen kategori "Tillval" i
+blockeditorns sidopanel), för sådant mottagaren själv väljer att lägga
+till utöver grundkostnaden — t.ex. tvättmaskin & torktumlare, internet.
+Innehållet är strukturellt en `price_table` (samma rader,
+moms-per-rad, RUT/ROT-per-rad — se avsnitt 4) plus `title`,
+`description` och `selected_by_default`; redigeringens rad-UI
+(`PriceItemsEditor` i `BlockEditor.tsx`) och renderarens prisdel
+(`PriceTableBody` i `BlockRenderer.tsx`) är därför extraherade som delade
+komponenter mellan `price_table` och `package_option` istället för att
+dupliceras.
+
+**Val är EN delad inställning per dokument, inte per signatär.** En
+hyresgäst väljer tvättmaskin eller internet en gång — det är ett villkor
+i det gemensamma avtalet, inte en individuell preferens per undertecknare
+(även om flera ska signera samma dokument). Valet lagras därför på
+`vihem_agreements.selected_package_ids` (ny `jsonb`-kolumn, migration
+`20260824100000_agreements_v2_package_selection.sql`), en array av
+`package_option`-blockens `id`. Block-id:n är stabila över både
+utkastredigering och den frysta versionssnapshotten (tilldelas en gång
+via `crypto.randomUUID()` när blocket skapas), så en direkt
+id-referens räcker — ingen versionsmedvetenhet behövs.
+
+**Live-summering** (`calcDocumentTotals()` i `blocks/priceTable.ts`,
+delad mellan redigerarens förhandsgranskning och `BlockRenderer`): går
+igenom hela blocklistan en gång, summerar `price`/`price_table`-block som
+grundkostnad och `package_option`-block som valbara tillägg, och
+returnerar `{hasPricing, base, addons, addonsTotal, grandTotal}`.
+`BlockRenderer` visar en "Sammanställning"-kort längst ner
+(Grundkostnad + varje VALT tillägg = Totalt) — men bara när det faktiskt
+finns minst ett tillägg i dokumentet (en ensam `price_table` visar redan
+sin egen totalsumma inline, ingen anledning att duplicera den i en tom
+sammanställning).
+
+**Interaktivitet på signeringssidan.** `BlockRenderer` accepterar valfria
+`packageSelection`/`onTogglePackage`-props (samma mönster som
+`resolveAttachmentUrl`) — ges de inte, sköter komponenten sitt eget
+`useState` internt (används av redigerarens förhandsgranskning, där val
+bara är en lokal demo). `PublicAgreementSignPage.tsx` äger valet på
+riktigt: laddar `selected_package_ids` från `getSignView()`, och
+persisterar varje togglening optimistiskt (flippar kryssrutan direkt,
+sparar i bakgrunden) mot en ny public-action,
+`update_package_selection` i `vihem-agreements-public/index.ts`. Den
+actionen avvisar ändringar med `ALREADY_SIGNED` om den ANROPANDE
+signatärens egen status redan är `signed`/`declined` — **öppen fråga,
+inte åtgärdad**: i ett fleragentsdokument kontrolleras bara den
+anropande signatärens status, inte hela avtalets, så en ännu inte
+signerande part skulle i teorin kunna ändra valet efter att en annan
+part redan signerat utifrån en då annorlunda totalsumma. Låg risk
+(kräver flera signatärer + ett aktivt försök) men bör hårdnas innan
+skarp drift med fleragentsavtal där detta är vanligt.
+
+**Slutlig PDF.** `_shared/agreement-pdf.ts` (samma duplicerings-motivering
+som `price_table`s aritmetik, se avsnitt 4) fick en spegling av
+`calcDocumentTotals()` (`documentTotalsLines()`) och en ny
+`package_option`-case i blockrenderingen: ett offererat men EJ valt
+tillägg listas ändå med sitt pris (transparens om vad som erbjöds) men
+märks tydligt `EJ VALT (ingår ej i totalsumman)` och utesluts ur både
+sammanställningen och grundkostnaden. `generateAndDeliverFinalPdf()` i
+`agreement-completion.ts` läser `agreement.selected_package_ids` och
+skickar med som `selectedPackageIds` till `buildAgreementPdf()` — valet
+fryses alltså i den slutliga PDF:en exakt som det stod vid
+signeringstillfället, oavsett vad som händer med draftet efteråt.
+
+**Verifiering.** `npm run typecheck`, `npx eslint` på samtliga ändrade
+filer, och `npm run build` gröna. Deno-sidan (`agreement-pdf.ts`,
+`agreement-completion.ts`) typkontrollerad med en ad-hoc `tsc`-körning
+(ingen `deno`-binär i sandboxen) mot bara känt brus (`Deno`-namespace,
+`npm:`-specifikatorer) — inga nya fel. `buildAgreementPdf()` kördes sedan
+på riktigt: bunt:ad med `esbuild` till en Node-körbar modul (ingen
+Deno-specifik API i den här filen — `DecompressionStream`/
+`CompressionStream` finns i Node 18+) och kört mot tre block (en
+`price_table` på 8000 kr grundhyra, ett VALT `package_option`
+tvättmaskin-tillägg 400 kr + 25% moms = 500 kr, ett EJ VALT
+internet-tillägg 199 kr + moms ≈ 249 kr). Den riktiga PDF:en lästes sedan
+med `pypdf`: rätt radtext, `Tillägg: ... -- VALT`/`EJ VALT`-märkning på
+rätt block, och sammanställningssidan `Grundkostnad: 8000.00 kr` + `+
+Tvättmaskin & torktumlare: 500.00 kr` + internetraden markerad `(ej
+valt)` och exkluderad, `Totalt: 8500.00 kr` — exakt (8000 + 500,
+internetraden korrekt uteslutet).
