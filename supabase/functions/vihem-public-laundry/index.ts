@@ -40,6 +40,15 @@ function cleanText(value: unknown, fallback = '') {
   return String(value || fallback).trim().slice(0, 160);
 }
 
+function isActiveBooking(booking: any, slotsById: Map<string, any>, now = new Date()) {
+  if (booking.status !== 'active') return false;
+  const slot = slotsById.get(booking.laundry_slot_id);
+  if (!slot?.date || !slot.end_time) return false;
+
+  const endAt = new Date(`${slot.date}T${slot.end_time}`);
+  return !Number.isNaN(endAt.getTime()) && endAt > now;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -111,7 +120,11 @@ Deno.serve(async (req) => {
         }
       }
 
-      const activeOwnBookings = bookings.filter((booking: any) => booking.guest_link_id === link.id).length;
+      const slotsById = new Map(slots.map((slot: any) => [slot.id, slot]));
+      const activeOwnBookings = bookings.filter(
+        (booking: any) =>
+          booking.guest_link_id === link.id && isActiveBooking(booking, slotsById)
+      ).length;
       const slotsWithStatus = slots.map((slot: any) => {
         const booking = bookings.find((item: any) => item.laundry_slot_id === slot.id);
         return {
@@ -146,11 +159,27 @@ Deno.serve(async (req) => {
 
       const { data: activeBookings, error: activeError } = await serviceClient
         .from('vihem_laundry_bookings')
-        .select('id')
+        .select('id, laundry_slot_id')
         .eq('guest_link_id', link.id)
         .eq('status', 'active');
       if (activeError) throw activeError;
-      if ((activeBookings || []).length >= link.max_bookings) {
+      const slotIdsByBooking = new Map<string, any>();
+      const activeSlotIds = (activeBookings || [])
+        .map((booking: any) => booking.laundry_slot_id)
+        .filter(Boolean);
+      if (activeSlotIds.length) {
+        const { data: activeSlots, error: activeSlotsError } = await serviceClient
+          .from('vihem_laundry_slots')
+          .select('id, date, end_time')
+          .in('id', activeSlotIds);
+        if (activeSlotsError) throw activeSlotsError;
+        (activeSlots || []).forEach((slot: any) => slotIdsByBooking.set(slot.id, slot));
+      }
+
+      const activeBookingCount = (activeBookings || []).filter((booking: any) =>
+        isActiveBooking(booking, slotIdsByBooking)
+      ).length;
+      if (activeBookingCount >= link.max_bookings) {
         return errorResponse(`Max ${link.max_bookings} aktiva bokningar är redan gjorda med denna länk.`);
       }
 
