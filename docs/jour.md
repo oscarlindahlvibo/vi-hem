@@ -29,6 +29,16 @@ det är bara flera rader.
   jourpass av samma typ (oavsett vem det tillhör eller vilken regel som
   skapade det), så en admins manuella justering, eller en annan regels
   intilliggande tillfälle, aldrig tyst skrivs över av en omkörning.
+  **Handover-klockslag: 07:00 svensk lokal tid**, inte midnatt. Varje
+  regel-genererat tillfälle (start OCH slut) beräknas som
+  `(datum + tid '07:00') AT TIME ZONE 'Europe/Stockholm'` -- det
+  korrekta Postgres-idiomet för "det här klockslaget, som lokal tid i
+  Stockholm", vilket automatiskt hanterar sommartidsväxlingar (t.ex.
+  ett tillfälle beräknat före och efter en DST-växling landar båda på
+  exakt 07:00 lokal tid, trots att UTC-offseten skiljer). Ett tidigare
+  försök att bara casta `date::timestamptz` gav midnatt UTC, vilket i
+  svensk sommartid blev 02:00 -- ett omotiverat klockslag för ett
+  jourbyte.
 - `vihem_jour_shifts` -- de faktiska passen. `user_id` är **nullable**:
   `NULL` betyder ett obemannat/öppet pass som vem som helst med rätt
   behörighet kan plocka, helt eller delvis, via bytesmarknaden (se

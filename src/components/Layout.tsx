@@ -284,7 +284,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
         <div className="lg:hidden fixed inset-0 z-50 flex">
           <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
           <div className="relative flex h-full w-72 flex-col bg-white shadow-2xl shadow-slate-950/20">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+            <div className="flex items-center justify-between px-5 pb-4 pt-[max(1rem,env(safe-area-inset-top,0px))] border-b border-slate-200">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg shadow-sm overflow-hidden">
                   <AppLogo className="w-full h-full" />
