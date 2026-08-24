@@ -36,6 +36,14 @@ export function initiateBankIDAuth(_config: BankIDConfig, _endUserIp: string) {
 export function initiateBankIDSign(_config: BankIDConfig, _endUserIp: string, userVisibleData: string, contractId: string) {
   return invoke<BankIDSignOrder>({ action: 'start_sign', user_visible_data: userVisibleData, contract_id: contractId });
 }
+/** For an Avtal V2 signer (see PublicAgreementSignPage.tsx) -- there is
+ * never a VI-HEM session to authorize against, only the signing link's
+ * token, which is what vihem-bankid re-verifies on start_sign AND on
+ * every collect() poll (see collectBankIDOrder's signingToken param
+ * below), not just once up front. */
+export function initiateBankIDAgreementSign(signingToken: string, userVisibleData?: string) {
+  return invoke<BankIDSignOrder>({ action: 'start_sign', signing_token: signingToken, ...(userVisibleData ? { user_visible_data: userVisibleData } : {}) });
+}
 /** For an already logged-in user connecting their own account to BankID
  * (see AuthContext.linkBankID and useBankIdFlow('link')) -- writes a
  * BankID-VERIFIED personnummer onto the caller's own profile, never a
@@ -43,7 +51,13 @@ export function initiateBankIDSign(_config: BankIDConfig, _endUserIp: string, us
 export function initiateBankIDLink(_config: BankIDConfig, _endUserIp: string) {
   return invoke<BankIDAuthOrder>({ action: 'start_link' });
 }
-export function collectBankIDOrder(_config: BankIDConfig, orderRef: string) { return invoke<BankIDCollectResult>({ action: 'collect', order_ref: orderRef }); }
+/** `signingToken` is only needed for an Avtal V2 sign order (see
+ * initiateBankIDAgreementSign) -- vihem-bankid re-verifies it against
+ * that order's agreement_signature_request_id on every call, since that
+ * flow has no Supabase session to check instead. */
+export function collectBankIDOrder(_config: BankIDConfig, orderRef: string, signingToken?: string) {
+  return invoke<BankIDCollectResult>({ action: 'collect', order_ref: orderRef, ...(signingToken ? { signing_token: signingToken } : {}) });
+}
 export function cancelBankIDOrder(_config: BankIDConfig, orderRef: string) { return invoke<void>({ action: 'cancel', order_ref: orderRef }); }
 export function generateBankIDQRContent(_qrStartToken: string, _qrStartSecret: string, _elapsedSeconds: number) { return ''; }
 

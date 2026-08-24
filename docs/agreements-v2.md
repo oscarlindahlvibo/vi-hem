@@ -296,53 +296,94 @@ Sparat på `vihem_agreement_signatures`: `signature_image` (base64 PNG),
 boolean": `ip_address`, `user_agent`, `signed_at`, samt vilken exakt
 `agreement_version_id`/därmed `content_hash` som signerades.
 
-## 10. BankID — vad som finns, vad som saknas
+## 10. BankID — signering för både det gamla hyresavtalsflödet och Avtal V2
 
-**Inventering gjord innan något byggdes** (`supabase/functions/vihem-bankid/
-index.ts`, 107 rader): en fungerande integration mot en tredjeparts
-BankSignering-proxy, med `start_auth`/`start_sign`/`collect`/`cancel`.
-Databas: `vihem_bankid_settings` (per-org, krypterade credentials) +
-`vihem_bankid_orders` (`order_ref`, `flow`, `contract_id`).
+**Ursprungsläget (innan detta byggdes)**: en fungerande integration mot en
+tredjeparts BankSignering-proxy (`supabase/functions/vihem-bankid/
+index.ts`), med `start_auth`/`start_sign`/`collect`/`cancel`. `start_sign`
+och `collect` krävde då en INLOGGAD VI-HEM-profil (`profile.id ===
+order.user_id`) och skrev resultatet hårdkodat till
+`vihem_contract_signatures` -- fungerade för det äldre, inloggade
+hyresavtalsflödet i `ApartmentPage.tsx`, men Avtal V2:s hela poäng med
+extern signering är att signatären INTE har en VI-HEM-session, bara en
+signeringstoken. Den publika signeringssidan visade därför tydligt
+"BankID-signering kommer snart" istället för att låtsas att det fungerade.
 
-**Varför den inte återanvänds direkt i etapp 1**: `start_sign` och
-`collect` kräver idag en INLOGGAD VI-HEM-profil (`profile.id ===
-order.user_id`) och skriver resultatet hårdkodat till
-`vihem_contract_signatures`. Avtal V2:s hela poäng med extern signering är
-att signatären INTE har en VI-HEM-session — bara en signeringstoken. Det
-är alltså inte en liten parametrisering utan en strukturellt annan
-autentiseringsväg (token-baserad, inte JWT-baserad), och det är en
-produktionsfunktion som redan används för skarp hyresavtalssignering
-idag — att bygga om den utan att ha bevisat lösningen grundligt vore fel
-risknivå för denna etapp. Uppdraget öppnade uttryckligen för detta:
-*"Om BankID kräver ett större separat arbete: bygg provider-gränssnittet
-och redovisa exakt vad som saknas."*
+**Nu byggt: en token-autentiserad gren parallellt med den
+profil-autentiserade.** `vihem_bankid_orders` har fått en ny nullable
+kolumn, `agreement_signature_request_id` (migration
+`20260824130000_bankid_agreement_signing.sql`), ömsesidigt uteslutande med
+den befintliga `contract_id`-kolumnen på samma rad:
 
-**Vad som är byggt**: datamodellen är redo (`signing_method IN
-('handwritten','bankid')` på `vihem_agreement_signers`,
-`method`/`bankid_personal_number`/`bankid_reference`-kolumner på
-`vihem_agreement_signatures`), admin kan välja BankID som metod för en
-signatär, och den publika signeringssidan visar tydligt "BankID-signering
-kommer snart" istället för att låtsas att det fungerar — aldrig en falsk
-signeringsförmåga.
+1. `start_sign` accepterar nu antingen `contract_id` (oförändrad,
+   inloggad-profil-väg) ELLER en ny `signing_token` -- verifieras mot
+   `vihem_agreement_signature_requests` med exakt samma hash-uppslag som
+   `vihem-agreements-public`s `resolveRequest()` redan använder (samma
+   "bara hashen lagras"-princip).
+2. `collect` auktoriserar en Avtal V2-signeringsorder genom att kräva och
+   omverifiera SAMMA `signing_token` på **varje** poll-anrop, inte bara
+   vid start -- det finns ingen session att kolla mot istället.
+3. En ny completion-gren: när ordern har en `agreement_signature_request_id`
+   skrivs resultatet till `vihem_agreement_signatures`
+   (`method:'bankid'`, `bankid_personal_number`, `bankid_reference` =
+   `order_ref`), signatärens status sätts till `signed`, och samma
+   avslutningslogik som den handskrivna vägen körs (audit-event, och om
+   alla obligatoriska signatärer nu klara: slutlig PDF).
 
-**Exakt vad som krävs för att koppla in det** (nästa etapp):
-1. En ny gren i `vihem-bankid`s `start_sign`: acceptera antingen
-   `contract_id` (oförändrad, legacy-väg) ELLER en ny
-   `agreement_signature_request_token` — verifiera token mot
-   `vihem_agreement_signature_requests` (samma hash-uppslag som
-   `vihem-agreements-public` redan gör) istället för att kräva en
-   inloggad profil.
-2. En motsvarande gren i `collect`: auktorisera om anroparen presenterar
-   samma giltiga token igen, istället för `profile.id === order.user_id`.
-3. Ny completion-branch: när ordern har en
-   `agreement_signature_request_id` (ny nullable kolumn på
-   `vihem_bankid_orders`), skriv resultatet till
-   `vihem_agreement_signatures` (med `method:'bankid'`,
-   `bankid_personal_number`, `bankid_reference` = `order_ref`) istället
-   för `vihem_contract_signatures`.
+**Delad logik, inte duplicerad**: `maybeCompleteAgreement()`/
+`writeAgreementAudit()` (statuseskalering, audit-trail, PDF-trigger) låg
+tidigare lokalt i `vihem-agreements-public/index.ts` -- flyttade ut till
+en ny `_shared/agreement-signing.ts` som nu båda edge-funktionerna
+importerar, eftersom det här är flerstegs, stateful bokföring (till
+skillnad från t.ex. pris/moms-aritmetiken i `agreement-pdf.ts`, som
+medvetet ÄR duplicerad över webbläsar/edge-funktion-gränsen -- se den
+filens kommentar).
 
-Ingen ny BankID-leverantör — samma BankSignering-proxy, samma
-provider-anropskod, bara en ny autentiseringsväg runt den.
+**Frontend**: `useBankIdFlow`-hooken tar nu en valfri `signingToken`
+och skickar med den på varje `collect()`-poll.
+`PublicAgreementSignPage.tsx`s signeringssteg grenar på
+`signer.signing_method`: BankID-signatärer ser samma
+QR/omdirigerings-kort som inloggningssidan (`Starta BankID` →
+QR-kod/app-redirect → status), inte längre "kommer snart".
+
+**Verifiering** (samma trestegsmetod som resten av sessionen, med en extra
+nivå för completion-logiken):
+- `npm run typecheck`/`eslint`/`build` gröna. Deno-sidan (`vihem-bankid`,
+  `vihem-agreements-public`, `_shared/agreement-signing.ts`)
+  typkontrollerad separat mot bara känt brus.
+- **Riktiga HTTP-anrop** mot ett verkligt testavtal + BankID-signatär +
+  signeringsförfrågan i den lokala databasen: `start_sign` med en giltig
+  token skapade en RIKTIG BankSignering-testorder (riktig `orderRef`/
+  `autoStartToken`/QR) utan någon inloggad profil; `collect` avvisade
+  korrekt utan token ("Signeringstoken krävs"), avvisade korrekt med FEL
+  token ("Obehörig signering"), och släppte igenom och nådde den riktiga
+  BankSignering-collectstatus-endpointen med RÄTT token; `start_sign` med
+  okänd token gav "Länken är ogiltig"; en signatär med
+  `signing_method:'handwritten'` gav korrekt "Fel signeringsmetod" när
+  BankID-flödet försöktes mot den.
+- **Completion-logiken** (den del som inte går att nå via HTTP utan en
+  riktigt godkänd BankID-legitimering på en fysisk enhet): `esbuild`
+  buntade den riktiga `_shared/agreement-signing.ts` till en Node-körbar
+  modul (samma teknik som `agreement-pdf.ts`-verifieringen i avsnitt 24),
+  körd mot den riktiga lokala databasen med ett testavtal som hade EN
+  BankID-signatär och EN handskriven signatär (båda obligatoriska): efter
+  att bara BankID-signaturen skrivits in gick avtalet korrekt till
+  `partially_signed`, ingen PDF än; efter att båda signerat gick det till
+  `signed`, `completed_at` sattes, och en riktig slutlig PDF genererades
+  och lagrades. PDF:en hämtades ur storage och lästes med `pypdf`:
+  BankID-sektionen visade rätt namn, `Metod: BankID`, maskerat
+  personnummer, rätt BankID-referens och rätt verifieringslänk -- exakt
+  som den handskrivna signaturens motsvarande sektion redan gjorde.
+- All testdata (testavtal, signatärer, signeringsförfrågningar,
+  BankID-ordrar, den genererade PDF:en i storage) skapades och raderades
+  i den lokala databasen efteråt.
+- **Inte gjort**: en fullständig legitimering via en riktig BankID-app på
+  en fysisk enhet (kräver BankID:s särskilda testklient, se separat
+  diskussion om det äldre hyresavtalsflödets samma begränsning).
+  Kompenserat av att varje annan del av kedjan -- auktorisering, riktiga
+  provider-anrop, och den faktiska skriv-/completion-logiken med samma
+  kod som körs i produktion -- är verifierad på riktigt, inte bara
+  typkontrollerad.
 
 ## 11. SMS och e-post
 
@@ -439,9 +480,12 @@ Ekonomi V2:s `module: 'finance'`-krav).
 **Ändrade befintliga filer**: `src/App.tsx` (routing + `/sign`-undantag),
 `src/components/Layout.tsx` (nav-post), `supabase/config.toml`
 (`verify_jwt=false` för `vihem-agreements-public`).
-**Orörda**: `vihem_contract_signatures`, `InspectionsPage.tsx`,
-`ApartmentPage.tsx`, `vihem-bankid/index.ts`, `vihem_documents`,
-`vihem-send-invoice-emails` — bekräftat via `git status --short` innan commit.
+**Orörda vid det ursprungliga bygget**: `vihem_contract_signatures`,
+`InspectionsPage.tsx`, `ApartmentPage.tsx`, `vihem-bankid/index.ts`,
+`vihem_documents`, `vihem-send-invoice-emails` — bekräftat via `git
+status --short` innan commit. (`vihem-bankid/index.ts` är INTE längre
+orörd -- se punkt 10 för BankID-signeringen som byggdes senare, en
+separat ändring i en annan del av kodbasen.)
 
 **Tillägg för slutlig PDF (samma dag, se punkt 24)**: ny migration
 (`final_pdf_storage_path`/`final_pdf_generated_at`/`verification_code`

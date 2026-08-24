@@ -1,5 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { hashSigningToken } from "../_shared/agreement-tokens.ts";
+import { maybeCompleteAgreement, writeAgreementAudit } from "../_shared/agreement-signing.ts";
 
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey" };
 const TEST_SIGN_URL = "https://banksign-test.azurewebsites.net/api/sign";
@@ -58,6 +60,34 @@ Deno.serve(async (req) => {
     }
 
     if (action === "start_sign") {
+      const signingToken = String(body.signing_token || "");
+      if (signingToken) {
+        // Avtal V2: the signer never has a VI-HEM session -- see
+        // vihem-agreements-public/index.ts's resolveRequest(), same
+        // hash-lookup convention (only the token's hash is ever stored).
+        const tokenHash = await hashSigningToken(signingToken);
+        const { data: request } = await db.from("vihem_agreement_signature_requests").select("id, agreement_id, signer_id, expires_at, revoked_at").eq("token_hash", tokenHash).maybeSingle();
+        if (!request) return json({ error: "Länken är ogiltig." }, 404);
+        if (request.revoked_at) return json({ error: "Länken har återkallats." }, 410);
+        if (new Date(request.expires_at) < new Date()) return json({ error: "Länken har gått ut. Be avsändaren skicka en ny." }, 410);
+        const { data: signer } = await db.from("vihem_agreement_signers").select("id, name, status, signing_method").eq("id", request.signer_id).maybeSingle();
+        if (!signer) return json({ error: "Signatären hittades inte." }, 404);
+        if (signer.signing_method !== "bankid") return json({ error: "Fel signeringsmetod för denna signatär." }, 400);
+        if (signer.status === "signed") return json({ error: "Du har redan signerat detta dokument." }, 409);
+        if (signer.status === "declined") return json({ error: "Du har redan avböjt detta dokument." }, 409);
+        const { data: agreement } = await db.from("vihem_agreements").select("organisation_id, title, document_number").eq("id", request.agreement_id).maybeSingle();
+        if (!agreement) return json({ error: "Avtalet kunde inte hittas." }, 404);
+        const settings = await getSettings(db, agreement.organisation_id);
+        if (!settings?.enabled || !settings.signing_enabled) return json({ error: "BankID-signering är inte aktiverad för organisationen." }, 403);
+        const visible = String(body.user_visible_data || `Godkänn och signera ${agreement.title || agreement.document_number} i VI-HEM.`);
+        const order = await startProvider(settings, visible, "", req);
+        await db.from("vihem_bankid_orders").insert({ organisation_id: agreement.organisation_id, order_ref: order.orderRef, flow: "sign", agreement_signature_request_id: request.id });
+        return json({ ok: true, ...order });
+      }
+
+      // Legacy path: authenticated tenant signing their own
+      // vihem_contract_signatures row (a real VI-HEM session, unlike Avtal
+      // V2's token-only signers above).
       if (!profile?.organisation_id) return json({ error: "Du måste vara inloggad för att signera avtalet." }, 401);
       const contractId = String(body.contract_id || "");
       const { data: contract } = await db.from("vihem_contract_signatures").select("id,organisation_id,tenant_id").eq("id", contractId).maybeSingle();
@@ -87,7 +117,18 @@ Deno.serve(async (req) => {
       const orderRef = String(body.order_ref || "");
       const { data: order } = await db.from("vihem_bankid_orders").select("*").eq("order_ref", orderRef).maybeSingle();
       if (!order || new Date(order.expires_at) < new Date()) return json({ error: "BankID-sessionen har gått ut." }, 410);
-      if ((order.flow === "sign" || order.flow === "link") && (!profile || profile.id !== order.user_id)) return json({ error: order.flow === "sign" ? "Obehörig signering." : "Obehörig länkning." }, 403);
+      if (order.flow === "sign" && order.agreement_signature_request_id) {
+        // Avtal V2: re-verify the SAME signing token on every poll, not
+        // just at start_sign -- there is no Supabase session to check
+        // against instead (see module header).
+        const signingToken = String(body.signing_token || "");
+        if (!signingToken) return json({ error: "Signeringstoken krävs." }, 401);
+        const tokenHash = await hashSigningToken(signingToken);
+        const { data: matchingRequest } = await db.from("vihem_agreement_signature_requests").select("id").eq("id", order.agreement_signature_request_id).eq("token_hash", tokenHash).maybeSingle();
+        if (!matchingRequest) return json({ error: "Obehörig signering." }, 403);
+      } else if ((order.flow === "sign" || order.flow === "link") && (!profile || profile.id !== order.user_id)) {
+        return json({ error: order.flow === "sign" ? "Obehörig signering." : "Obehörig länkning." }, 403);
+      }
       const settings = await getSettings(db, order.organisation_id);
       const result = await collectProvider(settings, orderRef);
       if (result.status === "pending") return json(result);
@@ -99,6 +140,37 @@ Deno.serve(async (req) => {
         const now = new Date().toISOString();
         const { error } = await db.from("vihem_contract_signatures").update({ tenant_bankid_personal_number: pno, tenant_bankid_signature: completion.signature || "", tenant_bankid_signed_at: now, tenant_signature_method: "bankid", tenant_signed_at: now, tenant_signature_name: completion.user?.name || "", status: "signed" }).eq("id", order.contract_id);
         if (error) throw error;
+        return json({ ...result, signed: true });
+      }
+      if (order.flow === "sign" && order.agreement_signature_request_id) {
+        const { data: request } = await db.from("vihem_agreement_signature_requests").select("id, agreement_id, signer_id, agreement_version_id").eq("id", order.agreement_signature_request_id).maybeSingle();
+        if (!request) return json({ ...result, error: "Signeringsförfrågan hittades inte." });
+        const { data: signer } = await db.from("vihem_agreement_signers").select("id, name, status").eq("id", request.signer_id).maybeSingle();
+        if (!signer) return json({ ...result, error: "Signatären hittades inte." });
+        // Idempotent: a re-poll landing here after the first "complete"
+        // response already recorded the signature would otherwise hit the
+        // (signer_id, agreement_version_id) unique constraint on
+        // vihem_agreement_signatures.
+        if (signer.status === "signed") return json({ ...result, signed: true });
+        const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || null;
+        const userAgent = req.headers.get("user-agent") || "";
+        const { error: sigErr } = await db.from("vihem_agreement_signatures").insert({
+          agreement_id: request.agreement_id,
+          signer_id: request.signer_id,
+          signature_request_id: request.id,
+          agreement_version_id: request.agreement_version_id,
+          method: "bankid",
+          bankid_personal_number: pno,
+          bankid_reference: orderRef,
+          signature_name: completion.user?.name || signer.name || "",
+          ip_address: ip,
+          user_agent: userAgent,
+        });
+        if (sigErr) return json({ ...result, error: `Kunde inte spara signaturen: ${sigErr.message}` });
+        await db.from("vihem_agreement_signers").update({ status: "signed" }).eq("id", request.signer_id);
+        const { data: version } = await db.from("vihem_agreement_versions").select("content_hash").eq("id", request.agreement_version_id).maybeSingle();
+        await writeAgreementAudit(db, request.agreement_id, request.signer_id, "signed", request.agreement_version_id, version?.content_hash, ip, userAgent, { method: "bankid" });
+        await maybeCompleteAgreement(db, request.agreement_id);
         return json({ ...result, signed: true });
       }
       if (order.flow === "link") {

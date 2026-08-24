@@ -46,8 +46,11 @@ export interface BankIdFlowState {
 /** `intent` scopes the sessionStorage key and the resume-on-return check --
  * a pending sign order must never get picked up as if it were a login
  * order, or vice versa, if both happen to be mid-flight in the same
- * browser tab lineage. */
-export function useBankIdFlow(intent: 'auth' | 'sign' | 'link'): BankIdFlowState {
+ * browser tab lineage. `signingToken` is only relevant for an Avtal V2
+ * sign order (PublicAgreementSignPage.tsx) -- there is no VI-HEM session
+ * for vihem-bankid to authorize collect() polls against instead, so the
+ * same token from the signing link is re-sent on every poll. */
+export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: string): BankIdFlowState {
   const storageKey = `${STORAGE_PREFIX}${intent}`;
   const [status, setStatus] = useState<BankIdFlowStatus>('idle');
   const [qrImage, setQrImage] = useState<string | null>(null);
@@ -87,7 +90,7 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link'): BankIdFlowState
       if (cancelled.current) return;
       if (attempt >= MAX_POLL_ATTEMPTS) { finish('failed', undefined, 'BankID-sessionen tog för lång tid. Försök igen.'); return; }
       try {
-        const r = await collectBankIDOrder({ environment: 'test', edgeFunctionUrl: '' }, orderRef);
+        const r = await collectBankIDOrder({ environment: 'test', edgeFunctionUrl: '' }, orderRef, signingToken);
         if (cancelled.current) return;
         if (r.status === 'failed') { finish('failed', r, r.error || 'BankID avbröts eller misslyckades.'); return; }
         if (r.status === 'complete') {
@@ -109,7 +112,7 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link'): BankIdFlowState
         finish('failed', undefined, err instanceof BankIDError ? err.message : (err instanceof Error ? err.message : 'BankID-anropet misslyckades.'));
       }
     }, POLL_MS);
-  }, [finish]);
+  }, [finish, signingToken]);
 
   const beginFromOrder = useCallback((order: BankIDAuthOrder) => {
     setStatus('pending');

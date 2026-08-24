@@ -6,14 +6,16 @@
 // (see supabase/config.toml), matching vihem-accounted-webhook and
 // vihem-accounted-healthcheck's existing pattern for this repo.
 //
-// BankID signing is NOT implemented here yet -- see docs/agreements-v2.md
-// "BankID" section for exactly what's needed. A signer whose
-// signing_method is 'bankid' gets a clear "not available yet" response
-// rather than a broken/fake flow.
+// BankID signing does NOT go through this action -- a signer whose
+// signing_method is 'bankid' is rejected here with a clear error (see the
+// "sign" case below) and instead goes through vihem-bankid's start_sign/
+// collect, which re-verifies the same signing token on every call since
+// there is no Supabase session to authorize against. See that module and
+// docs/agreements-v2.md's "BankID" section for the full flow.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { hashSigningToken } from "../_shared/agreement-tokens.ts";
-import { generateAndDeliverFinalPdf } from "../_shared/agreement-completion.ts";
+import { maybeCompleteAgreement, writeAgreementAudit } from "../_shared/agreement-signing.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -86,7 +88,7 @@ Deno.serve(async (req: Request) => {
           // this no-ops via the .eq("status","sent") guard, so a later
           // viewer can never regress the agreement's overall status.
           await db.from("vihem_agreements").update({ status: "viewed" }).eq("id", request.agreement_id).eq("status", "sent");
-          await writeAudit(db, request.agreement_id, request.signer_id, "viewed", request.agreement_version_id, version?.content_hash, ip, userAgent);
+          await writeAgreementAudit(db, request.agreement_id, request.signer_id, "viewed", request.agreement_version_id, version?.content_hash, ip, userAgent);
         }
 
         return json({
@@ -146,10 +148,10 @@ Deno.serve(async (req: Request) => {
         const method = String(body?.method || "handwritten");
         if (method !== signer.signing_method) return errorJson("METHOD_MISMATCH", "Fel signeringsmetod för denna signatär.", 400);
         if (method === "bankid") {
-          // See module header + docs/agreements-v2.md: BankID for Avtal V2
-          // needs a token-authenticated extension to vihem-bankid that does
-          // not exist yet. Never fake a signature here.
-          return errorJson("NOT_IMPLEMENTED", "BankID-signering för Avtal V2 är inte kopplad ännu. Kontakta avsändaren.", 501);
+          // BankID signers go through vihem-bankid's start_sign/collect
+          // instead (token-authenticated there too) -- this action only
+          // ever records a handwritten signature.
+          return errorJson("METHOD_MISMATCH", "Den här signatären signerar med BankID, inte handskriven signatur.", 400);
         }
 
         const signatureImage = String(body?.signature_image || "");
@@ -177,7 +179,7 @@ Deno.serve(async (req: Request) => {
         await db.from("vihem_agreement_signers").update({ status: "signed" }).eq("id", request.signer_id);
 
         const { data: version } = await db.from("vihem_agreement_versions").select("content_hash").eq("id", request.agreement_version_id).maybeSingle();
-        await writeAudit(db, request.agreement_id, request.signer_id, "signed", request.agreement_version_id, version?.content_hash, ip, userAgent, { method: "handwritten" });
+        await writeAgreementAudit(db, request.agreement_id, request.signer_id, "signed", request.agreement_version_id, version?.content_hash, ip, userAgent, { method: "handwritten" });
 
         await maybeCompleteAgreement(db, request.agreement_id);
 
@@ -198,7 +200,7 @@ Deno.serve(async (req: Request) => {
           .from("vihem_agreements")
           .update({ status: agreement?.document_type === "offer" ? "rejected" : "declined" })
           .eq("id", request.agreement_id);
-        await writeAudit(db, request.agreement_id, request.signer_id, "declined", request.agreement_version_id, null, ip, userAgent, { reason: String(body?.reason || "") });
+        await writeAgreementAudit(db, request.agreement_id, request.signer_id, "declined", request.agreement_version_id, null, ip, userAgent, { reason: String(body?.reason || "") });
         return json({ data: { ok: true } });
       }
 
@@ -210,53 +212,3 @@ Deno.serve(async (req: Request) => {
     return errorJson("INTERNAL_ERROR", err instanceof Error ? err.message : String(err), 500);
   }
 });
-
-async function maybeCompleteAgreement(db: any, agreementId: string) {
-  const { data: signers } = await db.from("vihem_agreement_signers").select("status, signing_required").eq("agreement_id", agreementId);
-  const required = (signers || []).filter((s: any) => s.signing_required);
-  const allSigned = required.length > 0 && required.every((s: any) => s.status === "signed");
-  const anySigned = required.some((s: any) => s.status === "signed");
-
-  if (allSigned) {
-    const { data: agreement } = await db.from("vihem_agreements").select("document_type").eq("id", agreementId).maybeSingle();
-    await db
-      .from("vihem_agreements")
-      .update({ status: agreement?.document_type === "offer" ? "accepted" : "signed", completed_at: new Date().toISOString() })
-      .eq("id", agreementId);
-    await db.from("vihem_agreement_audit_events").insert({ agreement_id: agreementId, event_type: "completed", actor_type: "system" });
-
-    // Best-effort: the agreement is already correctly marked signed/
-    // accepted above regardless of whether PDF generation or delivery
-    // succeeds -- a signer's confirmation of their own signature must
-    // never fail because of a downstream PDF/email problem. Failures are
-    // captured in the audit trail by generateAndDeliverFinalPdf itself,
-    // not re-thrown here.
-    await generateAndDeliverFinalPdf(db, agreementId);
-  } else if (anySigned) {
-    await db.from("vihem_agreements").update({ status: "partially_signed" }).eq("id", agreementId).in("status", ["sent", "viewed", "partially_signed"]);
-  }
-}
-
-async function writeAudit(
-  db: any,
-  agreementId: string,
-  signerId: string | null,
-  eventType: string,
-  versionId: string | null,
-  documentHash: string | null | undefined,
-  ip: string | null,
-  userAgent: string,
-  metadata: Record<string, unknown> = {},
-) {
-  await db.from("vihem_agreement_audit_events").insert({
-    agreement_id: agreementId,
-    signer_id: signerId,
-    event_type: eventType,
-    actor_type: "signer",
-    agreement_version_id: versionId,
-    document_hash: documentHash || null,
-    ip_address: ip,
-    user_agent: userAgent,
-    metadata,
-  });
-}

@@ -7,7 +7,9 @@ import { declineSigning, getAttachmentDownloadUrl, getSignView, submitSignature,
 import type { PublicSignView } from '../types';
 import { BlockRenderer } from '../components/BlockRenderer';
 import { SignaturePad } from '../components/SignaturePad';
-import { CheckCircle2, Download, FileText, XCircle } from 'lucide-react';
+import { useBankIdFlow } from '../../../hooks/useBankIdFlow';
+import { initiateBankIDAgreementSign } from '../../../lib/bankid';
+import { CheckCircle2, Download, FileText, ShieldCheck, XCircle } from 'lucide-react';
 
 function getTokenFromUrl(): string {
   return new URLSearchParams(window.location.search).get('token') || '';
@@ -23,6 +25,8 @@ export function PublicAgreementSignPage() {
   const [signatureName, setSignatureName] = useState('');
   const [saving, setSaving] = useState(false);
   const [packageSelection, setPackageSelection] = useState<Record<string, boolean>>({});
+  const bankId = useBankIdFlow('sign', token);
+  const bankIdBusy = bankId.status === 'starting' || bankId.status === 'redirecting' || bankId.status === 'pending';
 
   useEffect(() => {
     if (!token) {
@@ -41,6 +45,21 @@ export function PublicAgreementSignPage() {
       .catch((err) => setError(err instanceof AgreementApiError ? err.message : 'Kunde inte ladda dokumentet.'))
       .finally(() => setLoading(false));
   }, [token]);
+
+  // The signature itself is already written to vihem_agreement_signatures
+  // server-side by vihem-bankid's "collect" action once the order
+  // completes (see that module's flow==="sign" +
+  // agreement_signature_request_id branch) -- this just reflects it.
+  useEffect(() => {
+    if (bankId.status !== 'complete') return;
+    setMode('signed');
+    bankId.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bankId.status]);
+
+  useEffect(() => {
+    if (bankId.status === 'failed' && bankId.error) setError(bankId.error);
+  }, [bankId.status, bankId.error]);
 
   // Optimistic: flips the checkbox immediately, persists in the
   // background. A tenant toggling tvättmaskin/internet on and off while
@@ -174,20 +193,41 @@ export function PublicAgreementSignPage() {
                       <button onClick={handleDecline} disabled={saving} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50">
                         Avböj
                       </button>
-                      {view.signer.signing_method === 'bankid' ? (
-                        <button disabled className="flex-[2] rounded-xl bg-slate-300 py-3 text-sm font-semibold text-white">
-                          BankID-signering kommer snart
-                        </button>
-                      ) : (
-                        <button onClick={() => setMode('sign')} className="flex-[2] rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700">
-                          Granska & signera
-                        </button>
-                      )}
+                      <button onClick={() => setMode('sign')} className="flex-[2] rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700">
+                        {view.signer.signing_method === 'bankid' ? 'Granska & signera med BankID' : 'Granska & signera'}
+                      </button>
                     </div>
                   </div>
                 )}
 
-                {mode === 'sign' && (
+                {mode === 'sign' && view.signer.signing_method === 'bankid' && (
+                  <div className="rounded-2xl bg-white p-5 shadow-sm">
+                    <p className="mb-3 text-sm font-semibold text-slate-700">Signera med BankID</p>
+                    {bankIdBusy ? (
+                      <div className="rounded-xl border-2 border-[#193E4F]/20 bg-slate-50 p-5 text-center">
+                        {bankId.qrImage && (
+                          <img src={bankId.qrImage} alt="QR-kod för BankID" className="mx-auto mb-3 h-44 w-44 rounded-lg border border-slate-200 bg-white p-2" />
+                        )}
+                        <p className="text-sm text-slate-600">{bankId.message || 'Startar BankID...'}</p>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => bankId.start(() => initiateBankIDAgreementSign(token))}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#193E4F] py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#122e3c]"
+                      >
+                        <ShieldCheck className="h-4 w-4" /> Starta BankID
+                      </button>
+                    )}
+                    {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+                    <div className="mt-4">
+                      <button onClick={() => { setMode('read'); bankId.reset(); }} className="w-full rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50">
+                        Tillbaka
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {mode === 'sign' && view.signer.signing_method !== 'bankid' && (
                   <div className="rounded-2xl bg-white p-5 shadow-sm">
                     <p className="mb-3 text-sm font-semibold text-slate-700">Din signatur</p>
                     <input
