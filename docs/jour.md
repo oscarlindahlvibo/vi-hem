@@ -107,9 +107,40 @@ Registrerad som en valfri modul (`vihem_module_registry` +
 organisation i Organisationer-sidan (superadmin) eller direkt i databasen.
 `src/pages/JourPage.tsx` har fem flikar:
 
-- **Dagbesked** -- Gantt-liknande tidslinje (adapterad från
-  `RentalPage.tsx`s kalendermönster), en rad per (person eller
-  "Obemannat", jourtyp).
+- **Dagbesked** -- två vyer beroende på skärmstorlek: på desktop en
+  Gantt-liknande tidslinje (adapterad från `RentalPage.tsx`s
+  kalendermönster), en rad per (person eller "Obemannat", jourtyp); på
+  mobil (under `md`-brytpunkten, som ersatte den tidigare horisontellt
+  scrollande Gantt-tabellen som var svårläst på smal skärm) tappbara
+  dag-pills (idag förvalt) + en lista över vem som har jour den valda
+  dagen, med tiden KLIPPT till den dagen (t.ex. "08:00 - 14:00", eller
+  "Hela dagen" om passet täcker hela dygnet) så att en klyvpunkt mitt på
+  dagen (två personer, samma dag, olika pass) är tydlig -- en sekundär
+  rad visar hela passets fulla datumspann när det sträcker sig över
+  fler än en dag. `dateKey()` bygger dagnyckeln av lokala
+  datumkomponenter (år/månad/dag), INTE `toISOString()`, eftersom en
+  UTC-baserad nyckel skiftar kalenderdagen ett dygn för alla
+  tidszoner med positiv offset (t.ex. Europe/Stockholm) -- detta orsakade
+  tidigare att "idag" (både pill-markeringen och auto-valet) visade FEL
+  dag.
+  **Admin kan klicka på ett pass** (både i Gantt-stapeln och
+  mobil-listraden) för att öppna "Hantera jourpass" med fyra
+  handlingar: **Annonsera för byte** (samma annons-flöde som "Mitt
+  schema", men för VILKET pass som helst, inte bara admins eget --
+  redan möjligt via den befintliga RLS-policyn som redan tillät
+  admin/superadmin att annonsera ett pass de inte äger), **Dela pass**
+  (kryper originalets `ends_at` till en vald klyvpunkt + infogar ett
+  nytt pass för resten, med valfri ny ägare -- ett direkt
+  admin-verktyg, skilt från bytesmarknadens annonsera-och-vänta-flöde),
+  **Tilldela till någon annan** (`UPDATE ... SET user_id = ...`,
+  dubbelbokningsspärren `EXCLUDE`-constrainten gäller precis som vid
+  alla andra skrivningar), och **Radera pass** (`DELETE`, kaskaderar
+  automatiskt bort en ev. öppen annons via `ON DELETE CASCADE` på
+  `vihem_jour_swap_offers.shift_id`). Ett pass som redan har en öppen
+  annons visar en varning och "Annonsera"-knappen inaktiveras (för att
+  undvika två samtidiga annonser på samma pass). Personal ser INTE
+  klick-att-hantera-affordansen alls -- de kan bara annonsera sina egna
+  pass (Mitt schema) och plocka annonserade (Byten), oförändrat.
 - **Byten** -- bytesmarknaden. Visar den annonserade delen (inte
   nödvändigtvis hela passet), en "Obemannat"-badge för öppna pass, och
   för admin en **"Skapa öppet pass"**-knapp+modal som skapar ett
@@ -120,9 +151,17 @@ organisation i Organisationer-sidan (superadmin) eller direkt i databasen.
   passet" och "en del av passet" (datum/tid-väljare för delen).
 - Admin-only **Behörighet** (kryssrutematris, en kolumn per jourtyp i
   `DUTY_TYPES`) + **Grundschema** (en sektion per jourtyp, rader av
-  redigerbara rotationsregler med "Ändra"/radera, plus en
+  redigerbara rotationsregler med "Ändra"/radera, en
   "Generera jourpass"-knapp per jourtyp som anropar
-  `vihem_generate_jour_shifts_for_duty_type`).
+  `vihem_generate_jour_shifts_for_duty_type`, och en **"Rensa
+  genererade"**-knapp som raderar alla KOMMANDE (`starts_at > now()`)
+  pass av den jourtypen med `source = 'template'` -- dvs. bara
+  automatgenererade pass som inte redan bytts eller manuellt redigerats
+  (ett bytt/redigerat pass får `source = 'manual'` av klaim-triggern
+  respektive splitten ovan, så det är strukturellt skyddat mot att
+  rensas bort av misstag). Ger admin ett rent sätt att slänga ett gammalt
+  genererat schema och köra om generatorn efter att ha ändrat
+  rotationsreglerna.
 
 Alla läsningar/skrivningar går direkt via supabase-js + RLS (samma
 mönster som `AdminStaffPage.tsx`/`listMyAgreements()`) -- ingen
@@ -209,6 +248,41 @@ Verifierat med riktiga databassessioner (`SET LOCAL role authenticated` +
 - All testdata (pass, annonser, regler, behörigheter) skapad och
   raderad i den lokala databasen efteråt; modulen återställd till
   avstängd för demo-organisationen.
+
+### Mobil dagbesked, tidszonsbugg och admin-hantering av enskilda pass (denna utökning)
+
+Ingen ny migration -- helt frontend, eftersom admin redan hade `FOR ALL`
+på `vihem_jour_shifts` och redan fick annonsera vilket pass som helst
+via den befintliga RLS-policyn på `vihem_jour_swap_offers`.
+
+- Bekräftat att `dateKey()`s tidigare `toISOString()`-baserade
+  implementation faktiskt gav fel resultat i en riktig
+  `Europe/Stockholm`-webbläsarsession (verifierat direkt:
+  `Intl.DateTimeFormat().resolvedOptions().timeZone` → `"Europe/Stockholm"`,
+  `new Date().getTimezoneOffset()` → `-120`) -- "idag" markerades och
+  auto-valdes en dag FÖR SENT innan fixen, och en dag KORREKT efter.
+- Ett delat pass (Erik 08:00–14:00 dag 1, Maja 14:00– dag 2) visar nu
+  klyvpunktens exakta tid på handover-dagen i mobil-listan istället för
+  bara datum -- verifierat att båda personernas segment visas med rätt
+  start/sluttid (`14:00`) på samma dag.
+- "Dela pass" (admin, via Dagbesked) testat: krymper originalet och
+  infogar en ny rad för resten med en vald ny ägare, verifierat mot
+  databasen (rätt `starts_at`/`ends_at`/`user_id` på båda raderna).
+- "Tilldela till någon annan" testat, inklusive omtilldelning till
+  "Obemannat" (`user_id = NULL`).
+- "Annonsera för byte" från Dagbesked (admin, på ett pass som INTE är
+  admins eget) testat -- skapar en öppen annons; ett pass som redan har
+  en öppen annons visar korrekt varningen och inaktiverar knappen.
+- "Radera pass" testat, inklusive att en tillhörande öppen annons
+  försvinner automatiskt (`ON DELETE CASCADE`).
+- Bekräftat att personal INTE ser klick-att-hantera-affordansen alls
+  (inga klickbara rader/staplar i DOM:en) när inloggad som `personal@demo.se`.
+- "Rensa genererade" testat: genererade 5 pass från en regel, rensade
+  dem, bekräftade att exakt de 5 `source = 'template'`-raderna
+  försvann medan två `source = 'manual'`-rader (en delad, en
+  omtilldelad) lämnades orörda.
+- All testdata skapad och raderad efteråt; modulen återställd till
+  avstängd.
 
 ## 5. Kvarstående (inte byggt)
 
