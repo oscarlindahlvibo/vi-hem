@@ -404,9 +404,51 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
   const [form, setForm] = useState<VehicleForm>(EMPTY_VEHICLE_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [lookupUrl, setLookupUrl] = useState('');
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState('');
+  const [lookupNote, setLookupNote] = useState('');
+
+  const handleLookup = async () => {
+    if (!lookupUrl.trim()) { setLookupError('Klistra in en länk först.'); return; }
+    setLookupLoading(true);
+    setLookupError('');
+    setLookupNote('');
+    try {
+      const { data, error: err } = await supabase.functions.invoke('vihem-fleet-lookup-vehicle', { body: { url: lookupUrl.trim() } });
+      if (err) {
+        const context = (err as { context?: Response }).context;
+        const parsed = context ? await context.clone().json().catch(() => null) : null;
+        throw new Error(parsed?.error || describeError(err));
+      }
+      if (data?.error) throw new Error(data.error);
+      const found = (data?.data || {}) as Record<string, unknown>;
+      setForm((current) => ({
+        ...current,
+        make: typeof found.make === 'string' && found.make ? found.make : current.make,
+        model: typeof found.model === 'string' && found.model ? found.model : current.model,
+        model_year: typeof found.model_year === 'number' ? String(found.model_year) : current.model_year,
+        vin: typeof found.vin === 'string' && found.vin ? found.vin : current.vin,
+        registration_number: typeof found.registration_number === 'string' && found.registration_number ? found.registration_number.toUpperCase() : current.registration_number,
+        fuel_type: typeof found.fuel_type === 'string' && found.fuel_type ? found.fuel_type : current.fuel_type,
+        current_odometer: typeof found.current_odometer === 'number' ? String(found.current_odometer) : current.current_odometer,
+        odometer_unit: typeof found.odometer_unit === 'string' && found.odometer_unit ? found.odometer_unit : current.odometer_unit,
+      }));
+      const extras = [
+        found.next_inspection_date ? `Besiktning enligt sidan: ${found.next_inspection_date}` : '',
+        typeof found.other_notes === 'string' && found.other_notes ? found.other_notes : '',
+      ].filter(Boolean).join(' · ');
+      setLookupNote(extras ? `Fälten är ifyllda -- kontrollera dem. ${extras}` : 'Fälten är ifyllda -- kontrollera dem innan du sparar.');
+    } catch (err) {
+      setLookupError(describeError(err));
+    } finally {
+      setLookupLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
+    setLookupUrl(''); setLookupError(''); setLookupNote('');
     if (vehicle) {
       setForm({
         asset_type: vehicle.asset_type, registration_number: vehicle.registration_number, internal_number: vehicle.internal_number, name: vehicle.name,
@@ -461,6 +503,16 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
   return (
     <Modal open={open} onClose={onClose} title={vehicle ? 'Redigera tillgång' : 'Ny tillgång'} size="lg">
       <div className="space-y-4">
+        <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+          <label className="mb-1.5 block text-sm font-semibold text-slate-700">Hämta uppgifter från en länk (t.ex. biluppgifter.se)</label>
+          <div className="flex gap-2">
+            <Input value={lookupUrl} onChange={(e) => setLookupUrl(e.target.value)} placeholder="https://biluppgifter.se/fordon/..." className="flex-1" />
+            <Button type="button" size="sm" variant="secondary" onClick={handleLookup} loading={lookupLoading}>Hämta med AI</Button>
+          </div>
+          <p className="mt-1.5 text-xs text-slate-500">Sidan hämtas och tolkas av AI. Kontrollera alltid fälten nedan innan du sparar.</p>
+          {lookupError && <p className="mt-1.5 text-xs text-red-600">{lookupError}</p>}
+          {lookupNote && <p className="mt-1.5 text-xs text-emerald-700">{lookupNote}</p>}
+        </div>
         <div className="grid gap-3 sm:grid-cols-3">
           <Select label="Typ" value={form.asset_type} onChange={(e) => setForm({ ...form, asset_type: e.target.value as FleetAssetType })} options={ASSET_TYPES.map((t) => ({ value: t, label: ASSET_TYPE_LABELS[t] }))} />
           <Input label="Namn" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="T.ex. Ford Transit" />
