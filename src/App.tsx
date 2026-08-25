@@ -51,6 +51,7 @@ import { MailPage } from './pages/MailPage';
 import { SmsPage } from './pages/SmsPage';
 import { SkatteverketPage } from './pages/SkatteverketPage';
 import { JourPage } from './pages/JourPage';
+import { FleetPage } from './pages/FleetPage';
 import type { ModuleKey } from './types';
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasError: boolean }> {
@@ -101,6 +102,7 @@ const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
   'inventory_management',
   'skatteverket',
   'jour',
+  'fleet_management',
 ];
 
 const DEFAULT_MODULE_STATE: ModuleState = {
@@ -118,6 +120,7 @@ const DEFAULT_MODULE_STATE: ModuleState = {
   inventory_management: false,
   skatteverket: false,
   jour: false,
+  fleet_management: false,
 };
 
 function normalizeAppPath(path: string) {
@@ -377,6 +380,11 @@ function AppInner() {
       return <TimeTrackingPage onNavigate={navigate} initialAction={action} />;
     }
 
+    if (currentPage.startsWith('fleet/')) {
+      if (!isStaff || !enabledModules.fleet_management) return renderDashboard();
+      return <FleetPage onNavigate={navigate} initialVehicleId={currentPage.split('/')[1]} />;
+    }
+
     switch (currentPage) {
       case 'dashboard':
         return renderDashboard();
@@ -515,6 +523,10 @@ function AppInner() {
       case 'jour':
         if (!isStaff || !enabledModules.jour) return renderDashboard();
         return <JourPage />;
+
+      case 'fleet':
+        if (!isStaff || !enabledModules.fleet_management) return renderDashboard();
+        return <FleetPage onNavigate={navigate} />;
 
       case 'admin-payroll':
         if (!isAdmin) return renderDashboard();

@@ -23,7 +23,8 @@ export type ModuleKey =
   | 'crm'
   | 'ai'
   | 'skatteverket'
-  | 'jour';
+  | 'jour'
+  | 'fleet_management';
 
 export interface Organisation {
   id: string;
@@ -483,6 +484,7 @@ export interface WorkOrder {
   customer_project_id: string | null;
   maintenance_request_id: string | null;
   short_stay_booking_id: string | null;
+  vehicle_id: string | null;
   assigned_to: string | null;
   assigned_to_ids: string[];
   created_by: string | null;
@@ -918,6 +920,7 @@ export interface TimeEntry {
   maintenance_request_id: string | null;
   property_id: string | null;
   customer_project_id: string | null;
+  vehicle_id: string | null;
   category: TimeCategory;
   entry_type: TimeEntryType;
   customer_name: string | null;
@@ -2076,4 +2079,256 @@ export interface JourSwapOffer {
   updated_at: string;
   shift?: JourShift | null;
   offerer?: Pick<Profile, 'id' | 'name'> | null;
+}
+
+// ── Fleet Manager ─────────────────────────────────────────────────────
+
+export type FleetAssetType = 'car' | 'van' | 'truck' | 'trailer' | 'excavator' | 'tractor' | 'implement' | 'other';
+export type FleetVehicleStatus = 'in_service' | 'workshop' | 'out_of_service' | 'driving_ban' | 'laid_up' | 'rented_out' | 'sold';
+export type FleetFinancingType = 'owned' | 'leasing' | 'loan' | 'rental';
+export type FleetFuelType = 'petrol' | 'diesel' | 'electric' | 'hybrid' | 'hvo' | 'other';
+export type FleetRegistrationStatus = 'registered' | 'deregistered' | 'not_applicable';
+export type FleetDamageSeverity = 'info' | 'should_fix' | 'urgent' | 'no_use';
+export type FleetDamageStatus = 'open' | 'converted' | 'resolved' | 'dismissed';
+export type FleetMeterReadingType = 'odometer' | 'engine_hours';
+export type FleetMeterSource = 'manual' | 'telematics' | 'service' | 'import';
+export type FleetTireSeason = 'summer' | 'winter' | 'all_season';
+export type FleetTirePosition = 'front_left' | 'front_right' | 'rear_left' | 'rear_right' | 'spare' | 'storage';
+export type FleetCostType = 'service' | 'repair' | 'parts' | 'tires' | 'insurance' | 'tax' | 'leasing' | 'inspection' | 'fuel' | 'charging' | 'other';
+export type FleetInspectionResult = 'passed' | 'passed_with_remarks' | 'failed';
+export type FleetTelematicsProvider = 'teltonika' | 'generic_obd' | 'generic_gps' | 'other';
+export type FleetTelematicsStatus = 'online' | 'offline' | 'unknown';
+
+export interface FleetVehicle {
+  id: string;
+  organisation_id: string;
+  company_id: string | null;
+  asset_type: FleetAssetType;
+  registration_number: string;
+  internal_number: string;
+  name: string;
+  make: string;
+  model: string;
+  model_year: number | null;
+  vin: string;
+  serial_number: string;
+  responsible_user_id: string | null;
+  property_id: string | null;
+  inventory_location_id: string | null;
+  purchase_date: string | null;
+  purchase_price: number | null;
+  financing_type: FleetFinancingType;
+  financing_notes: string;
+  current_odometer: number;
+  odometer_unit: 'km' | 'mil';
+  engine_hours: number;
+  fuel_type: FleetFuelType;
+  registration_status: FleetRegistrationStatus;
+  status: FleetVehicleStatus;
+  image_url: string;
+  notes: string;
+  documents: AttachmentItem[];
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  responsible?: Pick<Profile, 'id' | 'name'> | null;
+  company?: { id: string; name: string } | null;
+  property?: Pick<Property, 'id' | 'name'> | null;
+}
+
+export interface FleetDamageReport {
+  id: string;
+  organisation_id: string;
+  vehicle_id: string;
+  reported_by: string | null;
+  description: string;
+  severity: FleetDamageSeverity;
+  usable: boolean;
+  status: FleetDamageStatus;
+  work_order_id: string | null;
+  photos: string[];
+  resolved_at: string | null;
+  resolved_by: string | null;
+  created_at: string;
+  updated_at: string;
+  reporter?: Pick<Profile, 'id' | 'name'> | null;
+  vehicle?: Pick<FleetVehicle, 'id' | 'name' | 'registration_number'> | null;
+}
+
+export interface FleetServiceSchedule {
+  id: string;
+  organisation_id: string;
+  vehicle_id: string;
+  name: string;
+  interval_km: number | null;
+  interval_hours: number | null;
+  interval_months: number | null;
+  last_done_at: string | null;
+  last_done_odometer: number | null;
+  last_done_hours: number | null;
+  next_due_date: string | null;
+  next_due_odometer: number | null;
+  next_due_hours: number | null;
+  active: boolean;
+  notes: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FleetServiceRecord {
+  id: string;
+  organisation_id: string;
+  vehicle_id: string;
+  schedule_id: string | null;
+  performed_at: string;
+  odometer: number | null;
+  engine_hours: number | null;
+  performed_by_text: string;
+  cost: number | null;
+  work_order_id: string | null;
+  description: string;
+  documents: string[];
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface FleetInspection {
+  id: string;
+  organisation_id: string;
+  vehicle_id: string;
+  inspection_type: string;
+  interval_months: number | null;
+  last_inspection_date: string | null;
+  next_inspection_date: string | null;
+  result: FleetInspectionResult | null;
+  performed_by_text: string;
+  cost: number | null;
+  document_url: string;
+  notes: string;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FleetMeterReading {
+  id: string;
+  organisation_id: string;
+  vehicle_id: string;
+  reading_type: FleetMeterReadingType;
+  value: number;
+  source: FleetMeterSource;
+  recorded_at: string;
+  recorded_by: string | null;
+  notes: string;
+  created_at: string;
+  recorder?: Pick<Profile, 'id' | 'name'> | null;
+}
+
+export interface FleetTire {
+  id: string;
+  organisation_id: string;
+  vehicle_id: string;
+  season: FleetTireSeason;
+  dimension: string;
+  brand: string;
+  dot: string;
+  tread_depth_mm: number | null;
+  position: FleetTirePosition | null;
+  mounted: boolean;
+  storage_location: string;
+  mounted_at: string | null;
+  mounted_odometer: number | null;
+  notes: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FleetCost {
+  id: string;
+  organisation_id: string;
+  vehicle_id: string;
+  cost_type: FleetCostType;
+  amount: number;
+  currency: string;
+  cost_date: string;
+  description: string;
+  work_order_id: string | null;
+  supplier_invoice_id: string | null;
+  service_record_id: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface FleetChecklistTemplate {
+  id: string;
+  organisation_id: string;
+  asset_type: FleetAssetType | null;
+  name: string;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FleetChecklistTemplateItem {
+  id: string;
+  template_id: string;
+  sort_order: number;
+  label: string;
+  created_at: string;
+}
+
+export interface FleetChecklistRun {
+  id: string;
+  organisation_id: string;
+  vehicle_id: string;
+  template_id: string | null;
+  template_name_snapshot: string;
+  performed_by: string | null;
+  performed_at: string;
+  notes: string;
+  created_at: string;
+  performer?: Pick<Profile, 'id' | 'name'> | null;
+}
+
+export interface FleetChecklistRunItem {
+  id: string;
+  run_id: string;
+  label_snapshot: string;
+  ok: boolean;
+  damage_report_id: string | null;
+  created_at: string;
+}
+
+export interface FleetTelematicsDevice {
+  id: string;
+  organisation_id: string;
+  vehicle_id: string | null;
+  provider: FleetTelematicsProvider;
+  device_model: string;
+  imei: string;
+  sim_number: string;
+  status: FleetTelematicsStatus;
+  last_contact_at: string | null;
+  api_key: string;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FleetEvent {
+  id: string;
+  organisation_id: string;
+  vehicle_id: string;
+  event_type: string;
+  summary: string;
+  metadata: Record<string, unknown>;
+  actor_id: string | null;
+  created_at: string;
+  actor?: Pick<Profile, 'id' | 'name'> | null;
 }

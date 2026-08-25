@@ -12,7 +12,7 @@ import {
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
   ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase,
   BedDouble, CalendarDays, Landmark, MessageSquareText, Monitor, ScanLine, SlidersHorizontal,
-  Truck, Package, FileSpreadsheet, Mail, FileSignature, ShieldCheck, ShieldAlert,
+  Truck, Package, FileSpreadsheet, Mail, FileSignature, ShieldCheck, ShieldAlert, Car,
 } from 'lucide-react';
 
 interface NavItem {
@@ -87,6 +87,9 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     { label: 'Inköp & lager', icon: <Package className="w-5 h-5" />, items: [
       { label: 'Inköpslista', icon: <ShoppingCart className="w-5 h-5" />, page: 'purchases', roles: ['staff', 'admin'] },
       { label: 'Lager', icon: <Package className="w-5 h-5" />, page: 'inventory', roles: ['staff', 'admin'], module: 'inventory_management' },
+    ] },
+    { label: 'Fordon', icon: <Car className="w-5 h-5" />, items: [
+      { label: 'Fleet Manager', icon: <Car className="w-5 h-5" />, page: 'fleet', roles: ['staff', 'admin'], module: 'fleet_management' },
     ] },
     { label: 'Scanna underlag', icon: <ScanLine className="w-5 h-5" />, items: [
       { label: 'Scanna underlag', icon: <ScanLine className="w-5 h-5" />, page: 'document-scanner', roles: ['staff', 'admin'], module: 'finance' },
