@@ -1,18 +1,21 @@
-// Fleet Manager: hämtar en webbsida (t.ex. en fordonsannons/uppgiftssida som
-// admin själv länkar till, som biluppgifter.se) och låter en AI-modell tolka
-// ut strukturerad fordonsdata ur sidans text, för att förifylla "Ny
-// tillgång"-formuläret. Återanvänder samma OpenAI-nyckel/inställningar som
-// leverantörsfaktura-OCR:n (vihem_ocr_provider_settings), så ingen ny
-// nyckelhantering behövs.
+// Fleet Manager: tolkar fordonsdata med AI från antingen (a) en webbsida
+// admin själv länkar till (t.ex. biluppgifter.se) eller (b) text admin
+// själv kopierat och klistrat in (för sidor som inte går att länka direkt
+// till, t.ex. Transportstyrelsens sökverktyg där resultatet inte hamnar i
+// URL:en -- admin gör själv den vanliga, legitima sökningen där och
+// klistrar in resultatet). Förifyller "Ny tillgång"-formuläret. Återanvänder
+// samma OpenAI-nyckel/inställningar som leverantörsfaktura-OCR:n
+// (vihem_ocr_provider_settings), så ingen ny nyckelhantering behövs.
 //
-// Säkerhet: detta är en admin-endast funktion som hämtar EN sida admin
-// själv anger (inte en crawler/bulk-skrapare). Länken valideras mot
-// http/https och privata/interna adresser blockeras (SSRF-skydd). Sidans
-// textinnehåll skickas till AI:n som strikt DATA -- prompten instruerar
-// modellen att aldrig följa instruktioner som förekommer i sidtexten, och
-// modellen har inga verktyg/åtgärder att utföra, bara ett fast JSON-schema
-// att fylla i. Resultatet förifyller bara formuläret; admin granskar och
-// sparar själv.
+// Säkerhet: admin-endast. Länkläget hämtar EN sida admin själv anger (inte
+// en crawler/bulk-skrapare, och absolut ingen automatiserad sökning/
+// formulärifyllnad mot tredjepartssajter -- bara en enkel GET av en URL
+// admin redan valt). Länken valideras mot http/https och privata/interna
+// adresser blockeras (SSRF-skydd). Text (hämtad eller inklistrad) skickas
+// till AI:n som strikt DATA -- prompten instruerar modellen att aldrig
+// följa instruktioner som förekommer i texten, och modellen har inga
+// verktyg/åtgärder att utföra, bara ett fast JSON-schema att fylla i.
+// Resultatet förifyller bara formuläret; admin granskar och sparar själv.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -62,23 +65,34 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json().catch(() => ({}));
     const rawUrl = typeof body.url === "string" ? body.url.trim() : "";
-    if (!rawUrl) return json({ error: "Ange en länk att hämta." }, 400);
+    const rawText = typeof body.text === "string" ? body.text.trim() : "";
+    if (!rawUrl && !rawText) return json({ error: "Ange antingen en länk eller klistra in text." }, 400);
 
-    let target: URL;
-    try {
-      target = new URL(rawUrl);
-    } catch {
-      return json({ error: "Ogiltig länk." }, 400);
-    }
-    if (target.protocol !== "http:" && target.protocol !== "https:") {
-      return json({ error: "Endast http/https-länkar stöds." }, 400);
-    }
-    if (isBlockedHost(target.hostname)) {
-      return json({ error: "Den här adressen kan inte hämtas." }, 400);
-    }
+    let pageText = "";
+    let sourceUrl: string | null = null;
 
-    const pageText = await fetchPageText(target.toString());
-    if (!pageText.trim()) return json({ error: "Kunde inte läsa något innehåll från sidan." }, 400);
+    if (rawUrl) {
+      let target: URL;
+      try {
+        target = new URL(rawUrl);
+      } catch {
+        return json({ error: "Ogiltig länk." }, 400);
+      }
+      if (target.protocol !== "http:" && target.protocol !== "https:") {
+        return json({ error: "Endast http/https-länkar stöds." }, 400);
+      }
+      if (isBlockedHost(target.hostname)) {
+        return json({ error: "Den här adressen kan inte hämtas." }, 400);
+      }
+      pageText = await fetchPageText(target.toString());
+      sourceUrl = target.toString();
+      if (!pageText.trim()) return json({ error: "Kunde inte läsa något innehåll från sidan." }, 400);
+    } else {
+      // Inklistrad text -- ingen hämtning görs, admin har själv kopierat innehållet
+      // (t.ex. från en sida som inte kan länkas direkt till, som Transportstyrelsens
+      // interaktiva sökverktyg där resultatet inte hamnar i URL:en).
+      pageText = rawText.slice(0, MAX_TEXT_CHARS);
+    }
 
     const settings = await loadAiSettings(serviceClient, profile.organisation_id);
     if (!settings.openaiKey) return json({ error: "Ingen AI-nyckel konfigurerad. Kontakta administratören (samma nyckel som används för fakturaskanning)." }, 500);
@@ -86,7 +100,7 @@ Deno.serve(async (req: Request) => {
     const result = await extractVehicleData(settings.openaiKey, settings.aiModel, pageText);
     if (!result.ok) return json({ error: result.error }, 502);
 
-    return json({ ok: true, data: result.data, source_url: target.toString() });
+    return json({ ok: true, data: result.data, source_url: sourceUrl });
   } catch (error) {
     console.error(error);
     return json({ error: error instanceof Error ? error.message : "Internt serverfel" }, 400);

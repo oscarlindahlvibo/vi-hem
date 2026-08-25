@@ -412,7 +412,9 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
   const [form, setForm] = useState<VehicleForm>(EMPTY_VEHICLE_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [lookupMode, setLookupMode] = useState<'url' | 'text'>('url');
   const [lookupUrl, setLookupUrl] = useState('');
+  const [lookupText, setLookupText] = useState('');
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState('');
   const [lookupNote, setLookupNote] = useState('');
@@ -423,12 +425,14 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
   const num = (v: unknown) => (typeof v === 'number' ? String(v) : '');
 
   const handleLookup = async () => {
-    if (!lookupUrl.trim()) { setLookupError('Klistra in en länk först.'); return; }
+    const body = lookupMode === 'url' ? { url: lookupUrl.trim() } : { text: lookupText.trim() };
+    if (lookupMode === 'url' && !lookupUrl.trim()) { setLookupError('Klistra in en länk först.'); return; }
+    if (lookupMode === 'text' && !lookupText.trim()) { setLookupError('Klistra in text först.'); return; }
     setLookupLoading(true);
     setLookupError('');
     setLookupNote('');
     try {
-      const { data, error: err } = await supabase.functions.invoke('vihem-fleet-lookup-vehicle', { body: { url: lookupUrl.trim() } });
+      const { data, error: err } = await supabase.functions.invoke('vihem-fleet-lookup-vehicle', { body });
       if (err) {
         const context = (err as { context?: Response }).context;
         const parsed = context ? await context.clone().json().catch(() => null) : null;
@@ -481,7 +485,7 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
 
   useEffect(() => {
     if (!open) return;
-    setLookupUrl(''); setLookupError(''); setLookupNote(''); setLookupLastInspection(''); setLookupNextInspection('');
+    setLookupMode('url'); setLookupUrl(''); setLookupText(''); setLookupError(''); setLookupNote(''); setLookupLastInspection(''); setLookupNextInspection('');
     if (vehicle) {
       setForm({
         asset_type: vehicle.asset_type, registration_number: vehicle.registration_number, internal_number: vehicle.internal_number, name: vehicle.name,
@@ -564,12 +568,27 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
     <Modal open={open} onClose={onClose} title={vehicle ? 'Redigera tillgång' : 'Ny tillgång'} size="lg">
       <div className="space-y-4">
         <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3">
-          <label className="mb-1.5 block text-sm font-semibold text-slate-700">Hämta uppgifter från en länk (t.ex. biluppgifter.se)</label>
-          <div className="flex gap-2">
-            <Input value={lookupUrl} onChange={(e) => setLookupUrl(e.target.value)} placeholder="https://biluppgifter.se/fordon/..." className="flex-1" />
-            <Button type="button" size="sm" variant="secondary" onClick={handleLookup} loading={lookupLoading}>Hämta med AI</Button>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <label className="text-sm font-semibold text-slate-700">Fyll i med AI</label>
+            <div className="flex gap-1 rounded-lg bg-white p-0.5 ring-1 ring-slate-200">
+              <button type="button" onClick={() => setLookupMode('url')} className={`rounded-md px-2.5 py-1 text-xs font-semibold ${lookupMode === 'url' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}>Länk</button>
+              <button type="button" onClick={() => setLookupMode('text')} className={`rounded-md px-2.5 py-1 text-xs font-semibold ${lookupMode === 'text' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}>Inklistrad text</button>
+            </div>
           </div>
-          <p className="mt-1.5 text-xs text-slate-500">Sidan hämtas och tolkas av AI. Kontrollera alltid fälten nedan innan du sparar.</p>
+          {lookupMode === 'url' ? (
+            <div className="flex gap-2">
+              <Input value={lookupUrl} onChange={(e) => setLookupUrl(e.target.value)} placeholder="https://biluppgifter.se/fordon/..." className="flex-1" />
+              <Button type="button" size="sm" variant="secondary" onClick={handleLookup} loading={lookupLoading}>Hämta med AI</Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Textarea value={lookupText} onChange={(e) => setLookupText(e.target.value)} rows={5} placeholder="Sök upp fordonet själv (t.ex. på Transportstyrelsens fordonsuppgifter), markera och kopiera resultatet, och klistra in här." />
+              <Button type="button" size="sm" variant="secondary" onClick={handleLookup} loading={lookupLoading}>Tolka inklistrad text</Button>
+            </div>
+          )}
+          <p className="mt-1.5 text-xs text-slate-500">
+            {lookupMode === 'url' ? 'Sidan hämtas och tolkas av AI.' : 'Ingenting hämtas -- bara texten du klistrat in tolkas.'} Kontrollera alltid fälten nedan innan du sparar.
+          </p>
           {lookupError && <p className="mt-1.5 text-xs text-red-600">{lookupError}</p>}
           {lookupNote && <p className="mt-1.5 text-xs text-emerald-700">{lookupNote}</p>}
         </div>
