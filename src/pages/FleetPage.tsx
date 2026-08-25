@@ -394,8 +394,16 @@ type VehicleForm = {
   vin: string; serial_number: string; company_id: string; responsible_user_id: string; property_id: string; purchase_date: string; purchase_price: string;
   financing_type: string; financing_notes: string; current_odometer: string; odometer_unit: string; engine_hours: string; fuel_type: string;
   registration_status: string; status: string; notes: string;
+  color: string; transmission: string; curb_weight_kg: string; gross_weight_kg: string; max_load_kg: string; trailer_weight_braked_kg: string; trailer_weight_unbraked_kg: string;
+  length_mm: string; width_mm: string; height_mm: string; number_of_seats: string; co2_g_km: string; euro_class: string;
+  technical_specs: { label: string; value: string }[];
 };
-const EMPTY_VEHICLE_FORM: VehicleForm = { asset_type: 'car', registration_number: '', internal_number: '', name: '', make: '', model: '', model_year: '', vin: '', serial_number: '', company_id: '', responsible_user_id: '', property_id: '', purchase_date: '', purchase_price: '', financing_type: 'owned', financing_notes: '', current_odometer: '0', odometer_unit: 'mil', engine_hours: '0', fuel_type: 'diesel', registration_status: 'registered', status: 'in_service', notes: '' };
+const EMPTY_VEHICLE_FORM: VehicleForm = {
+  asset_type: 'car', registration_number: '', internal_number: '', name: '', make: '', model: '', model_year: '', vin: '', serial_number: '', company_id: '', responsible_user_id: '', property_id: '',
+  purchase_date: '', purchase_price: '', financing_type: 'owned', financing_notes: '', current_odometer: '0', odometer_unit: 'mil', engine_hours: '0', fuel_type: 'diesel', registration_status: 'registered', status: 'in_service', notes: '',
+  color: '', transmission: '', curb_weight_kg: '', gross_weight_kg: '', max_load_kg: '', trailer_weight_braked_kg: '', trailer_weight_unbraked_kg: '',
+  length_mm: '', width_mm: '', height_mm: '', number_of_seats: '', co2_g_km: '', euro_class: '', technical_specs: [],
+};
 
 function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, companies, properties, profiles, onSaved }: {
   open: boolean; onClose: () => void; vehicle: FleetVehicle | null; organisationId: string; userId: string;
@@ -408,6 +416,11 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState('');
   const [lookupNote, setLookupNote] = useState('');
+  const [lookupLastInspection, setLookupLastInspection] = useState('');
+  const [lookupNextInspection, setLookupNextInspection] = useState('');
+
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : '');
+  const num = (v: unknown) => (typeof v === 'number' ? String(v) : '');
 
   const handleLookup = async () => {
     if (!lookupUrl.trim()) { setLookupError('Klistra in en länk först.'); return; }
@@ -423,20 +436,40 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
       }
       if (data?.error) throw new Error(data.error);
       const found = (data?.data || {}) as Record<string, unknown>;
+      const foundSpecs = Array.isArray(found.technical_specs)
+        ? (found.technical_specs as unknown[]).filter((s): s is { label: string; value: string } => !!s && typeof s === 'object' && typeof (s as any).label === 'string' && typeof (s as any).value === 'string')
+        : [];
       setForm((current) => ({
         ...current,
-        make: typeof found.make === 'string' && found.make ? found.make : current.make,
-        model: typeof found.model === 'string' && found.model ? found.model : current.model,
-        model_year: typeof found.model_year === 'number' ? String(found.model_year) : current.model_year,
-        vin: typeof found.vin === 'string' && found.vin ? found.vin : current.vin,
-        registration_number: typeof found.registration_number === 'string' && found.registration_number ? found.registration_number.toUpperCase() : current.registration_number,
-        fuel_type: typeof found.fuel_type === 'string' && found.fuel_type ? found.fuel_type : current.fuel_type,
-        current_odometer: typeof found.current_odometer === 'number' ? String(found.current_odometer) : current.current_odometer,
-        odometer_unit: typeof found.odometer_unit === 'string' && found.odometer_unit ? found.odometer_unit : current.odometer_unit,
+        make: str(found.make) || current.make,
+        model: str(found.model) || current.model,
+        model_year: num(found.model_year) || current.model_year,
+        vin: str(found.vin) || current.vin,
+        registration_number: str(found.registration_number) ? String(found.registration_number).toUpperCase() : current.registration_number,
+        fuel_type: str(found.fuel_type) || current.fuel_type,
+        current_odometer: num(found.current_odometer) || current.current_odometer,
+        odometer_unit: str(found.odometer_unit) || current.odometer_unit,
+        color: str(found.color) || current.color,
+        transmission: str(found.transmission) || current.transmission,
+        curb_weight_kg: num(found.curb_weight_kg) || current.curb_weight_kg,
+        gross_weight_kg: num(found.gross_weight_kg) || current.gross_weight_kg,
+        max_load_kg: num(found.max_load_kg) || current.max_load_kg,
+        trailer_weight_braked_kg: num(found.trailer_weight_braked_kg) || current.trailer_weight_braked_kg,
+        trailer_weight_unbraked_kg: num(found.trailer_weight_unbraked_kg) || current.trailer_weight_unbraked_kg,
+        length_mm: num(found.length_mm) || current.length_mm,
+        width_mm: num(found.width_mm) || current.width_mm,
+        height_mm: num(found.height_mm) || current.height_mm,
+        number_of_seats: num(found.number_of_seats) || current.number_of_seats,
+        co2_g_km: num(found.co2_g_km) || current.co2_g_km,
+        euro_class: str(found.euro_class) || current.euro_class,
+        technical_specs: foundSpecs.length ? [...current.technical_specs, ...foundSpecs] : current.technical_specs,
       }));
+      if (str(found.last_inspection_date)) setLookupLastInspection(String(found.last_inspection_date));
+      if (str(found.next_inspection_date)) setLookupNextInspection(String(found.next_inspection_date));
       const extras = [
-        found.next_inspection_date ? `Besiktning enligt sidan: ${found.next_inspection_date}` : '',
-        typeof found.other_notes === 'string' && found.other_notes ? found.other_notes : '',
+        found.last_inspection_date ? `Senaste besiktning: ${found.last_inspection_date}` : '',
+        found.next_inspection_date ? `Nästa besiktning: ${found.next_inspection_date}` : '',
+        str(found.other_notes),
       ].filter(Boolean).join(' · ');
       setLookupNote(extras ? `Fälten är ifyllda -- kontrollera dem. ${extras}` : 'Fälten är ifyllda -- kontrollera dem innan du sparar.');
     } catch (err) {
@@ -448,7 +481,7 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
 
   useEffect(() => {
     if (!open) return;
-    setLookupUrl(''); setLookupError(''); setLookupNote('');
+    setLookupUrl(''); setLookupError(''); setLookupNote(''); setLookupLastInspection(''); setLookupNextInspection('');
     if (vehicle) {
       setForm({
         asset_type: vehicle.asset_type, registration_number: vehicle.registration_number, internal_number: vehicle.internal_number, name: vehicle.name,
@@ -457,6 +490,14 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
         purchase_date: vehicle.purchase_date || '', purchase_price: vehicle.purchase_price ? String(vehicle.purchase_price) : '', financing_type: vehicle.financing_type,
         financing_notes: vehicle.financing_notes, current_odometer: String(vehicle.current_odometer), odometer_unit: vehicle.odometer_unit, engine_hours: String(vehicle.engine_hours),
         fuel_type: vehicle.fuel_type, registration_status: vehicle.registration_status, status: vehicle.status, notes: vehicle.notes,
+        color: vehicle.color, transmission: vehicle.transmission,
+        curb_weight_kg: vehicle.curb_weight_kg != null ? String(vehicle.curb_weight_kg) : '', gross_weight_kg: vehicle.gross_weight_kg != null ? String(vehicle.gross_weight_kg) : '',
+        max_load_kg: vehicle.max_load_kg != null ? String(vehicle.max_load_kg) : '',
+        trailer_weight_braked_kg: vehicle.trailer_weight_braked_kg != null ? String(vehicle.trailer_weight_braked_kg) : '',
+        trailer_weight_unbraked_kg: vehicle.trailer_weight_unbraked_kg != null ? String(vehicle.trailer_weight_unbraked_kg) : '',
+        length_mm: vehicle.length_mm != null ? String(vehicle.length_mm) : '', width_mm: vehicle.width_mm != null ? String(vehicle.width_mm) : '', height_mm: vehicle.height_mm != null ? String(vehicle.height_mm) : '',
+        number_of_seats: vehicle.number_of_seats != null ? String(vehicle.number_of_seats) : '', co2_g_km: vehicle.co2_g_km != null ? String(vehicle.co2_g_km) : '', euro_class: vehicle.euro_class,
+        technical_specs: vehicle.technical_specs || [],
       });
     } else {
       setForm(EMPTY_VEHICLE_FORM);
@@ -480,7 +521,16 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
         property_id: form.property_id || null, purchase_date: form.purchase_date || null, purchase_price: form.purchase_price ? Number(form.purchase_price) : null,
         financing_type: form.financing_type, financing_notes: form.financing_notes.trim(), current_odometer: Number(form.current_odometer) || 0, odometer_unit: form.odometer_unit,
         engine_hours: Number(form.engine_hours) || 0, fuel_type: form.fuel_type, registration_status: form.registration_status, status: form.status, notes: form.notes.trim(),
+        color: form.color.trim(), transmission: form.transmission.trim(),
+        curb_weight_kg: form.curb_weight_kg ? Number(form.curb_weight_kg) : null, gross_weight_kg: form.gross_weight_kg ? Number(form.gross_weight_kg) : null,
+        max_load_kg: form.max_load_kg ? Number(form.max_load_kg) : null,
+        trailer_weight_braked_kg: form.trailer_weight_braked_kg ? Number(form.trailer_weight_braked_kg) : null,
+        trailer_weight_unbraked_kg: form.trailer_weight_unbraked_kg ? Number(form.trailer_weight_unbraked_kg) : null,
+        length_mm: form.length_mm ? Number(form.length_mm) : null, width_mm: form.width_mm ? Number(form.width_mm) : null, height_mm: form.height_mm ? Number(form.height_mm) : null,
+        number_of_seats: form.number_of_seats ? Number(form.number_of_seats) : null, co2_g_km: form.co2_g_km ? Number(form.co2_g_km) : null, euro_class: form.euro_class.trim(),
+        technical_specs: form.technical_specs.filter((s) => s.label.trim() && s.value.trim()),
       };
+      let vehicleId = vehicle?.id || '';
       if (vehicle) {
         const { error: err } = await supabase.from('vihem_fleet_vehicles').update(payload).eq('id', vehicle.id);
         if (err) throw err;
@@ -490,7 +540,17 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
       } else {
         const { data, error: err } = await supabase.from('vihem_fleet_vehicles').insert({ ...payload, created_by: userId }).select('id').single();
         if (err) throw err;
-        await supabase.from('vihem_fleet_events').insert({ organisation_id: organisationId, vehicle_id: data.id, event_type: 'created', summary: 'Tillgång skapad', actor_id: userId });
+        vehicleId = data.id;
+        await supabase.from('vihem_fleet_events').insert({ organisation_id: organisationId, vehicle_id: vehicleId, event_type: 'created', summary: 'Tillgång skapad', actor_id: userId });
+      }
+      if (vehicleId && (lookupLastInspection || lookupNextInspection)) {
+        const { data: existingInspection } = await supabase.from('vihem_fleet_inspections').select('id').eq('vehicle_id', vehicleId).eq('inspection_type', 'Kontrollbesiktning').maybeSingle();
+        const inspectionPayload = { last_inspection_date: lookupLastInspection || null, next_inspection_date: lookupNextInspection || null };
+        if (existingInspection) {
+          await supabase.from('vihem_fleet_inspections').update(inspectionPayload).eq('id', existingInspection.id);
+        } else {
+          await supabase.from('vihem_fleet_inspections').insert({ organisation_id: organisationId, vehicle_id: vehicleId, inspection_type: 'Kontrollbesiktning', ...inspectionPayload, created_by: userId });
+        }
       }
       onSaved();
     } catch (err) {
@@ -552,6 +612,53 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
           <Select label="Leasing/finansiering" value={form.financing_type} onChange={(e) => setForm({ ...form, financing_type: e.target.value })} options={Object.entries(FINANCING_LABELS).map(([value, label]) => ({ value, label }))} />
           {showRegistration && <Select label="Registreringsstatus" value={form.registration_status} onChange={(e) => setForm({ ...form, registration_status: e.target.value })} options={[{ value: 'registered', label: 'Registrerad' }, { value: 'deregistered', label: 'Avregistrerad' }, { value: 'not_applicable', label: 'Ej tillämpligt' }]} />}
         </div>
+
+        <div className="border-t border-slate-200 pt-4">
+          <h3 className="mb-3 text-sm font-semibold text-slate-700">Mått, vikter & spec</h3>
+          <div className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Input label="Färg" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} />
+              <Input label="Växellåda" value={form.transmission} onChange={(e) => setForm({ ...form, transmission: e.target.value })} placeholder="T.ex. Automat" />
+              <Input label="Antal säten" type="number" value={form.number_of_seats} onChange={(e) => setForm({ ...form, number_of_seats: e.target.value })} />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Input label="Tjänstevikt (kg)" type="number" value={form.curb_weight_kg} onChange={(e) => setForm({ ...form, curb_weight_kg: e.target.value })} />
+              <Input label="Totalvikt (kg)" type="number" value={form.gross_weight_kg} onChange={(e) => setForm({ ...form, gross_weight_kg: e.target.value })} />
+              <Input label="Max lastvikt (kg)" type="number" value={form.max_load_kg} onChange={(e) => setForm({ ...form, max_load_kg: e.target.value })} />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input label="Max släpvikt, bromsat (kg)" type="number" value={form.trailer_weight_braked_kg} onChange={(e) => setForm({ ...form, trailer_weight_braked_kg: e.target.value })} />
+              <Input label="Max släpvikt, obromsat (kg)" type="number" value={form.trailer_weight_unbraked_kg} onChange={(e) => setForm({ ...form, trailer_weight_unbraked_kg: e.target.value })} />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Input label="Längd (mm)" type="number" value={form.length_mm} onChange={(e) => setForm({ ...form, length_mm: e.target.value })} />
+              <Input label="Bredd (mm)" type="number" value={form.width_mm} onChange={(e) => setForm({ ...form, width_mm: e.target.value })} />
+              <Input label="Höjd (mm)" type="number" value={form.height_mm} onChange={(e) => setForm({ ...form, height_mm: e.target.value })} />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input label="CO2 (g/km)" type="number" value={form.co2_g_km} onChange={(e) => setForm({ ...form, co2_g_km: e.target.value })} />
+              <Input label="Miljöklass" value={form.euro_class} onChange={(e) => setForm({ ...form, euro_class: e.target.value })} placeholder="T.ex. Euro 6" />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input label="Senaste besiktning" type="date" value={lookupLastInspection} onChange={(e) => setLookupLastInspection(e.target.value)} hint="Sparas som en besiktningspost när fordonet sparas." />
+              <Input label="Nästa besiktning" type="date" value={lookupNextInspection} onChange={(e) => setLookupNextInspection(e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-slate-700">Övriga specifikationer</label>
+              <div className="space-y-2">
+                {form.technical_specs.map((spec, i) => (
+                  <div key={i} className="flex gap-2">
+                    <Input value={spec.label} onChange={(e) => setForm({ ...form, technical_specs: form.technical_specs.map((s, idx) => (idx === i ? { ...s, label: e.target.value } : s)) })} placeholder="T.ex. Motoreffekt" className="w-2/5" />
+                    <Input value={spec.value} onChange={(e) => setForm({ ...form, technical_specs: form.technical_specs.map((s, idx) => (idx === i ? { ...s, value: e.target.value } : s)) })} placeholder="T.ex. 150 hk" className="flex-1" />
+                    <button onClick={() => setForm({ ...form, technical_specs: form.technical_specs.filter((_, idx) => idx !== i) })} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                ))}
+              </div>
+              <Button type="button" size="sm" variant="secondary" className="mt-2" onClick={() => setForm({ ...form, technical_specs: [...form.technical_specs, { label: '', value: '' }] })}><Plus className="h-4 w-4" /> Lägg till specifikation</Button>
+            </div>
+          </div>
+        </div>
+
         <Textarea label="Anteckningar" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         <div className="flex justify-end gap-2">
@@ -767,6 +874,21 @@ function OverviewTab({ vehicle, companies, properties, profilesById, openDamage,
     { label: 'Registreringsstatus', value: vehicle.registration_status === 'registered' ? 'Registrerad' : vehicle.registration_status === 'deregistered' ? 'Avregistrerad' : 'Ej tillämpligt' },
   ];
 
+  const specFields: { label: string; value: string }[] = [
+    vehicle.color ? { label: 'Färg', value: vehicle.color } : null,
+    vehicle.transmission ? { label: 'Växellåda', value: vehicle.transmission } : null,
+    vehicle.number_of_seats != null ? { label: 'Antal säten', value: String(vehicle.number_of_seats) } : null,
+    vehicle.curb_weight_kg != null ? { label: 'Tjänstevikt', value: `${formatNumber(vehicle.curb_weight_kg)} kg` } : null,
+    vehicle.gross_weight_kg != null ? { label: 'Totalvikt', value: `${formatNumber(vehicle.gross_weight_kg)} kg` } : null,
+    vehicle.max_load_kg != null ? { label: 'Max lastvikt', value: `${formatNumber(vehicle.max_load_kg)} kg` } : null,
+    vehicle.trailer_weight_braked_kg != null ? { label: 'Max släpvikt, bromsat', value: `${formatNumber(vehicle.trailer_weight_braked_kg)} kg` } : null,
+    vehicle.trailer_weight_unbraked_kg != null ? { label: 'Max släpvikt, obromsat', value: `${formatNumber(vehicle.trailer_weight_unbraked_kg)} kg` } : null,
+    (vehicle.length_mm != null || vehicle.width_mm != null || vehicle.height_mm != null)
+      ? { label: 'Mått (LxBxH)', value: `${vehicle.length_mm ?? '-'} x ${vehicle.width_mm ?? '-'} x ${vehicle.height_mm ?? '-'} mm` } : null,
+    vehicle.co2_g_km != null ? { label: 'CO2', value: `${formatNumber(vehicle.co2_g_km, 1)} g/km` } : null,
+    vehicle.euro_class ? { label: 'Miljöklass', value: vehicle.euro_class } : null,
+  ].filter((f): f is { label: string; value: string } => f !== null);
+
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <Card className="p-5 lg:col-span-2">
@@ -800,6 +922,25 @@ function OverviewTab({ vehicle, companies, properties, profilesById, openDamage,
           </div>
         </Card>
       </div>
+      {(specFields.length > 0 || vehicle.technical_specs.length > 0) && (
+        <Card className="p-5 lg:col-span-3">
+          <h3 className="mb-4 font-semibold text-slate-900">Mått, vikter & spec</h3>
+          {specFields.length > 0 && (
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+              {specFields.map((f) => (
+                <div key={f.label}><dt className="text-xs text-slate-500">{f.label}</dt><dd className="font-medium text-slate-800">{f.value}</dd></div>
+              ))}
+            </dl>
+          )}
+          {vehicle.technical_specs.length > 0 && (
+            <dl className={`grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4 ${specFields.length > 0 ? 'mt-4 border-t border-slate-100 pt-4' : ''}`}>
+              {vehicle.technical_specs.map((s, i) => (
+                <div key={i}><dt className="text-xs text-slate-500">{s.label}</dt><dd className="font-medium text-slate-800">{s.value}</dd></div>
+              ))}
+            </dl>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
