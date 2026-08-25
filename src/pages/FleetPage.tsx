@@ -513,7 +513,9 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
 
 // ── Tillgångskort (detaljvy) ─────────────────────────────────────────────
 
-type DetailTab = 'overview' | 'workorders' | 'damage' | 'service' | 'inspections' | 'meters' | 'tires' | 'documents' | 'costs' | 'telematics' | 'history';
+type DetailTab = 'overview' | 'workorders' | 'damage' | 'checklists' | 'service' | 'inspections' | 'meters' | 'tires' | 'documents' | 'costs' | 'telematics' | 'history';
+type ChecklistTemplateWithItems = FleetChecklistTemplate & { items: FleetChecklistTemplateItem[] };
+type ChecklistRunWithItems = FleetChecklistRun & { items: FleetChecklistRunItem[] };
 
 function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, properties, profiles, profilesById, onBack, onChanged, onNavigate }: {
   vehicle: FleetVehicle; isAdmin: boolean; userId: string; organisationId: string; companies: { id: string; name: string }[]; properties: { id: string; name: string }[];
@@ -529,6 +531,8 @@ function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, pr
   const [tires, setTires] = useState<FleetTire[]>([]);
   const [costs, setCosts] = useState<FleetCost[]>([]);
   const [telematicsDevice, setTelematicsDevice] = useState<FleetTelematicsDevice | null>(null);
+  const [checklistTemplates, setChecklistTemplates] = useState<ChecklistTemplateWithItems[]>([]);
+  const [checklistRuns, setChecklistRuns] = useState<ChecklistRunWithItems[]>([]);
   const [events, setEvents] = useState<FleetEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [reportModal, setReportModal] = useState(false);
@@ -537,7 +541,7 @@ function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, pr
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [dmg, wo, sched, srec, insp, meters, tir, cst, dev, evt] = await Promise.all([
+    const [dmg, wo, sched, srec, insp, meters, tir, cst, dev, evt, tpl, runs] = await Promise.all([
       supabase.from('vihem_fleet_damage_reports').select('*').eq('vehicle_id', vehicle.id).order('created_at', { ascending: false }),
       supabase.from('vihem_work_orders').select('*').eq('vehicle_id', vehicle.id).order('created_at', { ascending: false }),
       supabase.from('vihem_fleet_service_schedules').select('*').eq('vehicle_id', vehicle.id).eq('active', true).order('name'),
@@ -548,6 +552,8 @@ function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, pr
       isAdmin ? supabase.from('vihem_fleet_costs').select('*').eq('vehicle_id', vehicle.id).order('cost_date', { ascending: false }) : Promise.resolve({ data: [] }),
       supabase.from('vihem_fleet_telematics_devices').select('*').eq('vehicle_id', vehicle.id).eq('active', true).maybeSingle(),
       supabase.from('vihem_fleet_events').select('*').eq('vehicle_id', vehicle.id).order('created_at', { ascending: false }).limit(60),
+      supabase.from('vihem_fleet_checklist_templates').select('*, items:vihem_fleet_checklist_template_items(*)').eq('organisation_id', organisationId).eq('active', true).order('name'),
+      supabase.from('vihem_fleet_checklist_runs').select('*, items:vihem_fleet_checklist_run_items(*)').eq('vehicle_id', vehicle.id).order('performed_at', { ascending: false }).limit(30),
     ]);
     setDamageReports((dmg.data || []) as FleetDamageReport[]);
     setWorkOrders((wo.data || []) as WorkOrder[]);
@@ -559,8 +565,10 @@ function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, pr
     setCosts((cst.data || []) as FleetCost[]);
     setTelematicsDevice((dev.data || null) as FleetTelematicsDevice | null);
     setEvents((evt.data || []) as FleetEvent[]);
+    setChecklistTemplates(((tpl.data || []) as ChecklistTemplateWithItems[]).map((t) => ({ ...t, items: (t.items || []).slice().sort((a, b) => a.sort_order - b.sort_order) })));
+    setChecklistRuns((runs.data || []) as ChecklistRunWithItems[]);
     setLoading(false);
-  }, [vehicle.id, isAdmin]);
+  }, [vehicle.id, isAdmin, organisationId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -588,6 +596,7 @@ function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, pr
     { key: 'overview', label: 'Översikt', icon: Activity },
     { key: 'workorders', label: 'Arbetsordrar', icon: ClipboardList },
     { key: 'damage', label: 'Skador & fel', icon: AlertTriangle },
+    { key: 'checklists', label: 'Checklistor', icon: CheckSquare },
     { key: 'service', label: 'Service', icon: Wrench },
     { key: 'inspections', label: 'Besiktningar', icon: Calendar },
     { key: 'meters', label: 'Mätarhistorik', icon: Gauge },
@@ -644,6 +653,7 @@ function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, pr
       {tab === 'overview' && <OverviewTab vehicle={vehicle} companies={companies} properties={properties} profilesById={profilesById} openDamage={openDamage} openWo={openWo} serviceSchedules={serviceSchedules} inspections={inspections} organisationId={organisationId} userId={userId} isAdmin={isAdmin} onChanged={reload} />}
       {tab === 'workorders' && <WorkOrdersTab vehicle={vehicle} workOrders={workOrders} organisationId={organisationId} userId={userId} onNavigate={onNavigate} onChanged={reload} />}
       {tab === 'damage' && <DamageTab vehicle={vehicle} reports={damageReports} isAdmin={isAdmin} organisationId={organisationId} onChanged={reload} onNavigate={onNavigate} />}
+      {tab === 'checklists' && <ChecklistsTab vehicle={vehicle} templates={checklistTemplates} runs={checklistRuns} isAdmin={isAdmin} organisationId={organisationId} userId={userId} onChanged={reload} />}
       {tab === 'service' && <ServiceTab vehicle={vehicle} schedules={serviceSchedules} records={serviceRecords} isAdmin={isAdmin} organisationId={organisationId} userId={userId} onChanged={reload} />}
       {tab === 'inspections' && <InspectionsTab vehicle={vehicle} inspections={inspections} isAdmin={isAdmin} organisationId={organisationId} userId={userId} onChanged={reload} />}
       {tab === 'meters' && <MetersTab vehicle={vehicle} readings={meterReadings} profilesById={profilesById} organisationId={organisationId} onChanged={reload} />}
@@ -926,6 +936,252 @@ function DamageReportModal({ open, onClose, vehicle, organisationId, userId, onS
         </label>
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Avbryt</Button><Button onClick={save} loading={saving}>Rapportera</Button></div>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Checklistor ────────────────────────────────────────────────────────
+
+function ChecklistsTab({ vehicle, templates, runs, isAdmin, organisationId, userId, onChanged }: {
+  vehicle: FleetVehicle; templates: ChecklistTemplateWithItems[]; runs: ChecklistRunWithItems[]; isAdmin: boolean; organisationId: string; userId: string; onChanged: () => void;
+}) {
+  const [manageModal, setManageModal] = useState(false);
+  const [runTemplate, setRunTemplate] = useState<ChecklistTemplateWithItems | null>(null);
+  const [expandedRun, setExpandedRun] = useState<string | null>(null);
+
+  const applicableTemplates = templates.filter((t) => !t.asset_type || t.asset_type === vehicle.asset_type);
+
+  return (
+    <div className="space-y-5">
+      <Card className="overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 p-4">
+          <h3 className="font-semibold text-slate-900">Genomför checklista</h3>
+          {isAdmin && <Button size="sm" variant="secondary" onClick={() => setManageModal(true)}><Settings className="h-4 w-4" /> Hantera mallar</Button>}
+        </div>
+        {applicableTemplates.length ? (
+          <div className="flex flex-wrap gap-2 p-4">
+            {applicableTemplates.map((t) => (
+              <Button key={t.id} size="sm" onClick={() => setRunTemplate(t)}><CheckSquare className="h-4 w-4" /> {t.name}</Button>
+            ))}
+          </div>
+        ) : (
+          <div className="p-4 text-sm text-slate-500">
+            {isAdmin ? 'Inga mallar ännu. Skapa en checklistemall för denna fordonstyp under Hantera mallar.' : 'Inga checklistemallar finns ännu för denna fordonstyp.'}
+          </div>
+        )}
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="border-b border-slate-200 p-4"><h3 className="font-semibold text-slate-900">Genomförda checklistor</h3></div>
+        {runs.length ? (
+          <div className="divide-y divide-slate-100">
+            {runs.map((r) => {
+              const failCount = r.items.filter((i) => !i.ok).length;
+              const isOpen = expandedRun === r.id;
+              return (
+                <div key={r.id}>
+                  <button onClick={() => setExpandedRun(isOpen ? null : r.id)} className="flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-slate-50">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-800">{r.template_name_snapshot || 'Checklista'}</p>
+                      <p className="text-xs text-slate-500">{fmtDateTime(r.performed_at)}</p>
+                    </div>
+                    <Badge className={failCount > 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}>{failCount > 0 ? `${failCount} fel` : 'Allt OK'}</Badge>
+                  </button>
+                  {isOpen && (
+                    <div className="space-y-1 bg-slate-50 px-4 pb-4">
+                      {r.items.map((item) => (
+                        <div key={item.id} className="flex items-center justify-between gap-2 py-1 text-sm">
+                          <span className={item.ok ? 'text-slate-700' : 'text-red-700'}>{item.label_snapshot}</span>
+                          {item.ok ? <Check className="h-4 w-4 shrink-0 text-emerald-600" /> : <X className="h-4 w-4 shrink-0 text-red-600" />}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : <EmptyState icon={<CheckSquare className="w-10 h-10" />} title="Inga checklistor genomförda ännu" />}
+      </Card>
+
+      {isAdmin && <ChecklistTemplateManagerModal open={manageModal} onClose={() => setManageModal(false)} templates={templates} organisationId={organisationId} userId={userId} onChanged={onChanged} />}
+      <ChecklistRunModal open={runTemplate !== null} onClose={() => setRunTemplate(null)} template={runTemplate} vehicle={vehicle} organisationId={organisationId} userId={userId} onSaved={() => { setRunTemplate(null); onChanged(); }} />
+    </div>
+  );
+}
+
+function ChecklistRunModal({ open, onClose, template, vehicle, organisationId, userId, onSaved }: {
+  open: boolean; onClose: () => void; template: ChecklistTemplateWithItems | null; vehicle: FleetVehicle; organisationId: string; userId: string; onSaved: () => void;
+}) {
+  const [results, setResults] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open && template) setResults(Object.fromEntries(template.items.map((i) => [i.id, true])));
+    setError('');
+  }, [open, template]);
+
+  const submit = async () => {
+    if (!template) return;
+    setSaving(true);
+    setError('');
+    try {
+      const { data: run, error: runErr } = await supabase.from('vihem_fleet_checklist_runs').insert({
+        organisation_id: organisationId, vehicle_id: vehicle.id, template_id: template.id, template_name_snapshot: template.name, performed_by: userId,
+      }).select('id').single();
+      if (runErr) throw runErr;
+      const itemRows: { run_id: string; label_snapshot: string; ok: boolean; damage_report_id: string | null }[] = [];
+      for (const item of template.items) {
+        const ok = results[item.id] !== false;
+        let damageReportId: string | null = null;
+        if (!ok) {
+          const { data: dmg, error: dmgErr } = await supabase.from('vihem_fleet_damage_reports').insert({
+            organisation_id: organisationId, vehicle_id: vehicle.id, reported_by: userId, severity: 'should_fix', usable: true, photos: [],
+            description: `Checklista "${template.name}": ${item.label}`,
+          }).select('id').single();
+          if (dmgErr) throw dmgErr;
+          damageReportId = dmg.id;
+        }
+        itemRows.push({ run_id: run.id, label_snapshot: item.label, ok, damage_report_id: damageReportId });
+      }
+      const { error: itemsErr } = await supabase.from('vihem_fleet_checklist_run_items').insert(itemRows);
+      if (itemsErr) throw itemsErr;
+      const failCount = itemRows.filter((r) => !r.ok).length;
+      await supabase.from('vihem_fleet_events').insert({
+        organisation_id: organisationId, vehicle_id: vehicle.id, event_type: 'updated', actor_id: userId,
+        summary: `Checklista genomförd: ${template.name}${failCount ? ` (${failCount} fel -> felrapport skapad)` : ' (allt OK)'}`,
+      });
+      onSaved();
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!template) return null;
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Checklista -- ${template.name}`}>
+      <div className="space-y-4">
+        <p className="text-sm text-slate-500">Ett fel som markeras skapar automatiskt en felrapport på fordonet.</p>
+        <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+          {template.items.map((item) => {
+            const ok = results[item.id] !== false;
+            return (
+              <div key={item.id} className="flex items-center justify-between gap-3 p-3">
+                <span className="text-sm font-medium text-slate-800">{item.label}</span>
+                <div className="flex shrink-0 gap-1.5">
+                  <button onClick={() => setResults({ ...results, [item.id]: true })} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${ok ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-500'}`}>OK</button>
+                  <button onClick={() => setResults({ ...results, [item.id]: false })} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${!ok ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-500'}`}>Fel</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Avbryt</Button><Button onClick={submit} loading={saving}>Slutför checklista</Button></div>
+      </div>
+    </Modal>
+  );
+}
+
+function ChecklistTemplateManagerModal({ open, onClose, templates, organisationId, userId, onChanged }: {
+  open: boolean; onClose: () => void; templates: ChecklistTemplateWithItems[]; organisationId: string; userId: string; onChanged: () => void;
+}) {
+  const [editing, setEditing] = useState<ChecklistTemplateWithItems | 'new' | null>(null);
+  const [name, setName] = useState('');
+  const [assetType, setAssetType] = useState('');
+  const [items, setItems] = useState<string[]>(['']);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (editing === 'new') { setName(''); setAssetType(''); setItems(['']); setError(''); }
+    else if (editing) { setName(editing.name); setAssetType(editing.asset_type || ''); setItems(editing.items.length ? editing.items.map((i) => i.label) : ['']); setError(''); }
+  }, [editing]);
+
+  const save = async () => {
+    const cleanItems = items.map((i) => i.trim()).filter(Boolean);
+    if (!name.trim() || !cleanItems.length) { setError('Ange namn och minst en punkt.'); return; }
+    setSaving(true); setError('');
+    try {
+      let templateId: string;
+      if (editing !== 'new' && editing) {
+        templateId = editing.id;
+        const { error: err } = await supabase.from('vihem_fleet_checklist_templates').update({ name: name.trim(), asset_type: assetType || null }).eq('id', templateId);
+        if (err) throw err;
+        await supabase.from('vihem_fleet_checklist_template_items').delete().eq('template_id', templateId);
+      } else {
+        const { data, error: err } = await supabase.from('vihem_fleet_checklist_templates').insert({ organisation_id: organisationId, name: name.trim(), asset_type: assetType || null, created_by: userId }).select('id').single();
+        if (err) throw err;
+        templateId = data.id;
+      }
+      const { error: itemsErr } = await supabase.from('vihem_fleet_checklist_template_items').insert(cleanItems.map((label, index) => ({ template_id: templateId, label, sort_order: index })));
+      if (itemsErr) throw itemsErr;
+      setEditing(null);
+      onChanged();
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeTemplate = async (t: ChecklistTemplateWithItems) => {
+    if (!window.confirm(`Ta bort mallen "${t.name}"?`)) return;
+    const { error: err } = await supabase.from('vihem_fleet_checklist_templates').update({ active: false }).eq('id', t.id);
+    if (err) window.alert(describeError(err)); else onChanged();
+  };
+
+  if (editing) {
+    return (
+      <Modal open={open} onClose={() => setEditing(null)} title={editing === 'new' ? 'Ny checklistemall' : 'Redigera mall'}>
+        <div className="space-y-4">
+          <Input label="Namn" value={name} onChange={(e) => setName(e.target.value)} placeholder="T.ex. Daglig fordonskontroll" />
+          <Select label="Fordonstyp" value={assetType} onChange={(e) => setAssetType(e.target.value)} options={[{ value: '', label: 'Alla typer' }, ...ASSET_TYPES.map((t) => ({ value: t, label: ASSET_TYPE_LABELS[t] }))]} />
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">Punkter</label>
+            <div className="space-y-2">
+              {items.map((val, i) => (
+                <div key={i} className="flex gap-2">
+                  <Input value={val} onChange={(e) => setItems(items.map((v, idx) => (idx === i ? e.target.value : v)))} placeholder={`Punkt ${i + 1}`} className="flex-1" />
+                  <button onClick={() => setItems(items.filter((_, idx) => idx !== i))} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                </div>
+              ))}
+            </div>
+            <Button size="sm" variant="secondary" className="mt-2" onClick={() => setItems([...items, ''])}><Plus className="h-4 w-4" /> Lägg till punkt</Button>
+          </div>
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setEditing(null)}>Avbryt</Button><Button onClick={save} loading={saving}>Spara</Button></div>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Hantera checklistemallar" size="lg">
+      <div className="space-y-4">
+        <Button size="sm" onClick={() => setEditing('new')}><Plus className="h-4 w-4" /> Ny mall</Button>
+        {templates.length ? (
+          <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {templates.map((t) => (
+              <div key={t.id} className="flex items-center justify-between gap-3 p-3">
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-800">{t.name}</p>
+                  <p className="text-xs text-slate-500">{t.asset_type ? ASSET_TYPE_LABELS[t.asset_type] : 'Alla typer'} · {t.items.length} punkter</p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => setEditing(t)}>Redigera</Button>
+                  <button onClick={() => removeTemplate(t)} className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : <p className="text-sm text-slate-500">Inga mallar ännu.</p>}
+        <div className="flex justify-end"><Button variant="secondary" onClick={onClose}>Stäng</Button></div>
       </div>
     </Modal>
   );
