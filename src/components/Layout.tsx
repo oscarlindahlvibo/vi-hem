@@ -198,7 +198,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       <OfflineStatus />
       {/* Desktop sidebar */}
       <aside className="fixed left-0 top-0 z-30 hidden h-full w-[17rem] flex-col border-r border-slate-200/80 bg-white/95 shadow-[8px_0_34px_rgba(15,23,42,0.045)] backdrop-blur-xl lg:flex">
-        <div className="border-b border-slate-200/80 px-5 py-5">
+        <div className="border-b border-slate-200/80 px-5 pb-5 pt-[max(1.25rem,env(safe-area-inset-top,0px))]">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 overflow-hidden rounded-xl shadow-sm ring-1 ring-slate-200">
               <AppLogo className="w-full h-full" />
