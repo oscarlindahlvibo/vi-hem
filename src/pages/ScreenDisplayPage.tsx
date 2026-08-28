@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
 import { Button, LoadingPage } from '../components/ui';
-import type { CalendarEvent, CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, MaintenanceRequest, Meeting, MeetingAgendaItem, News, Profile, ShortStayBooking, ShortStayUnit, StaffAbsenceRequest, TimeEntry, WorkOrder } from '../types';
+import type { CalendarEvent, CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, MaintenanceRequest, Meeting, MeetingActionItem, MeetingAgendaItem, MeetingDecision, News, Profile, ShortStayBooking, ShortStayUnit, StaffAbsenceRequest, TimeEntry, WorkOrder } from '../types';
 import { formatDate, formatDateTime, MR_PRIORITY_LABELS, MR_STATUS_LABELS, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import {
@@ -160,6 +160,9 @@ export function ScreenDisplayPage() {
   const [clockedInEntries, setClockedInEntries] = useState<TimeEntry[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [meetingAgendaItems, setMeetingAgendaItems] = useState<MeetingAgendaItem[]>([]);
+  const [meetingDecisions, setMeetingDecisions] = useState<MeetingDecision[]>([]);
+  const [meetingActionItems, setMeetingActionItems] = useState<MeetingActionItem[]>([]);
+  const [meetingAiSummary, setMeetingAiSummary] = useState<string>('');
   const [customerProjects, setCustomerProjects] = useState<CustomerProject[]>([]);
   const [absenceRequests, setAbsenceRequests] = useState<StaffAbsenceRequest[]>([]);
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
@@ -309,6 +312,23 @@ export function ScreenDisplayPage() {
     const interval = window.setInterval(fetchScreenData, SCREEN_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(interval);
   }, [allowed, user?.organisation_id, days, selectedScreenKey]);
+
+  // Mötesvyn (dagordningens fritext, beslut, uppgifter, AI-sammanfattning)
+  // ska kännas levande på TV:n istället för att vänta upp till 60s på nästa
+  // poll -- samma realtidsmönster som redan används i CalendarPage.tsx.
+  // Refetchar samma fetchScreenData() som polling redan gör, bara oftare
+  // triggad; ingen ny datakanal, ingen ändring i vad som hämtas.
+  useEffect(() => {
+    if (!allowed || !user?.organisation_id || view !== 'meeting') return;
+    const channel = supabase
+      .channel(`screen-meeting-${user.organisation_id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_meeting_agenda_items', filter: `organisation_id=eq.${user.organisation_id}` }, () => fetchScreenData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_meeting_decisions', filter: `organisation_id=eq.${user.organisation_id}` }, () => fetchScreenData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_meeting_action_items', filter: `organisation_id=eq.${user.organisation_id}` }, () => fetchScreenData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_ai_suggestions', filter: `organisation_id=eq.${user.organisation_id}` }, () => fetchScreenData())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [allowed, user?.organisation_id, view]);
 
   async function handleLogin(event: React.FormEvent) {
     event.preventDefault();
@@ -559,14 +579,29 @@ export function ScreenDisplayPage() {
       setMeetings(loadedMeetings);
       const meetingIds = loadedMeetings.map(meeting => meeting.id);
       if (meetingIds.length > 0) {
-        const agendaResult = await supabase
-          .from('vihem_meeting_agenda_items')
-          .select('*')
-          .in('meeting_id', meetingIds)
-          .order('sort_order');
+        const [agendaResult, decisionsResult, actionItemsResult, aiResult] = await Promise.all([
+          supabase.from('vihem_meeting_agenda_items').select('*').in('meeting_id', meetingIds).order('sort_order'),
+          supabase.from('vihem_meeting_decisions').select('*').in('meeting_id', meetingIds).eq('status', 'open').order('created_at'),
+          supabase.from('vihem_meeting_action_items').select('*').in('meeting_id', meetingIds).neq('status', 'done').order('created_at'),
+          // Senaste AI-analysen per möte -- ordnad senast-först, MeetingScreen
+          // plockar bara den första träffen för det just nu visade mötet.
+          supabase.from('vihem_ai_suggestions').select('source_id, payload, created_at').eq('source_type', 'meeting').in('source_id', meetingIds).order('created_at', { ascending: false }).limit(20),
+        ]);
         setMeetingAgendaItems(agendaResult.error ? [] : (agendaResult.data || []) as MeetingAgendaItem[]);
+        setMeetingDecisions(decisionsResult.error ? [] : (decisionsResult.data || []) as MeetingDecision[]);
+        setMeetingActionItems(actionItemsResult.error ? [] : (actionItemsResult.data || []) as MeetingActionItem[]);
+        const currentMeetingForAi = selectedScreenConfig.meetingId
+          ? loadedMeetings.find((m) => m.id === selectedScreenConfig.meetingId)
+          : loadedMeetings.find((m) => m.status === 'in_progress') || loadedMeetings[0];
+        const aiRow = !aiResult.error && currentMeetingForAi
+          ? (aiResult.data || []).find((row: { source_id: string }) => row.source_id === currentMeetingForAi.id)
+          : null;
+        setMeetingAiSummary((aiRow?.payload as { summary?: string } | undefined)?.summary || '');
       } else {
         setMeetingAgendaItems([]);
+        setMeetingDecisions([]);
+        setMeetingActionItems([]);
+        setMeetingAiSummary('');
       }
       setLastUpdated(new Date());
     }
@@ -717,6 +752,9 @@ export function ScreenDisplayPage() {
           organisationName={organisationName}
           meetings={meetings}
           agendaItems={meetingAgendaItems}
+          decisions={meetingDecisions}
+          actionItems={meetingActionItems}
+          aiSummary={meetingAiSummary}
           workOrders={workOrders}
           customerProjects={customerProjects}
           absenceRequests={absenceRequests}
@@ -777,6 +815,9 @@ function MeetingScreen({
   organisationName,
   meetings,
   agendaItems,
+  decisions,
+  actionItems,
+  aiSummary,
   workOrders,
   customerProjects,
   absenceRequests,
@@ -790,6 +831,9 @@ function MeetingScreen({
   organisationName: string;
   meetings: Meeting[];
   agendaItems: MeetingAgendaItem[];
+  decisions: MeetingDecision[];
+  actionItems: MeetingActionItem[];
+  aiSummary: string;
   workOrders: WorkOrder[];
   customerProjects: CustomerProject[];
   absenceRequests: StaffAbsenceRequest[];
@@ -809,6 +853,8 @@ function MeetingScreen({
     : [];
   const visibleAgenda = selectedAgenda.filter(item => item.status !== 'done');
   const doneAgendaCount = selectedAgenda.length - visibleAgenda.length;
+  const openDecisions = currentMeeting ? decisions.filter(d => d.meeting_id === currentMeeting.id) : [];
+  const openActionItems = currentMeeting ? actionItems.filter(a => a.meeting_id === currentMeeting.id) : [];
   const activeWorkOrders = workOrders.slice(0, meetingPart === 'part-1' ? 24 : 18);
   const activeProjects = customerProjects.slice(0, meetingPart === 'part-2' ? 24 : 16);
   const activeMaintenanceRequests = maintenanceRequests.slice(0, meetingPart === 'part-2' ? 24 : 14);
@@ -839,7 +885,7 @@ function MeetingScreen({
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-500 text-[10px] font-black">{index + 1}</span>
             <div className="min-w-0">
               <p className="truncate text-xs font-black">{item.title}</p>
-              {item.notes && <p className="truncate text-[10px] font-semibold text-slate-300">{item.notes}</p>}
+              {item.notes && <p className="text-[10px] font-semibold leading-tight text-slate-300" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{item.notes}</p>}
             </div>
           </div>
         ))}
@@ -1020,6 +1066,44 @@ function MeetingScreen({
     </section>
   );
 
+  const decisionsAndTasksPanel = (
+    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-2.5 ring-1 ring-white/10">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex min-w-0 items-center gap-2 text-base font-black">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-violet-200" />
+          Beslut &amp; uppgifter
+        </h3>
+        <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-black">{openDecisions.length + openActionItems.length}</span>
+      </div>
+      <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
+        {aiSummary && (
+          <div className="mb-1 rounded-lg bg-violet-400/15 px-2 py-1.5 ring-1 ring-violet-300/20">
+            <p className="text-[9px] font-black uppercase tracking-wider text-violet-200">AI-sammanfattning</p>
+            <p className="text-[10px] font-semibold leading-tight text-slate-200" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{aiSummary}</p>
+          </div>
+        )}
+        {openDecisions.length === 0 && openActionItems.length === 0 ? (
+          <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga öppna beslut eller uppgifter.</p>
+        ) : (
+          <>
+            {openDecisions.slice(0, 6).map(decision => (
+              <div key={decision.id} className="rounded-lg bg-white/10 px-2 py-1">
+                <p className="truncate text-[11px] font-black">{decision.title}</p>
+                <span className="text-[9px] font-bold text-slate-400">Beslut</span>
+              </div>
+            ))}
+            {openActionItems.slice(0, 6).map(action => (
+              <div key={action.id} className="rounded-lg bg-white/10 px-2 py-1">
+                <p className="truncate text-[11px] font-black">{action.title}</p>
+                <span className="text-[9px] font-bold text-slate-400">Uppgift{action.due_date ? ` · ${formatDate(action.due_date)}` : ''}</span>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </section>
+  );
+
   return (
     <div
       className="grid gap-2 overflow-hidden rounded-xl bg-slate-950 text-white"
@@ -1064,9 +1148,10 @@ function MeetingScreen({
           {agendaPanel}
           {workOrderPanel}
           {projectPanel}
-          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '0.78fr 1fr' }}>
+          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '0.62fr 0.7fr 0.7fr' }}>
             {maintenancePanel}
             {calendarPanel}
+            {decisionsAndTasksPanel}
           </section>
         </div>
       )}

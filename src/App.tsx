@@ -34,6 +34,7 @@ import { CustomerProjectsPage } from './pages/CustomerProjectsPage';
 import { ShortStayPage } from './pages/ShortStayPage';
 import { YearPlanningPage } from './pages/YearPlanningPage';
 import { MeetingsPage } from './pages/MeetingsPage';
+import { MeetingsV2Page } from './modules/meetings-v2/pages/MeetingsV2Page';
 import { ScreenDisplayPage } from './pages/ScreenDisplayPage';
 import { ScreenSettingsPage } from './pages/ScreenSettingsPage';
 import { GuestLaundryPage } from './pages/GuestLaundryPage';
@@ -439,6 +440,12 @@ function AppInner() {
       case 'meetings':
         if (!isStaff || !enabledModules.meetings) return renderDashboard();
         return <MeetingsPage onNavigate={navigate} />;
+
+      case 'meetings-v2':
+        // Samma modulgrind som legacy 'meetings' -- matchar hur finance-v2/
+        // agreements-v2 återanvänder sin befintliga modulflagga, se planen.
+        if (!isStaff || !enabledModules.meetings) return renderDashboard();
+        return <MeetingsV2Page onNavigate={navigate} />;
 
       case 'customer-projects':
         if (!isStaff || !enabledModules.customer_projects) return renderDashboard();
