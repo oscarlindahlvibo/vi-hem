@@ -373,7 +373,10 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
       if (countErr) throw countErr;
 
       const activeCount = (activeBookings || []).filter((booking) =>
-        isActiveLaundryBooking(booking)
+        isActiveLaundryBooking({
+          status: booking.status,
+          slot: Array.isArray(booking.slot) ? booking.slot[0] : booking.slot,
+        })
       ).length;
 
       if (activeCount >= maxBookings) {
