@@ -119,6 +119,47 @@ type CustomerProjectLite = {
   updated_at?: string;
 };
 
+type MeetingAiSuggestionItem = Record<string, unknown>;
+
+type MeetingAiAnalysis = {
+  summary?: string;
+  warnings?: string[];
+  suggestions?: Record<string, unknown>;
+  model?: string;
+  estimated_cost_sek?: number;
+  suggestion_id?: string;
+};
+
+const meetingAiSuggestionSections = [
+  { key: 'work_orders_to_create', label: 'Nya arbetsordrar' },
+  { key: 'work_orders_to_update', label: 'Ändra arbetsordrar' },
+  { key: 'customer_projects_to_create', label: 'Nya kundprojekt' },
+  { key: 'customer_projects_to_update', label: 'Ändra kundprojekt' },
+  { key: 'purchase_items', label: 'Inköpslista' },
+  { key: 'follow_ups', label: 'Uppföljning' },
+  { key: 'questions', label: 'Frågor att reda ut' },
+] as const;
+
+function normaliseMeetingAiItems(value: unknown): MeetingAiSuggestionItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(item => item && typeof item === 'object') as MeetingAiSuggestionItem[];
+}
+
+function meetingAiField(item: MeetingAiSuggestionItem, keys: string[], fallback = 'Förslag') {
+  for (const key of keys) {
+    const value = item[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number') return String(value);
+  }
+  return fallback;
+}
+
+function formatConfidence(value: unknown) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return null;
+  const percent = value <= 1 ? Math.round(value * 100) : Math.round(value);
+  return `${percent}%`;
+}
+
 const meetingTypeOptions = [
   { value: 'weekly_operations', label: 'Veckomöte drift' },
   { value: 'management', label: 'Ledningsmöte' },
@@ -270,6 +311,9 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
   const [customerProjects, setCustomerProjects] = useState<CustomerProjectLite[]>([]);
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
+  const [meetingAiAnalysis, setMeetingAiAnalysis] = useState<MeetingAiAnalysis | null>(null);
+  const [meetingAiLoading, setMeetingAiLoading] = useState(false);
+  const [meetingAiError, setMeetingAiError] = useState('');
   const [loading, setLoading] = useState(true);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [selectedAgendaId, setSelectedAgendaId] = useState<string | null>(null);
@@ -292,6 +336,8 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
 
   useEffect(() => {
     if (selectedMeeting) {
+      setMeetingAiAnalysis(null);
+      setMeetingAiError('');
       loadMeetingDetails(selectedMeeting.id);
     }
   }, [selectedMeeting?.id]);
@@ -650,24 +696,23 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
     await loadMeetingDetails(selectedMeeting.id);
   }
 
-  async function createAiAnalysisPlaceholder() {
+  async function runMeetingAiAnalysis() {
     if (!selectedMeeting || !user?.organisation_id) return;
-    const { error } = await supabase.from('vihem_ai_suggestions').insert({
-      organisation_id: user.organisation_id,
-      created_by: user.id,
-      source_type: 'meeting',
-      source_id: selectedMeeting.id,
-      suggestion_type: 'meeting_protocol_review',
-      target_type: 'meeting',
-      target_id: selectedMeeting.id,
-      payload: {
-        title: 'AI-analys väntar på konfiguration',
-        reason: 'När AI-kopplingen aktiveras analyseras protokoll, dagordning och kopplade objekt här. Förslag kräver alltid godkännande.',
-      },
-      status: 'pending',
-    });
-    if (error) alert('Kunde inte skapa AI-granskningspost.');
-    await fetchData();
+    setMeetingAiLoading(true);
+    setMeetingAiError('');
+    try {
+      const { data, error } = await supabase.functions.invoke('vihem-meeting-ai', {
+        body: { meeting_id: selectedMeeting.id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setMeetingAiAnalysis(data?.analysis || data || null);
+      await fetchData();
+    } catch (error: any) {
+      setMeetingAiError(error?.message || 'Kunde inte analysera mötet med AI.');
+    } finally {
+      setMeetingAiLoading(false);
+    }
   }
 
   const systemLinks: SystemLink[] = useMemo(() => [
@@ -849,7 +894,10 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
               onAddAction={addActionItem}
               onStatus={updateMeetingStatus}
               onLock={lockMeeting}
-              onAi={createAiAnalysisPlaceholder}
+              onAi={runMeetingAiAnalysis}
+              aiAnalysis={meetingAiAnalysis}
+              aiLoading={meetingAiLoading}
+              aiError={meetingAiError}
               onActionDone={markActionDone}
               onAgendaStatus={updateAgendaStatus}
             />
@@ -967,6 +1015,69 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
   );
 }
 
+function MeetingAiAnalysisPanel({ analysis, loading, error }: { analysis: MeetingAiAnalysis | null; loading: boolean; error: string }) {
+  const suggestions = analysis?.suggestions || {};
+
+  return (
+    <Card className="p-4 border-blue-100 bg-blue-50/60">
+      <div className="flex items-start gap-3">
+        <div className="mt-1 rounded-xl bg-blue-600 p-2 text-white">
+          <Sparkles className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1 space-y-3">
+          <div>
+            <h3 className="font-bold text-slate-900">AI-sammanfattning</h3>
+            <p className="text-xs text-slate-500">Förslag skapas för granskning och utförs inte automatiskt.</p>
+          </div>
+          {loading && <p className="text-sm text-slate-600">Analyserar protokoll, dagordning och kopplade objekt...</p>}
+          {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+          {analysis?.summary && <p className="text-sm leading-6 text-slate-700">{analysis.summary}</p>}
+          {analysis?.warnings?.length ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs font-bold uppercase text-amber-700">Kontrollera</p>
+              <ul className="mt-1 space-y-1 text-sm text-amber-800">
+                {analysis.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}
+              </ul>
+            </div>
+          ) : null}
+          <div className="grid gap-3 md:grid-cols-2">
+            {meetingAiSuggestionSections.map(section => {
+              const items = normaliseMeetingAiItems(suggestions[section.key]);
+              if (!items.length) return null;
+              return (
+                <div key={section.key} className="rounded-xl border border-white bg-white p-3 shadow-sm">
+                  <p className="text-sm font-bold text-slate-800">{section.label}</p>
+                  <div className="mt-2 space-y-2">
+                    {items.slice(0, 5).map((item, index) => {
+                      const confidence = formatConfidence(item.confidence);
+                      const detail = meetingAiField(item, ['reason', 'description', 'note', 'change', 'question'], '');
+                      return (
+                        <div key={index} className="rounded-lg bg-slate-50 p-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-semibold text-slate-800">{meetingAiField(item, ['title', 'name', 'task', 'item', 'project'])}</p>
+                            {confidence && <Badge className="bg-blue-100 text-blue-700">{confidence}</Badge>}
+                          </div>
+                          {detail && <p className="mt-1 text-xs text-slate-500">{detail}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {analysis?.model && (
+            <p className="text-xs text-slate-400">
+              Modell: {analysis.model}
+              {typeof analysis.estimated_cost_sek === 'number' ? ` · ca ${analysis.estimated_cost_sek.toFixed(4)} kr` : ''}
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function MeetingDetail(props: {
   meeting: Meeting;
   agendaItems: MeetingAgendaItemMvp[];
@@ -989,7 +1100,10 @@ function MeetingDetail(props: {
   onAddAction: () => void;
   onStatus: (status: MeetingStatus) => void;
   onLock: () => void;
-  onAi: () => void;
+  onAi: () => void | Promise<void>;
+  aiAnalysis: MeetingAiAnalysis | null;
+  aiLoading: boolean;
+  aiError: string;
   onActionDone: (action: MeetingActionItem) => void;
   onAgendaStatus: (item: MeetingAgendaItemMvp, status: 'open' | 'done') => void;
 }) {
@@ -1031,11 +1145,21 @@ function MeetingDetail(props: {
               <Button size="sm" variant="outline" onClick={() => props.onStatus('in_progress')}>Starta</Button>
               <Button size="sm" variant="outline" onClick={() => props.onStatus('completed')}>Avsluta</Button>
               <Button size="sm" variant="secondary" onClick={props.onLock}><Lock className="w-4 h-4" /> Lås</Button>
-              <Button size="sm" variant="secondary" onClick={props.onAi}><Sparkles className="w-4 h-4" /> Analysera med AI</Button>
+              <Button size="sm" variant="secondary" onClick={props.onAi} disabled={props.aiLoading}>
+                <Sparkles className="w-4 h-4" /> {props.aiLoading ? 'Analyserar...' : 'Analysera med AI'}
+              </Button>
             </div>
           )}
         </div>
       </Card>
+
+      {(props.aiAnalysis || props.aiError || props.aiLoading) && (
+        <MeetingAiAnalysisPanel
+          analysis={props.aiAnalysis}
+          loading={props.aiLoading}
+          error={props.aiError}
+        />
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-[17rem_minmax(0,1fr)_18rem] gap-4">
         <Card className="overflow-hidden">
