@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, CalendarDays, ClipboardList, Monitor, Newspaper, RefreshCw, Timer, Users, Briefcase, CheckCircle2, UserRoundX } from 'lucide-react';
+import { AlertCircle, CalendarDays, ClipboardList, Monitor, Newspaper, RefreshCw, Timer, Users, Briefcase, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
@@ -114,15 +114,6 @@ function workOrderAssigneeLabel(order: WorkOrder, staffMembers: Pick<Profile, 'i
   if (order.assigned?.name) return useInitials ? nameInitials(order.assigned.name) : order.assigned.name;
   return `${ids.length} tilldelade`;
 }
-
-const ABSENCE_TYPE_LABELS: Record<string, string> = {
-  sick: 'Sjuk',
-  vab: 'VAB',
-  vacation: 'Semester',
-  leave: 'Ledig',
-  unpaid_leave: 'Tjänstledig',
-  parental_leave: 'Föräldraledig',
-};
 
 const PROJECT_STATUS_LABELS: Record<string, string> = {
   draft: 'Utkast',
@@ -855,8 +846,8 @@ function MeetingScreen({
   const doneAgendaCount = selectedAgenda.length - visibleAgenda.length;
   const openDecisions = currentMeeting ? decisions.filter(d => d.meeting_id === currentMeeting.id) : [];
   const openActionItems = currentMeeting ? actionItems.filter(a => a.meeting_id === currentMeeting.id) : [];
-  const activeWorkOrders = workOrders.slice(0, meetingPart === 'part-1' ? 24 : 18);
-  const activeProjects = customerProjects.slice(0, meetingPart === 'part-2' ? 24 : 16);
+  const activeWorkOrders = workOrders.slice(0, meetingPart === 'part-1' ? 40 : 18);
+  const activeProjects = customerProjects.slice(0, meetingPart === 'part-1' ? 40 : meetingPart === 'part-2' ? 24 : 16);
   const activeMaintenanceRequests = maintenanceRequests.slice(0, meetingPart === 'part-2' ? 24 : 14);
   const todayValue = dateKey(today());
   const upcomingAbsences = absenceRequests
@@ -893,6 +884,7 @@ function MeetingScreen({
     </section>
   );
 
+  const workOrderPanelCompact = meetingPart === 'part-1';
   const workOrderPanel = (
     <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-2.5 ring-1 ring-white/10">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -902,26 +894,42 @@ function MeetingScreen({
         </h3>
         <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-black">{workOrders.length}</span>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-1.5 overflow-hidden">
-        {activeWorkOrders.length === 0 ? (
-          <p className="col-span-2 rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
-        ) : activeWorkOrders.map(order => (
-          <div key={order.id} className="min-w-0 rounded-lg bg-white/10 px-2 py-1.5">
-            <div className="flex min-w-0 items-center justify-between gap-2">
-              <p className="truncate text-[12px] font-black">{order.title}</p>
+      {workOrderPanelCompact ? (
+        <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
+          {activeWorkOrders.length === 0 ? (
+            <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
+          ) : activeWorkOrders.map(order => (
+            <div key={order.id} className="flex min-w-0 items-center gap-2 rounded-lg bg-white/10 px-2.5 py-1.5">
+              <p className="min-w-0 flex-1 truncate text-[12px] font-black">{order.title}</p>
+              <span className="hidden shrink-0 truncate text-[10px] font-bold text-slate-300 sm:block sm:max-w-[110px]">{order.property?.name || 'Ingen fastighet'}</span>
+              <span className="shrink-0 truncate rounded-full bg-blue-400/20 px-1.5 py-0.5 text-[9px] font-black text-blue-100">{workOrderAssigneeLabel(order, staffMembers, true)}</span>
+              <span className="shrink-0 rounded-full bg-amber-300/20 px-1.5 py-0.5 text-[9px] font-black text-amber-100">{WO_PRIORITY_LABELS[order.priority]}</span>
               <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-black text-slate-100">{order.status === 'new' ? 'Ny' : order.status}</span>
             </div>
-            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] font-bold text-slate-300">
-              <span className="truncate">{order.property?.name || 'Ingen fastighet'}</span>
-              {order.due_date && <span className="shrink-0">{formatDate(order.due_date)}</span>}
+          ))}
+        </div>
+      ) : (
+        <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-1.5 overflow-hidden">
+          {activeWorkOrders.length === 0 ? (
+            <p className="col-span-2 rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
+          ) : activeWorkOrders.map(order => (
+            <div key={order.id} className="min-w-0 rounded-lg bg-white/10 px-2 py-1.5">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <p className="truncate text-[12px] font-black">{order.title}</p>
+                <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-black text-slate-100">{order.status === 'new' ? 'Ny' : order.status}</span>
+              </div>
+              <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] font-bold text-slate-300">
+                <span className="truncate">{order.property?.name || 'Ingen fastighet'}</span>
+                {order.due_date && <span className="shrink-0">{formatDate(order.due_date)}</span>}
+              </div>
+              <div className="mt-1 flex min-w-0 items-center gap-1">
+                <span className="truncate rounded-full bg-blue-400/20 px-1.5 py-0.5 text-[9px] font-black text-blue-100">{workOrderAssigneeLabel(order, staffMembers, true)}</span>
+                <span className="shrink-0 rounded-full bg-amber-300/20 px-1.5 py-0.5 text-[9px] font-black text-amber-100">{WO_PRIORITY_LABELS[order.priority]}</span>
+              </div>
             </div>
-            <div className="mt-1 flex min-w-0 items-center gap-1">
-              <span className="truncate rounded-full bg-blue-400/20 px-1.5 py-0.5 text-[9px] font-black text-blue-100">{workOrderAssigneeLabel(order, staffMembers, true)}</span>
-              <span className="shrink-0 rounded-full bg-amber-300/20 px-1.5 py-0.5 text-[9px] font-black text-amber-100">{WO_PRIORITY_LABELS[order.priority]}</span>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 
@@ -934,24 +942,42 @@ function MeetingScreen({
         </h3>
         <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-black">{customerProjects.length}</span>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-1.5 overflow-hidden">
-        {activeProjects.length === 0 ? (
-          <p className="col-span-2 rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga pågående kundprojekt.</p>
-        ) : activeProjects.map(project => (
-          <div key={project.id} className="min-w-0 rounded-lg bg-white/10 px-2 py-1.5">
-            <div className="flex min-w-0 items-center justify-between gap-2">
-              <p className="truncate text-[12px] font-black">{project.title || project.name || project.customer_name || 'Kundprojekt'}</p>
+      {workOrderPanelCompact ? (
+        <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
+          {activeProjects.length === 0 ? (
+            <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga pågående kundprojekt.</p>
+          ) : activeProjects.map(project => (
+            <div key={project.id} className="flex min-w-0 items-center gap-2 rounded-lg bg-white/10 px-2.5 py-1.5">
+              <p className="min-w-0 flex-1 truncate text-[12px] font-black">{project.title || project.name || project.customer_name || 'Kundprojekt'}</p>
+              <span className="hidden shrink-0 truncate text-[10px] font-bold text-slate-300 sm:block sm:max-w-[130px]">
+                {project.customer_name || project.project_address || 'Ingen kund'}
+              </span>
               <span className="shrink-0 rounded-full bg-violet-400/20 px-1.5 py-0.5 text-[9px] font-black text-violet-100">
                 {PROJECT_STATUS_LABELS[project.status] || project.status}
               </span>
             </div>
-            <p className="mt-1 truncate text-[10px] font-bold text-slate-300">
-              {project.customer_name || project.project_address || 'Ingen kund'}
-              {project.planned_end_date ? ` · ${formatDate(project.planned_end_date)}` : ''}
-            </p>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-1.5 overflow-hidden">
+          {activeProjects.length === 0 ? (
+            <p className="col-span-2 rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga pågående kundprojekt.</p>
+          ) : activeProjects.map(project => (
+            <div key={project.id} className="min-w-0 rounded-lg bg-white/10 px-2 py-1.5">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <p className="truncate text-[12px] font-black">{project.title || project.name || project.customer_name || 'Kundprojekt'}</p>
+                <span className="shrink-0 rounded-full bg-violet-400/20 px-1.5 py-0.5 text-[9px] font-black text-violet-100">
+                  {PROJECT_STATUS_LABELS[project.status] || project.status}
+                </span>
+              </div>
+              <p className="mt-1 truncate text-[10px] font-bold text-slate-300">
+                {project.customer_name || project.project_address || 'Ingen kund'}
+                {project.planned_end_date ? ` · ${formatDate(project.planned_end_date)}` : ''}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 
@@ -1006,36 +1032,6 @@ function MeetingScreen({
     </section>
   );
 
-  const absencePanel = (
-    <section className="flex min-h-0 flex-col rounded-2xl bg-rose-500/10 p-2.5 ring-1 ring-rose-300/20">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="flex min-w-0 items-center gap-2 text-base font-black">
-          <UserRoundX className="h-4 w-4 shrink-0 text-rose-200" />
-          Ledighet/frånvaro
-        </h3>
-        <span className="rounded-full bg-rose-300/20 px-2.5 py-1 text-[11px] font-black text-rose-100">{upcomingAbsences.length}</span>
-      </div>
-      <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
-        {upcomingAbsences.length === 0 ? (
-          <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Ingen planerad frånvaro i närtid.</p>
-        ) : upcomingAbsences.map(request => (
-          <div key={request.id} className="grid grid-cols-[minmax(0,1fr)_72px] items-center gap-2 rounded-lg bg-white/10 px-2 py-1.5">
-            <div className="min-w-0">
-              <p className="truncate text-xs font-black">{request.user?.name || staffMembers.find(staff => staff.id === request.user_id)?.name || 'Personal'}</p>
-              <p className="truncate text-[10px] font-bold text-rose-100">
-                {ABSENCE_TYPE_LABELS[request.absence_type] || request.absence_type}
-                {request.start_time && request.end_time ? ` · ${request.start_time.slice(0, 5)}-${request.end_time.slice(0, 5)}` : ''}
-              </p>
-            </div>
-            <span className="justify-self-end truncate rounded-full bg-white/10 px-2 py-1 text-[9px] font-black text-white">
-              {request.start_date === request.end_date ? formatDate(request.start_date) : `${formatDate(request.start_date)}-${formatDate(request.end_date)}`}
-            </span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-
   const calendarPanel = (
     <section className="flex min-h-0 flex-col rounded-2xl bg-blue-500/10 p-2.5 ring-1 ring-blue-300/20">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -1079,20 +1075,20 @@ function MeetingScreen({
         {aiSummary && (
           <div className="mb-1 rounded-lg bg-violet-400/15 px-2 py-1.5 ring-1 ring-violet-300/20">
             <p className="text-[9px] font-black uppercase tracking-wider text-violet-200">AI-sammanfattning</p>
-            <p className="text-[10px] font-semibold leading-tight text-slate-200" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{aiSummary}</p>
+            <p className="text-[10px] font-semibold leading-tight text-slate-200" style={{ display: '-webkit-box', WebkitLineClamp: meetingPart === 'part-2' ? 6 : 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{aiSummary}</p>
           </div>
         )}
         {openDecisions.length === 0 && openActionItems.length === 0 ? (
           <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga öppna beslut eller uppgifter.</p>
         ) : (
           <>
-            {openDecisions.slice(0, 6).map(decision => (
+            {openDecisions.slice(0, meetingPart === 'part-2' ? 14 : 6).map(decision => (
               <div key={decision.id} className="rounded-lg bg-white/10 px-2 py-1">
                 <p className="truncate text-[11px] font-black">{decision.title}</p>
                 <span className="text-[9px] font-bold text-slate-400">Beslut</span>
               </div>
             ))}
-            {openActionItems.slice(0, 6).map(action => (
+            {openActionItems.slice(0, meetingPart === 'part-2' ? 14 : 6).map(action => (
               <div key={action.id} className="rounded-lg bg-white/10 px-2 py-1">
                 <p className="truncate text-[11px] font-black">{action.title}</p>
                 <span className="text-[9px] font-bold text-slate-400">Uppgift{action.due_date ? ` · ${formatDate(action.due_date)}` : ''}</span>
@@ -1132,16 +1128,15 @@ function MeetingScreen({
       </div>
 
       {meetingPart === 'part-1' ? (
-        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '0.82fr 1fr 1fr' }}>
+        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '1.3fr 0.85fr 0.85fr' }}>
           {agendaPanel}
           {workOrderPanel}
           {projectPanel}
         </div>
       ) : meetingPart === 'part-2' ? (
-        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '0.85fr 1.3fr' }}>
           {maintenancePanel}
-          {absencePanel}
-          {calendarPanel}
+          {decisionsAndTasksPanel}
         </div>
       ) : (
         <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '0.78fr 1fr 1fr 0.82fr' }}>
