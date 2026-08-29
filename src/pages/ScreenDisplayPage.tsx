@@ -419,8 +419,10 @@ export function ScreenDisplayPage() {
         .select('*')
         .eq('organisation_id', user.organisation_id)
         .not('status', 'in', '(completed,locked,cancelled)')
-        .gte('starts_at', `${todayStart}T00:00:00`)
-        .lt('starts_at', `${meetingEnd}T23:59:59`)
+        // Ett pågående möte ska alltid synas på skärmen, oavsett vad dess
+        // starts_at råkar vara (kan hamna fel dag pga tidszonsavrundning
+        // nära midnatt) -- annars kan ett skarpt möte bli osynligt.
+        .or(`and(starts_at.gte.${todayStart}T00:00:00,starts_at.lt.${meetingEnd}T23:59:59),status.eq.in_progress`)
         .order('starts_at', { ascending: true })
         .limit(8),
       supabase

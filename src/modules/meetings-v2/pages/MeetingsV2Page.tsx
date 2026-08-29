@@ -36,7 +36,17 @@ const statusLabels: Record<string, string> = { draft: 'Utkast', planned: 'Planer
 const statusClasses: Record<string, string> = { draft: 'bg-slate-100 text-slate-700', planned: 'bg-blue-100 text-blue-700', in_progress: 'bg-amber-100 text-amber-700', completed: 'bg-green-100 text-green-700', locked: 'bg-slate-900 text-white', cancelled: 'bg-slate-200 text-slate-500' };
 const priorityOptions = [{ value: 'low', label: 'Låg' }, { value: 'normal', label: 'Normal' }, { value: 'high', label: 'Hög' }, { value: 'urgent', label: 'Akut' }];
 
-const EMPTY_MEETING_FORM: MeetingV2Form = { title: '', starts_at: new Date().toISOString().slice(0, 16), meeting_type: 'weekly_operations', template_id: '', participant_ids: [], description: '', generate_agenda: true };
+// datetime-local visar/tar emot lokal tid utan tidszon. new Date().toISOString()
+// ger UTC-siffror -- om de matas in här visas de som om de vore lokal tid, och
+// blir sedan fel med precis UTC-offset (2h sommartid) när de tolkas tillbaka,
+// vilket kan knuffa mötet till fel kalenderdag nära midnatt. Bygg strängen av
+// lokala komponenter istället så tur och retur blir korrekt.
+function toLocalDatetimeInputValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+const EMPTY_MEETING_FORM: MeetingV2Form = { title: '', starts_at: toLocalDatetimeInputValue(new Date()), meeting_type: 'weekly_operations', template_id: '', participant_ids: [], description: '', generate_agenda: true };
 const EMPTY_DECISION_FORM = { title: '', description: '', responsible_user_id: '', due_date: '' };
 const EMPTY_ACTION_FORM = { title: '', description: '', responsible_user_id: '', due_date: '', priority: 'normal' };
 
@@ -124,7 +134,7 @@ export function MeetingsV2Page({ onNavigate }: { onNavigate: (page: string) => v
   }
 
   function openCreateModal() {
-    setCreateForm({ ...EMPTY_MEETING_FORM, starts_at: new Date().toISOString().slice(0, 16) });
+    setCreateForm({ ...EMPTY_MEETING_FORM, starts_at: toLocalDatetimeInputValue(new Date()) });
     setCreateError('');
     setShowCreateModal(true);
   }
