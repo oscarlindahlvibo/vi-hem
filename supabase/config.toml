@@ -400,6 +400,13 @@ verify_jwt = false
 [functions.vihem-accounted-healthcheck]
 verify_jwt = false
 
+# The AFTER INSERT trigger on vihem_notifications calls this with a shared
+# secret header (see supabase/migrations/*_push_notification_dispatch.sql
+# and supabase/functions/vihem-send-push/index.ts), never a Supabase JWT.
+# Same --no-verify-jwt deploy caveat as vihem-accounted-webhook above.
+[functions.vihem-send-push]
+verify_jwt = false
+
 # Avtal V2 (BETA) public signing surface -- external signers authenticate
 # purely via a secure per-signer token in the request body, never a
 # Supabase session (see supabase/functions/vihem-agreements-public/index.ts
