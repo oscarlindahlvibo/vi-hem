@@ -14,6 +14,7 @@ import {
   Textarea,
 } from '../components/ui';
 import { formatDate } from '../lib/utils';
+import { isActiveLaundryBooking } from '../lib/laundry';
 import type { Apartment, LaundryGuestLink, LaundryRoom, LaundrySlot, LaundryBooking, Property, ShortStayUnit } from '../types';
 import {
   WashingMachine,
@@ -321,7 +322,9 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
           .order('created_at', { ascending: false });
 
         if (myBookingsErr) throw myBookingsErr;
-        setMyBookings(myBookingsData as MyBooking[]);
+        setMyBookings(
+          (myBookingsData || []).filter((booking) => isActiveLaundryBooking(booking)) as MyBooking[]
+        );
       } catch (e) {
         console.error('Error fetching slots and bookings:', e);
       } finally {
@@ -361,15 +364,22 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
       // Check max bookings
       const room = rooms.find((r) => r.id === selectedRoomId);
       const maxBookings = room?.max_bookings_per_tenant || 3;
-      const { count: activeCount, error: countErr } = await supabase
+      const { data: activeBookings, error: countErr } = await supabase
         .from('vihem_laundry_bookings')
-        .select('id', { count: 'exact', head: true })
+        .select('id, status, slot:laundry_slot_id(date, end_time)')
         .eq('tenant_id', user.id)
         .eq('status', 'active');
 
       if (countErr) throw countErr;
 
-      if ((activeCount ?? myBookings.filter((b) => b.status === 'active').length) >= maxBookings) {
+      const activeCount = (activeBookings || []).filter((booking) =>
+        isActiveLaundryBooking({
+          status: booking.status,
+          slot: Array.isArray(booking.slot) ? booking.slot[0] : booking.slot,
+        })
+      ).length;
+
+      if (activeCount >= maxBookings) {
         setBookingModalError(
           `Du har uppnått max antal bokningar (${maxBookings} aktiva tvättpass). Avboka en tid innan du bokar en ny.`
         );

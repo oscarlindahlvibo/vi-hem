@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, Badge, StatCard, LoadingPage } from '../components/ui';
 import { formatDate, formatCurrency, MR_STATUS_LABELS } from '../lib/utils';
+import { isActiveLaundryBooking } from '../lib/laundry';
 import type { Tenancy, MaintenanceRequest, LaundryBooking, News } from '../types';
 import {
   Home,
@@ -29,7 +30,7 @@ interface TenantData {
   }) | null;
   maintenanceRequests: MaintenanceRequest[];
   laundryBookings: (LaundryBooking & {
-    slot: { date: string; start_time: string; room_name: string } | null;
+    slot: { date: string; start_time: string; end_time: string; room_name: string } | null;
   })[];
   news: News[];
   pendingContracts: { id: string; created_at: string }[];
@@ -101,7 +102,9 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
         setData({
           tenancy: tenancyData,
           maintenanceRequests: mrRes.error ? [] : mrRes.data || [],
-          laundryBookings: laundryRes.error ? [] : laundryRes.data || [],
+          laundryBookings: laundryRes.error
+            ? []
+            : (laundryRes.data || []).filter((booking) => isActiveLaundryBooking(booking)),
           news: newsRes.error ? [] : newsRes.data || [],
           pendingContracts: contractRes.error ? [] : contractRes.data || [],
           loading: false,

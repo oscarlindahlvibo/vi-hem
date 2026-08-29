@@ -119,6 +119,31 @@ type CustomerProjectLite = {
   updated_at?: string;
 };
 
+type MeetingAiTaskToCreate = { title: string; description: string; priority: 'low' | 'normal' | 'high' | 'urgent'; due_date: string | null; reason: string; confidence: number };
+type MeetingAiTaskToUpdate = { action_item_id: string | null; action_item_title_hint: string; new_status: 'open' | 'in_progress' | 'done' | 'cancelled' | null; new_priority: 'low' | 'normal' | 'high' | 'urgent' | null; reason: string; confidence: number };
+type MeetingAiPurchaseItem = { item_name: string; quantity: string | null; store_name: string | null; notes: string | null; reason: string; confidence: number };
+type MeetingAiWorkOrder = { title: string; description: string; priority: 'low' | 'normal' | 'high' | 'urgent'; reason: string; confidence: number };
+type MeetingAiReviewFlag = { title: string; detail: string; reason: string };
+
+type MeetingAiAnalysis = {
+  summary?: string;
+  warnings?: string[];
+  tasks_to_create?: MeetingAiTaskToCreate[];
+  tasks_to_update?: MeetingAiTaskToUpdate[];
+  purchase_items?: MeetingAiPurchaseItem[];
+  work_orders_to_create?: MeetingAiWorkOrder[];
+  review_flags?: MeetingAiReviewFlag[];
+  model?: string;
+  estimated_cost_sek?: number;
+  suggestion_id?: string;
+};
+
+function formatConfidence(value: unknown) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return null;
+  const percent = value <= 1 ? Math.round(value * 100) : Math.round(value);
+  return `${percent}%`;
+}
+
 const meetingTypeOptions = [
   { value: 'weekly_operations', label: 'Veckomöte drift' },
   { value: 'management', label: 'Ledningsmöte' },
@@ -256,7 +281,7 @@ function isSchemaCacheMiss(error: any) {
   return error?.code === 'PGRST204' || error?.code === 'PGRST205' || message.includes('schema cache');
 }
 
-export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
+export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => void }) {
   const { user } = useAuth();
   const [tab, setTab] = useState<MeetingTab>('dashboard');
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -270,6 +295,11 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
   const [customerProjects, setCustomerProjects] = useState<CustomerProjectLite[]>([]);
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
+  const [meetingAiAnalysis, setMeetingAiAnalysis] = useState<MeetingAiAnalysis | null>(null);
+  const [meetingAiLoading, setMeetingAiLoading] = useState(false);
+  const [meetingAiError, setMeetingAiError] = useState('');
+  const [meetingAiApplied, setMeetingAiApplied] = useState<Set<string>>(new Set());
+  const [meetingAiApplying, setMeetingAiApplying] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [selectedAgendaId, setSelectedAgendaId] = useState<string | null>(null);
@@ -292,6 +322,9 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
 
   useEffect(() => {
     if (selectedMeeting) {
+      setMeetingAiAnalysis(null);
+      setMeetingAiError('');
+      setMeetingAiApplied(new Set());
       loadMeetingDetails(selectedMeeting.id);
     }
   }, [selectedMeeting?.id]);
@@ -650,24 +683,113 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
     await loadMeetingDetails(selectedMeeting.id);
   }
 
-  async function createAiAnalysisPlaceholder() {
+  async function runMeetingAiAnalysis() {
     if (!selectedMeeting || !user?.organisation_id) return;
-    const { error } = await supabase.from('vihem_ai_suggestions').insert({
-      organisation_id: user.organisation_id,
-      created_by: user.id,
-      source_type: 'meeting',
-      source_id: selectedMeeting.id,
-      suggestion_type: 'meeting_protocol_review',
-      target_type: 'meeting',
-      target_id: selectedMeeting.id,
-      payload: {
-        title: 'AI-analys väntar på konfiguration',
-        reason: 'När AI-kopplingen aktiveras analyseras protokoll, dagordning och kopplade objekt här. Förslag kräver alltid godkännande.',
-      },
-      status: 'pending',
+    setMeetingAiLoading(true);
+    setMeetingAiError('');
+    setMeetingAiApplied(new Set());
+    try {
+      const { data, error } = await supabase.functions.invoke('vihem-meeting-ai', {
+        body: { meeting_id: selectedMeeting.id },
+      });
+      if (error) {
+        // Non-2xx responses leave `data` null and `error` a generic
+        // FunctionsHttpError -- the real {error: "..."} body the function
+        // sent is only reachable via error.context, the raw Response.
+        const context = (error as { context?: Response }).context;
+        const parsed = context ? await context.clone().json().catch(() => null) : null;
+        throw new Error(parsed?.error || error.message);
+      }
+      if (data?.error) throw new Error(data.error);
+      setMeetingAiAnalysis(data?.analysis || data || null);
+      await fetchData();
+    } catch (error: any) {
+      setMeetingAiError(error?.message || 'Kunde inte analysera mötet med AI.');
+    } finally {
+      setMeetingAiLoading(false);
+    }
+  }
+
+  function markAiApplying(key: string, applying: boolean) {
+    setMeetingAiApplying(prev => {
+      const next = new Set(prev);
+      if (applying) next.add(key); else next.delete(key);
+      return next;
     });
-    if (error) alert('Kunde inte skapa AI-granskningspost.');
-    await fetchData();
+  }
+
+  async function applyAiCreateTask(item: MeetingAiTaskToCreate, key: string) {
+    if (!selectedMeeting || !user?.organisation_id) return;
+    markAiApplying(key, true);
+    const { error } = await supabase.from('vihem_meeting_action_items').insert({
+      organisation_id: user.organisation_id,
+      meeting_id: selectedMeeting.id,
+      title: item.title,
+      description: item.description,
+      responsible_user_id: null,
+      due_date: item.due_date || null,
+      linked_entity_type: '',
+      linked_entity_id: null,
+      priority: item.priority,
+      status: 'open',
+    });
+    markAiApplying(key, false);
+    if (error) { alert('Kunde inte skapa uppgiften.'); return; }
+    setMeetingAiApplied(prev => new Set(prev).add(key));
+    await loadMeetingDetails(selectedMeeting.id);
+  }
+
+  async function applyAiUpdateTask(item: MeetingAiTaskToUpdate, key: string) {
+    if (!selectedMeeting || !item.action_item_id) return;
+    const patch: Record<string, string> = {};
+    if (item.new_status) patch.status = item.new_status;
+    if (item.new_priority) patch.priority = item.new_priority;
+    if (!Object.keys(patch).length) return;
+    markAiApplying(key, true);
+    const { error } = await supabase.from('vihem_meeting_action_items').update(patch).eq('id', item.action_item_id);
+    markAiApplying(key, false);
+    if (error) { alert('Kunde inte uppdatera uppgiften.'); return; }
+    setMeetingAiApplied(prev => new Set(prev).add(key));
+    await loadMeetingDetails(selectedMeeting.id);
+  }
+
+  async function applyAiPurchaseItem(item: MeetingAiPurchaseItem, key: string) {
+    if (!user?.organisation_id) return;
+    markAiApplying(key, true);
+    const { error } = await supabase.from('vihem_purchase_items').insert({
+      organisation_id: user.organisation_id,
+      store_name: item.store_name || 'Övrigt',
+      item_name: item.item_name,
+      quantity: item.quantity || '1',
+      notes: item.notes || '',
+      priority: 'normal',
+      created_by: user.id,
+    });
+    markAiApplying(key, false);
+    if (error) { alert('Kunde inte lägga till i inköpslistan.'); return; }
+    setMeetingAiApplied(prev => new Set(prev).add(key));
+  }
+
+  async function applyAiCreateWorkOrder(item: MeetingAiWorkOrder, key: string) {
+    if (!user?.organisation_id) return;
+    markAiApplying(key, true);
+    const { data, error } = await supabase.from('vihem_work_orders').insert({
+      organisation_id: user.organisation_id,
+      title: item.title,
+      description: item.description,
+      category: 'Möte',
+      priority: item.priority,
+      status: 'new',
+      assigned_to_ids: [],
+      checklist: [],
+      materials: [],
+      attachments: [],
+      created_by: user.id,
+    }).select('id').single();
+    markAiApplying(key, false);
+    if (error) { alert('Kunde inte skapa arbetsordern.'); return; }
+    setMeetingAiApplied(prev => new Set(prev).add(key));
+    if (data?.id) onNavigate(`workorder/${data.id}`);
   }
 
   const systemLinks: SystemLink[] = useMemo(() => [
@@ -849,7 +971,16 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
               onAddAction={addActionItem}
               onStatus={updateMeetingStatus}
               onLock={lockMeeting}
-              onAi={createAiAnalysisPlaceholder}
+              onAi={runMeetingAiAnalysis}
+              aiAnalysis={meetingAiAnalysis}
+              aiLoading={meetingAiLoading}
+              aiError={meetingAiError}
+              aiApplied={meetingAiApplied}
+              aiApplying={meetingAiApplying}
+              onAiCreateTask={applyAiCreateTask}
+              onAiUpdateTask={applyAiUpdateTask}
+              onAiAddPurchaseItem={applyAiPurchaseItem}
+              onAiCreateWorkOrder={applyAiCreateWorkOrder}
               onActionDone={markActionDone}
               onAgendaStatus={updateAgendaStatus}
             />
@@ -967,6 +1098,194 @@ export function MeetingsPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
   );
 }
 
+const meetingAiPriorityLabels: Record<string, string> = { low: 'Låg', normal: 'Normal', high: 'Hög', urgent: 'Akut' };
+const meetingAiStatusLabels: Record<string, string> = { open: 'Öppen', in_progress: 'Pågår', done: 'Klar', cancelled: 'Avbruten' };
+
+function MeetingAiAnalysisPanel({
+  analysis, loading, error, actionItems, applied, applying,
+  onCreateTask, onUpdateTask, onAddPurchaseItem, onCreateWorkOrder,
+}: {
+  analysis: MeetingAiAnalysis | null; loading: boolean; error: string; actionItems: MeetingActionItem[];
+  applied: Set<string>; applying: Set<string>;
+  onCreateTask: (item: MeetingAiTaskToCreate, key: string) => void;
+  onUpdateTask: (item: MeetingAiTaskToUpdate, key: string) => void;
+  onAddPurchaseItem: (item: MeetingAiPurchaseItem, key: string) => void;
+  onCreateWorkOrder: (item: MeetingAiWorkOrder, key: string) => void;
+}) {
+  const knownActionIds = useMemo(() => new Set(actionItems.map(item => item.id)), [actionItems]);
+
+  return (
+    <Card className="p-4 border-blue-100 bg-blue-50/60">
+      <div className="flex items-start gap-3">
+        <div className="mt-1 rounded-xl bg-blue-600 p-2 text-white">
+          <Sparkles className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1 space-y-3">
+          <div>
+            <h3 className="font-bold text-slate-900">AI-sammanfattning</h3>
+            <p className="text-xs text-slate-500">Förslag skapas för granskning -- inget skapas eller ändras förrän du klickar.</p>
+          </div>
+          {loading && <p className="text-sm text-slate-600">Analyserar protokoll, dagordning och kopplade objekt...</p>}
+          {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+          {analysis?.summary && <p className="text-sm leading-6 text-slate-700">{analysis.summary}</p>}
+          {analysis?.warnings?.length ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs font-bold uppercase text-amber-700">Kontrollera</p>
+              <ul className="mt-1 space-y-1 text-sm text-amber-800">
+                {analysis.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}
+              </ul>
+            </div>
+          ) : null}
+
+          {(analysis?.tasks_to_create?.length ?? 0) > 0 && (
+            <div className="rounded-xl border border-white bg-white p-3 shadow-sm">
+              <p className="text-sm font-bold text-slate-800">Nya uppgifter</p>
+              <div className="mt-2 space-y-2">
+                {analysis!.tasks_to_create!.map((item, index) => {
+                  const key = `task-create-${index}`;
+                  const isApplied = applied.has(key);
+                  const isApplying = applying.has(key);
+                  return (
+                    <div key={key} className="rounded-lg bg-slate-50 p-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800">{item.title}</p>
+                          {item.description && <p className="mt-0.5 text-xs text-slate-500">{item.description}</p>}
+                          <p className="mt-1 text-xs text-slate-400">{item.reason}</p>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            <Badge className="bg-slate-100 text-slate-600">{meetingAiPriorityLabels[item.priority] || item.priority}</Badge>
+                            {item.due_date && <Badge className="bg-slate-100 text-slate-600">{item.due_date}</Badge>}
+                            {formatConfidence(item.confidence) && <Badge className="bg-blue-100 text-blue-700">{formatConfidence(item.confidence)}</Badge>}
+                          </div>
+                        </div>
+                        <Button size="sm" variant={isApplied ? 'secondary' : 'primary'} disabled={isApplied || isApplying} onClick={() => onCreateTask(item, key)}>
+                          {isApplied ? 'Skapad' : isApplying ? 'Skapar...' : 'Skapa uppgift'}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {(analysis?.tasks_to_update?.length ?? 0) > 0 && (
+            <div className="rounded-xl border border-white bg-white p-3 shadow-sm">
+              <p className="text-sm font-bold text-slate-800">Ändra befintliga uppgifter</p>
+              <div className="mt-2 space-y-2">
+                {analysis!.tasks_to_update!.map((item, index) => {
+                  const key = `task-update-${index}`;
+                  const isApplied = applied.has(key);
+                  const isApplying = applying.has(key);
+                  const targetKnown = !!item.action_item_id && knownActionIds.has(item.action_item_id);
+                  const hasChange = !!(item.new_status || item.new_priority);
+                  const canApply = targetKnown && hasChange;
+                  return (
+                    <div key={key} className="rounded-lg bg-slate-50 p-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800">{item.action_item_title_hint}</p>
+                          <p className="mt-1 text-xs text-slate-400">{item.reason}</p>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {item.new_status && <Badge className="bg-slate-100 text-slate-600">Ny status: {meetingAiStatusLabels[item.new_status] || item.new_status}</Badge>}
+                            {item.new_priority && <Badge className="bg-slate-100 text-slate-600">Ny prioritet: {meetingAiPriorityLabels[item.new_priority] || item.new_priority}</Badge>}
+                            {formatConfidence(item.confidence) && <Badge className="bg-blue-100 text-blue-700">{formatConfidence(item.confidence)}</Badge>}
+                          </div>
+                          {!targetKnown && <p className="mt-1 text-xs text-amber-600">Kunde inte matcha till en befintlig uppgift -- justera manuellt.</p>}
+                        </div>
+                        <Button size="sm" variant={isApplied ? 'secondary' : 'primary'} disabled={!canApply || isApplied || isApplying} onClick={() => onUpdateTask(item, key)}>
+                          {isApplied ? 'Uppdaterad' : isApplying ? 'Sparar...' : 'Applicera'}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {(analysis?.purchase_items?.length ?? 0) > 0 && (
+            <div className="rounded-xl border border-white bg-white p-3 shadow-sm">
+              <p className="text-sm font-bold text-slate-800">Inköpslista</p>
+              <div className="mt-2 space-y-2">
+                {analysis!.purchase_items!.map((item, index) => {
+                  const key = `purchase-${index}`;
+                  const isApplied = applied.has(key);
+                  const isApplying = applying.has(key);
+                  return (
+                    <div key={key} className="rounded-lg bg-slate-50 p-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800">{item.item_name}{item.quantity ? ` (${item.quantity})` : ''}</p>
+                          {item.notes && <p className="mt-0.5 text-xs text-slate-500">{item.notes}</p>}
+                          <p className="mt-1 text-xs text-slate-400">{item.reason}</p>
+                        </div>
+                        <Button size="sm" variant={isApplied ? 'secondary' : 'primary'} disabled={isApplied || isApplying} onClick={() => onAddPurchaseItem(item, key)}>
+                          {isApplied ? 'Tillagd' : isApplying ? 'Lägger till...' : 'Lägg till'}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {(analysis?.work_orders_to_create?.length ?? 0) > 0 && (
+            <div className="rounded-xl border border-white bg-white p-3 shadow-sm">
+              <p className="text-sm font-bold text-slate-800">Nya arbetsordrar</p>
+              <div className="mt-2 space-y-2">
+                {analysis!.work_orders_to_create!.map((item, index) => {
+                  const key = `wo-create-${index}`;
+                  const isApplied = applied.has(key);
+                  const isApplying = applying.has(key);
+                  return (
+                    <div key={key} className="rounded-lg bg-slate-50 p-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800">{item.title}</p>
+                          {item.description && <p className="mt-0.5 text-xs text-slate-500">{item.description}</p>}
+                          <p className="mt-1 text-xs text-slate-400">{item.reason}</p>
+                          <Badge className="mt-1 bg-slate-100 text-slate-600">{meetingAiPriorityLabels[item.priority] || item.priority}</Badge>
+                        </div>
+                        <Button size="sm" variant={isApplied ? 'secondary' : 'primary'} disabled={isApplied || isApplying} onClick={() => onCreateWorkOrder(item, key)}>
+                          {isApplied ? 'Skapad' : isApplying ? 'Skapar...' : 'Skapa arbetsorder'}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {(analysis?.review_flags?.length ?? 0) > 0 && (
+            <div className="rounded-xl border border-white bg-white p-3 shadow-sm">
+              <p className="text-sm font-bold text-slate-800">Övrigt att titta på</p>
+              <div className="mt-2 space-y-2">
+                {analysis!.review_flags!.map((item, index) => (
+                  <div key={index} className="rounded-lg bg-slate-50 p-2">
+                    <p className="text-sm font-semibold text-slate-800">{item.title}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{item.detail}</p>
+                    <p className="mt-1 text-xs text-slate-400">{item.reason}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {analysis?.model && (
+            <p className="text-xs text-slate-400">
+              Modell: {analysis.model}
+              {typeof analysis.estimated_cost_sek === 'number' ? ` · ca ${analysis.estimated_cost_sek.toFixed(4)} kr` : ''}
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function MeetingDetail(props: {
   meeting: Meeting;
   agendaItems: MeetingAgendaItemMvp[];
@@ -989,7 +1308,16 @@ function MeetingDetail(props: {
   onAddAction: () => void;
   onStatus: (status: MeetingStatus) => void;
   onLock: () => void;
-  onAi: () => void;
+  onAi: () => void | Promise<void>;
+  aiAnalysis: MeetingAiAnalysis | null;
+  aiLoading: boolean;
+  aiError: string;
+  aiApplied: Set<string>;
+  aiApplying: Set<string>;
+  onAiCreateTask: (item: MeetingAiTaskToCreate, key: string) => void;
+  onAiUpdateTask: (item: MeetingAiTaskToUpdate, key: string) => void;
+  onAiAddPurchaseItem: (item: MeetingAiPurchaseItem, key: string) => void;
+  onAiCreateWorkOrder: (item: MeetingAiWorkOrder, key: string) => void;
   onActionDone: (action: MeetingActionItem) => void;
   onAgendaStatus: (item: MeetingAgendaItemMvp, status: 'open' | 'done') => void;
 }) {
@@ -1031,11 +1359,28 @@ function MeetingDetail(props: {
               <Button size="sm" variant="outline" onClick={() => props.onStatus('in_progress')}>Starta</Button>
               <Button size="sm" variant="outline" onClick={() => props.onStatus('completed')}>Avsluta</Button>
               <Button size="sm" variant="secondary" onClick={props.onLock}><Lock className="w-4 h-4" /> Lås</Button>
-              <Button size="sm" variant="secondary" onClick={props.onAi}><Sparkles className="w-4 h-4" /> Analysera med AI</Button>
+              <Button size="sm" variant="secondary" onClick={props.onAi} disabled={props.aiLoading}>
+                <Sparkles className="w-4 h-4" /> {props.aiLoading ? 'Analyserar...' : 'Analysera med AI'}
+              </Button>
             </div>
           )}
         </div>
       </Card>
+
+      {(props.aiAnalysis || props.aiError || props.aiLoading) && (
+        <MeetingAiAnalysisPanel
+          analysis={props.aiAnalysis}
+          loading={props.aiLoading}
+          error={props.aiError}
+          actionItems={props.actionItems}
+          applied={props.aiApplied}
+          applying={props.aiApplying}
+          onCreateTask={props.onAiCreateTask}
+          onUpdateTask={props.onAiUpdateTask}
+          onAddPurchaseItem={props.onAiAddPurchaseItem}
+          onCreateWorkOrder={props.onAiCreateWorkOrder}
+        />
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-[17rem_minmax(0,1fr)_18rem] gap-4">
         <Card className="overflow-hidden">

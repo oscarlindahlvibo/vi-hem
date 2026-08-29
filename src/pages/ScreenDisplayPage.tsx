@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, CalendarDays, ClipboardList, Monitor, Newspaper, RefreshCw, Timer, Users, Briefcase, CheckCircle2, UserRoundX } from 'lucide-react';
+import { AlertCircle, CalendarDays, ClipboardList, Monitor, Newspaper, RefreshCw, Timer, Users, Briefcase, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
 import { Button, LoadingPage } from '../components/ui';
-import type { CalendarEvent, CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, MaintenanceRequest, Meeting, MeetingAgendaItem, News, Profile, ShortStayBooking, ShortStayUnit, StaffAbsenceRequest, TimeEntry, WorkOrder } from '../types';
+import type { CalendarEvent, CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, MaintenanceRequest, Meeting, MeetingActionItem, MeetingAgendaItem, MeetingDecision, News, Profile, ShortStayBooking, ShortStayUnit, StaffAbsenceRequest, TimeEntry, WorkOrder } from '../types';
 import { formatDate, formatDateTime, MR_PRIORITY_LABELS, MR_STATUS_LABELS, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import {
@@ -115,15 +115,6 @@ function workOrderAssigneeLabel(order: WorkOrder, staffMembers: Pick<Profile, 'i
   return `${ids.length} tilldelade`;
 }
 
-const ABSENCE_TYPE_LABELS: Record<string, string> = {
-  sick: 'Sjuk',
-  vab: 'VAB',
-  vacation: 'Semester',
-  leave: 'Ledig',
-  unpaid_leave: 'Tjänstledig',
-  parental_leave: 'Föräldraledig',
-};
-
 const PROJECT_STATUS_LABELS: Record<string, string> = {
   draft: 'Utkast',
   quote_created: 'Offert skapad',
@@ -160,6 +151,9 @@ export function ScreenDisplayPage() {
   const [clockedInEntries, setClockedInEntries] = useState<TimeEntry[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [meetingAgendaItems, setMeetingAgendaItems] = useState<MeetingAgendaItem[]>([]);
+  const [meetingDecisions, setMeetingDecisions] = useState<MeetingDecision[]>([]);
+  const [meetingActionItems, setMeetingActionItems] = useState<MeetingActionItem[]>([]);
+  const [meetingAiSummary, setMeetingAiSummary] = useState<string>('');
   const [customerProjects, setCustomerProjects] = useState<CustomerProject[]>([]);
   const [absenceRequests, setAbsenceRequests] = useState<StaffAbsenceRequest[]>([]);
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
@@ -310,6 +304,23 @@ export function ScreenDisplayPage() {
     return () => window.clearInterval(interval);
   }, [allowed, user?.organisation_id, days, selectedScreenKey]);
 
+  // Mötesvyn (dagordningens fritext, beslut, uppgifter, AI-sammanfattning)
+  // ska kännas levande på TV:n istället för att vänta upp till 60s på nästa
+  // poll -- samma realtidsmönster som redan används i CalendarPage.tsx.
+  // Refetchar samma fetchScreenData() som polling redan gör, bara oftare
+  // triggad; ingen ny datakanal, ingen ändring i vad som hämtas.
+  useEffect(() => {
+    if (!allowed || !user?.organisation_id || view !== 'meeting') return;
+    const channel = supabase
+      .channel(`screen-meeting-${user.organisation_id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_meeting_agenda_items', filter: `organisation_id=eq.${user.organisation_id}` }, () => fetchScreenData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_meeting_decisions', filter: `organisation_id=eq.${user.organisation_id}` }, () => fetchScreenData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_meeting_action_items', filter: `organisation_id=eq.${user.organisation_id}` }, () => fetchScreenData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_ai_suggestions', filter: `organisation_id=eq.${user.organisation_id}` }, () => fetchScreenData())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [allowed, user?.organisation_id, view]);
+
   async function handleLogin(event: React.FormEvent) {
     event.preventDefault();
     setLoginError('');
@@ -408,8 +419,10 @@ export function ScreenDisplayPage() {
         .select('*')
         .eq('organisation_id', user.organisation_id)
         .not('status', 'in', '(completed,locked,cancelled)')
-        .gte('starts_at', `${todayStart}T00:00:00`)
-        .lt('starts_at', `${meetingEnd}T23:59:59`)
+        // Ett pågående möte ska alltid synas på skärmen, oavsett vad dess
+        // starts_at råkar vara (kan hamna fel dag pga tidszonsavrundning
+        // nära midnatt) -- annars kan ett skarpt möte bli osynligt.
+        .or(`and(starts_at.gte.${todayStart}T00:00:00,starts_at.lt.${meetingEnd}T23:59:59),status.eq.in_progress`)
         .order('starts_at', { ascending: true })
         .limit(8),
       supabase
@@ -559,14 +572,29 @@ export function ScreenDisplayPage() {
       setMeetings(loadedMeetings);
       const meetingIds = loadedMeetings.map(meeting => meeting.id);
       if (meetingIds.length > 0) {
-        const agendaResult = await supabase
-          .from('vihem_meeting_agenda_items')
-          .select('*')
-          .in('meeting_id', meetingIds)
-          .order('sort_order');
+        const [agendaResult, decisionsResult, actionItemsResult, aiResult] = await Promise.all([
+          supabase.from('vihem_meeting_agenda_items').select('*').in('meeting_id', meetingIds).order('sort_order'),
+          supabase.from('vihem_meeting_decisions').select('*').in('meeting_id', meetingIds).eq('status', 'open').order('created_at'),
+          supabase.from('vihem_meeting_action_items').select('*').in('meeting_id', meetingIds).neq('status', 'done').order('created_at'),
+          // Senaste AI-analysen per möte -- ordnad senast-först, MeetingScreen
+          // plockar bara den första träffen för det just nu visade mötet.
+          supabase.from('vihem_ai_suggestions').select('source_id, payload, created_at').eq('source_type', 'meeting').in('source_id', meetingIds).order('created_at', { ascending: false }).limit(20),
+        ]);
         setMeetingAgendaItems(agendaResult.error ? [] : (agendaResult.data || []) as MeetingAgendaItem[]);
+        setMeetingDecisions(decisionsResult.error ? [] : (decisionsResult.data || []) as MeetingDecision[]);
+        setMeetingActionItems(actionItemsResult.error ? [] : (actionItemsResult.data || []) as MeetingActionItem[]);
+        const currentMeetingForAi = selectedScreenConfig.meetingId
+          ? loadedMeetings.find((m) => m.id === selectedScreenConfig.meetingId)
+          : loadedMeetings.find((m) => m.status === 'in_progress') || loadedMeetings[0];
+        const aiRow = !aiResult.error && currentMeetingForAi
+          ? (aiResult.data || []).find((row: { source_id: string }) => row.source_id === currentMeetingForAi.id)
+          : null;
+        setMeetingAiSummary((aiRow?.payload as { summary?: string } | undefined)?.summary || '');
       } else {
         setMeetingAgendaItems([]);
+        setMeetingDecisions([]);
+        setMeetingActionItems([]);
+        setMeetingAiSummary('');
       }
       setLastUpdated(new Date());
     }
@@ -717,6 +745,9 @@ export function ScreenDisplayPage() {
           organisationName={organisationName}
           meetings={meetings}
           agendaItems={meetingAgendaItems}
+          decisions={meetingDecisions}
+          actionItems={meetingActionItems}
+          aiSummary={meetingAiSummary}
           workOrders={workOrders}
           customerProjects={customerProjects}
           absenceRequests={absenceRequests}
@@ -777,6 +808,9 @@ function MeetingScreen({
   organisationName,
   meetings,
   agendaItems,
+  decisions,
+  actionItems,
+  aiSummary,
   workOrders,
   customerProjects,
   absenceRequests,
@@ -790,6 +824,9 @@ function MeetingScreen({
   organisationName: string;
   meetings: Meeting[];
   agendaItems: MeetingAgendaItem[];
+  decisions: MeetingDecision[];
+  actionItems: MeetingActionItem[];
+  aiSummary: string;
   workOrders: WorkOrder[];
   customerProjects: CustomerProject[];
   absenceRequests: StaffAbsenceRequest[];
@@ -809,8 +846,14 @@ function MeetingScreen({
     : [];
   const visibleAgenda = selectedAgenda.filter(item => item.status !== 'done');
   const doneAgendaCount = selectedAgenda.length - visibleAgenda.length;
-  const activeWorkOrders = workOrders.slice(0, meetingPart === 'part-1' ? 24 : 18);
-  const activeProjects = customerProjects.slice(0, meetingPart === 'part-2' ? 24 : 16);
+  // Punktens nummer ska vara dess ursprungliga plats i dagordningen, inte
+  // dess plats i den synliga (avbockade bortfiltrerade) listan -- annars
+  // byter alla kvarvarande punkter nummer varje gång en punkt bockas av.
+  const agendaNumberByItemId = new Map(selectedAgenda.map((item, index) => [item.id, index + 1]));
+  const openDecisions = currentMeeting ? decisions.filter(d => d.meeting_id === currentMeeting.id) : [];
+  const openActionItems = currentMeeting ? actionItems.filter(a => a.meeting_id === currentMeeting.id) : [];
+  const activeWorkOrders = workOrders.slice(0, meetingPart === 'part-1' ? 40 : 18);
+  const activeProjects = customerProjects.slice(0, meetingPart === 'part-1' ? 40 : meetingPart === 'part-2' ? 24 : 16);
   const activeMaintenanceRequests = maintenanceRequests.slice(0, meetingPart === 'part-2' ? 24 : 14);
   const todayValue = dateKey(today());
   const upcomingAbsences = absenceRequests
@@ -834,12 +877,12 @@ function MeetingScreen({
       <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
         {visibleAgenda.length === 0 ? (
           <p className="rounded-xl bg-white/5 px-4 py-5 text-sm font-bold text-slate-300">Ingen dagordning kopplad till valt möte.</p>
-        ) : visibleAgenda.slice(0, agendaLimit).map((item, index) => (
+        ) : visibleAgenda.slice(0, agendaLimit).map((item) => (
           <div key={item.id} className="grid grid-cols-[24px_minmax(0,1fr)] gap-2 rounded-lg bg-white/10 px-2 py-1.5">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-500 text-[10px] font-black">{index + 1}</span>
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-500 text-[10px] font-black">{agendaNumberByItemId.get(item.id)}</span>
             <div className="min-w-0">
               <p className="truncate text-xs font-black">{item.title}</p>
-              {item.notes && <p className="truncate text-[10px] font-semibold text-slate-300">{item.notes}</p>}
+              {item.notes && <p className="text-[10px] font-semibold leading-tight text-slate-300" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{item.notes}</p>}
             </div>
           </div>
         ))}
@@ -847,6 +890,7 @@ function MeetingScreen({
     </section>
   );
 
+  const workOrderPanelCompact = meetingPart === 'part-1';
   const workOrderPanel = (
     <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-2.5 ring-1 ring-white/10">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -856,26 +900,42 @@ function MeetingScreen({
         </h3>
         <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-black">{workOrders.length}</span>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-1.5 overflow-hidden">
-        {activeWorkOrders.length === 0 ? (
-          <p className="col-span-2 rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
-        ) : activeWorkOrders.map(order => (
-          <div key={order.id} className="min-w-0 rounded-lg bg-white/10 px-2 py-1.5">
-            <div className="flex min-w-0 items-center justify-between gap-2">
-              <p className="truncate text-[12px] font-black">{order.title}</p>
+      {workOrderPanelCompact ? (
+        <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
+          {activeWorkOrders.length === 0 ? (
+            <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
+          ) : activeWorkOrders.map(order => (
+            <div key={order.id} className="flex min-w-0 items-center gap-2 rounded-lg bg-white/10 px-2.5 py-1.5">
+              <p className="min-w-0 flex-1 truncate text-[12px] font-black">{order.title}</p>
+              <span className="hidden shrink-0 truncate text-[10px] font-bold text-slate-300 sm:block sm:max-w-[110px]">{order.property?.name || 'Ingen fastighet'}</span>
+              <span className="shrink-0 truncate rounded-full bg-blue-400/20 px-1.5 py-0.5 text-[9px] font-black text-blue-100">{workOrderAssigneeLabel(order, staffMembers, true)}</span>
+              <span className="shrink-0 rounded-full bg-amber-300/20 px-1.5 py-0.5 text-[9px] font-black text-amber-100">{WO_PRIORITY_LABELS[order.priority]}</span>
               <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-black text-slate-100">{order.status === 'new' ? 'Ny' : order.status}</span>
             </div>
-            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] font-bold text-slate-300">
-              <span className="truncate">{order.property?.name || 'Ingen fastighet'}</span>
-              {order.due_date && <span className="shrink-0">{formatDate(order.due_date)}</span>}
+          ))}
+        </div>
+      ) : (
+        <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-1.5 overflow-hidden">
+          {activeWorkOrders.length === 0 ? (
+            <p className="col-span-2 rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga aktiva arbetsordrar.</p>
+          ) : activeWorkOrders.map(order => (
+            <div key={order.id} className="min-w-0 rounded-lg bg-white/10 px-2 py-1.5">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <p className="truncate text-[12px] font-black">{order.title}</p>
+                <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-black text-slate-100">{order.status === 'new' ? 'Ny' : order.status}</span>
+              </div>
+              <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] font-bold text-slate-300">
+                <span className="truncate">{order.property?.name || 'Ingen fastighet'}</span>
+                {order.due_date && <span className="shrink-0">{formatDate(order.due_date)}</span>}
+              </div>
+              <div className="mt-1 flex min-w-0 items-center gap-1">
+                <span className="truncate rounded-full bg-blue-400/20 px-1.5 py-0.5 text-[9px] font-black text-blue-100">{workOrderAssigneeLabel(order, staffMembers, true)}</span>
+                <span className="shrink-0 rounded-full bg-amber-300/20 px-1.5 py-0.5 text-[9px] font-black text-amber-100">{WO_PRIORITY_LABELS[order.priority]}</span>
+              </div>
             </div>
-            <div className="mt-1 flex min-w-0 items-center gap-1">
-              <span className="truncate rounded-full bg-blue-400/20 px-1.5 py-0.5 text-[9px] font-black text-blue-100">{workOrderAssigneeLabel(order, staffMembers, true)}</span>
-              <span className="shrink-0 rounded-full bg-amber-300/20 px-1.5 py-0.5 text-[9px] font-black text-amber-100">{WO_PRIORITY_LABELS[order.priority]}</span>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 
@@ -888,24 +948,42 @@ function MeetingScreen({
         </h3>
         <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-black">{customerProjects.length}</span>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-1.5 overflow-hidden">
-        {activeProjects.length === 0 ? (
-          <p className="col-span-2 rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga pågående kundprojekt.</p>
-        ) : activeProjects.map(project => (
-          <div key={project.id} className="min-w-0 rounded-lg bg-white/10 px-2 py-1.5">
-            <div className="flex min-w-0 items-center justify-between gap-2">
-              <p className="truncate text-[12px] font-black">{project.title || project.name || project.customer_name || 'Kundprojekt'}</p>
+      {workOrderPanelCompact ? (
+        <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
+          {activeProjects.length === 0 ? (
+            <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga pågående kundprojekt.</p>
+          ) : activeProjects.map(project => (
+            <div key={project.id} className="flex min-w-0 items-center gap-2 rounded-lg bg-white/10 px-2.5 py-1.5">
+              <p className="min-w-0 flex-1 truncate text-[12px] font-black">{project.title || project.name || project.customer_name || 'Kundprojekt'}</p>
+              <span className="hidden shrink-0 truncate text-[10px] font-bold text-slate-300 sm:block sm:max-w-[130px]">
+                {project.customer_name || project.project_address || 'Ingen kund'}
+              </span>
               <span className="shrink-0 rounded-full bg-violet-400/20 px-1.5 py-0.5 text-[9px] font-black text-violet-100">
                 {PROJECT_STATUS_LABELS[project.status] || project.status}
               </span>
             </div>
-            <p className="mt-1 truncate text-[10px] font-bold text-slate-300">
-              {project.customer_name || project.project_address || 'Ingen kund'}
-              {project.planned_end_date ? ` · ${formatDate(project.planned_end_date)}` : ''}
-            </p>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-1.5 overflow-hidden">
+          {activeProjects.length === 0 ? (
+            <p className="col-span-2 rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga pågående kundprojekt.</p>
+          ) : activeProjects.map(project => (
+            <div key={project.id} className="min-w-0 rounded-lg bg-white/10 px-2 py-1.5">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <p className="truncate text-[12px] font-black">{project.title || project.name || project.customer_name || 'Kundprojekt'}</p>
+                <span className="shrink-0 rounded-full bg-violet-400/20 px-1.5 py-0.5 text-[9px] font-black text-violet-100">
+                  {PROJECT_STATUS_LABELS[project.status] || project.status}
+                </span>
+              </div>
+              <p className="mt-1 truncate text-[10px] font-bold text-slate-300">
+                {project.customer_name || project.project_address || 'Ingen kund'}
+                {project.planned_end_date ? ` · ${formatDate(project.planned_end_date)}` : ''}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 
@@ -960,36 +1038,6 @@ function MeetingScreen({
     </section>
   );
 
-  const absencePanel = (
-    <section className="flex min-h-0 flex-col rounded-2xl bg-rose-500/10 p-2.5 ring-1 ring-rose-300/20">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="flex min-w-0 items-center gap-2 text-base font-black">
-          <UserRoundX className="h-4 w-4 shrink-0 text-rose-200" />
-          Ledighet/frånvaro
-        </h3>
-        <span className="rounded-full bg-rose-300/20 px-2.5 py-1 text-[11px] font-black text-rose-100">{upcomingAbsences.length}</span>
-      </div>
-      <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
-        {upcomingAbsences.length === 0 ? (
-          <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Ingen planerad frånvaro i närtid.</p>
-        ) : upcomingAbsences.map(request => (
-          <div key={request.id} className="grid grid-cols-[minmax(0,1fr)_72px] items-center gap-2 rounded-lg bg-white/10 px-2 py-1.5">
-            <div className="min-w-0">
-              <p className="truncate text-xs font-black">{request.user?.name || staffMembers.find(staff => staff.id === request.user_id)?.name || 'Personal'}</p>
-              <p className="truncate text-[10px] font-bold text-rose-100">
-                {ABSENCE_TYPE_LABELS[request.absence_type] || request.absence_type}
-                {request.start_time && request.end_time ? ` · ${request.start_time.slice(0, 5)}-${request.end_time.slice(0, 5)}` : ''}
-              </p>
-            </div>
-            <span className="justify-self-end truncate rounded-full bg-white/10 px-2 py-1 text-[9px] font-black text-white">
-              {request.start_date === request.end_date ? formatDate(request.start_date) : `${formatDate(request.start_date)}-${formatDate(request.end_date)}`}
-            </span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-
   const calendarPanel = (
     <section className="flex min-h-0 flex-col rounded-2xl bg-blue-500/10 p-2.5 ring-1 ring-blue-300/20">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -1016,6 +1064,44 @@ function MeetingScreen({
             </p>
           </div>
         ))}
+      </div>
+    </section>
+  );
+
+  const decisionsAndTasksPanel = (
+    <section className="flex min-h-0 flex-col rounded-2xl bg-white/10 p-2.5 ring-1 ring-white/10">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex min-w-0 items-center gap-2 text-base font-black">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-violet-200" />
+          Beslut &amp; uppgifter
+        </h3>
+        <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-black">{openDecisions.length + openActionItems.length}</span>
+      </div>
+      <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
+        {aiSummary && (
+          <div className="mb-1 rounded-lg bg-violet-400/15 px-2 py-1.5 ring-1 ring-violet-300/20">
+            <p className="text-[9px] font-black uppercase tracking-wider text-violet-200">AI-sammanfattning</p>
+            <p className="text-[10px] font-semibold leading-tight text-slate-200" style={{ display: '-webkit-box', WebkitLineClamp: meetingPart === 'part-2' ? 6 : 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{aiSummary}</p>
+          </div>
+        )}
+        {openDecisions.length === 0 && openActionItems.length === 0 ? (
+          <p className="rounded-xl bg-white/5 px-4 py-4 text-sm font-bold text-slate-300">Inga öppna beslut eller uppgifter.</p>
+        ) : (
+          <>
+            {openDecisions.slice(0, meetingPart === 'part-2' ? 14 : 6).map(decision => (
+              <div key={decision.id} className="rounded-lg bg-white/10 px-2 py-1">
+                <p className="truncate text-[11px] font-black">{decision.title}</p>
+                <span className="text-[9px] font-bold text-slate-400">Beslut</span>
+              </div>
+            ))}
+            {openActionItems.slice(0, meetingPart === 'part-2' ? 14 : 6).map(action => (
+              <div key={action.id} className="rounded-lg bg-white/10 px-2 py-1">
+                <p className="truncate text-[11px] font-black">{action.title}</p>
+                <span className="text-[9px] font-bold text-slate-400">Uppgift{action.due_date ? ` · ${formatDate(action.due_date)}` : ''}</span>
+              </div>
+            ))}
+          </>
+        )}
       </div>
     </section>
   );
@@ -1048,25 +1134,25 @@ function MeetingScreen({
       </div>
 
       {meetingPart === 'part-1' ? (
-        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '0.82fr 1fr 1fr' }}>
+        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '1.3fr 0.85fr 0.85fr' }}>
           {agendaPanel}
           {workOrderPanel}
           {projectPanel}
         </div>
       ) : meetingPart === 'part-2' ? (
-        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '0.85fr 1.3fr' }}>
           {maintenancePanel}
-          {absencePanel}
-          {calendarPanel}
+          {decisionsAndTasksPanel}
         </div>
       ) : (
         <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '0.78fr 1fr 1fr 0.82fr' }}>
           {agendaPanel}
           {workOrderPanel}
           {projectPanel}
-          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '0.78fr 1fr' }}>
+          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '0.62fr 0.7fr 0.7fr' }}>
             {maintenancePanel}
             {calendarPanel}
+            {decisionsAndTasksPanel}
           </section>
         </div>
       )}
