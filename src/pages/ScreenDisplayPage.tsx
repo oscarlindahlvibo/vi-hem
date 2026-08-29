@@ -846,6 +846,10 @@ function MeetingScreen({
     : [];
   const visibleAgenda = selectedAgenda.filter(item => item.status !== 'done');
   const doneAgendaCount = selectedAgenda.length - visibleAgenda.length;
+  // Punktens nummer ska vara dess ursprungliga plats i dagordningen, inte
+  // dess plats i den synliga (avbockade bortfiltrerade) listan -- annars
+  // byter alla kvarvarande punkter nummer varje gång en punkt bockas av.
+  const agendaNumberByItemId = new Map(selectedAgenda.map((item, index) => [item.id, index + 1]));
   const openDecisions = currentMeeting ? decisions.filter(d => d.meeting_id === currentMeeting.id) : [];
   const openActionItems = currentMeeting ? actionItems.filter(a => a.meeting_id === currentMeeting.id) : [];
   const activeWorkOrders = workOrders.slice(0, meetingPart === 'part-1' ? 40 : 18);
@@ -873,9 +877,9 @@ function MeetingScreen({
       <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
         {visibleAgenda.length === 0 ? (
           <p className="rounded-xl bg-white/5 px-4 py-5 text-sm font-bold text-slate-300">Ingen dagordning kopplad till valt möte.</p>
-        ) : visibleAgenda.slice(0, agendaLimit).map((item, index) => (
+        ) : visibleAgenda.slice(0, agendaLimit).map((item) => (
           <div key={item.id} className="grid grid-cols-[24px_minmax(0,1fr)] gap-2 rounded-lg bg-white/10 px-2 py-1.5">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-500 text-[10px] font-black">{index + 1}</span>
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-500 text-[10px] font-black">{agendaNumberByItemId.get(item.id)}</span>
             <div className="min-w-0">
               <p className="truncate text-xs font-black">{item.title}</p>
               {item.notes && <p className="text-[10px] font-semibold leading-tight text-slate-300" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{item.notes}</p>}
