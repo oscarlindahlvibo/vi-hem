@@ -325,7 +325,14 @@ function AppInner() {
       supabase.removeChannel(channel);
       void unregisterNativePush(user.id);
     };
-  }, [user]);
+    // Depend on the stable id/org fields, not the whole user object --
+    // Supabase fires TOKEN_REFRESHED periodically (and often when the app
+    // returns to foreground on mobile), and AuthContext calls setUser with
+    // a brand-new object each time even though nothing actually changed.
+    // Keying this effect on `user` tore down and re-registered the native
+    // push token on every refresh, sometimes leaving it deactivated.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, user?.organisation_id]);
 
   if (loading) {
     return (
