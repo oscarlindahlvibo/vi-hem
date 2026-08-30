@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications, type Token } from '@capacitor/push-notifications';
+import { Badge } from '@capawesome/capacitor-badge';
 import { supabase } from './supabase';
 
 let listenersRegistered = false;
@@ -45,4 +46,20 @@ export async function unregisterNativePush(userId: string) {
   if (!Capacitor.isNativePlatform()) return;
   await supabase.from('vihem_push_tokens').update({ active: false }).eq('user_id', userId);
   if (activeContext?.userId === userId) activeContext = null;
+}
+
+/**
+ * Keeps the home-screen app icon badge in sync with the in-app unread
+ * count. iOS sets the badge from each push's `aps.badge` field, but never
+ * clears it on its own -- opening the app and reading notifications there
+ * doesn't touch the OS-level badge unless something explicitly tells it
+ * to. Call this wherever the unread count is (re)computed.
+ */
+export async function syncNativeBadge(count: number) {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await Badge.set({ count });
+  } catch (error) {
+    console.warn('Could not sync native badge:', error);
+  }
 }

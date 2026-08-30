@@ -5,7 +5,7 @@ import { LoginPage } from './components/LoginPage';
 import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { LoadingPage } from './components/ui';
 import { supabase } from './lib/supabase';
-import { registerNativePush, unregisterNativePush } from './lib/nativePush';
+import { registerNativePush, unregisterNativePush, syncNativeBadge } from './lib/nativePush';
 
 import { TenantDashboard } from './pages/TenantDashboard';
 import { StaffDashboard } from './pages/StaffDashboard';
@@ -305,6 +305,7 @@ function AppInner() {
 
       setNotificationCount(allUnread.count ?? 0);
       setChatNotificationCount(chatUnread.count ?? 0);
+      void syncNativeBadge(allUnread.count ?? 0);
     };
 
     void refreshNotificationCounts();

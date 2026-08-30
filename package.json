@@ -16,10 +16,10 @@
     "release:check": "node scripts/check-release.mjs",
     "mobile:sync": "npm run build && npx cap sync",
     "mobile:ios": "npx cap open ios",
-    "mobile:android": "npx cap open android"
-    ,"viborent:dev": "vite --config apps/viborent/vite.config.ts"
-    ,"viborent:build": "vite build --config apps/viborent/vite.config.ts"
-    ,"viborent:preview": "vite preview --config apps/viborent/vite.config.ts"
+    "mobile:android": "npx cap open android",
+    "viborent:dev": "vite --config apps/viborent/vite.config.ts",
+    "viborent:build": "vite build --config apps/viborent/vite.config.ts",
+    "viborent:preview": "vite preview --config apps/viborent/vite.config.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
@@ -27,6 +27,7 @@
     "@capacitor/core": "^8.5.0",
     "@capacitor/ios": "^8.5.0",
     "@capacitor/push-notifications": "^8.1.2",
+    "@capawesome/capacitor-badge": "^8.0.2",
     "@supabase/supabase-js": "^2.57.4",
     "@types/qrcode": "^1.5.6",
     "lucide-react": "^0.344.0",
