@@ -41,4 +41,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         config.delegateClass = SceneDelegate.self
         return config
     }
+
+    // @capacitor/push-notifications does not auto-wire these -- without
+    // forwarding them, PushNotifications.register() calls
+    // registerForRemoteNotifications() successfully but the resulting
+    // 'registration'/'registrationError' JS event never fires, so the app
+    // silently never learns its APNs device token (confirmed via Xcode
+    // console: register() resolves, but no callback ever follows).
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications, object: deviceToken)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+    }
 }
