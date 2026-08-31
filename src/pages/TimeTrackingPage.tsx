@@ -1581,6 +1581,14 @@ function AdminTimeView({ user }: { user: Profile }) {
   const [summary, setSummary] = useState<Record<string, { total: number; approved: number; pending: number; rejected: number }>>({});
   const [todayEntries, setTodayEntries] = useState<TimeEntry[]>([]);
   const [todayAbsenceRequests, setTodayAbsenceRequests] = useState<StaffAbsenceRequest[]>([]);
+  // Every pending item across the whole org, any date -- previously the
+  // only way to find a pending absence/time entry was to open each staff
+  // member's own modal one by one and look for it, since "väntande" only
+  // showed a count with nowhere to click through to. This is the flat,
+  // directly-actionable list.
+  const [pendingEntries, setPendingEntries] = useState<TimeEntry[]>([]);
+  const [pendingAbsences, setPendingAbsences] = useState<StaffAbsenceRequest[]>([]);
+  const [pendingPanelOpen, setPendingPanelOpen] = useState(true);
   const [selectedStaff, setSelectedStaff] = useState<Profile | null>(null);
   const [staffEntries, setStaffEntries] = useState<TimeEntry[]>([]);
   const [staffModalOpen, setStaffModalOpen] = useState(false);
@@ -1603,7 +1611,7 @@ function AdminTimeView({ user }: { user: Profile }) {
   const [calYear, setCalYear] = useState(now.getFullYear());
   const [calMonth, setCalMonth] = useState(now.getMonth());
 
-  useEffect(() => { fetchStaff(); fetchAdminOptions(); }, []);
+  useEffect(() => { fetchStaff(); fetchAdminOptions(); fetchAllPending(); }, []);
   useEffect(() => { if (staffMembers.length > 0) { fetchSummary(); fetchTodayEntries(); } }, [monthFilter, todayFilter, staffMembers]);
   useEffect(() => {
     const channel = supabase
@@ -1614,6 +1622,7 @@ function AdminTimeView({ user }: { user: Profile }) {
         () => {
           if (selectedStaff) loadAbsenceRequests(selectedStaff.id, monthFilter);
           fetchTodayEntries();
+          fetchAllPending();
         }
       )
       .subscribe();
@@ -1633,6 +1642,54 @@ function AdminTimeView({ user }: { user: Profile }) {
     ]);
     setWorkOrders(wos || []);
     setCustomerProjects(projectsData || []);
+  }
+
+  // Org-wide pending list, any staff member and any date -- previously the
+  // only way to find something pending was to open one staff member's
+  // modal at a time and look ("svårt att komma åt").
+  async function fetchAllPending() {
+    const [entriesResult, absencesResult] = await Promise.all([
+      supabase
+        .from('vihem_time_entries')
+        .select('*, work_order:work_order_id(id, title), customer_project:customer_project_id(id, title, name, customer_name)')
+        .in('status', ['submitted', 'change_requested'])
+        .order('start_time', { ascending: false }),
+      supabase
+        .from('vihem_staff_absence_requests')
+        .select('*, user:user_id(id, name, email, role)')
+        .eq('status', 'submitted')
+        .order('start_date', { ascending: false }),
+    ]);
+    setPendingEntries(entriesResult.data || []);
+    if (!absencesResult.error) setPendingAbsences(absencesResult.data || []);
+  }
+
+  async function approvePendingEntry(id: string) {
+    await supabase.from('vihem_time_entries').update({ status: 'approved', approved_by: user.id, approved_at: new Date().toISOString() }).eq('id', id);
+    fetchAllPending();
+    fetchSummary();
+    if (selectedStaff) loadStaffEntries(selectedStaff.id, monthFilter);
+  }
+
+  async function rejectPendingEntry(id: string) {
+    await supabase.from('vihem_time_entries').update({ status: 'rejected' }).eq('id', id);
+    fetchAllPending();
+    fetchSummary();
+    if (selectedStaff) loadStaffEntries(selectedStaff.id, monthFilter);
+  }
+
+  async function reviewPendingAbsence(id: string, status: 'approved' | 'rejected') {
+    const { error } = await supabase
+      .from('vihem_staff_absence_requests')
+      .update({ status, reviewed_by: user.id, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) {
+      setAdminAbsenceError(absenceDbErrorMessage(error));
+      return;
+    }
+    setAdminAbsenceError('');
+    fetchAllPending();
+    if (selectedStaff) loadAbsenceRequests(selectedStaff.id, monthFilter);
   }
 
   async function fetchSummary() {
@@ -1747,12 +1804,14 @@ function AdminTimeView({ user }: { user: Profile }) {
     await supabase.from('vihem_time_entries').update({ status: 'approved', approved_by: user.id, approved_at: new Date().toISOString() }).eq('id', id);
     loadStaffEntries(selectedStaff!.id, monthFilter);
     fetchSummary();
+    fetchAllPending();
   }
 
   async function rejectEntry(id: string) {
     await supabase.from('vihem_time_entries').update({ status: 'rejected' }).eq('id', id);
     loadStaffEntries(selectedStaff!.id, monthFilter);
     fetchSummary();
+    fetchAllPending();
   }
 
   async function approveAll() {
@@ -1761,6 +1820,7 @@ function AdminTimeView({ user }: { user: Profile }) {
     await supabase.from('vihem_time_entries').update({ status: 'approved', approved_by: user.id, approved_at: new Date().toISOString() })
       .eq('user_id', selectedStaff.id).in('status', ['submitted', 'change_requested'])
       .gte('start_time', start).lt('start_time', end);
+    fetchAllPending();
     loadStaffEntries(selectedStaff.id, monthFilter);
     fetchSummary();
   }
@@ -1795,9 +1855,11 @@ function AdminTimeView({ user }: { user: Profile }) {
     setAdminEditModalOpen(false);
     setAdminEntryModalTitle('Redigera tidpost');
     setAdminEntryDefaultDate('');
+    setStaffModalOpen(true);
     await loadStaffEntries(selectedStaff.id, monthFilter);
     await fetchTodayEntries();
     fetchSummary();
+    fetchAllPending();
   }
 
   async function deleteAdminEntry(entry: TimeEntry) {
@@ -1807,6 +1869,7 @@ function AdminTimeView({ user }: { user: Profile }) {
     await loadStaffEntries(selectedStaff.id, monthFilter);
     await fetchTodayEntries();
     fetchSummary();
+    fetchAllPending();
   }
 
   async function reviewAbsenceRequest(id: string, status: 'approved' | 'rejected') {
@@ -1821,6 +1884,7 @@ function AdminTimeView({ user }: { user: Profile }) {
     }
     setAdminAbsenceError('');
     loadAbsenceRequests(selectedStaff.id, monthFilter);
+    fetchAllPending();
   }
 
   async function handleAdminAbsenceSubmit(payload: {
@@ -1854,7 +1918,9 @@ function AdminTimeView({ user }: { user: Profile }) {
     setAdminAbsenceModalOpen(false);
     setAdminAbsenceDefaultDate('');
     setAdminEditingAbsence(null);
+    setStaffModalOpen(true);
     await loadAbsenceRequests(selectedStaff.id, monthFilter);
+    fetchAllPending();
   }
 
   async function deleteAdminAbsence(request: StaffAbsenceRequest) {
@@ -1867,6 +1933,7 @@ function AdminTimeView({ user }: { user: Profile }) {
     }
     setAdminAbsenceError('');
     await loadAbsenceRequests(selectedStaff.id, monthFilter);
+    fetchAllPending();
   }
 
   // Calendar helpers for selected staff
@@ -1966,6 +2033,8 @@ function AdminTimeView({ user }: { user: Profile }) {
   const totalAttendance = staffMembers.filter(staff => (todayEntriesByStaff[staff.id] || []).length > 0);
   const todayAbsentStaffCount = staffMembers.filter(staff => (todayAbsencesByStaff[staff.id] || []).length > 0).length;
   const todayPendingCount = todayEntries.filter(entry => entry.status === 'submitted' || entry.status === 'change_requested').length + todayAbsenceRequests.filter(request => request.status === 'submitted').length;
+  const staffById: Record<string, Profile> = Object.fromEntries(staffMembers.map(staff => [staff.id, staff]));
+  const totalPendingCount = pendingEntries.length + pendingAbsences.length;
   function changeMonthFilter(delta: number) {
     const next = new Date(adminListYear, adminListMonthNumber - 1 + delta, 1);
     setMonthFilter(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`);
@@ -2034,6 +2103,64 @@ function AdminTimeView({ user }: { user: Profile }) {
           {adminAbsenceError && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {adminAbsenceError}
+            </div>
+          )}
+
+          {totalPendingCount > 0 && (
+            <div className="rounded-xl border border-orange-200 bg-orange-50 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setPendingPanelOpen(open => !open)}
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <Badge className="bg-orange-200 text-orange-800 px-2.5 py-1">{totalPendingCount}</Badge>
+                  <h3 className="text-sm font-semibold text-orange-900">Väntar på godkännande</h3>
+                </div>
+                <span className="text-xs font-medium text-orange-700">{pendingPanelOpen ? 'Dölj' : 'Visa'}</span>
+              </button>
+              {pendingPanelOpen && (
+                <div className="max-h-96 divide-y divide-orange-100 overflow-y-auto border-t border-orange-200 bg-white">
+                  {pendingEntries.map(entry => (
+                    <div key={entry.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                      <button
+                        type="button"
+                        onClick={() => { const staff = staffById[entry.user_id]; if (staff) openStaffModal(staff); }}
+                        className="min-w-0 text-left"
+                      >
+                        <p className="truncate text-sm font-medium text-slate-800">{staffById[entry.user_id]?.name || 'Personal'}</p>
+                        <p className="truncate text-xs text-slate-500">
+                          {formatDate(entry.start_time)} · {entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}
+                          {(timeEntryProjectLabel(entry) || entry.work_order?.title) ? ` · ${timeEntryProjectLabel(entry) || entry.work_order?.title}` : ''}
+                          {' · '}{formatMinutes(entry.total_minutes || 0)}
+                        </p>
+                      </button>
+                      <div className="flex shrink-0 gap-3">
+                        <button onClick={() => approvePendingEntry(entry.id)} className="text-xs font-medium text-green-600 hover:text-green-700">Godkänn</button>
+                        <button onClick={() => rejectPendingEntry(entry.id)} className="text-xs font-medium text-red-500 hover:text-red-600">Avvisa</button>
+                      </div>
+                    </div>
+                  ))}
+                  {pendingAbsences.map(request => (
+                    <div key={request.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                      <button
+                        type="button"
+                        onClick={() => { const staff = staffById[request.user_id]; if (staff) openStaffModal(staff); }}
+                        className="min-w-0 text-left"
+                      >
+                        <p className="truncate text-sm font-medium text-slate-800">{request.user?.name || staffById[request.user_id]?.name || 'Personal'}</p>
+                        <p className="truncate text-xs text-slate-500">
+                          {ABSENCE_TYPE_LABEL[request.absence_type]} · {formatDate(request.start_date)}{request.end_date !== request.start_date ? ` – ${formatDate(request.end_date)}` : ''}
+                        </p>
+                      </button>
+                      <div className="flex shrink-0 gap-3">
+                        <button onClick={() => reviewPendingAbsence(request.id, 'approved')} className="text-xs font-medium text-green-600 hover:text-green-700">Godkänn</button>
+                        <button onClick={() => reviewPendingAbsence(request.id, 'rejected')} className="text-xs font-medium text-red-500 hover:text-red-600">Avvisa</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -2269,6 +2396,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                   setAdminEditingEntry(null);
                   setAdminEntryDefaultDate(`${monthFilter}-01`);
                   setAdminEntryModalTitle(`Lägg till tidrad för ${selectedStaff?.name || 'personal'}`);
+                  setStaffModalOpen(false);
                   setAdminEditModalOpen(true);
                 }}
               >
@@ -2349,6 +2477,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                         onClick={() => {
                           setAdminEditingAbsence(request);
                           setAdminAbsenceDefaultDate(request.start_date);
+                          setStaffModalOpen(false);
                           setAdminAbsenceModalOpen(true);
                         }}
                         className="text-xs text-blue-600 hover:text-blue-700 font-medium"
@@ -2430,7 +2559,8 @@ function AdminTimeView({ user }: { user: Profile }) {
                                     setAdminEditingEntry(null);
                                     setAdminEntryDefaultDate(dayKey);
                                     setAdminEntryModalTitle(`Lägg till tidrad ${formatDate(dayKey)}`);
-                                    setAdminEditModalOpen(true);
+                                    setStaffModalOpen(false);
+                  setAdminEditModalOpen(true);
                                   }}
                                   className="text-xs font-medium text-blue-600 hover:text-blue-700"
                                 >
@@ -2441,7 +2571,8 @@ function AdminTimeView({ user }: { user: Profile }) {
                                   onClick={() => {
                                     setAdminEditingAbsence(null);
                                     setAdminAbsenceDefaultDate(dayKey);
-                                    setAdminAbsenceModalOpen(true);
+                                    setStaffModalOpen(false);
+                          setAdminAbsenceModalOpen(true);
                                   }}
                                   className="text-xs font-medium text-slate-600 hover:text-slate-800"
                                 >
@@ -2468,7 +2599,8 @@ function AdminTimeView({ user }: { user: Profile }) {
                                     setAdminEditingEntry(entry);
                                     setAdminEntryDefaultDate('');
                                     setAdminEntryModalTitle(`Redigera tidpost för ${selectedStaff?.name || 'personal'}`);
-                                    setAdminEditModalOpen(true);
+                                    setStaffModalOpen(false);
+                  setAdminEditModalOpen(true);
                                   }}
                                   className="text-xs text-blue-600 hover:text-blue-700 font-medium"
                                 >
@@ -2503,7 +2635,8 @@ function AdminTimeView({ user }: { user: Profile }) {
                                   onClick={() => {
                                     setAdminEditingAbsence(request);
                                     setAdminAbsenceDefaultDate(request.start_date);
-                                    setAdminAbsenceModalOpen(true);
+                                    setStaffModalOpen(false);
+                          setAdminAbsenceModalOpen(true);
                                   }}
                                   className="text-xs text-blue-600 hover:text-blue-700 font-medium"
                                 >
@@ -2579,7 +2712,7 @@ function AdminTimeView({ user }: { user: Profile }) {
       {adminEditModalOpen && selectedStaff && (
         <EntryFormModal
           open={adminEditModalOpen}
-          onClose={() => { setAdminEditModalOpen(false); setAdminEditingEntry(null); setAdminEntryDefaultDate(''); setAdminEntryModalTitle('Redigera tidpost'); }}
+          onClose={() => { setAdminEditModalOpen(false); setAdminEditingEntry(null); setAdminEntryDefaultDate(''); setAdminEntryModalTitle('Redigera tidpost'); setStaffModalOpen(true); }}
           onSubmit={(payload) => handleAdminSaveEntry(payload, adminEditingEntry?.id)}
           workOrders={workOrders}
           customerProjects={customerProjects}
@@ -2592,7 +2725,7 @@ function AdminTimeView({ user }: { user: Profile }) {
       {selectedStaff && (
         <AbsenceRequestModal
           open={adminAbsenceModalOpen}
-          onClose={() => { setAdminAbsenceModalOpen(false); setAdminAbsenceDefaultDate(''); setAdminEditingAbsence(null); }}
+          onClose={() => { setAdminAbsenceModalOpen(false); setAdminAbsenceDefaultDate(''); setAdminEditingAbsence(null); setStaffModalOpen(true); }}
           onSubmit={handleAdminAbsenceSubmit}
           defaultDate={adminAbsenceDefaultDate || `${monthFilter}-01`}
           absence={adminEditingAbsence}

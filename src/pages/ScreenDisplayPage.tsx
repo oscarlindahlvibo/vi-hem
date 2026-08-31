@@ -115,6 +115,15 @@ function workOrderAssigneeLabel(order: WorkOrder, staffMembers: Pick<Profile, 'i
   return `${ids.length} tilldelade`;
 }
 
+const ABSENCE_TYPE_LABELS: Record<string, string> = {
+  sick: 'Sjuk',
+  vab: 'VAB',
+  vacation: 'Semester',
+  leave: 'Ledig',
+  unpaid_leave: 'Tjänstledig',
+  parental_leave: 'Föräldraledig',
+};
+
 const PROJECT_STATUS_LABELS: Record<string, string> = {
   draft: 'Utkast',
   quote_created: 'Offert skapad',
@@ -772,6 +781,7 @@ export function ScreenDisplayPage() {
           news={news}
           workOrders={workOrders}
           clockedInEntries={clockedInEntries}
+          absenceRequests={absenceRequests}
           meetings={meetings}
           bookings={bookings}
           organisationName={organisationName}
@@ -1178,6 +1188,7 @@ function PresentationScreen({
   news,
   workOrders,
   clockedInEntries,
+  absenceRequests,
   meetings,
   bookings,
   organisationName,
@@ -1190,6 +1201,7 @@ function PresentationScreen({
   news: News[];
   workOrders: WorkOrder[];
   clockedInEntries: TimeEntry[];
+  absenceRequests: StaffAbsenceRequest[];
   meetings: Meeting[];
   bookings: ShortStayBooking[];
   organisationName: string;
@@ -1199,6 +1211,8 @@ function PresentationScreen({
   screenHeight: number;
 }) {
   const [weatherText, setWeatherText] = useState('Laddar väder...');
+  const todayKey = dateKey(today());
+  const absentToday = absenceRequests.filter(request => request.start_date <= todayKey && request.end_date >= todayKey);
   const availableHeight = Math.max(screenHeight - 54, 480);
   const compact = true;
 
@@ -1369,20 +1383,36 @@ function PresentationScreen({
                     <Timer className="h-5 w-5 text-emerald-200" />
                     Instämplade
                   </h3>
-                  <span className="rounded-full bg-emerald-300/20 px-2.5 py-0.5 font-black text-emerald-100" style={{ fontSize: 13 }}>{clockedInEntries.length}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="rounded-full bg-emerald-300/20 px-2.5 py-0.5 font-black text-emerald-100" style={{ fontSize: 13 }}>{clockedInEntries.length}</span>
+                    {absentToday.length > 0 && (
+                      <span className="rounded-full bg-rose-300/20 px-2.5 py-0.5 font-black text-rose-100" style={{ fontSize: 13 }}>{absentToday.length} borta</span>
+                    )}
+                  </div>
                 </div>
                 <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
-                  {clockedInEntries.length === 0 ? (
+                  {clockedInEntries.length === 0 && absentToday.length === 0 ? (
                     <p className="rounded-xl bg-white/5 px-3 py-3 font-bold text-slate-300" style={{ fontSize: 14 }}>Ingen är instämplad just nu.</p>
-                  ) : clockedInEntries.slice(0, 9).map(entry => (
-                    <div key={entry.id} className="grid grid-cols-[minmax(76px,0.85fr)_minmax(92px,1.15fr)_auto] items-center gap-1.5 rounded-md bg-white/10 px-2 py-1">
-                      <p className="truncate font-black" style={{ fontSize: 11.5 }}>{entry.user?.name || 'Personal'}</p>
-                      <p className="truncate font-semibold text-emerald-100" style={{ fontSize: 10.5 }}>{timeEntryTitle(entry)}</p>
-                      <p className="whitespace-nowrap font-bold text-slate-400" style={{ fontSize: 9.5 }}>
-                        {new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </div>
-                  ))}
+                  ) : (
+                    <>
+                      {clockedInEntries.slice(0, 9).map(entry => (
+                        <div key={entry.id} className="grid grid-cols-[minmax(76px,0.85fr)_minmax(92px,1.15fr)_auto] items-center gap-1.5 rounded-md bg-white/10 px-2 py-1">
+                          <p className="truncate font-black" style={{ fontSize: 11.5 }}>{entry.user?.name || 'Personal'}</p>
+                          <p className="truncate font-semibold text-emerald-100" style={{ fontSize: 10.5 }}>{timeEntryTitle(entry)}</p>
+                          <p className="whitespace-nowrap font-bold text-slate-400" style={{ fontSize: 9.5 }}>
+                            {new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+                      ))}
+                      {absentToday.slice(0, 6).map(request => (
+                        <div key={request.id} className="grid grid-cols-[minmax(76px,0.85fr)_minmax(92px,1.15fr)_auto] items-center gap-1.5 rounded-md bg-rose-400/10 px-2 py-1 ring-1 ring-rose-300/20">
+                          <p className="truncate font-black" style={{ fontSize: 11.5 }}>{request.user?.name || 'Personal'}</p>
+                          <p className="truncate font-semibold text-rose-100" style={{ fontSize: 10.5 }}>{ABSENCE_TYPE_LABELS[request.absence_type] || request.absence_type}</p>
+                          <p className="whitespace-nowrap font-bold text-rose-200/70" style={{ fontSize: 9.5 }}>Borta</p>
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </div>
               </section>
             )}
