@@ -63,13 +63,25 @@
     background-size: 32px 32px, 32px 32px, auto, auto;
     font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     overflow-x: hidden;
-    overscroll-behavior-y: none;
   }
 
+  /* No overscroll-behavior-y here (or on #root below): body/#root are never
+     the actual scrolling element on web -- setting overflow-x:hidden with
+     no explicit overflow-y makes the browser compute overflow-y as "auto"
+     per spec, so both become zero-height "phantom" scroll containers that
+     never actually have anything to scroll (their content just grows past
+     the viewport instead of being clipped). overscroll-behavior:none on a
+     scroll container blocks chaining to its parent even when the container
+     itself has nothing to scroll, so having it here silently swallowed
+     every wheel/trackpad scroll before it could reach <html> -- the one
+     element that actually does scroll on web (document.scrollingElement).
+     html below keeps overscroll-behavior-y:none since it's the real
+     boundary that needs anti-bounce; the native-shell override further
+     down adds it back onto #root there, since #root becomes the real
+     scroller once the native shell pins html/body in place. */
   #root {
     min-width: 0;
     overflow-x: hidden;
-    overscroll-behavior-y: none;
   }
 
   /* Native app only (class set in main.tsx). Pins html/body so WKWebView's
@@ -92,6 +104,7 @@
     position: fixed;
     inset: 0;
     overflow-y: auto;
+    overscroll-behavior-y: none;
     -webkit-overflow-scrolling: touch;
   }
 
