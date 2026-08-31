@@ -1,4 +1,5 @@
 import React from 'react';
+import { useScrollLock } from '../lib/utils';
 
 interface BadgeProps {
   children?: React.ReactNode;
@@ -144,6 +145,7 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, children, size = 'md' }: ModalProps) {
+  useScrollLock(open);
   if (!open) return null;
   const sizes = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', xxl: 'max-w-7xl' };
   return (
@@ -158,7 +160,7 @@ export function Modal({ open, onClose, title, children, size = 'md' }: ModalProp
             </svg>
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-6">
           {children}
         </div>
       </div>

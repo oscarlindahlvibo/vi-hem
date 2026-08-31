@@ -12,7 +12,7 @@ import {
   EmptyState,
   LoadingPage,
 } from '../components/ui';
-import { formatDate, NEWS_AUDIENCE_LABELS, NEWS_PRIORITY_LABELS, NEWS_TARGET_LABELS } from '../lib/utils';
+import { formatDate, NEWS_AUDIENCE_LABELS, NEWS_PRIORITY_LABELS, NEWS_TARGET_LABELS, useScrollLock } from '../lib/utils';
 import type { News, Property } from '../types';
 import { Newspaper, Plus, Edit2, Calendar } from 'lucide-react';
 
@@ -39,6 +39,8 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
   const [newImageUrl, setNewImageUrl] = useState('');
 
   const canManageNews = user?.role === 'staff' || user?.role === 'admin' || user?.role === 'superadmin';
+
+  useScrollLock(showCreateModal);
 
   useEffect(() => {
     fetchNews();
@@ -407,7 +409,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
       {/* Create/Edit News Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto overscroll-contain">
             <div className="p-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-6">
                 {editingNews ? 'Redigera nyhet' : 'Ny nyhet'}

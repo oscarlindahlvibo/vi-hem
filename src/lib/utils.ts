@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -273,6 +274,52 @@ export function scrollAppTo(top: number, behavior: ScrollBehavior = 'auto') {
 export function scrollAppToBottom(behavior: ScrollBehavior = 'smooth') {
   const height = document.getElementById('root')?.scrollHeight ?? document.body.scrollHeight;
   scrollAppTo(height, behavior);
+}
+
+/**
+ * A `fixed inset-0` overlay (Modal, and the handful of bespoke full-page
+ * dialogs that don't go through it) sits visually on top of the page, but
+ * nothing stops a wheel/touch scroll started over its backdrop from
+ * bubbling up the DOM to whichever ancestor actually scrolls -- body on
+ * web, #root inside the native shell (see scrollAppTo above). That's what
+ * made scrolling feel like it "only worked in some spots": the gesture was
+ * scrolling the page behind the dialog instead of the dialog itself.
+ * Call lockBackgroundScroll() when an overlay opens and its returned
+ * unlock function when it closes; ref-counted so overlays opened on top of
+ * each other don't unlock the background until the last one is gone.
+ */
+let backgroundScrollLockCount = 0;
+let previousBodyOverflow: string | null = null;
+let previousRootOverflow: string | null = null;
+
+export function lockBackgroundScroll(): () => void {
+  if (backgroundScrollLockCount === 0) {
+    const root = document.getElementById('root');
+    previousBodyOverflow = document.body.style.overflow;
+    previousRootOverflow = root ? root.style.overflow : null;
+    document.body.style.overflow = 'hidden';
+    if (root) root.style.overflow = 'hidden';
+  }
+  backgroundScrollLockCount++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    backgroundScrollLockCount = Math.max(0, backgroundScrollLockCount - 1);
+    if (backgroundScrollLockCount === 0) {
+      document.body.style.overflow = previousBodyOverflow ?? '';
+      const root = document.getElementById('root');
+      if (root) root.style.overflow = previousRootOverflow ?? '';
+    }
+  };
+}
+
+/** React hook wrapper around lockBackgroundScroll -- call with the overlay's own open/visible flag. */
+export function useScrollLock(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    return lockBackgroundScroll();
+  }, [active]);
 }
 
 function blobToBase64(blob: Blob): Promise<string> {

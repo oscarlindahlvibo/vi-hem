@@ -49,6 +49,7 @@ import { BlockRenderer } from '../components/BlockRenderer';
 import { blockTypeDef, createBlock } from '../blocks/blockTypes';
 import { BLOCK_CATEGORIES } from '../blocks/blockCategories';
 import { Modal } from '../../../components/ui';
+import { useScrollLock } from '../../../lib/utils';
 import { ArchiveIcon, ArrowLeft, Bell, ChevronDown, Download, Edit3, FileSignature, FileText, Fingerprint, Globe, MoreHorizontal, Paperclip, PenLine, Plus, RefreshCw, Send, Trash2, Users, XCircle } from 'lucide-react';
 
 function describeError(err: unknown): string {
@@ -297,6 +298,8 @@ function NewDocumentModal({ organisationId, onClose, onCreated }: { organisation
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  useScrollLock(true);
+
   useEffect(() => {
     listTemplates({ status: 'active' }).then((t) => setTemplates(t.filter((x) => x.document_type === documentType))).catch(() => setTemplates([]));
   }, [documentType]);
@@ -316,7 +319,7 @@ function NewDocumentModal({ organisationId, onClose, onCreated }: { organisation
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-bold text-slate-900">Nytt dokument</h2>
         <div className="mt-4 space-y-4">
           <div>

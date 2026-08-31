@@ -7,6 +7,7 @@ import { OfflineStatus } from './OfflineStatus';
 import { Button, Input, Modal } from './ui';
 import { useBankIdFlow } from '../hooks/useBankIdFlow';
 import { initiateBankIDLink, formatPersonalNumber } from '../lib/bankid';
+import { useScrollLock } from '../lib/utils';
 import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
@@ -42,6 +43,7 @@ interface LayoutProps {
 export function Layout({ children, currentPage, onNavigate, notificationCount = 0, chatNotificationCount = 0, enabledModules = {} }: LayoutProps) {
   const { user, signOut, bankIDAvailable, refreshProfile } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  useScrollLock(mobileMenuOpen);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -308,7 +310,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
                 <p className="text-xs text-slate-500">{roleLabel}</p>
               </div>
             </div>
-            <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-0.5">
+            <nav className="flex-1 px-3 py-3 overflow-y-auto overscroll-contain space-y-0.5">
               {visibleGroups.map(group => {
                 const active = group.items.some(item => currentPage === item.page || currentPage.startsWith(`${item.page}/`));
                 if (group.items.length === 1) { const item = group.items[0]; return <button key={group.label} onClick={() => navigate(item.page)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold ${active ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-100' : 'text-slate-600 hover:bg-slate-100'}`}><span className={active ? 'text-blue-600' : 'text-slate-400'}>{group.icon}</span>{group.label}<ChevronRight className="ml-auto h-4 w-4 text-slate-300" /></button>; }
