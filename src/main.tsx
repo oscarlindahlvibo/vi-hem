@@ -59,10 +59,33 @@ window.addEventListener('unhandledrejection', (event) => {
   }
 });
 
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+// Service worker caching is a web/PWA concern -- it exists to avoid
+// re-fetching assets over the network. Inside the native app the assets
+// are already bundled locally, so it adds nothing there, only risk: the
+// registration (and its cache) survives an in-place TestFlight update in
+// WKWebView's persistent storage, keyed by the same origin across every
+// version. If a prior version's cached index.html/shell ever gets served
+// on top of a new build whose content-hashed asset filenames have moved
+// on, the app is stuck on this file's static placeholder forever with no
+// JS ever running to recover -- that's what happened going from 1.3 to
+// 1.4. Only register on the web.
+if (!Capacitor.isNativePlatform() && 'serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     void navigator.serviceWorker.register('/sw.js?v=2', { updateViaCache: 'none' }).then((registration) => {
       void registration.update();
     });
   });
+}
+
+// Belt-and-suspenders cleanup for anyone who already has a stale service
+// worker registered from a native build before this fix shipped (it can't
+// self-heal from inside the broken state above, but a fresh reinstall
+// picks up this code and clears it out for good).
+if (Capacitor.isNativePlatform() && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations.forEach((registration) => void registration.unregister());
+  });
+  if ('caches' in window) {
+    caches.keys().then((keys) => keys.forEach((key) => void caches.delete(key)));
+  }
 }
