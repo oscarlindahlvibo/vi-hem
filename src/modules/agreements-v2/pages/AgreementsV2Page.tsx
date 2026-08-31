@@ -319,7 +319,7 @@ function NewDocumentModal({ organisationId, onClose, onCreated }: { organisation
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-bold text-slate-900">Nytt dokument</h2>
         <div className="mt-4 space-y-4">
           <div>

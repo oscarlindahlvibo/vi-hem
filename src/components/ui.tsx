@@ -149,9 +149,9 @@ export function Modal({ open, onClose, title, children, size = 'md' }: ModalProp
   if (!open) return null;
   const sizes = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', xxl: 'max-w-7xl' };
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-end justify-center pb-24 lg:items-center lg:pb-0">
       <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-md" onClick={onClose} />
-      <div className={`relative flex max-h-[90vh] w-full ${sizes[size]} flex-col rounded-t-xl bg-white shadow-2xl shadow-slate-950/20 ring-1 ring-slate-900/10 sm:rounded-xl`}>
+      <div className={`relative flex max-h-[80vh] w-full ${sizes[size]} flex-col rounded-t-xl bg-white shadow-2xl shadow-slate-950/20 ring-1 ring-slate-900/10 lg:max-h-[90vh] lg:rounded-xl`}>
         <div className="flex items-center justify-between border-b border-slate-200/80 px-6 py-4">
           <h2 className="text-lg font-bold text-slate-950">{title}</h2>
           <button onClick={onClose} className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900">
@@ -160,7 +160,7 @@ export function Modal({ open, onClose, title, children, size = 'md' }: ModalProp
             </svg>
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto overscroll-contain p-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-6 [-webkit-overflow-scrolling:touch]">
           {children}
         </div>
       </div>
