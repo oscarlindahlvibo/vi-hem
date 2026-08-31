@@ -13,10 +13,23 @@ function json(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
+const WEEKDAY_NUMBERS: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+
 function localNow() {
-  const parts = new Intl.DateTimeFormat("sv-SE", { timeZone: timezone, hour: "2-digit", minute: "2-digit", weekday: "numeric" }).formatToParts(new Date());
+  // "numeric" was never a valid Intl.DateTimeFormat weekday option (only
+  // "long"/"short"/"narrow" are) -- some engines silently ignored the
+  // invalid value, this edge runtime throws RangeError instead, which is
+  // exactly why this function never actually ran successfully even after
+  // being wired to cron. Get the day name instead and map it to 1-7
+  // (matching vihem_staff_work_schedules.weekday) ourselves.
+  const parts = new Intl.DateTimeFormat("sv-SE", { timeZone: timezone, hour: "2-digit", minute: "2-digit" }).formatToParts(new Date());
   const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
-  return { weekday: Number(values.weekday), minutes: Number(values.hour) * 60 + Number(values.minute), date: new Intl.DateTimeFormat("sv-SE", { timeZone: timezone }).format(new Date()) };
+  const weekdayName = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short" }).format(new Date());
+  return {
+    weekday: WEEKDAY_NUMBERS[weekdayName] ?? 0,
+    minutes: Number(values.hour) * 60 + Number(values.minute),
+    date: new Intl.DateTimeFormat("sv-SE", { timeZone: timezone }).format(new Date()),
+  };
 }
 
 function minutes(value: string | null | undefined) {
