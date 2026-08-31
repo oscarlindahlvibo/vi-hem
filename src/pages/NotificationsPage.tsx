@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 
 interface NotificationsPageProps { onNavigate: (page: string) => void; }
-export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPageProps) {
+export function NotificationsPage({ onNavigate }: NotificationsPageProps) {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -245,6 +245,7 @@ export function NotificationsPage({ onNavigate: _onNavigate }: NotificationsPage
                   if (!notification.read_at) {
                     markAsRead(notification.id);
                   }
+                  if (notification.link) onNavigate(notification.link);
                 }}
               >
                 <div className="flex items-start justify-between">

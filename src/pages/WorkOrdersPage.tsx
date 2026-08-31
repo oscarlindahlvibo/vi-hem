@@ -105,6 +105,28 @@ const defaultCreateForm: CreateWorkOrderForm = {
   files: [],
 };
 
+type EditWorkOrderForm = {
+  title: string;
+  description: string;
+  category: string;
+  priority: WOPriority;
+  property_id: string;
+  apartment_id: string;
+  tenant_id: string;
+  due_date: string;
+};
+
+const defaultEditForm: EditWorkOrderForm = {
+  title: '',
+  description: '',
+  category: WO_CATEGORIES[0],
+  priority: 'normal',
+  property_id: '',
+  apartment_id: '',
+  tenant_id: '',
+  due_date: '',
+};
+
 const WO_STATUSES: WOStatus[] = [
   'new',
   'assigned',
@@ -177,6 +199,16 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   const [updatingAssignment, setUpdatingAssignment] = useState(false);
   const [newAssignedToIds, setNewAssignedToIds] = useState<string[]>([]);
   const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null);
+
+  // Edit modal state -- status has its own dropdown+button and assignment
+  // its own checkboxes+button already in the detail view (both work fine),
+  // this covers the rest of the order (title, description, category,
+  // priority, property/apartment/tenant, due date) which previously had no
+  // way to change at all after creation.
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState<EditWorkOrderForm>(defaultEditForm);
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+  const [editError, setEditError] = useState('');
 
   // Stamp-in state (inline, tied to work order detail)
   const [showStampInModal, setShowStampInModal] = useState(false);
@@ -620,6 +652,65 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     }
   }
 
+  function openEditModal() {
+    if (!selectedWorkOrder) return;
+    setEditForm({
+      title: selectedWorkOrder.title,
+      description: selectedWorkOrder.description || '',
+      category: selectedWorkOrder.category || WO_CATEGORIES[0],
+      priority: selectedWorkOrder.priority,
+      property_id: selectedWorkOrder.property_id || '',
+      apartment_id: selectedWorkOrder.apartment_id || '',
+      tenant_id: selectedWorkOrder.tenant_id || '',
+      due_date: selectedWorkOrder.due_date || '',
+    });
+    setEditError('');
+    // Both modals use the same fixed-inset overlay pattern, so leaving the
+    // detail modal "open" underneath would just paint over the edit form.
+    setShowDetailModal(false);
+    setShowEditModal(true);
+  }
+
+  function closeEditModal() {
+    setShowEditModal(false);
+    setEditError('');
+    setShowDetailModal(true);
+  }
+
+  async function updateWorkOrderDetails() {
+    if (!selectedWorkOrder || !editForm.title.trim()) return;
+
+    try {
+      setSubmittingEdit(true);
+      setEditError('');
+      const payload = {
+        title: editForm.title,
+        description: editForm.description,
+        category: editForm.category,
+        priority: editForm.priority,
+        property_id: editForm.property_id || null,
+        apartment_id: editForm.apartment_id || null,
+        tenant_id: editForm.tenant_id || null,
+        due_date: editForm.due_date || null,
+      };
+      const { error } = await supabase
+        .from('vihem_work_orders')
+        .update(payload)
+        .eq('id', selectedWorkOrder.id);
+
+      if (error) throw error;
+      setSelectedWorkOrder({ ...selectedWorkOrder, ...payload });
+      setShowEditModal(false);
+      setShowDetailModal(true);
+      await fetchWorkOrders();
+    } catch (err: any) {
+      console.error('Error updating work order:', err);
+      setEditError(err.message || 'Kunde inte spara ändringarna. Kontrollera fälten och försök igen.');
+    } finally {
+      setSubmittingEdit(false);
+    }
+  }
+
   async function checkActiveTimeEntry() {
     if (!user) return;
     const today = new Date();
@@ -775,6 +866,9 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   };
   const propertyApartments = createForm.property_id
     ? apartments.filter((apt) => apt.property_id === createForm.property_id)
+    : apartments;
+  const editPropertyApartments = editForm.property_id
+    ? apartments.filter((apt) => apt.property_id === editForm.property_id)
     : apartments;
   const assigneeName = (id: string) => staffMembers.find((staff) => staff.id === id)?.name || 'Okänd';
   const assigneeNames = (wo: WOWithRelations) => {
@@ -1560,6 +1654,108 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         </Modal>
       )}
 
+      {/* Edit Modal -- title/description/category/priority/property/
+          apartment/tenant/due date. Status and assignment keep their own
+          existing dedicated controls in the detail view below. */}
+      {isStaff && selectedWorkOrder && (
+        <Modal
+          open={showEditModal}
+          onClose={closeEditModal}
+          title="Redigera arbetsorder"
+          size="lg"
+        >
+          <div className="space-y-4">
+            {editError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {editError}
+              </div>
+            )}
+            <Input
+              label="Titel *"
+              required
+              value={editForm.title}
+              onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+            />
+
+            <Textarea
+              label="Beskrivning"
+              value={editForm.description}
+              onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+              rows={4}
+            />
+
+            <Select
+              label="Kategori"
+              options={WO_CATEGORIES.map((cat) => ({ value: cat, label: cat }))}
+              value={editForm.category}
+              onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+            />
+
+            <Select
+              label="Prioritet"
+              options={[
+                { value: 'low', label: WO_PRIORITY_LABELS.low },
+                { value: 'normal', label: WO_PRIORITY_LABELS.normal },
+                { value: 'high', label: WO_PRIORITY_LABELS.high },
+                { value: 'urgent', label: WO_PRIORITY_LABELS.urgent },
+              ]}
+              value={editForm.priority}
+              onChange={(e) => setEditForm({ ...editForm, priority: e.target.value as WOPriority })}
+            />
+
+            <Select
+              label="Fastighet"
+              options={[{ value: '', label: '- Ingen -' }, ...properties.map((p) => ({ value: p.id, label: p.name }))]}
+              value={editForm.property_id}
+              onChange={(e) => setEditForm({ ...editForm, property_id: e.target.value, apartment_id: '' })}
+            />
+
+            <Select
+              label="Lägenhet"
+              options={[
+                { value: '', label: '- Ingen -' },
+                ...editPropertyApartments.map((apt) => ({
+                  value: apt.id,
+                  label: `${apt.apartment_number}${apt.property?.name ? ` · ${apt.property.name}` : ''}`,
+                })),
+              ]}
+              value={editForm.apartment_id}
+              onChange={(e) => setEditForm({ ...editForm, apartment_id: e.target.value })}
+            />
+
+            <Select
+              label="Hyresgäst"
+              options={[{ value: '', label: '- Ingen -' }, ...tenants.map((tenant) => ({ value: tenant.id, label: tenant.name }))]}
+              value={editForm.tenant_id}
+              onChange={(e) => setEditForm({ ...editForm, tenant_id: e.target.value })}
+            />
+
+            <Input
+              label="Förfallodatum"
+              type="date"
+              value={editForm.due_date}
+              onChange={(e) => setEditForm({ ...editForm, due_date: e.target.value })}
+            />
+
+            <div className="flex gap-2 pt-4">
+              <Button
+                variant="secondary"
+                onClick={closeEditModal}
+              >
+                Avbryt
+              </Button>
+              <Button
+                onClick={updateWorkOrderDetails}
+                loading={submittingEdit}
+                disabled={!editForm.title.trim()}
+              >
+                Spara ändringar
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Detail Modal */}
       <Modal
         open={showDetailModal}
@@ -1569,6 +1765,13 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       >
         {selectedWorkOrder && (
           <div className="space-y-6">
+            {isStaff && (
+              <div className="flex justify-end">
+                <Button variant="secondary" size="sm" onClick={openEditModal}>
+                  Redigera arbetsorder
+                </Button>
+              </div>
+            )}
             {/* Work order info */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>

@@ -5,7 +5,7 @@ import { LoginPage } from './components/LoginPage';
 import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { LoadingPage } from './components/ui';
 import { supabase } from './lib/supabase';
-import { registerNativePush, unregisterNativePush, syncNativeBadge } from './lib/nativePush';
+import { registerNativePush, unregisterNativePush, syncNativeBadge, addPushNavigationListener } from './lib/nativePush';
 import { scrollAppTo } from './lib/utils';
 
 import { TenantDashboard } from './pages/TenantDashboard';
@@ -335,6 +335,19 @@ function AppInner() {
     // push token on every refresh, sometimes leaving it deactivated.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.organisation_id]);
+
+  // Tapping a delivered push should open whatever it's about, not just the
+  // app in general. Mirrors navigate() below (which isn't defined yet at
+  // this point in the component, since it only makes sense once `user` is
+  // guaranteed non-null) rather than reordering it just for this.
+  useEffect(() => {
+    return addPushNavigationListener((link) => {
+      setCurrentPage(link);
+      if (link === 'notifications') setNotificationCount(0);
+      if (link === 'chat') setChatNotificationCount(0);
+      scrollAppTo(0);
+    });
+  }, []);
 
   if (loading) {
     return (
