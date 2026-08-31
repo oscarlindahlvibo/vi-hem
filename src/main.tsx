@@ -1,7 +1,19 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Capacitor } from '@capacitor/core';
 import App from './App.tsx';
 import './index.css';
+
+// WKWebView's own top-level scroll view rubber-bands past the edges of the
+// document and, while it does, visually drags position:fixed elements
+// (header, bottom nav) along with it -- a WKWebView-specific rendering
+// quirk that doesn't happen in a normal browser tab. Scoped to the native
+// app only (see .vihem-native-shell in index.css): pins html/body so
+// WKWebView's own scroll view never has anything to bounce, and makes
+// #root itself the scrollable container instead.
+if (Capacitor.isNativePlatform()) {
+  document.documentElement.classList.add('vihem-native-shell');
+}
 
 const rootElement = document.getElementById('root');
 

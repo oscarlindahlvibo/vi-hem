@@ -251,3 +251,23 @@ export function getAptStatusColor(status: string): string {
     blocked: 'text-red-600 bg-red-100',
   }[status] ?? 'text-slate-600 bg-slate-100';
 }
+
+/**
+ * Scrolls the app's real scroll container to the given position. In the
+ * native iOS/Android shell, #root is the scroll container instead of
+ * window/body (see .vihem-native-shell in index.css, which pins html/body
+ * so WKWebView's own scroll view never bounces past the edges) -- plain
+ * window.scrollTo() would silently do nothing there. Scrolling both is
+ * harmless: whichever one isn't the real scroll container is already at
+ * rest and ignores it.
+ */
+export function scrollAppTo(top: number, behavior: ScrollBehavior = 'auto') {
+  window.scrollTo({ top, left: 0, behavior });
+  document.getElementById('root')?.scrollTo({ top, left: 0, behavior });
+}
+
+/** Same idea as scrollAppTo, but to the bottom of the real content height. */
+export function scrollAppToBottom(behavior: ScrollBehavior = 'smooth') {
+  const height = document.getElementById('root')?.scrollHeight ?? document.body.scrollHeight;
+  scrollAppTo(height, behavior);
+}

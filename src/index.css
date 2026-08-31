@@ -72,6 +72,29 @@
     overscroll-behavior-y: none;
   }
 
+  /* Native app only (class set in main.tsx). Pins html/body so WKWebView's
+     own scroll view has nothing to rubber-band past the edges of -- that
+     native bounce is what visually drags the fixed header/bottom nav along
+     with it. #root becomes the scrollable container instead; fixed-position
+     children (header, bottom nav, sidebar) stay pinned to the viewport
+     exactly as before, since #root doesn't create a new containing block
+     for them. */
+  html.vihem-native-shell,
+  html.vihem-native-shell body {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  html.vihem-native-shell #root {
+    position: fixed;
+    inset: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
   * {
     box-sizing: border-box;
   }

@@ -6,6 +6,7 @@ import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { LoadingPage } from './components/ui';
 import { supabase } from './lib/supabase';
 import { registerNativePush, unregisterNativePush, syncNativeBadge } from './lib/nativePush';
+import { scrollAppTo } from './lib/utils';
 
 import { TenantDashboard } from './pages/TenantDashboard';
 import { StaffDashboard } from './pages/StaffDashboard';
@@ -240,11 +241,11 @@ function AppInner() {
     setCurrentPage(user.role === 'superadmin' ? 'admin-organisations' : 'dashboard');
     setNotificationCount(0);
     setChatNotificationCount(0);
-    requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
+    requestAnimationFrame(() => scrollAppTo(0));
   }, [user?.id, user?.role]);
 
   useEffect(() => {
-    requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
+    requestAnimationFrame(() => scrollAppTo(0));
   }, [currentPage]);
 
   useEffect(() => {
@@ -359,7 +360,7 @@ function AppInner() {
     setCurrentPage(page);
     if (page === 'notifications') setNotificationCount(0);
     if (page === 'chat') setChatNotificationCount(0);
-    window.scrollTo(0, 0);
+    scrollAppTo(0);
   };
 
   const isAdmin = user.role === 'admin';
