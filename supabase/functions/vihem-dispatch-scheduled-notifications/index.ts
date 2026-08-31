@@ -25,22 +25,38 @@ function minutes(value: string | null | undefined) {
   return hour * 60 + minute;
 }
 
-async function createOnce(client: any, row: { organisation_id: string; user_id: string }, key: string, type: string, title: string, message: string) {
-  const { data, error } = await client.from("vihem_notification_delivery_log").insert({ organisation_id: row.organisation_id, user_id: row.user_id, delivery_key: key, notification_type: type }).select("id").maybeSingle();
+// Records the dedup key first (unique per user/day/reminder), then -- only
+// if that succeeded -- creates the notification via the shared
+// create_notification() RPC, passing setting_key so the recipient's own
+// notification preference (falling back to the org's) gates it, same as
+// every other notification path in the app.
+async function createOnce(client: any, row: { organisation_id: string; user_id: string }, key: string, settingKey: string, title: string, message: string) {
+  const { data, error } = await client.from("vihem_notification_delivery_log").insert({ organisation_id: row.organisation_id, user_id: row.user_id, delivery_key: key, notification_type: settingKey }).select("id").maybeSingle();
   if (error?.code === "23505") return false;
   if (error) throw error;
   if (!data) return false;
-  const result = await client.from("vihem_notifications").insert({ user_id: row.user_id, organisation_id: row.organisation_id, title, message, type: "time_entry", link: "timetracking" });
-  if (result.error) throw result.error;
+  const { error: rpcError } = await client.rpc("create_notification", {
+    recipient_id: row.user_id,
+    org_uuid: row.organisation_id,
+    notification_title: title,
+    notification_message: message,
+    notification_type: "time_entry",
+    notification_link: "timetracking",
+    setting_key: settingKey,
+  });
+  if (rpcError) throw rpcError;
   return true;
 }
 
 Deno.serve(async request => {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
-  const secret = Deno.env.get("VIHEM_CRON_SECRET");
-  if (secret && request.headers.get("X-Cron-Secret") !== secret) return json({ error: "Unauthorized" }, 401);
 
   const client = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+  const { data: cfgRow } = await client.from("vihem_system_settings").select("value").eq("key", "scheduled_notifications_dispatch").maybeSingle();
+  const expectedSecret = cfgRow?.value?.secret;
+  if (expectedSecret && request.headers.get("X-Cron-Secret") !== expectedSecret) return json({ error: "Unauthorized" }, 401);
+
   const now = localNow();
   const { data: settingsRows, error: settingsError } = await client.from("vihem_organisation_notification_settings").select("organisation_id,settings");
   if (settingsError) return json({ error: settingsError.message }, 500);

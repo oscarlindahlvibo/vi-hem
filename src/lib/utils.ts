@@ -151,6 +151,63 @@ export const TERMINATION_STATUS_LABELS: Record<string, string> = {
   closed: 'Avslutad',
 };
 
+/**
+ * Every notification type the app can send, shared between the org-wide
+ * defaults (AdminStaffPage.tsx) and each user's own overrides
+ * (NotificationSettingsPage.tsx). Keys match the setting_key strings the
+ * DB trigger functions pass into create_notification() -- see
+ * notification_enabled_for_user() and the per-recipient trigger updates
+ * in supabase/migrations/20260831120000_per_recipient_notification_gating.sql.
+ */
+export type NotificationSettings = {
+  work_order_assigned: boolean;
+  work_order_unassigned: boolean;
+  maintenance_created_staff: boolean;
+  maintenance_comment_staff: boolean;
+  staff_absence_submitted: boolean;
+  chat_message: boolean;
+  fleet_damage_reported: boolean;
+  jour_swap_available: boolean;
+  shift_start_reminder: boolean;
+  lunch_start_reminder: boolean;
+  lunch_return_reminder: boolean;
+  shift_end_reminder: boolean;
+  default_lunch_return_minutes: number;
+};
+
+export const defaultNotificationSettings: NotificationSettings = {
+  work_order_assigned: true,
+  work_order_unassigned: true,
+  maintenance_created_staff: true,
+  maintenance_comment_staff: true,
+  staff_absence_submitted: true,
+  chat_message: true,
+  fleet_damage_reported: true,
+  jour_swap_available: true,
+  shift_start_reminder: true,
+  lunch_start_reminder: true,
+  lunch_return_reminder: true,
+  shift_end_reminder: true,
+  default_lunch_return_minutes: 45,
+};
+
+export type BooleanNotificationSettingKey = Exclude<keyof NotificationSettings, 'default_lunch_return_minutes'>;
+
+export const NOTIFICATION_SETTING_LABELS: { key: BooleanNotificationSettingKey; label: string; description: string }[] = [
+  { key: 'work_order_assigned', label: 'Arbetsorder tilldelad', description: 'Notifiera när en arbetsorder tilldelas användaren.' },
+  { key: 'work_order_unassigned', label: 'Otilldelad arbetsorder', description: 'Notifiera personal när en arbetsorder läggs upp utan ansvarig.' },
+  { key: 'maintenance_created_staff', label: 'Ny felanmälan', description: 'Notifiera all personal när en felanmälan kommer in.' },
+  { key: 'maintenance_comment_staff', label: 'Kommentar på felanmälan', description: 'Notifiera personal när en hyresgäst kommenterar en felanmälan.' },
+  { key: 'staff_absence_submitted', label: 'Frånvaro från personal', description: 'Notifiera admin när personal sjukanmäler sig eller ansöker om ledighet.' },
+  { key: 'chat_message', label: 'Chattmeddelanden', description: 'Notifiera deltagare när nya chattmeddelanden skickas.' },
+  { key: 'fleet_damage_reported', label: 'Fordonsskada', description: 'Notifiera admin vid brådskande fordonsskador.' },
+  { key: 'jour_swap_available', label: 'Jourpass ute för byte', description: 'Notifiera behörig personal när ett jourpass läggs ut för byte.' },
+  { key: 'shift_start_reminder', label: 'Pass börjar', description: 'Påminn vid schemalagd starttid.' },
+  { key: 'lunch_start_reminder', label: 'Lunch börjar', description: 'Påminn vid schemalagd lunchstart.' },
+  { key: 'lunch_return_reminder', label: 'Lunch slutar', description: 'Påminn efter organisationens eller personalens lunchlängd.' },
+  { key: 'shift_end_reminder', label: 'Pass slutar', description: 'Påminn om att stämpla ut vid schemalagt slut.' },
+];
+
 export const WO_CATEGORIES = [
   'Fastighetsunderhåll',
   'Felanmälan',

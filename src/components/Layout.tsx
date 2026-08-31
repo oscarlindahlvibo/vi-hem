@@ -8,6 +8,7 @@ import { Button, Input, Modal } from './ui';
 import { useBankIdFlow } from '../hooks/useBankIdFlow';
 import { initiateBankIDLink, formatPersonalNumber } from '../lib/bankid';
 import { useScrollLock } from '../lib/utils';
+import { NotificationSettingsModal } from './NotificationSettingsModal';
 import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
@@ -23,6 +24,8 @@ interface NavItem {
   roles: Role[];
   badge?: number;
   module?: ModuleKey;
+  /** Admin also needs is_system_admin (or superadmin) to see this -- API/integration pages. */
+  systemAdminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -45,6 +48,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   useScrollLock(mobileMenuOpen);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [notificationSettingsModalOpen, setNotificationSettingsModalOpen] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -111,16 +115,21 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Nyheter', icon: <Newspaper className="w-5 h-5" />, page: 'news', roles: ['tenant', 'staff', 'admin'] },
     ] },
     { label: 'Administration', icon: <Settings className="w-5 h-5" />, items: [
-      { label: 'Inställningar', icon: <SlidersHorizontal className="w-5 h-5" />, page: 'admin-settings', roles: ['admin'] },
-      { label: 'Google Workspace', icon: <Mail className="w-5 h-5" />, page: 'admin-google-workspace', roles: ['admin'] },
-      { label: 'Cellsynt SMS', icon: <MessageSquareText className="w-5 h-5" />, page: 'admin-cellsynth', roles: ['admin'] },
+      { label: 'Inställningar', icon: <SlidersHorizontal className="w-5 h-5" />, page: 'admin-settings', roles: ['admin'], systemAdminOnly: true },
+      { label: 'Google Workspace', icon: <Mail className="w-5 h-5" />, page: 'admin-google-workspace', roles: ['admin'], systemAdminOnly: true },
+      { label: 'Cellsynt SMS', icon: <MessageSquareText className="w-5 h-5" />, page: 'admin-cellsynth', roles: ['admin'], systemAdminOnly: true },
       { label: 'TV-skärm', icon: <Monitor className="w-5 h-5" />, page: 'screen-settings', roles: ['admin'] },
       { label: 'Importera data', icon: <FileSpreadsheet className="w-5 h-5" />, page: 'admin-import', roles: ['admin'] },
       { label: 'Organisationer', icon: <Globe className="w-5 h-5" />, page: 'admin-organisations', roles: ['superadmin'] },
     ] },
   ];
 
-  const isVisible = (item: NavItem) => Boolean(user && item.roles.includes(user.role) && (!item.module || enabledModules[item.module]));
+  const isVisible = (item: NavItem) => Boolean(
+    user
+    && item.roles.includes(user.role)
+    && (!item.module || enabledModules[item.module])
+    && (!item.systemAdminOnly || user.role === 'superadmin' || user.is_system_admin)
+  );
   const visibleGroups = navGroups.map(group => ({ ...group, items: group.items.filter(isVisible) })).filter(group => group.items.length > 0);
   const currentGroup = visibleGroups.find(group => group.items.some(item => currentPage === item.page || currentPage.startsWith(`${item.page}/`)))?.label;
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -248,6 +257,13 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
             <KeyRound className="w-4 h-4" />
             Byt lösenord
           </button>
+          <button
+            onClick={() => setNotificationSettingsModalOpen(true)}
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950"
+          >
+            <Bell className="w-4 h-4" />
+            Notisinställningar
+          </button>
           {bankIDAvailable && (
             <button
               onClick={() => { setBankIdLinkedNotice(false); setBankIdModalOpen(true); }}
@@ -327,6 +343,16 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
               >
                 <KeyRound className="w-4 h-4" />
                 Byt lösenord
+              </button>
+              <button
+                onClick={() => {
+                  setNotificationSettingsModalOpen(true);
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm text-slate-600 hover:bg-slate-100"
+              >
+                <Bell className="w-4 h-4" />
+                Notisinställningar
               </button>
               {bankIDAvailable && (
                 <button
@@ -480,6 +506,11 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
           )}
         </div>
       </Modal>
+
+      <NotificationSettingsModal
+        open={notificationSettingsModalOpen}
+        onClose={() => setNotificationSettingsModalOpen(false)}
+      />
     </div>
   );
 }

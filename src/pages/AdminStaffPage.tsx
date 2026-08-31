@@ -16,6 +16,7 @@ import {
   SearchInput,
 } from '../components/ui';
 import type { Profile, StaffWorkSchedule } from '../types';
+import { defaultNotificationSettings, NOTIFICATION_SETTING_LABELS, type NotificationSettings } from '../lib/utils';
 
 const WEEKDAYS = [
   { weekday: 1, label: 'Måndag' },
@@ -36,45 +37,6 @@ type ScheduleFormRow = {
   lunch_minutes: string;
 };
 
-type NotificationSettings = {
-  work_order_assigned: boolean;
-  work_order_unassigned: boolean;
-  maintenance_created_staff: boolean;
-  staff_absence_submitted: boolean;
-  chat_message: boolean;
-  shift_start_reminder: boolean;
-  lunch_start_reminder: boolean;
-  lunch_return_reminder: boolean;
-  shift_end_reminder: boolean;
-  default_lunch_return_minutes: number;
-};
-
-const defaultNotificationSettings: NotificationSettings = {
-  work_order_assigned: true,
-  work_order_unassigned: true,
-  maintenance_created_staff: true,
-  staff_absence_submitted: true,
-  chat_message: true,
-  shift_start_reminder: true,
-  lunch_start_reminder: true,
-  lunch_return_reminder: true,
-  shift_end_reminder: true,
-  default_lunch_return_minutes: 45,
-};
-
-type BooleanNotificationSettingKey = Exclude<keyof NotificationSettings, 'default_lunch_return_minutes'>;
-
-const NOTIFICATION_SETTING_LABELS: { key: BooleanNotificationSettingKey; label: string; description: string }[] = [
-  { key: 'work_order_assigned', label: 'Arbetsorder tilldelad', description: 'Notifiera när en arbetsorder tilldelas användaren.' },
-  { key: 'work_order_unassigned', label: 'Otilldelad arbetsorder', description: 'Notifiera personal när en arbetsorder läggs upp utan ansvarig.' },
-  { key: 'maintenance_created_staff', label: 'Ny felanmälan', description: 'Notifiera all personal när en felanmälan kommer in.' },
-  { key: 'staff_absence_submitted', label: 'Frånvaro från personal', description: 'Notifiera admin när personal sjukanmäler sig eller ansöker om ledighet.' },
-  { key: 'chat_message', label: 'Chattmeddelanden', description: 'Notifiera deltagare när nya chattmeddelanden skickas.' },
-  { key: 'shift_start_reminder', label: 'Pass börjar', description: 'Påminn vid schemalagd starttid.' },
-  { key: 'lunch_start_reminder', label: 'Lunch börjar', description: 'Påminn vid schemalagd lunchstart.' },
-  { key: 'lunch_return_reminder', label: 'Lunch slutar', description: 'Påminn efter organisationens eller personalens lunchlängd.' },
-  { key: 'shift_end_reminder', label: 'Pass slutar', description: 'Påminn om att stämpla ut vid schemalagt slut.' },
-];
 
 function isMissingSchemaError(error: any) {
   return error?.code === 'PGRST205' || String(error?.message || '').includes('schema cache');
@@ -118,7 +80,9 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     role: 'staff',
     active: true,
     bankid_personal_number: '',
+    is_system_admin: false,
   });
+  const canManageSystemAdminFlag = user?.role === 'superadmin' || user?.is_system_admin;
 
   useEffect(() => {
     fetchStaff();
@@ -205,6 +169,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
             role: staffFormData.role,
             active: staffFormData.active,
             bankid_personal_number: normalizedPno,
+            is_system_admin: canManageSystemAdminFlag ? staffFormData.is_system_admin : editingStaff.is_system_admin,
           })
           .eq('id', editingStaff.id);
         if (error) throw error;
@@ -242,7 +207,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   };
 
   const resetForm = () => {
-    setStaffFormData({ name: '', email: '', phone: '', role: 'staff', active: true, bankid_personal_number: '' });
+    setStaffFormData({ name: '', email: '', phone: '', role: 'staff', active: true, bankid_personal_number: '', is_system_admin: false });
     setScheduleRows(defaultScheduleRows());
     setSaveError('');
   };
@@ -333,6 +298,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       role: staffMember.role || 'staff',
       active: staffMember.active !== false,
       bankid_personal_number: staffMember.bankid_personal_number || '',
+      is_system_admin: staffMember.is_system_admin === true,
     });
     setEditingStaff(staffMember);
     fetchStaffSchedule(staffMember.id);
@@ -625,6 +591,20 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                 className="w-4 h-4 rounded border-slate-300"
               />
               <span className="text-sm text-slate-700">Aktiv</span>
+            </label>
+          )}
+          {editingStaff && staffFormData.role === 'admin' && canManageSystemAdminFlag && (
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={staffFormData.is_system_admin}
+                onChange={(e) => setStaffFormData({ ...staffFormData, is_system_admin: e.target.checked })}
+                className="mt-0.5 w-4 h-4 rounded border-slate-300"
+              />
+              <span>
+                <span className="block text-sm text-slate-700">Systemadmin (API-åtkomst)</span>
+                <span className="block text-xs text-slate-500">Ger tillgång till Inställningar, Google Workspace och Cellsynt SMS -- annars kan admin inte nå dessa.</span>
+              </span>
             </label>
           )}
           {editingStaff && (

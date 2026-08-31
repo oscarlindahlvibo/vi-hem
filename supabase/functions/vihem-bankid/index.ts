@@ -18,7 +18,7 @@ Deno.serve(async (req) => {
     const profile = authData.user ? await getProfile(db, authData.user.id) : null;
 
     if (["get_settings", "save_settings", "delete_settings"].includes(action)) {
-      if (!profile || !["admin", "superadmin"].includes(profile.role)) return json({ error: "Endast admin kan hantera BankID." }, 403);
+      if (!profile || !(profile.role === "superadmin" || (profile.role === "admin" && profile.is_system_admin))) return json({ error: "Endast systemadmin kan hantera BankID." }, 403);
       if (action === "get_settings") return json({ ok: true, settings: publicSettings(await getSettings(db, profile.organisation_id)) });
       if (action === "delete_settings") {
         await db.from("vihem_bankid_settings").upsert({ organisation_id: profile.organisation_id, encrypted_api_user: "", encrypted_password: "", encrypted_company_api_guid: "", api_user_hint: "", company_api_guid_hint: "", enabled: false, login_enabled: false, signing_enabled: false, updated_by: profile.id, updated_at: new Date().toISOString() }, { onConflict: "organisation_id" });
@@ -201,7 +201,7 @@ Deno.serve(async (req) => {
 });
 
 function getAuthClient(req: Request) { const headers = { Authorization: req.headers.get("Authorization") || "" }; return { client: createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers } }) }; }
-async function getProfile(db: any, id: string) { const { data } = await db.from("vihem_profiles").select("id,role,organisation_id,email,auth_method").eq("id", id).maybeSingle(); return data; }
+async function getProfile(db: any, id: string) { const { data } = await db.from("vihem_profiles").select("id,role,organisation_id,email,auth_method,is_system_admin").eq("id", id).maybeSingle(); return data; }
 async function getSettings(db: any, organisationId: string) { const { data } = await db.from("vihem_bankid_settings").select("*").eq("organisation_id", organisationId).maybeSingle(); return data; }
 function publicSettings(s: any) { return { configured: Boolean(s?.encrypted_api_user && s?.encrypted_password && s?.encrypted_company_api_guid), enabled: Boolean(s?.enabled), login_enabled: Boolean(s?.login_enabled), signing_enabled: Boolean(s?.signing_enabled), environment: s?.environment || "test", api_user_hint: s?.api_user_hint || "", company_api_guid_hint: s?.company_api_guid_hint || "", provider_note: s?.provider_note || "", updated_at: s?.updated_at || null }; }
 async function startProvider(s: any, visible: string, nonVisible: string, req: Request) { const credentials = await credentialsFor(s); const response = await fetch(signUrl(s), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...credentials, endUserIp: (req.headers.get("x-forwarded-for") || "0.0.0.0").split(",")[0].trim(), userVisibleData: visible, userNonVisibleData: nonVisible, getQr: true }) }); const data = await response.json(); if (!response.ok) throw new Error(data?.message || `BankSignering start misslyckades (${response.status}).`); const r = data?.apiCallResponse?.Response || data?.Response || data; if (!r?.OrderRef) throw new Error("BankSignering returnerade inget OrderRef."); return { orderRef: String(r.OrderRef), autoStartToken: String(r.AutoStartToken || ""), qrImage: r.QrImage || null }; }

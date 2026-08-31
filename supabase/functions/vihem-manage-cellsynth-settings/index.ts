@@ -12,8 +12,8 @@ Deno.serve(async (req) => {
     const db = createClient(url, serviceKey);
     const { data: { user } } = await auth.auth.getUser();
     if (!user) return json({ error: "Unauthorized" }, 401);
-    const { data: profile } = await db.from("vihem_profiles").select("id,role,organisation_id").eq("id", user.id).maybeSingle();
-    if (!profile?.organisation_id || !["admin", "superadmin"].includes(profile.role)) return json({ error: "Endast admin kan hantera Cellsynt." }, 403);
+    const { data: profile } = await db.from("vihem_profiles").select("id,role,organisation_id,is_system_admin").eq("id", user.id).maybeSingle();
+    if (!profile?.organisation_id || !(profile.role === "superadmin" || (profile.role === "admin" && profile.is_system_admin))) return json({ error: "Endast systemadmin kan hantera Cellsynt." }, 403);
     const body = await req.json().catch(() => ({}));
     const existing = await getSettings(db, profile.organisation_id);
     if (body.action === "get") return json({ ok: true, settings: publicSettings(existing) });

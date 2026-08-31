@@ -44,13 +44,13 @@ Deno.serve(async (req: Request) => {
 
     const { data: profile, error: profileError } = await serviceClient
       .from("vihem_profiles")
-      .select("id, role, organisation_id")
+      .select("id, role, organisation_id, is_system_admin")
       .eq("id", user.id)
       .maybeSingle();
 
     if (profileError || !profile?.organisation_id) return json({ error: "Kunde inte verifiera användaren." }, 403);
-    if (!["superadmin", "admin"].includes(profile.role)) {
-      return json({ error: "Endast admin kan hantera AI/OCR-kopplingar." }, 403);
+    if (!(profile.role === "superadmin" || (profile.role === "admin" && profile.is_system_admin))) {
+      return json({ error: "Endast systemadmin kan hantera AI/OCR-kopplingar." }, 403);
     }
 
     const existing = await getSettings(serviceClient, profile.organisation_id);

@@ -52,6 +52,7 @@ const localSuperadminProfile: Profile = {
   phone: '',
   role: 'superadmin',
   active: true,
+  is_system_admin: true,
   avatar_url: '',
   organisation_id: null,
   auth_method: 'password',

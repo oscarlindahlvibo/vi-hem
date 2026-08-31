@@ -381,6 +381,11 @@ function AppInner() {
   const isStaff = user.role === 'staff' || isAdmin;
   const isTenant = user.role === 'tenant';
   const isScreen = user.role === 'screen';
+  // Admin-only permission tier: unlocks API/integration settings (AI/OCR,
+  // Google Workspace, BankID, Cellsynt) within the admin's own org.
+  // Superadmin already passes every gate unconditionally elsewhere, so it's
+  // included here too rather than needing a separate check at every call site.
+  const isSystemAdmin = isSuperadmin || (isAdmin && user.is_system_admin);
 
   const renderDashboard = () => {
     if (isTenant) return <TenantDashboard onNavigate={navigate} />;
@@ -513,15 +518,15 @@ function AppInner() {
         return <ScreenSettingsPage onNavigate={navigate} />;
 
       case 'admin-settings':
-        if (!isAdmin) return renderDashboard();
+        if (!isSystemAdmin) return renderDashboard();
         return <PlatformSettingsPage onNavigate={navigate} />;
 
       case 'admin-google-workspace':
-        if (!isAdmin) return renderDashboard();
+        if (!isSystemAdmin) return renderDashboard();
         return <PlatformSettingsPage initialSection="google" onNavigate={navigate} />;
 
       case 'admin-cellsynth':
-        if (!isAdmin) return renderDashboard();
+        if (!isSystemAdmin) return renderDashboard();
         return <SmsPage />;
 
       case 'finance':
