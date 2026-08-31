@@ -5,6 +5,7 @@ import { allocatePaymentOldestFirst, calculateInstallmentSchedule, deriveInstall
 import { buildInstallmentPaymentPdfBlob } from '../lib/installmentPaymentPdf';
 import { buildInvoicePdfBlob } from '../lib/invoicePdf';
 import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
+import { saveOrShareFile } from '../lib/utils';
 import { Badge, Button, Card, EmptyState, Input, Select, Textarea } from './ui';
 import type { FinanceCompany, FinanceCustomer, InstallmentPayment, InstallmentPlan, InstallmentPlanDocument, InstallmentPlanInvoice, InstallmentSchedule, Invoice, InvoiceLine } from '../types';
 
@@ -151,12 +152,7 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
     setSaving(true);
     try {
       await persistDocument(file, selectedPlan, payment.id, 'payment_underlay', `Betalningsunderlag ${payment.payment_number}`);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = file.name;
-      link.click();
-      URL.revokeObjectURL(url);
+      await saveOrShareFile(blob, file.name);
       await loadPlan(selectedPlan);
     } catch (documentError) {
       setError(documentError instanceof Error ? documentError.message : 'Kunde inte spara betalningsunderlaget.');
@@ -411,8 +407,7 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
       ]);
       if (invoiceError || linesError || !invoice) throw new Error(invoiceError?.message ?? linesError?.message ?? 'Kunde inte läsa fakturaunderlaget.');
       const blob = buildInvoicePdfBlob({ invoice: invoice as Invoice, lines: (lines ?? []) as InvoiceLine[], formatCurrency: (value, currency = 'SEK') => new Intl.NumberFormat('sv-SE', { style: 'currency', currency }).format(value) });
-      const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
-      anchor.href = url; anchor.download = `${selectedPlan.plan_number}-del-${row.installment_no}.pdf`; anchor.click(); URL.revokeObjectURL(url);
+      await saveOrShareFile(blob, `${selectedPlan.plan_number}-del-${row.installment_no}.pdf`);
     } catch (invoiceError) {
       setError(invoiceError instanceof Error ? invoiceError.message : 'Kunde inte skapa PDF-filen.');
     } finally { setSaving(false); }

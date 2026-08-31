@@ -9,9 +9,10 @@
 // up here -- there is no fallback to legacy vihem_invoices, since that path
 // isn't linked to a tenant the way vihem_accounted_invoice_links is.
 import { useCallback, useEffect, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { Badge, Card, EmptyState, LoadingPage, PageHeader } from '../components/ui';
-import { formatCurrency, formatDate } from '../lib/utils';
-import { fetchMyInvoicePdfUrl, listMyRentInvoices } from '../modules/finance-v2/api';
+import { formatCurrency, formatDate, saveOrShareFile } from '../lib/utils';
+import { fetchMyInvoicePdfBlob, listMyRentInvoices } from '../modules/finance-v2/api';
 import type { AccountedInvoiceLink } from '../modules/finance-v2/types';
 import { FileText, Receipt } from 'lucide-react';
 
@@ -58,15 +59,20 @@ export function TenantInvoicesPage() {
     load();
   }, [load]);
 
-  const handleOpenPdf = async (invoiceId: string) => {
+  const handleOpenPdf = async (invoiceId: string, invoiceNumber: string) => {
     setOpeningId(invoiceId);
     setError('');
     try {
-      const url = await fetchMyInvoicePdfUrl(invoiceId);
-      window.open(url, '_blank', 'noopener,noreferrer');
-      // Revoke after a delay rather than immediately: the new tab needs the
-      // blob: URL to still be valid while it loads the PDF.
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      const blob = await fetchMyInvoicePdfBlob(invoiceId);
+      if (Capacitor.isNativePlatform()) {
+        await saveOrShareFile(blob, `faktura-${invoiceNumber}.pdf`);
+      } else {
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank', 'noopener,noreferrer');
+        // Revoke after a delay rather than immediately: the new tab needs
+        // the blob: URL to still be valid while it loads the PDF.
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Kunde inte öppna fakturan.');
     } finally {
@@ -121,7 +127,7 @@ export function TenantInvoicesPage() {
                   />
                   <button
                     type="button"
-                    onClick={() => handleOpenPdf(invoice.id)}
+                    onClick={() => handleOpenPdf(invoice.id, invoice.accounted_invoice_number || invoice.id)}
                     disabled={openingId === invoice.id || !invoice.accounted_invoice_number}
                     className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
                     title={invoice.accounted_invoice_number ? 'Öppna PDF' : 'Fakturan är inte klar än'}

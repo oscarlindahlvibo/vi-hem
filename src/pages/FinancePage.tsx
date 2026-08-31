@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { buildInvoicePdfBlob } from '../lib/invoicePdf';
 import { buildDocumentArchiveFilename, renameGoogleDriveFile } from '../lib/googleDriveStorage';
+import { saveOrShareFile } from '../lib/utils';
 import { DocumentCapture } from '../components/DocumentCapture';
 import { InstallmentPlansPanel } from '../components/InstallmentPlansPanel';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, Select, Textarea } from '../components/ui';
@@ -1978,12 +1979,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     const content = String(data.content || data.csv || '');
     const filename = String(data.filename || `vihem-leverantorsbetalningar.${format === 'bankgirot' ? 'txt' : 'csv'}`);
     const blob = new Blob([format === 'csv' ? `\uFEFF${content}` : content], { type: format === 'bankgirot' ? 'text/plain;charset=utf-8' : 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(url);
+    await saveOrShareFile(blob, filename);
 
     const skipped = (data.skipped || {}) as Record<string, number>;
     setSupplierPaymentExportResult(
@@ -2550,12 +2546,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     const csv = String(data?.csv || '');
     const filename = String(data?.filename || 'vihem-bokforing.csv');
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(url);
+    await saveOrShareFile(blob, filename);
     setSaving(false);
   };
 
@@ -2576,12 +2567,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     const sie = String(data?.sie || '');
     const filename = String(data?.filename || 'vihem-bokforing.se');
     const blob = new Blob([sie], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(url);
+    await saveOrShareFile(blob, filename);
     setSaving(false);
   };
 
@@ -2985,12 +2971,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
     const content = String(data.content || data.csv || '');
     const filename = String(data.filename || `vihem-autogiro-${selectedRentRun.rent_period.slice(0, 7)}.${format === 'bankgirot' ? 'txt' : 'csv'}`);
     const blob = new Blob([content], { type: format === 'bankgirot' ? 'text/plain;charset=utf-8' : 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(url);
+    await saveOrShareFile(blob, filename);
 
     const skipped = (data.skipped || {}) as Record<string, number>;
     setRentDirectDebitExportResult(
@@ -3217,16 +3198,7 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       .update({ document_id: data.id })
       .eq('id', invoice.id);
 
-    const { data: signedData } = await supabase.storage
-      .from('vihem-documents')
-      .createSignedUrl(storagePath, 60 * 10, { download: fileName });
-
-    if (signedData?.signedUrl) {
-      const link = document.createElement('a');
-      link.href = signedData.signedUrl;
-      link.download = fileName;
-      link.click();
-    }
+    await saveOrShareFile(pdfBlob, fileName);
   };
 
   const downloadInvoiceDocument = async (storagePath: string, fileName: string) => {
@@ -3239,12 +3211,12 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       return;
     }
 
-    const link = document.createElement('a');
-    link.href = data.signedUrl;
-    link.download = fileName;
-    link.target = '_blank';
-    link.rel = 'noopener';
-    link.click();
+    const response = await fetch(data.signedUrl);
+    if (!response.ok) {
+      setError('Kunde inte hämta faktura-PDF:en.');
+      return;
+    }
+    await saveOrShareFile(await response.blob(), fileName);
   };
 
   const renderInvoiceDocument = async (invoice: Invoice, lines: InvoiceLine[]) => {
@@ -3266,12 +3238,9 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           const publicUrl = new URL(import.meta.env.VITE_SUPABASE_URL);
           legacyUrl.protocol = publicUrl.protocol;
           legacyUrl.host = publicUrl.host;
-          const link = document.createElement('a');
-          link.href = legacyUrl.toString();
-          link.download = `${safePathPart(`Faktura ${invoice.invoice_number || invoice.id.slice(0, 8)}`)}.pdf`;
-          link.target = '_blank';
-          link.rel = 'noopener';
-          link.click();
+          const response = await fetch(legacyUrl.toString());
+          if (!response.ok) throw new Error('fetch failed');
+          await saveOrShareFile(await response.blob(), `${safePathPart(`Faktura ${invoice.invoice_number || invoice.id.slice(0, 8)}`)}.pdf`);
         } catch {
           setError('Kunde inte skapa en giltig länk till faktura-PDF:en.');
         }

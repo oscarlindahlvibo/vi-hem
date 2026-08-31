@@ -421,11 +421,12 @@ export async function listMyRentInvoices(): Promise<AccountedInvoiceLink[]> {
 
 /**
  * Fetches the invoice PDF via vihem-accounted-tenant-invoices (the Accounted
- * API key never reaches the browser) and returns a blob: URL the caller can
- * open in a new tab or set as a download link's href. The caller is
- * responsible for revoking it (URL.revokeObjectURL) once no longer needed.
+ * API key never reaches the browser) and returns the raw Blob. The caller
+ * decides how to present it -- window.open on a blob: URL works fine on the
+ * web, but not in the native app's WKWebView (see saveOrShareFile in
+ * lib/utils.ts), so callers should branch on Capacitor.isNativePlatform().
  */
-export async function fetchMyInvoicePdfUrl(invoiceLinkId: string): Promise<string> {
+export async function fetchMyInvoicePdfBlob(invoiceLinkId: string): Promise<Blob> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.access_token) {
     throw new AccountedIntegrationError('UNAUTHORIZED', 'Din inloggning kunde inte verifieras. Ladda om sidan och försök igen.');
@@ -442,8 +443,7 @@ export async function fetchMyInvoicePdfUrl(invoiceLinkId: string): Promise<strin
       body?.error?.message || 'Kunde inte hämta fakturan från Accounted.',
     );
   }
-  const blob = await response.blob();
-  return URL.createObjectURL(blob);
+  return response.blob();
 }
 
 // ── Scanner → Accounted (underlag) ───────────────────────────────────────

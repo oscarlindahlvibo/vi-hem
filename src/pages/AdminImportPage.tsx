@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { createUserAccount } from '../lib/userAdmin';
+import { saveOrShareFile } from '../lib/utils';
 import { Button, Card, EmptyState, PageHeader } from '../components/ui';
 
 type ImportKind = 'properties' | 'apartments' | 'tenants' | 'inventory_locations' | 'inventory_items' | 'rental_products' | 'rental_pricing' | 'rental_assets';
@@ -52,11 +53,11 @@ function readRows(file: File): Promise<ImportRow[]> {
   });
 }
 
-function downloadCsv(kind: ImportKind) {
+async function downloadCsv(kind: ImportKind) {
   const header = columns[kind].join(';');
   const sample = columns[kind].map(column => templateRows[kind][0][column] || '').join(';');
   const blob = new Blob([`\uFEFF${header}\n${sample}\n`], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `vi-hem-${kind}-mall.csv`; anchor.click(); URL.revokeObjectURL(url);
+  await saveOrShareFile(blob, `vi-hem-${kind}-mall.csv`);
 }
 
 export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
@@ -80,10 +81,14 @@ export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page
   }, [kind]);
   const rowErrors = useMemo(() => rows.map((row, index) => ({ row: index + 2, message: required.filter(field => !clean(row[field])).map(field => `saknar ${field}`).join(', ') })).filter(item => item.message), [rows, required]);
 
-  function downloadExcelTemplate() {
+  async function downloadExcelTemplate() {
     const workbook = XLSX.utils.book_new();
     (Object.keys(columns) as ImportKind[]).forEach(sheetKind => XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(templateRows[sheetKind], { header: columns[sheetKind] }), labels[sheetKind].title));
-    XLSX.writeFile(workbook, 'vi-hem-importmall.xlsx');
+    // XLSX.writeFile does its own browser-only blob+anchor download
+    // internally, same problem as the manual pattern elsewhere -- build
+    // the bytes ourselves instead so saveOrShareFile can handle it.
+    const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    await saveOrShareFile(new Blob([wbout], { type: 'application/octet-stream' }), 'vi-hem-importmall.xlsx');
   }
 
   async function importRows() {
@@ -214,7 +219,7 @@ export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page
     <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
       <Card className="p-5"><div className="mb-5 flex flex-wrap gap-2">{(Object.keys(labels) as ImportKind[]).map(value => { const Icon = labels[value].icon; return <Button key={value} size="sm" variant={kind === value ? 'primary' : 'secondary'} onClick={() => { setKind(value); setRows([]); setResults([]); setFileName(''); }}>{<Icon className="h-4 w-4" />}{labels[value].title}</Button>; })}</div>
         <div className="rounded-xl border border-blue-100 bg-blue-50 p-4"><h2 className="font-semibold text-blue-950">{labels[kind].title}</h2><p className="mt-1 text-sm text-blue-800">{labels[kind].description}</p><p className="mt-2 text-xs text-blue-700">Kolumner: {columns[kind].join(', ')}</p></div>
-        <div className="mt-5 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => downloadCsv(kind)}><Download className="h-4 w-4" /> CSV-mall</Button><Button variant="secondary" onClick={downloadExcelTemplate}><Download className="h-4 w-4" /> Excel-mall (.xlsx)</Button><label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Upload className="h-4 w-4" /> Välj fil<input className="hidden" type="file" accept=".csv,.xlsx,.xls,.txt" onChange={async event => { const file = event.target.files?.[0]; if (!file) return; try { setError(''); setRows(await readRows(file)); setFileName(file.name); setResults([]); } catch { setError('Filen kunde inte läsas. Använd mallen och kontrollera rubrikerna.'); } }} /></label></div>
+        <div className="mt-5 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => void downloadCsv(kind)}><Download className="h-4 w-4" /> CSV-mall</Button><Button variant="secondary" onClick={() => void downloadExcelTemplate()}><Download className="h-4 w-4" /> Excel-mall (.xlsx)</Button><label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Upload className="h-4 w-4" /> Välj fil<input className="hidden" type="file" accept=".csv,.xlsx,.xls,.txt" onChange={async event => { const file = event.target.files?.[0]; if (!file) return; try { setError(''); setRows(await readRows(file)); setFileName(file.name); setResults([]); } catch { setError('Filen kunde inte läsas. Använd mallen och kontrollera rubrikerna.'); } }} /></label></div>
         {fileName && <p className="mt-3 text-sm text-slate-600">Vald fil: <strong>{fileName}</strong> · {rows.length} rader</p>}
         {rowErrors.length > 0 && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"><p className="font-semibold">Importen kan inte starta ännu</p>{rowErrors.slice(0, 8).map(item => <p key={item.row}>Rad {item.row}: {item.message}</p>)}{rowErrors.length > 8 && <p>…och {rowErrors.length - 8} fler rader.</p>}</div>}
         {rows.length > 0 && <><div className="mt-5 overflow-x-auto rounded-lg border border-slate-200"><table className="min-w-full text-left text-sm"><thead className="bg-slate-50"><tr>{columns[kind].map(column => <th key={column} className="px-3 py-2 font-semibold">{column}</th>)}</tr></thead><tbody>{rows.slice(0, 10).map((row, index) => <tr key={index} className="border-t border-slate-100">{columns[kind].map(column => <td key={column} className="max-w-[220px] truncate px-3 py-2">{row[column] || '—'}</td>)}</tr>)}</tbody></table></div>{rows.length > 10 && <p className="mt-2 text-xs text-slate-500">Visar de första 10 av {rows.length} rader.</p>}<Button className="mt-4" onClick={importRows} loading={busy} disabled={Boolean(rowErrors.length)}>Importera {rows.length} {labels[kind].title.toLowerCase()}</Button></>}

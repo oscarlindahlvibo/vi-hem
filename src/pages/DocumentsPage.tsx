@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -13,7 +14,7 @@ import {
   EmptyState,
   LoadingPage,
 } from '../components/ui';
-import { formatDate, DOCUMENT_CATEGORY_LABELS, DOCUMENT_CONTRACT_STATUS_LABELS, DOCUMENT_TYPE_LABELS } from '../lib/utils';
+import { formatDate, saveOrShareFile, DOCUMENT_CATEGORY_LABELS, DOCUMENT_CONTRACT_STATUS_LABELS, DOCUMENT_TYPE_LABELS } from '../lib/utils';
 import { Document, Profile, Property } from '../types';
 import { FileText, Download, Upload, Search, Trash2, FolderOpen } from 'lucide-react';
 
@@ -301,18 +302,25 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
       }
       if (doc.file_url) {
         if (doc.file_url.startsWith('data:')) {
-          // iOS/Safari may render a data: PDF as a blank page. Convert it to
-          // a Blob URL first so generated inspection and contract documents
-          // open like regular files.
+          // iOS/Safari may render a data: PDF as a blank page, so this
+          // fetches it into a real Blob first. On the web that opens fine
+          // in a new tab via a blob: URL; the native app can't do that
+          // (WKWebView doesn't support opening blob: URLs in a new tab),
+          // so it goes through the native Share sheet instead.
           const response = await fetch(doc.file_url);
           if (!response.ok) throw new Error('Dokumentet kunde inte läsas.');
-          const blobUrl = URL.createObjectURL(await response.blob());
-          const link = document.createElement('a');
-          link.href = blobUrl;
-          link.target = '_blank';
-          link.rel = 'noopener';
-          link.click();
-          window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+          const blob = await response.blob();
+          if (Capacitor.isNativePlatform()) {
+            await saveOrShareFile(blob, doc.file_name || doc.title);
+          } else {
+            const blobUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.click();
+            window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+          }
         } else {
           window.open(doc.file_url, '_blank');
         }
