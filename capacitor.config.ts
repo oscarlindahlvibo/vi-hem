@@ -17,12 +17,6 @@ const config: CapacitorConfig = {
     // taller than before. The app already handles safe areas itself via
     // CSS, so the native scroll view shouldn't add its own on top.
     contentInset: 'never',
-    // Temporary: TestFlight builds freeze on the static loading placeholder
-    // and Safari's Develop menu doesn't list the app at all, which means
-    // this wasn't even on -- without it a release build's WKWebView isn't
-    // attachable, so there's no way to see the actual console error behind
-    // the freeze. Remove once that's diagnosed.
-    webContentsDebuggingEnabled: true,
   },
   plugins: {
     // Without this, PushNotificationsHandler.willPresent (see

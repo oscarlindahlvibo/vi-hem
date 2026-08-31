@@ -1,27 +1,8 @@
-// TEMPORARY boot-sequence tracer for the frozen-splash-screen bug: console
-// capture over Safari's remote inspector for a capacitor:// page has been
-// unreliable to confirm, so this writes each step directly onto the static
-// placeholder in index.html (#boot-status) -- whatever step number is last
-// visible on a still-frozen screen tells us exactly where execution stops.
-// Remove once diagnosed.
-function bootStep(n: number, label: string) {
-  try {
-    console.log(`[BOOT ${n}] ${label}`);
-    const el = document.getElementById('boot-status');
-    if (el) el.textContent = `boot: ${n}/6 (${label})`;
-  } catch {
-    // swallow -- this tracer must never itself be why boot fails
-  }
-}
-bootStep(1, 'script started');
-
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
 import App from './App.tsx';
 import './index.css';
-
-bootStep(2, 'imports resolved');
 
 // WKWebView's own top-level scroll view rubber-bands past the edges of the
 // document and, while it does, visually drags position:fixed elements
@@ -34,11 +15,7 @@ if (Capacitor.isNativePlatform()) {
   document.documentElement.classList.add('vihem-native-shell');
 }
 
-bootStep(3, 'capacitor check done');
-
 const rootElement = document.getElementById('root');
-
-bootStep(4, 'root element found: ' + Boolean(rootElement));
 
 function showStartupError(error: unknown) {
   console.error('VI-HEM startup error:', error);
@@ -59,13 +36,11 @@ if (!rootElement) {
   showStartupError(new Error('Root element was not found'));
 } else {
   try {
-    bootStep(5, 'about to call render');
     createRoot(rootElement).render(
       <StrictMode>
         <App />
       </StrictMode>
     );
-    bootStep(6, 'render() returned without throwing');
   } catch (error) {
     showStartupError(error);
   }
