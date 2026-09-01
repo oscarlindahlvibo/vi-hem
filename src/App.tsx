@@ -54,6 +54,7 @@ import { SmsPage } from './pages/SmsPage';
 import { SkatteverketPage } from './pages/SkatteverketPage';
 import { JourPage } from './pages/JourPage';
 import { FleetPage } from './pages/FleetPage';
+import { AdminBroadcastPage } from './pages/AdminBroadcastPage';
 import type { ModuleKey } from './types';
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasError: boolean }> {
@@ -516,6 +517,10 @@ function AppInner() {
       case 'screen-settings':
         if (!isAdmin) return renderDashboard();
         return <ScreenSettingsPage onNavigate={navigate} />;
+
+      case 'admin-broadcast':
+        if (!isAdmin) return renderDashboard();
+        return <AdminBroadcastPage />;
 
       case 'admin-settings':
         if (!isSystemAdmin) return renderDashboard();

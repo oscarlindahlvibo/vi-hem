@@ -119,6 +119,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Google Workspace', icon: <Mail className="w-5 h-5" />, page: 'admin-google-workspace', roles: ['admin'], systemAdminOnly: true },
       { label: 'Cellsynt SMS', icon: <MessageSquareText className="w-5 h-5" />, page: 'admin-cellsynth', roles: ['admin'], systemAdminOnly: true },
       { label: 'TV-skärm', icon: <Monitor className="w-5 h-5" />, page: 'screen-settings', roles: ['admin'] },
+      { label: 'Push-meddelande', icon: <Bell className="w-5 h-5" />, page: 'admin-broadcast', roles: ['admin'] },
       { label: 'Importera data', icon: <FileSpreadsheet className="w-5 h-5" />, page: 'admin-import', roles: ['admin'] },
       { label: 'Organisationer', icon: <Globe className="w-5 h-5" />, page: 'admin-organisations', roles: ['superadmin'] },
     ] },

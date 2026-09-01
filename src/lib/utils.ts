@@ -172,6 +172,7 @@ export type NotificationSettings = {
   lunch_start_reminder: boolean;
   lunch_return_reminder: boolean;
   shift_end_reminder: boolean;
+  admin_broadcast: boolean;
   default_lunch_return_minutes: number;
 };
 
@@ -188,6 +189,7 @@ export const defaultNotificationSettings: NotificationSettings = {
   lunch_start_reminder: true,
   lunch_return_reminder: true,
   shift_end_reminder: true,
+  admin_broadcast: true,
   default_lunch_return_minutes: 45,
 };
 
@@ -206,6 +208,7 @@ export const NOTIFICATION_SETTING_LABELS: { key: BooleanNotificationSettingKey; 
   { key: 'lunch_start_reminder', label: 'Lunch börjar', description: 'Påminn vid schemalagd lunchstart.' },
   { key: 'lunch_return_reminder', label: 'Lunch slutar', description: 'Påminn efter organisationens eller personalens lunchlängd.' },
   { key: 'shift_end_reminder', label: 'Pass slutar', description: 'Påminn om att stämpla ut vid schemalagt slut.' },
+  { key: 'admin_broadcast', label: 'Meddelande från administrationen', description: 'Notifiera vid utskick som en administratör skickar till dig eller din grupp.' },
 ];
 
 export const WO_CATEGORIES = [
