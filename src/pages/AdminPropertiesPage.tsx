@@ -2,18 +2,20 @@ import React, { useState, useEffect } from 'react';
 import {
   Building2, Plus, Edit2, Home, Users, ChevronRight,
   Key, Network, Zap, Droplets, Thermometer, Wind,
-  Lock, MailOpen, CarFront, Package, Layers,
+  Lock, MailOpen, CarFront, Package, Layers, KeyRound, BookOpen,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Card, Badge, Button, Modal, Input, Textarea,
-  PageHeader, EmptyState, LoadingPage, SearchInput,
+  PageHeader, EmptyState, LoadingPage, SearchInput, Tabs,
 } from '../components/ui';
 import {
   formatCurrency, APARTMENT_STATUS_LABELS, getAptStatusColor,
 } from '../lib/utils';
 import { Property, Apartment, Tenancy, Profile, KeyRecord, NetworkOutlet, Organisation } from '../types';
+import { OperationsAccessPage } from './OperationsAccessPage';
+import { OperationsRoutinesPage } from './OperationsRoutinesPage';
 
 const APARTMENT_STATUS_OPTIONS = [
   { value: 'vacant', label: 'Ledig' },
@@ -58,6 +60,8 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
   const [showPropertyModal, setShowPropertyModal] = useState(false);
   const [showApartmentModal, setShowApartmentModal] = useState(false);
   const [aptTab, setAptTab] = useState<'basic' | 'technical'>('basic');
+  const [operationsEnabled, setOperationsEnabled] = useState(false);
+  const [driftTab, setDriftTab] = useState<'access' | 'routines'>('access');
 
   // Key IDs dynamic list
   const [keyIds, setKeyIds] = useState<KeyRecord[]>([]);
@@ -94,6 +98,14 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
           .eq('id', user.organisation_id)
           .maybeSingle();
         if (org) setOrgLimits(org);
+
+        const { data: operationsModule } = await supabase
+          .from('vihem_organisation_modules')
+          .select('enabled')
+          .eq('organisation_id', user.organisation_id)
+          .eq('module_key', 'operations')
+          .maybeSingle();
+        setOperationsEnabled(Boolean(operationsModule?.enabled));
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -379,6 +391,23 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
               </div>
             )}
           </Card>
+
+          {operationsEnabled && (
+            <Card className="p-5">
+              <h3 className="mb-3 text-lg font-black text-slate-950">Driftinformation</h3>
+              <Tabs
+                tabs={[{ key: 'access', label: 'Åtkomst' }, { key: 'routines', label: 'Rutiner' }]}
+                active={driftTab}
+                onChange={key => setDriftTab(key as 'access' | 'routines')}
+                className="mb-4"
+              />
+              {driftTab === 'access' ? (
+                <OperationsAccessPage propertyId={selectedProperty.id} />
+              ) : (
+                <OperationsRoutinesPage propertyId={selectedProperty.id} />
+              )}
+            </Card>
+          )}
 
           <div className="space-y-3">
             {getPropertyApartments(selectedProperty.id).length === 0 ? (

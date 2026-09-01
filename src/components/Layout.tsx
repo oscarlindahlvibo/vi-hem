@@ -14,7 +14,7 @@ import {
   Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
   ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase,
   BedDouble, CalendarDays, Landmark, MessageSquareText, Monitor, ScanLine, SlidersHorizontal,
-  Truck, Package, FileSpreadsheet, Mail, FileSignature, ShieldCheck, ShieldAlert, Car, Sparkles,
+  Truck, Package, FileSpreadsheet, Mail, FileSignature, ShieldCheck, ShieldAlert, Car, Sparkles, BookOpen,
 } from 'lucide-react';
 
 interface NavItem {
@@ -84,6 +84,13 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Dokument', icon: <FileText className="w-5 h-5" />, page: 'documents', roles: ['tenant', 'staff', 'admin'] },
       { label: 'Uppsägningar', icon: <FileX className="w-5 h-5" />, page: 'admin-terminations', roles: ['admin'] },
       { label: 'Uppsägning', icon: <FileX className="w-5 h-5" />, page: 'termination', roles: ['tenant'] },
+    ] },
+    { label: 'Drift & rutiner', icon: <ClipboardCheck className="w-5 h-5" />, items: [
+      { label: 'Översikt', icon: <ClipboardCheck className="w-5 h-5" />, page: 'operations-overview', roles: ['staff', 'admin'], module: 'operations' },
+      { label: 'Åtkomst', icon: <KeyRound className="w-5 h-5" />, page: 'operations-access', roles: ['staff', 'admin'], module: 'operations' },
+      { label: 'Rutiner', icon: <BookOpen className="w-5 h-5" />, page: 'operations-routines', roles: ['staff', 'admin'], module: 'operations' },
+      { label: 'Checklistor', icon: <ClipboardList className="w-5 h-5" />, page: 'operations-checklists', roles: ['staff', 'admin'], module: 'operations' },
+      { label: 'Inventarielistor', icon: <Package className="w-5 h-5" />, page: 'operations-inventory', roles: ['staff', 'admin'], module: 'operations' },
     ] },
     { label: 'Korttidsuthyrning', icon: <BedDouble className="w-5 h-5" />, items: [
       { label: 'Korttidsuthyrning', icon: <BedDouble className="w-5 h-5" />, page: 'short-stay', roles: ['staff', 'admin'], module: 'short_stay' },

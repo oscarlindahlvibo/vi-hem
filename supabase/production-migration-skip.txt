@@ -14,3 +14,4 @@ supabase/migrations/20260601113956_seed_superadmin_user.sql
 supabase/migrations/20260601114333_remove_broken_superadmin_auth_user.sql
 supabase/migrations/20260601114356_fix_superadmin_profile_id.sql
 supabase/migrations/20260616090000_vihem_namespace_shared_resources.sql
+supabase/migrations/20260901190000_operations_seed_demo_data.sql

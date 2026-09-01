@@ -59,6 +59,7 @@ import {
 import { TIME_CATEGORY_LABELS } from '../lib/utils';
 import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
 import type { TimeCategory } from '../types';
+import { WorkOrderOperationsPanel } from '../components/WorkOrderOperationsPanel';
 
 type FilterView = 'all' | 'mine' | 'unassigned';
 type WorkOrderListTab = 'active' | 'archived';
@@ -1974,6 +1975,13 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                 </div>
               </div>
             )}
+
+            <WorkOrderOperationsPanel
+              workOrderId={selectedWorkOrder.id}
+              propertyId={selectedWorkOrder.property_id}
+              apartmentId={selectedWorkOrder.apartment_id}
+              category={selectedWorkOrder.category}
+            />
 
             {/* Time logged */}
             <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">

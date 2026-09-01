@@ -55,6 +55,11 @@ import { SkatteverketPage } from './pages/SkatteverketPage';
 import { JourPage } from './pages/JourPage';
 import { FleetPage } from './pages/FleetPage';
 import { AdminBroadcastPage } from './pages/AdminBroadcastPage';
+import { OperationsOverviewPage } from './pages/OperationsOverviewPage';
+import { OperationsAccessPage } from './pages/OperationsAccessPage';
+import { OperationsRoutinesPage } from './pages/OperationsRoutinesPage';
+import { OperationsChecklistsPage } from './pages/OperationsChecklistsPage';
+import { OperationsInventoryPage } from './pages/OperationsInventoryPage';
 import type { ModuleKey } from './types';
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasError: boolean }> {
@@ -106,6 +111,7 @@ const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
   'skatteverket',
   'jour',
   'fleet_management',
+  'operations',
 ];
 
 const DEFAULT_MODULE_STATE: ModuleState = {
@@ -124,6 +130,7 @@ const DEFAULT_MODULE_STATE: ModuleState = {
   skatteverket: false,
   jour: false,
   fleet_management: false,
+  operations: false,
 };
 
 function normalizeAppPath(path: string) {
@@ -521,6 +528,26 @@ function AppInner() {
       case 'admin-broadcast':
         if (!isAdmin) return renderDashboard();
         return <AdminBroadcastPage />;
+
+      case 'operations-overview':
+        if (!isStaff || !enabledModules.operations) return renderDashboard();
+        return <OperationsOverviewPage onNavigate={navigate} />;
+
+      case 'operations-access':
+        if (!isStaff || !enabledModules.operations) return renderDashboard();
+        return <OperationsAccessPage />;
+
+      case 'operations-routines':
+        if (!isStaff || !enabledModules.operations) return renderDashboard();
+        return <OperationsRoutinesPage />;
+
+      case 'operations-checklists':
+        if (!isStaff || !enabledModules.operations) return renderDashboard();
+        return <OperationsChecklistsPage />;
+
+      case 'operations-inventory':
+        if (!isStaff || !enabledModules.operations) return renderDashboard();
+        return <OperationsInventoryPage />;
 
       case 'admin-settings':
         if (!isSystemAdmin) return renderDashboard();

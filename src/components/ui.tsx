@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useScrollLock } from '../lib/utils';
 
 interface BadgeProps {
@@ -298,6 +298,145 @@ export function PageHeader({ title, subtitle, action, backButton, icon: Icon }: 
         </div>
       </div>
       {action && <div className="w-full sm:w-auto sm:flex-shrink-0">{action}</div>}
+    </div>
+  );
+}
+
+interface TabsProps {
+  tabs: { key: string; label: string }[];
+  active: string;
+  onChange: (key: string) => void;
+  className?: string;
+}
+
+export function Tabs({ tabs, active, onChange, className = '' }: TabsProps) {
+  return (
+    <div className={`flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 ${className}`}>
+      {tabs.map(tab => (
+        <button
+          key={tab.key}
+          type="button"
+          onClick={() => onChange(tab.key)}
+          className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-bold transition-colors ${active === tab.key ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+interface RevealSecretProps {
+  /** A short, non-secret hint shown while masked, e.g. "••32". */
+  hint?: string;
+  /** Fetches the plaintext secret on demand -- never called until the user asks. */
+  onReveal: () => Promise<string>;
+  /** Fire-and-forget audit call when the revealed value is copied. */
+  onCopied?: () => void;
+  /** How long the revealed value stays on screen before re-masking itself. */
+  autoHideMs?: number;
+}
+
+/**
+ * Masked-by-default secret display used throughout Drift & rutiner.
+ * The plaintext value only ever lives in this component's own local state
+ * (never in a parent's state, a store, or a log call) and is cleared by a
+ * timer -- both when it expires and on unmount.
+ */
+export function RevealSecret({ hint, onReveal, onCopied, autoHideMs = 30000 }: RevealSecretProps) {
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+  const hideTimer = useRef<number | null>(null);
+
+  useEffect(() => () => { if (hideTimer.current) window.clearTimeout(hideTimer.current); }, []);
+
+  async function handleReveal() {
+    setError('');
+    setLoading(true);
+    try {
+      const secret = await onReveal();
+      setRevealed(secret);
+      if (hideTimer.current) window.clearTimeout(hideTimer.current);
+      hideTimer.current = window.setTimeout(() => setRevealed(null), autoHideMs);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Kunde inte hämta koden.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCopy() {
+    if (!revealed) return;
+    try {
+      await navigator.clipboard.writeText(revealed);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard unavailable -- best effort only */
+    }
+    onCopied?.();
+  }
+
+  if (revealed) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-lg bg-slate-900 px-3 py-1.5 font-mono text-base font-black tracking-wider text-white">{revealed}</span>
+        <Button type="button" size="sm" variant="outline" onClick={handleCopy}>{copied ? 'Kopierad!' : 'Kopiera'}</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="rounded-lg bg-slate-100 px-3 py-1.5 font-mono text-base font-black tracking-wider text-slate-400">{hint || '••••'}</span>
+      <Button type="button" size="sm" variant="secondary" loading={loading} onClick={handleReveal}>Visa kod</Button>
+      {error && <span className="text-xs font-semibold text-red-600">{error}</span>}
+    </div>
+  );
+}
+
+export interface ChecklistItemData {
+  id: string;
+  label: string;
+  required?: boolean;
+  completed?: boolean;
+  comment?: string;
+}
+
+interface ChecklistItemProps {
+  item: ChecklistItemData;
+  onToggle: (id: string, completed: boolean) => void;
+  onCommentChange?: (id: string, comment: string) => void;
+  disabled?: boolean;
+}
+
+export function ChecklistItem({ item, onToggle, onCommentChange, disabled }: ChecklistItemProps) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3">
+      <label className="flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          checked={Boolean(item.completed)}
+          disabled={disabled}
+          onChange={(event) => onToggle(item.id, event.target.checked)}
+          className="mt-0.5 h-5 w-5 shrink-0 rounded border-slate-300 accent-blue-600"
+        />
+        <span className={`min-w-0 flex-1 text-sm font-semibold ${item.completed ? 'text-slate-400 line-through' : 'text-slate-900'}`}>
+          {item.label}
+          {item.required && <span className="ml-1 text-red-500">*</span>}
+        </span>
+      </label>
+      {onCommentChange && (
+        <input
+          type="text"
+          value={item.comment || ''}
+          onChange={(event) => onCommentChange(item.id, event.target.value)}
+          placeholder="Kommentar (valfritt)"
+          className="vihem-field vihem-focus w-full rounded-lg border px-3 py-2 text-xs text-slate-700"
+        />
+      )}
     </div>
   );
 }
