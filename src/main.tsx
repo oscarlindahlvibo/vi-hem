@@ -1,7 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
-import App from './App.tsx';
 import './index.css';
 
 // WKWebView's own top-level scroll view rubber-bands past the edges of the
@@ -35,15 +34,25 @@ function showStartupError(error: unknown) {
 if (!rootElement) {
   showStartupError(new Error('Root element was not found'));
 } else {
-  try {
-    createRoot(rootElement).render(
-      <StrictMode>
-        <App />
-      </StrictMode>
-    );
-  } catch (error) {
-    showStartupError(error);
-  }
+  const root = rootElement;
+  // Loaded dynamically (not as a static top-level `import App from
+  // './App.tsx'`) so that a throw anywhere in App's own module graph --
+  // e.g. src/lib/supabase.ts throwing when VITE_SUPABASE_URL is missing
+  // from a CI build, see ios/App/ci_scripts/ci_post_clone.sh -- rejects
+  // this promise instead of aborting this whole script before the .catch
+  // below, or the error/unhandledrejection listeners further down, ever
+  // get a chance to run. That gap is exactly what left the app frozen on
+  // index.html's static "VI-HEM laddas" placeholder forever with nothing
+  // in the UI to explain why.
+  import('./App.tsx')
+    .then(({ default: App }) => {
+      createRoot(root).render(
+        <StrictMode>
+          <App />
+        </StrictMode>
+      );
+    })
+    .catch(showStartupError);
 }
 
 // Keep a visible recovery screen if a production chunk fails after React has mounted.
