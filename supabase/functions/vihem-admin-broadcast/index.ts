@@ -41,22 +41,44 @@ Deno.serve(async (req) => {
     const title = String(body.title || "").trim();
     const message = String(body.message || "").trim();
     const audience = String(body.audience || "");
-    const roles = rolesForAudience(audience);
+    const recipientId = String(body.recipient_id || "").trim();
 
     if (!title) return json({ error: "Rubrik krävs." }, 400);
     if (title.length > MAX_TITLE_LENGTH) return json({ error: `Rubriken får vara högst ${MAX_TITLE_LENGTH} tecken.` }, 400);
     if (!message) return json({ error: "Meddelande krävs." }, 400);
     if (message.length > MAX_MESSAGE_LENGTH) return json({ error: `Meddelandet får vara högst ${MAX_MESSAGE_LENGTH} tecken.` }, 400);
-    if (!roles) return json({ error: "Ogiltig mottagargrupp." }, 400);
 
-    const { data: recipients, error: recipientsError } = await db
-      .from("vihem_profiles")
-      .select("id")
-      .eq("organisation_id", profile.organisation_id)
-      .eq("active", true)
-      .in("role", roles);
-    if (recipientsError) throw recipientsError;
-    if (!recipients || recipients.length === 0) return json({ error: "Inga mottagare hittades för vald grupp." }, 404);
+    // Two mutually exclusive targeting modes: a whole audience group
+    // (tenant/staff/all, see rolesForAudience) or one named person
+    // (audience: 'individual' + recipient_id) -- resolve to the same
+    // shape (a list of {id, name} to notify) either way so the
+    // create_notification fan-out below doesn't need to branch.
+    let recipients: { id: string; name: string | null }[];
+    if (audience === "individual") {
+      if (!recipientId) return json({ error: "Välj en mottagare." }, 400);
+      const { data: person, error: personError } = await db
+        .from("vihem_profiles")
+        .select("id,name")
+        .eq("id", recipientId)
+        .eq("organisation_id", profile.organisation_id)
+        .eq("active", true)
+        .maybeSingle();
+      if (personError) throw personError;
+      if (!person) return json({ error: "Mottagaren hittades inte i din organisation." }, 404);
+      recipients = [person];
+    } else {
+      const roles = rolesForAudience(audience);
+      if (!roles) return json({ error: "Ogiltig mottagargrupp." }, 400);
+      const { data: groupRecipients, error: recipientsError } = await db
+        .from("vihem_profiles")
+        .select("id,name")
+        .eq("organisation_id", profile.organisation_id)
+        .eq("active", true)
+        .in("role", roles);
+      if (recipientsError) throw recipientsError;
+      if (!groupRecipients || groupRecipients.length === 0) return json({ error: "Inga mottagare hittades för vald grupp." }, 404);
+      recipients = groupRecipients;
+    }
 
     for (const recipient of recipients) {
       const { error: rpcError } = await db.rpc("create_notification", {
@@ -78,6 +100,8 @@ Deno.serve(async (req) => {
       title,
       message,
       recipient_count: recipients.length,
+      recipient_id: audience === "individual" ? recipients[0].id : null,
+      recipient_name: audience === "individual" ? recipients[0].name : null,
     });
 
     return json({ ok: true, recipient_count: recipients.length });

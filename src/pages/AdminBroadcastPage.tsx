@@ -2,9 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { Bell, Send, Users2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Button, Card, EmptyState, Input, LoadingPage, PageHeader, Select, Textarea } from '../components/ui';
+import { Button, Card, EmptyState, Input, LoadingPage, PageHeader, SearchInput, Select, Textarea } from '../components/ui';
+import type { Profile } from '../types';
 
-type Audience = 'tenant' | 'staff' | 'all';
+type Audience = 'tenant' | 'staff' | 'all' | 'individual';
 
 interface BroadcastRow {
   id: string;
@@ -12,6 +13,7 @@ interface BroadcastRow {
   title: string;
   message: string;
   recipient_count: number;
+  recipient_name: string | null;
   created_at: string;
 }
 
@@ -19,6 +21,13 @@ const AUDIENCE_LABELS: Record<Audience, string> = {
   tenant: 'Hyresgäster',
   staff: 'Personal',
   all: 'Alla',
+  individual: 'En person',
+};
+
+const ROLE_LABELS: Record<string, string> = {
+  tenant: 'Hyresgäst',
+  staff: 'Personal',
+  admin: 'Admin',
 };
 
 const MAX_TITLE_LENGTH = 120;
@@ -35,12 +44,29 @@ export function AdminBroadcastPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  const [people, setPeople] = useState<Profile[]>([]);
+  const [personQuery, setPersonQuery] = useState('');
+  const [recipientId, setRecipientId] = useState('');
+
   const [history, setHistory] = useState<BroadcastRow[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
 
   useEffect(() => {
     fetchHistory();
+    fetchPeople();
   }, [user?.organisation_id]);
+
+  async function fetchPeople() {
+    if (!user?.organisation_id) return;
+    const { data, error: fetchError } = await supabase
+      .from('vihem_profiles')
+      .select('*')
+      .eq('organisation_id', user.organisation_id)
+      .eq('active', true)
+      .in('role', ['tenant', 'staff', 'admin'])
+      .order('name');
+    if (!fetchError) setPeople((data || []) as Profile[]);
+  }
 
   async function fetchHistory() {
     if (!user?.organisation_id) {
@@ -50,13 +76,22 @@ export function AdminBroadcastPage() {
     setLoadingHistory(true);
     const { data, error: fetchError } = await supabase
       .from('vihem_admin_broadcasts')
-      .select('id, audience, title, message, recipient_count, created_at')
+      .select('id, audience, title, message, recipient_count, recipient_name, created_at')
       .eq('organisation_id', user.organisation_id)
       .order('created_at', { ascending: false })
       .limit(20);
     if (!fetchError) setHistory((data || []) as BroadcastRow[]);
     setLoadingHistory(false);
   }
+
+  const filteredPeople = personQuery
+    ? people.filter((person) =>
+        person.name?.toLowerCase().includes(personQuery.toLowerCase()) ||
+        person.email?.toLowerCase().includes(personQuery.toLowerCase())
+      )
+    : people;
+
+  const selectedPerson = people.find((person) => person.id === recipientId) || null;
 
   async function handleSend() {
     setError('');
@@ -66,12 +101,14 @@ export function AdminBroadcastPage() {
     const trimmedMessage = message.trim();
     if (!trimmedTitle) { setError('Skriv en rubrik.'); return; }
     if (!trimmedMessage) { setError('Skriv ett meddelande.'); return; }
+    if (audience === 'individual' && !recipientId) { setError('Välj en mottagare.'); return; }
 
-    if (!window.confirm(`Skicka "${trimmedTitle}" till ${AUDIENCE_LABELS[audience].toLowerCase()}?`)) return;
+    const confirmTarget = audience === 'individual' ? (selectedPerson?.name || 'vald person') : AUDIENCE_LABELS[audience].toLowerCase();
+    if (!window.confirm(`Skicka "${trimmedTitle}" till ${confirmTarget}?`)) return;
 
     setSending(true);
     const { data, error: invokeError } = await supabase.functions.invoke('vihem-admin-broadcast', {
-      body: { title: trimmedTitle, message: trimmedMessage, audience },
+      body: { title: trimmedTitle, message: trimmedMessage, audience, recipient_id: audience === 'individual' ? recipientId : undefined },
     });
     setSending(false);
 
@@ -83,6 +120,8 @@ export function AdminBroadcastPage() {
     setSuccess(`Skickat till ${data.recipient_count} mottagare.`);
     setTitle('');
     setMessage('');
+    setRecipientId('');
+    setPersonQuery('');
     fetchHistory();
   }
 
@@ -100,7 +139,7 @@ export function AdminBroadcastPage() {
     <div className="min-h-screen bg-slate-50">
       <PageHeader
         title="Push-meddelande"
-        subtitle="Skicka ett meddelande direkt till hyresgäster, personal eller alla i organisationen. Det dyker upp i mottagarens notiser och som push på telefonen."
+        subtitle="Skicka ett meddelande direkt till hyresgäster, personal, alla eller en enskild person i organisationen. Det dyker upp i mottagarens notiser och som push på telefonen."
         icon={Bell}
       />
 
@@ -126,13 +165,49 @@ export function AdminBroadcastPage() {
             <Select
               label="Mottagare"
               value={audience}
-              onChange={(event) => setAudience(event.target.value as Audience)}
+              onChange={(event) => {
+                setAudience(event.target.value as Audience);
+                setRecipientId('');
+                setPersonQuery('');
+              }}
               options={[
                 { value: 'all', label: 'Alla' },
                 { value: 'tenant', label: 'Hyresgäster' },
                 { value: 'staff', label: 'Personal' },
+                { value: 'individual', label: 'En person' },
               ]}
             />
+
+            {audience === 'individual' && (
+              <div className="space-y-2">
+                <SearchInput
+                  value={personQuery}
+                  onChange={setPersonQuery}
+                  placeholder="Sök namn eller e-post..."
+                />
+                <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-200">
+                  {filteredPeople.length === 0 ? (
+                    <p className="p-4 text-sm text-slate-500">Ingen matchar sökningen.</p>
+                  ) : (
+                    filteredPeople.map((person) => (
+                      <label key={person.id} className="flex cursor-pointer items-center gap-3 border-b border-slate-100 p-3 last:border-b-0 hover:bg-slate-50">
+                        <input
+                          type="radio"
+                          checked={recipientId === person.id}
+                          onChange={() => setRecipientId(person.id)}
+                          className="h-4 w-4"
+                        />
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium text-slate-800">{person.name}</span>
+                          <span className="block truncate text-xs text-slate-500">{person.email} · {ROLE_LABELS[person.role] || person.role}</span>
+                        </span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
             <Input
               label="Rubrik"
               value={title}
@@ -149,7 +224,11 @@ export function AdminBroadcastPage() {
             />
             <p className="text-xs text-slate-500">{message.length}/{MAX_MESSAGE_LENGTH} tecken</p>
 
-            <Button onClick={handleSend} loading={sending} disabled={!title.trim() || !message.trim()}>
+            <Button
+              onClick={handleSend}
+              loading={sending}
+              disabled={!title.trim() || !message.trim() || (audience === 'individual' && !recipientId)}
+            >
               <Send className="h-4 w-4" />
               Skicka
             </Button>
@@ -171,7 +250,7 @@ export function AdminBroadcastPage() {
                   <div className="flex items-start justify-between gap-3">
                     <h3 className="font-black text-slate-900">{row.title}</h3>
                     <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-black text-slate-500">
-                      {AUDIENCE_LABELS[row.audience]}
+                      {row.audience === 'individual' ? (row.recipient_name || 'En person') : AUDIENCE_LABELS[row.audience]}
                     </span>
                   </div>
                   <p className="mt-1 text-sm leading-5 text-slate-600">{row.message}</p>
