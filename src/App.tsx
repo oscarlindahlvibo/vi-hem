@@ -234,8 +234,29 @@ function AppInner() {
       console.warn('Could not load organisation modules, using legacy module fields where available:', moduleResult.error);
     }
 
+    // Org-level enabling only decides whether a module is available to the
+    // organisation at all -- for role 'staff' it also requires an explicit
+    // per-person grant (vihem_permission_grants, key 'module.<key>'),
+    // managed per staff member in AdminStaffPage.tsx. Staff have none of
+    // these by default, matching "de ska inte ha tillgång till Ekonomi som
+    // standard". admin/superadmin are never restricted by this -- same
+    // authority they already have everywhere else in the app.
+    if (user.role === 'staff') {
+      const { data: grants } = await supabase
+        .from('vihem_permission_grants')
+        .select('permission_key')
+        .eq('user_id', user.id)
+        .like('permission_key', 'module.%');
+      const grantedModuleKeys = new Set((grants || []).map((row: any) => row.permission_key.replace('module.', '')));
+      for (const moduleKey of OPTIONAL_MODULE_KEYS) {
+        if (nextModules[moduleKey] && !grantedModuleKeys.has(moduleKey)) {
+          nextModules[moduleKey] = false;
+        }
+      }
+    }
+
     setEnabledModules(nextModules);
-  }, [user?.organisation_id, user?.role]);
+  }, [user?.organisation_id, user?.role, user?.id]);
 
   useEffect(() => {
     if (!user) {

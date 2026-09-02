@@ -15,8 +15,32 @@ import {
   LoadingPage,
   SearchInput,
 } from '../components/ui';
-import type { Profile, StaffWorkSchedule } from '../types';
+import type { ModuleKey, Profile, StaffWorkSchedule } from '../types';
 import { defaultNotificationSettings, NOTIFICATION_SETTING_LABELS, type NotificationSettings } from '../lib/utils';
+
+// Same optional-module set App.tsx gates on an org-wide on/off toggle
+// (OPTIONAL_MODULE_KEYS) -- these are the only modules it makes sense to
+// grant per staff member. Core features (maintenance, work orders, time
+// tracking, ...) are always on for every staff member and aren't listed
+// here, matching DEFAULT_MODULE_STATE in App.tsx.
+// 'finance' and 'skatteverket' are deliberately excluded: those pages and
+// their underlying RLS policies are hard-gated to role='admin' everywhere
+// today, not just this nav toggle -- granting staff a module.finance row
+// would show a checkbox that does nothing (they'd still be blocked), which
+// is worse than not offering it. Extending real staff access to financial
+// data is a separate, bigger decision (touching finance RLS), not this
+// feature -- see the chat message this shipped with.
+const GRANTABLE_MODULES: { key: ModuleKey; label: string }[] = [
+  { key: 'inventory_management', label: 'Lager' },
+  { key: 'customer_projects', label: 'Kundprojekt' },
+  { key: 'short_stay', label: 'Korttidsuthyrning' },
+  { key: 'rental_management', label: 'Uthyrning' },
+  { key: 'year_planning', label: 'Årsplanering' },
+  { key: 'meetings', label: 'Möten & uppföljning' },
+  { key: 'jour', label: 'Jour' },
+  { key: 'fleet_management', label: 'Fleet Manager' },
+  { key: 'operations', label: 'Drift & rutiner' },
+];
 
 const WEEKDAYS = [
   { weekday: 1, label: 'Måndag' },
@@ -73,6 +97,8 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   const [scheduleRows, setScheduleRows] = useState<ScheduleFormRow[]>([]);
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(defaultNotificationSettings);
   const [savingNotificationSettings, setSavingNotificationSettings] = useState(false);
+  const [moduleAccess, setModuleAccess] = useState<Set<ModuleKey>>(new Set());
+  const [initialModuleAccess, setInitialModuleAccess] = useState<Set<ModuleKey>>(new Set());
   const [staffFormData, setStaffFormData] = useState({
     name: '',
     email: '',
@@ -174,6 +200,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
           .eq('id', editingStaff.id);
         if (error) throw error;
         await saveStaffSchedule(editingStaff.id);
+        if (staffFormData.role === 'staff') await saveModuleAccess(editingStaff.id);
         setShowStaffModal(false);
         setEditingStaff(null);
         resetForm();
@@ -209,6 +236,8 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   const resetForm = () => {
     setStaffFormData({ name: '', email: '', phone: '', role: 'staff', active: true, bankid_personal_number: '', is_system_admin: false });
     setScheduleRows(defaultScheduleRows());
+    setModuleAccess(new Set());
+    setInitialModuleAccess(new Set());
     setSaveError('');
   };
 
@@ -302,9 +331,42 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     });
     setEditingStaff(staffMember);
     fetchStaffSchedule(staffMember.id);
+    fetchModuleAccess(staffMember.id);
     setSaveError('');
     setShowStaffModal(true);
   };
+
+  async function fetchModuleAccess(staffId: string) {
+    const { data } = await supabase.from('vihem_permission_grants').select('permission_key').eq('user_id', staffId).like('permission_key', 'module.%');
+    const granted = new Set((data || []).map((row) => row.permission_key.replace('module.', '') as ModuleKey));
+    setModuleAccess(granted);
+    setInitialModuleAccess(new Set(granted));
+  }
+
+  function toggleModuleAccess(key: ModuleKey) {
+    setModuleAccess((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  // Grants a staff member never had access to don't need a row deleted;
+  // only diff what actually changed since the modal opened, matching
+  // scheduleRows' own "only touch what changed" pattern in this file.
+  async function saveModuleAccess(staffId: string) {
+    if (!user?.organisation_id) return;
+    const toGrant = [...moduleAccess].filter((key) => !initialModuleAccess.has(key));
+    const toRevoke = [...initialModuleAccess].filter((key) => !moduleAccess.has(key));
+    if (toGrant.length) {
+      await supabase.from('vihem_permission_grants').insert(
+        toGrant.map((key) => ({ organisation_id: user.organisation_id, user_id: staffId, permission_key: `module.${key}`, granted_by: user.id }))
+      );
+    }
+    if (toRevoke.length) {
+      await supabase.from('vihem_permission_grants').delete().eq('user_id', staffId).in('permission_key', toRevoke.map((key) => `module.${key}`));
+    }
+  }
 
   const handleResetPassword = async (staffMember: Profile) => {
     try {
@@ -606,6 +668,27 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                 <span className="block text-xs text-slate-500">Ger tillgång till Inställningar, Google Workspace och Cellsynt SMS -- annars kan admin inte nå dessa.</span>
               </span>
             </label>
+          )}
+          {editingStaff && staffFormData.role === 'staff' && (
+            <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-sm font-semibold text-slate-800">Modulåtkomst</p>
+              <p className="text-xs text-slate-500">
+                Personal har som standard inte tillgång till dessa moduler även om organisationen har aktiverat dem -- kryssa i det som gäller för {staffFormData.name || 'den här personen'}.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {GRANTABLE_MODULES.map((module) => (
+                  <label key={module.key} className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-medium text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={moduleAccess.has(module.key)}
+                      onChange={() => toggleModuleAccess(module.key)}
+                      className="h-4 w-4 rounded border-slate-300 accent-blue-600"
+                    />
+                    {module.label}
+                  </label>
+                ))}
+              </div>
+            </div>
           )}
           {editingStaff && (
             <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
