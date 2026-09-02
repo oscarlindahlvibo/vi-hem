@@ -142,6 +142,37 @@ async function syncOrganisation(serviceClient: any, organisationId: string, opti
         }
       }
 
+      // Beds24 doesn't reliably return a cancelled booking WITH a
+      // cancelled status -- it can just stop returning it from /bookings
+      // at all, in which case the two branches above never see it and the
+      // stale row lives forever (this is what was tripping the
+      // "potentiella dubbelbokningar" detector on bookings Beds24 itself
+      // no longer knows about). Reconcile instead of only reacting to
+      // what this fetch happened to include: any beds24-sourced row
+      // already in the DB for this unit, with an arrival inside the exact
+      // [from, to] window just queried, that this fetch didn't mention at
+      // all (active or cancelled) is gone from Beds24's perspective and
+      // gets removed. Scoped tightly to the queried window + this unit so
+      // it can never touch a booking the fetch legitimately didn't cover.
+      const returnedExternalIds = new Set(
+        bookings.map((booking: any) => readBookingId(booking)).filter(Boolean).map((id: any) => `beds24:${id}`)
+      );
+      const { data: existingRows, error: existingRowsError } = await serviceClient
+        .from("vihem_short_stay_bookings")
+        .select("id, external_uid")
+        .eq("organisation_id", organisationId)
+        .eq("unit_id", unit.id)
+        .like("external_uid", "beds24:%")
+        .gte("start_date", from)
+        .lte("start_date", to);
+      if (existingRowsError) throw existingRowsError;
+      const orphanedIds = (existingRows || [])
+        .filter((row: any) => !returnedExternalIds.has(row.external_uid))
+        .map((row: any) => row.id);
+      if (orphanedIds.length > 0) {
+        await serviceClient.from("vihem_short_stay_bookings").delete().in("id", orphanedIds);
+      }
+
       const rows = activeBookings
         .map((booking: any) => normalizeBooking(booking, unit, organisationId))
         .filter(Boolean);
@@ -154,7 +185,7 @@ async function syncOrganisation(serviceClient: any, organisationId: string, opti
       }
 
       importedTotal += rows.length;
-      allResults.push({ unit_id: unit.id, unit_name: unit.name, imported: rows.length, cancelled: cancelledBookings.length });
+      allResults.push({ unit_id: unit.id, unit_name: unit.name, imported: rows.length, cancelled: cancelledBookings.length, orphaned_removed: orphanedIds.length });
       await log(serviceClient, {
         organisation_id: organisationId,
         connection_id: connection.id,

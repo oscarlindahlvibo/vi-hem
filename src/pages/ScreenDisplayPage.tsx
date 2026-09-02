@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
 import { Button, LoadingPage } from '../components/ui';
 import type { CalendarEvent, CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, MaintenanceRequest, Meeting, MeetingActionItem, MeetingAgendaItem, MeetingDecision, News, Profile, ShortStayBooking, ShortStayUnit, StaffAbsenceRequest, TimeEntry, WorkOrder } from '../types';
-import { formatDate, formatDateTime, MR_PRIORITY_LABELS, MR_STATUS_LABELS, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
+import { formatDate, formatDateTime, MR_PRIORITY_LABELS, MR_STATUS_LABELS, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS, entryKindLabel } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import {
   DEFAULT_SCREEN_KEY,
@@ -1282,8 +1282,7 @@ function PresentationScreen({
   ].filter(Boolean);
 
   const timeEntryTitle = (entry: TimeEntry) => {
-    if (entry.entry_type === 'break') return 'Rast';
-    return entry.work_order?.title || entry.customer_project?.title || entry.customer_project?.name || entry.property?.name || TIME_CATEGORY_LABELS[entry.category] || 'Arbete';
+    return entryKindLabel(entry.entry_type) || entry.work_order?.title || entry.customer_project?.title || entry.customer_project?.name || entry.property?.name || TIME_CATEGORY_LABELS[entry.category] || 'Arbete';
   };
   const isOrderOverdue = (order: WorkOrder) => Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
   const assigneeLabel = (order: WorkOrder) => workOrderAssigneeLabel(order, staffMembers, true);
@@ -1554,8 +1553,15 @@ function TodayEventsPanel({ units, bookings }: { units: ShortStayUnit[]; booking
   const unitName = (unitId: string) => units.find(unit => unit.id === unitId)?.name || 'Okänd enhet';
   const checkIns = bookings.filter(booking => booking.booking_type === 'booking' && booking.start_date === todayValue);
   const checkOuts = bookings.filter(booking => booking.booking_type === 'booking' && booking.end_date === todayValue);
+  // Checked-out but still not cleaned -- from ANY day, not just today's
+  // checkouts, so a cleaning that was missed a few days ago doesn't just
+  // silently drop off the screen once its checkout date is no longer
+  // "today". Oldest (most overdue) first.
+  const pendingCleanings = bookings
+    .filter(booking => booking.booking_type === 'booking' && booking.end_date <= todayValue && (booking.cleaning_status === 'dirty' || booking.cleaning_status === 'in_progress'))
+    .sort((a, b) => a.end_date.localeCompare(b.end_date));
 
-  const renderItems = (items: ShortStayBooking[], emptyText: string, options: { showGuestCount?: boolean; showCleaningStatus?: boolean } = {}) => (
+  const renderItems = (items: ShortStayBooking[], emptyText: string, options: { showGuestCount?: boolean; showCleaningStatus?: boolean; showEndDate?: boolean } = {}) => (
     <div className="space-y-1.5">
       {items.length === 0 ? (
         <p className="rounded-lg bg-white/5 px-2 py-2 text-xs font-semibold text-slate-400">{emptyText}</p>
@@ -1574,7 +1580,12 @@ function TodayEventsPanel({ units, bookings }: { units: ShortStayUnit[]; booking
                   {cleaningStatusLabel(booking)}
                 </div>
               )}
-              <div className="mt-0.5 truncate text-[11px] font-semibold text-slate-300">{unitName(booking.unit_id)}</div>
+              <div className="mt-0.5 truncate text-[11px] font-semibold text-slate-300">
+                {unitName(booking.unit_id)}
+                {options.showEndDate && booking.end_date !== todayValue && (
+                  <> · utcheckad {new Date(`${booking.end_date}T12:00:00`).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}</>
+                )}
+              </div>
             </div>
             {options.showGuestCount && (
               <span className="shrink-0 rounded-full bg-emerald-400/15 px-2 py-0.5 text-[11px] font-black text-emerald-200">
@@ -1610,6 +1621,13 @@ function TodayEventsPanel({ units, bookings }: { units: ShortStayUnit[]; booking
             <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-xs font-black text-amber-200">{checkOuts.length}</span>
           </div>
           {renderItems(checkOuts, 'Inga utcheckningar', { showCleaningStatus: true })}
+        </section>
+        <section>
+          <div className="mb-1.5 flex items-center justify-between">
+            <h3 className="text-sm font-black text-rose-300">Ej städade</h3>
+            <span className="rounded-full bg-rose-400/15 px-2 py-0.5 text-xs font-black text-rose-200">{pendingCleanings.length}</span>
+          </div>
+          {renderItems(pendingCleanings, 'Inget att städa', { showEndDate: true })}
         </section>
       </div>
     </aside>

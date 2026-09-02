@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, Badge, StatCard, LoadingPage } from '../components/ui';
-import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, TIME_CATEGORY_LABELS } from '../lib/utils';
+import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, TIME_CATEGORY_LABELS, isBreakLike, entryKindLabel, clockTone, CLOCK_TONE_STYLES, LUNCH_WARNING_MINUTES, LUNCH_OVERDUE_MINUTES } from '../lib/utils';
 import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News, Profile, ShortStayBooking, CustomerProject } from '../types';
-import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, Square, Repeat2, Coffee, BedDouble, Briefcase } from 'lucide-react';
+import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, Square, Repeat2, Coffee, Utensils, BedDouble, Briefcase } from 'lucide-react';
 
 interface StaffDashboardProps {
   onNavigate: (page: string) => void;
@@ -46,8 +46,7 @@ function customerProjectLabel(project: any) {
 }
 
 function timeEntryLabel(entry: TimeEntry) {
-  if (entry.entry_type === 'break') return 'Rast';
-  return TIME_CATEGORY_LABELS[entry.category] || 'Arbete';
+  return entryKindLabel(entry.entry_type) || TIME_CATEGORY_LABELS[entry.category] || 'Arbete';
 }
 
 function absenceStatusColor(status: StaffAbsenceStatus) {
@@ -92,6 +91,16 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   const [dashboardNews, setDashboardNews] = useState<News[]>([]);
   const [todayShortStayBookings, setTodayShortStayBookings] = useState<ShortStayBooking[]>([]);
   const [ongoingCustomerProjects, setOngoingCustomerProjects] = useState<CustomerProject[]>([]);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!activeTimeEntry) return;
+    setElapsedSeconds(Math.floor((Date.now() - new Date(activeTimeEntry.start_time).getTime()) / 1000));
+    const interval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - new Date(activeTimeEntry.start_time).getTime()) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeTimeEntry]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -394,64 +403,82 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
           </span>
           <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
         </button>
-        {activeTimeEntry ? (
-          <div className="space-y-3">
-            <div className={`rounded-xl border px-4 py-3 ${
-              activeTimeEntry.entry_type === 'break' ? 'border-amber-200 bg-amber-50/70 text-amber-900' : 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
-            }`}>
-              <p className="text-xs font-bold uppercase tracking-wide">
-                {activeTimeEntry.entry_type === 'break' ? 'Aktiv rast' : 'Instämplad just nu'}
-              </p>
-              <p className="mt-1 text-sm font-semibold">
-                {timeEntryLabel(activeTimeEntry)}
-                {(customerProjectLabel(activeTimeEntry.customer_project) || activeTimeEntry.work_order?.title) && (
-                  <> · {customerProjectLabel(activeTimeEntry.customer_project) || activeTimeEntry.work_order?.title}</>
+        {activeTimeEntry ? (() => {
+          const tone = clockTone(activeTimeEntry.entry_type, elapsedSeconds);
+          const toneStyle = CLOCK_TONE_STYLES[tone];
+          const activeLabel = activeTimeEntry.entry_type === 'lunch' ? 'Aktiv lunch' : isBreakLike(activeTimeEntry.entry_type) ? 'Aktiv rast' : 'Instämplad just nu';
+          const elapsedLabel = `${String(Math.floor(elapsedSeconds / 3600)).padStart(2, '0')}:${String(Math.floor((elapsedSeconds % 3600) / 60)).padStart(2, '0')}:${String(elapsedSeconds % 60).padStart(2, '0')}`;
+          return (
+            <div className="space-y-3">
+              <div className={`rounded-xl border px-4 py-3 ${toneStyle.card}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <p className={`text-xs font-bold uppercase tracking-wide ${toneStyle.label}`}>
+                    {activeLabel}
+                    {tone === 'lunchWarning' && ` · över ${LUNCH_WARNING_MINUTES} min`}
+                    {tone === 'lunchOverdue' && ` · över ${LUNCH_OVERDUE_MINUTES} min`}
+                  </p>
+                  <p className={`shrink-0 font-mono text-sm font-bold ${toneStyle.mono}`}>{elapsedLabel}</p>
+                </div>
+                <p className="mt-1 text-sm font-semibold">
+                  {timeEntryLabel(activeTimeEntry)}
+                  {(customerProjectLabel(activeTimeEntry.customer_project) || activeTimeEntry.work_order?.title) && (
+                    <> · {customerProjectLabel(activeTimeEntry.customer_project) || activeTimeEntry.work_order?.title}</>
+                  )}
+                </p>
+                <p className="mt-1 text-xs font-medium opacity-80">Startad {formatDateTime(activeTimeEntry.start_time)}</p>
+              </div>
+              <div className={`grid grid-cols-1 gap-2 ${isBreakLike(activeTimeEntry.entry_type) ? 'sm:grid-cols-3' : 'sm:grid-cols-4'}`}>
+                <button
+                  onClick={() => onNavigate('timetracking/clockout')}
+                  className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100"
+                >
+                  <Square className="h-4 w-4 shrink-0" />
+                  <span className="truncate">Stämpla ut</span>
+                </button>
+                <button
+                  onClick={() => onNavigate('timetracking/switch')}
+                  className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-700 transition-colors hover:bg-blue-100"
+                >
+                  <Repeat2 className="h-4 w-4 shrink-0" />
+                  <span className="truncate">Byt jobb</span>
+                </button>
+                {isBreakLike(activeTimeEntry.entry_type) ? (
+                  <button
+                    onClick={() => onNavigate('timetracking/break')}
+                    className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100"
+                  >
+                    <Timer className="h-4 w-4 shrink-0" />
+                    <span className="truncate">Återgå till jobb</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => onNavigate('timetracking/break')}
+                      className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-700 transition-colors hover:bg-amber-100"
+                    >
+                      <Coffee className="h-4 w-4 shrink-0" />
+                      <span className="truncate">Gå på rast</span>
+                    </button>
+                    <button
+                      onClick={() => onNavigate('timetracking/lunch')}
+                      className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5 text-sm font-bold text-orange-700 transition-colors hover:bg-orange-100"
+                    >
+                      <Utensils className="h-4 w-4 shrink-0" />
+                      <span className="truncate">Gå på lunch</span>
+                    </button>
+                  </>
                 )}
-              </p>
-              <p className="mt-1 text-xs font-medium opacity-80">Startad {formatDateTime(activeTimeEntry.start_time)}</p>
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              </div>
               <button
-                onClick={() => onNavigate('timetracking/clockout')}
-                className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100"
+                onClick={() => onNavigate('timetracking')}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
               >
-                <Square className="h-4 w-4 shrink-0" />
-                <span className="truncate">Stämpla ut</span>
+                Öppna tidsregistrering
+                <ArrowRight className="h-4 w-4" />
               </button>
-              <button
-                onClick={() => onNavigate('timetracking/switch')}
-                className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-700 transition-colors hover:bg-blue-100"
-              >
-                <Repeat2 className="h-4 w-4 shrink-0" />
-                <span className="truncate">Byt jobb</span>
-              </button>
-              {activeTimeEntry.entry_type === 'break' ? (
-                <button
-                  onClick={() => onNavigate('timetracking/break')}
-                  className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100"
-                >
-                  <Timer className="h-4 w-4 shrink-0" />
-                  <span className="truncate">Återgå till jobb</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => onNavigate('timetracking/break')}
-                  className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-700 transition-colors hover:bg-amber-100"
-                >
-                  <Coffee className="h-4 w-4 shrink-0" />
-                  <span className="truncate">Gå på rast</span>
-                </button>
-              )}
             </div>
-            <button
-              onClick={() => onNavigate('timetracking')}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
-            >
-              Öppna tidsregistrering
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
-        ) : (
+          );
+        })() : (
           <div>
             <button
               onClick={() => onNavigate('timetracking')}

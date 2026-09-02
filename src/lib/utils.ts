@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import type { MRCategory, MRPriority, MRStatus, WOPriority, WOStatus, TimeCategory, Role } from '../types';
+import type { MRCategory, MRPriority, MRStatus, WOPriority, WOStatus, TimeCategory, TimeEntryType, Role } from '../types';
 
 export function createClientId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -416,3 +416,48 @@ export async function saveOrShareFile(blob: Blob, filename: string): Promise<voi
   const { uri } = await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Cache });
   await Share.share({ url: uri, title: filename });
 }
+
+// ─── time tracking: break/lunch shared display logic ──────────────────────
+// Shared between TimeTrackingPage.tsx (full stämpelklocka) and
+// StaffDashboard.tsx (the compact home-screen widget) so both surfaces
+// treat "what counts as away from work" and "when is a lunch running
+// long" identically instead of drifting apart.
+
+// 'lunch' is its own entry_type (distinct from generic 'break') so it can
+// be reminded about based on when someone actually clocked into it, but
+// for every other purpose -- worked-time totals, "is this person
+// currently away from work" -- lunch and break behave identically.
+export function isBreakLike(kind: TimeEntryType) {
+  return kind === 'break' || kind === 'lunch';
+}
+
+export function entryKindLabel(kind: TimeEntryType): string | null {
+  if (kind === 'lunch') return 'Lunch';
+  if (kind === 'break') return 'Rast';
+  return null;
+}
+
+// Lunch-specific elapsed-time thresholds for the live stämpelklocka
+// display -- orange past 45 minutes, red past 50. Generic short breaks
+// (fika etc, entry_type 'break') aren't held to a fixed length, so they
+// don't get this treatment.
+export const LUNCH_WARNING_MINUTES = 45;
+export const LUNCH_OVERDUE_MINUTES = 50;
+
+export type ClockTone = 'work' | 'break' | 'lunchWarning' | 'lunchOverdue';
+
+export function clockTone(entryType: TimeEntryType, elapsedSeconds: number): ClockTone {
+  if (entryType === 'lunch') {
+    const elapsedMinutes = elapsedSeconds / 60;
+    if (elapsedMinutes >= LUNCH_OVERDUE_MINUTES) return 'lunchOverdue';
+    if (elapsedMinutes >= LUNCH_WARNING_MINUTES) return 'lunchWarning';
+  }
+  return isBreakLike(entryType) ? 'break' : 'work';
+}
+
+export const CLOCK_TONE_STYLES: Record<ClockTone, { card: string; iconBg: string; iconText: string; label: string; mono: string; sub: string }> = {
+  work: { card: 'bg-emerald-50 border-emerald-200', iconBg: 'bg-emerald-100', iconText: 'text-emerald-700', label: 'text-emerald-700', mono: 'text-emerald-950', sub: 'text-emerald-700' },
+  break: { card: 'bg-amber-50 border-amber-200', iconBg: 'bg-amber-100', iconText: 'text-amber-700', label: 'text-amber-700', mono: 'text-amber-950', sub: 'text-amber-700' },
+  lunchWarning: { card: 'bg-orange-50 border-orange-300', iconBg: 'bg-orange-100', iconText: 'text-orange-700', label: 'text-orange-700', mono: 'text-orange-950', sub: 'text-orange-700' },
+  lunchOverdue: { card: 'bg-red-50 border-red-300', iconBg: 'bg-red-100', iconText: 'text-red-700', label: 'text-red-700', mono: 'text-red-950', sub: 'text-red-700' },
+};

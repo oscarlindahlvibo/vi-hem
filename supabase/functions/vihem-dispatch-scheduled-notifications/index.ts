@@ -86,8 +86,12 @@ Deno.serve(async request => {
       const lunch = minutes(schedule.lunch_start);
       const lunchLength = Number(schedule.lunch_minutes || settings.default_lunch_return_minutes || 45);
       const { data: openEntries } = await client.from("vihem_time_entries").select("id,entry_type,start_time,end_time").eq("user_id", schedule.user_id).is("end_time", null);
-      const hasOpenWork = (openEntries || []).some((entry: any) => entry.entry_type !== "break");
-      const hasOpenBreak = (openEntries || []).some((entry: any) => entry.entry_type === "break");
+      const hasOpenWork = (openEntries || []).some((entry: any) => entry.entry_type !== "break" && entry.entry_type !== "lunch");
+      // 'lunch' is a distinct entry_type from generic 'break' (see
+      // 20260902100000_time_entries_lunch_type.sql) precisely so this
+      // reminder can key off whether the person is actually on lunch
+      // right now, not just any short break.
+      const hasOpenLunch = (openEntries || []).some((entry: any) => entry.entry_type === "lunch");
       const dayKey = now.date;
       if (settings.shift_start_reminder && start !== null && now.minutes >= start && now.minutes <= start + 5 && !hasOpenWork) {
         if (await createOnce(client, schedule, `${dayKey}:shift-start`, "shift_start_reminder", "Ditt arbetspass börjar nu", `Hej ${profile.name || ""}, det är dags att stämpla in.`)) created++;
@@ -95,7 +99,7 @@ Deno.serve(async request => {
       if (settings.lunch_start_reminder && lunch !== null && now.minutes >= lunch && now.minutes <= lunch + 5 && hasOpenWork) {
         if (await createOnce(client, schedule, `${dayKey}:lunch-start`, "lunch_start_reminder", "Lunch börjar nu", "Det är dags att gå på lunch.")) created++;
       }
-      if (settings.lunch_return_reminder && lunch !== null && now.minutes >= lunch + lunchLength && now.minutes <= lunch + lunchLength + 5 && hasOpenBreak) {
+      if (settings.lunch_return_reminder && lunch !== null && now.minutes >= lunch + lunchLength && now.minutes <= lunch + lunchLength + 5 && hasOpenLunch) {
         if (await createOnce(client, schedule, `${dayKey}:lunch-return`, "lunch_return_reminder", "Lunchen är slut", "Det är dags att återgå till arbetet.")) created++;
       }
       if (settings.shift_end_reminder && end !== null && now.minutes >= end && now.minutes <= end + 5 && hasOpenWork) {

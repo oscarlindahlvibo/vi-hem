@@ -22,6 +22,12 @@ import {
   formatMinutes,
   TIME_CATEGORY_LABELS,
   getTimeStatusColor,
+  isBreakLike,
+  entryKindLabel,
+  clockTone,
+  CLOCK_TONE_STYLES,
+  LUNCH_WARNING_MINUTES,
+  LUNCH_OVERDUE_MINUTES,
 } from '../lib/utils';
 import type { TimeEntry, TimeCategory, WorkOrder, Profile, CustomerProject, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, StaffWorkSchedule } from '../types';
 import {
@@ -47,11 +53,12 @@ import {
   Trash2,
   UserCheck,
   ClipboardList,
+  Utensils,
 } from 'lucide-react';
 
 type TimeStatus = 'draft' | 'submitted' | 'change_requested' | 'approved' | 'rejected';
-type TimeEntryKind = 'work' | 'break';
-export type TimeTrackingInitialAction = 'clockout' | 'switch' | 'break' | undefined;
+type TimeEntryKind = 'work' | 'break' | 'lunch';
+export type TimeTrackingInitialAction = 'clockout' | 'switch' | 'break' | 'lunch' | undefined;
 
 interface DailyWorkSummary {
   id: string;
@@ -256,8 +263,14 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       setStampMode('switch');
       setShowStampModal(true);
     } else if (initialAction === 'break') {
-      if (currentEntry.entry_type !== 'break') {
-        handleStartBreak();
+      if (!isBreakLike(currentEntry.entry_type)) {
+        handleStartBreak('break');
+      } else {
+        handleReturnFromBreak();
+      }
+    } else if (initialAction === 'lunch') {
+      if (!isBreakLike(currentEntry.entry_type)) {
+        handleStartBreak('lunch');
       } else {
         handleReturnFromBreak();
       }
@@ -342,7 +355,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     // 'submitted' pending review. Any later edit still needs review: see
     // handleSaveEntry's previousStatus === 'approved' check.
     if (!navigator.onLine && currentEntry) {
-      const breakMinutes = currentEntry.entry_type === 'break' ? 0 : currentEntry.break_minutes;
+      const breakMinutes = isBreakLike(currentEntry.entry_type) ? 0 : currentEntry.break_minutes;
       await queueOfflineMutation('time_entry_update', {
         id: currentEntry.id,
         data: { end_time: end, total_minutes: calcMinutes(currentEntry.start_time, end, breakMinutes), status: 'approved', approved_by: null, approved_at: end },
@@ -359,7 +372,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     if (error) throw error;
 
     await Promise.all((openEntries || []).map(async entry => {
-      const breakMinutes = entry.entry_type === 'break' ? 0 : entry.break_minutes;
+      const breakMinutes = isBreakLike(entry.entry_type) ? 0 : entry.break_minutes;
       const total = calcMinutes(entry.start_time, end, breakMinutes);
       const { error: updateError } = await supabase.from('vihem_time_entries').update({
         end_time: end,
@@ -436,19 +449,19 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     fetchData();
   }
 
-  async function handleStartBreak() {
+  async function handleStartBreak(kind: 'break' | 'lunch' = 'break') {
     if (!currentEntry) return;
     await finishOpenEntries();
     const payload = {
       user_id: user.id,
       organisation_id: user.organisation_id || null,
       category: 'general',
-      entry_type: 'break',
+      entry_type: kind,
       start_time: new Date().toISOString(),
       end_time: null,
       break_minutes: 0,
       total_minutes: 0,
-      comment: 'Rast',
+      comment: kind === 'lunch' ? 'Lunch' : 'Rast',
       status: 'draft',
     };
     if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', payload, `time-entry-open:${user.id}`);
@@ -460,7 +473,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
   }
 
   async function handleReturnFromBreak() {
-    if (!currentEntry || currentEntry.entry_type !== 'break') return;
+    if (!currentEntry || !isBreakLike(currentEntry.entry_type)) return;
 
     const { data: previousEntries, error } = await supabase
       .from('vihem_time_entries')
@@ -629,20 +642,20 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
 
   function dayTotals(dayEntries: TimeEntry[]) {
     const work = dayEntries
-      .filter(e => e.end_time && e.entry_type !== 'break')
+      .filter(e => e.end_time && !isBreakLike(e.entry_type))
       .reduce((s, e) => s + (e.total_minutes || 0), 0);
     const breaks = dayEntries.reduce((s, e) => {
-      if (e.entry_type === 'break') return s + (e.total_minutes || 0);
+      if (isBreakLike(e.entry_type)) return s + (e.total_minutes || 0);
       return s + (e.break_minutes || 0);
     }, 0);
     return { work, breaks };
   }
 
   // ── Month-level totals ──────────────────────────────────────────────────────
-  const completedEntries = entries.filter(e => e.end_time && e.entry_type !== 'break');
+  const completedEntries = entries.filter(e => e.end_time && !isBreakLike(e.entry_type));
   const totalWork = completedEntries.reduce((s, e) => s + (e.total_minutes || 0), 0);
   const totalBreaks = entries.reduce((s, e) => {
-    if (e.entry_type === 'break') return s + (e.total_minutes || 0);
+    if (isBreakLike(e.entry_type)) return s + (e.total_minutes || 0);
     return s + (e.break_minutes || 0);
   }, 0);
   const workDays = Object.values(entriesByDay).filter(d => d.some(e => e.end_time)).length;
@@ -684,50 +697,62 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       />
 
       {/* Active clock */}
-      {currentEntry ? (
-        <Card className={`p-5 ${currentEntry.entry_type === 'break' ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className={`p-3 rounded-xl ${currentEntry.entry_type === 'break' ? 'bg-amber-100' : 'bg-emerald-100'}`}>
-                {currentEntry.entry_type === 'break'
-                  ? <Coffee className="w-6 h-6 text-amber-700" />
-                  : <Clock className="w-6 h-6 text-emerald-700" />}
+      {currentEntry ? (() => {
+        const tone = clockTone(currentEntry.entry_type, elapsedSeconds);
+        const toneStyle = CLOCK_TONE_STYLES[tone];
+        const activeLabel = currentEntry.entry_type === 'lunch' ? 'Aktiv lunch' : isBreakLike(currentEntry.entry_type) ? 'Aktiv rast' : 'Aktiv tidrapportering';
+        return (
+          <Card className={`p-5 ${toneStyle.card}`}>
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-xl ${toneStyle.iconBg}`}>
+                  {isBreakLike(currentEntry.entry_type)
+                    ? <Coffee className={`w-6 h-6 ${toneStyle.iconText}`} />
+                    : <Clock className={`w-6 h-6 ${toneStyle.iconText}`} />}
+                </div>
+                <div>
+                  <p className={`text-xs font-semibold uppercase tracking-wide ${toneStyle.label}`}>
+                    {activeLabel}
+                    {tone === 'lunchWarning' && ` · över ${LUNCH_WARNING_MINUTES} min`}
+                    {tone === 'lunchOverdue' && ` · över ${LUNCH_OVERDUE_MINUTES} min`}
+                  </p>
+                  <p className={`text-3xl font-bold font-mono ${toneStyle.mono}`}>
+                    {String(Math.floor(elapsedSeconds / 3600)).padStart(2, '0')}:
+                    {String(Math.floor((elapsedSeconds % 3600) / 60)).padStart(2, '0')}:
+                    {String(elapsedSeconds % 60).padStart(2, '0')}
+                  </p>
+                  <p className={`text-xs mt-0.5 ${toneStyle.sub}`}>
+                    {TIME_CATEGORY_LABELS[currentEntry.category]}{currentEntry.category === 'customer_project' && currentEntry.project_billing_scope === 'outside_quote' ? ' · ÄTA-tid' : ''} · Startade {new Date(currentEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+                    {timeEntryProjectLabel(currentEntry) && ` · ${timeEntryProjectLabel(currentEntry)}`}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className={`text-xs font-semibold uppercase tracking-wide ${currentEntry.entry_type === 'break' ? 'text-amber-700' : 'text-emerald-700'}`}>
-                  {currentEntry.entry_type === 'break' ? 'Aktiv rast' : 'Aktiv tidrapportering'}
-                </p>
-                <p className={`text-3xl font-bold font-mono ${currentEntry.entry_type === 'break' ? 'text-amber-950' : 'text-emerald-950'}`}>
-                  {String(Math.floor(elapsedSeconds / 3600)).padStart(2, '0')}:
-                  {String(Math.floor((elapsedSeconds % 3600) / 60)).padStart(2, '0')}:
-                  {String(elapsedSeconds % 60).padStart(2, '0')}
-                </p>
-                <p className={`text-xs mt-0.5 ${currentEntry.entry_type === 'break' ? 'text-amber-700' : 'text-emerald-700'}`}>
-                  {TIME_CATEGORY_LABELS[currentEntry.category]}{currentEntry.category === 'customer_project' && currentEntry.project_billing_scope === 'outside_quote' ? ' · ÄTA-tid' : ''} · Startade {new Date(currentEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
-                  {timeEntryProjectLabel(currentEntry) && ` · ${timeEntryProjectLabel(currentEntry)}`}
-                </p>
+              <div className={`grid w-full gap-2 lg:max-w-2xl ${isBreakLike(currentEntry.entry_type) ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'}`}>
+                <Button onClick={() => { setStampMode('switch'); setShowStampModal(true); }} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
+                  <Repeat2 className="w-4 h-4" /> Byt jobb
+                </Button>
+                <Button onClick={() => setShowEndDayModal(true)} variant="danger" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
+                  <Square className="w-4 h-4" /> Stämpla ut
+                </Button>
+                {isBreakLike(currentEntry.entry_type) ? (
+                  <Button onClick={handleReturnFromBreak} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
+                    <Timer className="w-4 h-4" /> Återgå till jobb
+                  </Button>
+                ) : (
+                  <>
+                    <Button onClick={() => handleStartBreak('break')} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
+                      <Coffee className="w-4 h-4" /> Gå på rast
+                    </Button>
+                    <Button onClick={() => handleStartBreak('lunch')} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
+                      <Utensils className="w-4 h-4" /> Gå på lunch
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
-            <div className="grid w-full grid-cols-3 gap-2 lg:max-w-2xl">
-              <Button onClick={() => { setStampMode('switch'); setShowStampModal(true); }} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
-                <Repeat2 className="w-4 h-4" /> Byt jobb
-              </Button>
-              <Button onClick={() => setShowEndDayModal(true)} variant="danger" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
-                <Square className="w-4 h-4" /> Stämpla ut
-              </Button>
-              {currentEntry.entry_type === 'break' ? (
-                <Button onClick={handleReturnFromBreak} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
-                  <Timer className="w-4 h-4" /> Återgå till jobb
-                </Button>
-              ) : (
-                <Button onClick={handleStartBreak} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
-                  <Coffee className="w-4 h-4" /> Gå på rast
-                </Button>
-              )}
-            </div>
-          </div>
-        </Card>
-      ) : (
+          </Card>
+        );
+      })() : (
         <Card className="p-5 border-dashed border-slate-300 bg-slate-50">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between min-w-0">
             <div className="flex items-center gap-3 min-w-0">
@@ -1026,10 +1051,10 @@ function DayWorkCard({ dayKey, entries, absences, summary, onEditEntry, onAddEnt
 }) {
   const sortedEntries = [...entries].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
   const workMinutes = sortedEntries
-    .filter(entry => entry.entry_type !== 'break' && entry.end_time)
+    .filter(entry => !isBreakLike(entry.entry_type) && entry.end_time)
     .reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
   const breakMinutes = sortedEntries.reduce((sum, entry) => {
-    if (entry.entry_type === 'break') return sum + (entry.total_minutes || 0);
+    if (isBreakLike(entry.entry_type)) return sum + (entry.total_minutes || 0);
     return sum + (entry.break_minutes || 0);
   }, 0);
   const weekday = new Date(`${dayKey}T12:00:00`).toLocaleDateString('sv-SE', { weekday: 'long' });
@@ -1080,8 +1105,8 @@ function DayWorkCard({ dayKey, entries, absences, summary, onEditEntry, onAddEnt
                 const projectLabel = timeEntryProjectLabel(entry);
                 return (
                 <div key={entry.id} className="flex items-start gap-3 rounded-lg border border-slate-100 bg-white px-3 py-2">
-                  <div className={`mt-0.5 p-1.5 rounded-lg ${entry.entry_type === 'break' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                    {entry.entry_type === 'break' ? <Coffee className="w-3.5 h-3.5" /> : <Briefcase className="w-3.5 h-3.5" />}
+                  <div className={`mt-0.5 p-1.5 rounded-lg ${isBreakLike(entry.entry_type) ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                    {entry.entry_type === 'lunch' ? <Utensils className="w-3.5 h-3.5" /> : isBreakLike(entry.entry_type) ? <Coffee className="w-3.5 h-3.5" /> : <Briefcase className="w-3.5 h-3.5" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -1089,7 +1114,7 @@ function DayWorkCard({ dayKey, entries, absences, summary, onEditEntry, onAddEnt
                         {new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
                         {entry.end_time ? `-${new Date(entry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}` : '-pågår'}
                       </span>
-                      <span className="text-xs text-slate-500">{entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
+                      <span className="text-xs text-slate-500">{entryKindLabel(entry.entry_type) || TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
                       {entry.work_order?.title && <span className="text-xs text-slate-500 truncate">· {entry.work_order.title}</span>}
                       {projectLabel && <span className="text-xs text-slate-500 truncate">· Projekt: {projectLabel}</span>}
                     </div>
@@ -1141,7 +1166,7 @@ function EntryCard({ entry, onEdit, showEdit }: { entry: any; onEdit: () => void
             <Badge className={getTimeStatusColor(entry.status)}>
               {STATUS_LABEL[entry.status as TimeStatus] || entry.status}
             </Badge>
-            <span className="text-xs text-slate-500">{entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
+            <span className="text-xs text-slate-500">{entryKindLabel(entry.entry_type) || TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
             {entry.work_order?.title && (
               <span className="text-xs text-slate-500 truncate">· {entry.work_order.title}</span>
             )}
@@ -1337,6 +1362,7 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
             options={[
               { value: 'work', label: 'Arbete' },
               { value: 'break', label: 'Rast' },
+              { value: 'lunch', label: 'Lunch' },
             ]} />
           <Select label="Kategori" value={category} onChange={e => setCategory(e.target.value as TimeCategory)}
             options={Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))} />
@@ -1752,7 +1778,7 @@ function AdminTimeView({ user }: { user: Profile }) {
       const s: Record<string, { total: number; approved: number; pending: number; rejected: number }> = {};
       staffMembers.forEach(st => { s[st.id] = { total: 0, approved: 0, pending: 0, rejected: 0 }; });
       data?.forEach(e => {
-        if (s[e.user_id] && e.entry_type !== 'break') {
+        if (s[e.user_id] && !isBreakLike(e.entry_type)) {
           s[e.user_id].total += e.total_minutes || 0;
           if (e.status === 'approved') s[e.user_id].approved += e.total_minutes || 0;
           else if (e.status === 'submitted' || e.status === 'change_requested') s[e.user_id].pending += e.total_minutes || 0;
@@ -2005,9 +2031,9 @@ function AdminTimeView({ user }: { user: Profile }) {
   }, {} as Record<string, StaffAbsenceRequest[]>);
   const calMonthName = new Date(calYear, calMonth, 1).toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' });
 
-  const modalTotalWork = staffEntries.filter(e => e.end_time && e.entry_type !== 'break').reduce((s, e) => s + (e.total_minutes || 0), 0);
+  const modalTotalWork = staffEntries.filter(e => e.end_time && !isBreakLike(e.entry_type)).reduce((s, e) => s + (e.total_minutes || 0), 0);
   const modalTotalBreaks = staffEntries.reduce((s, e) => {
-    if (e.entry_type === 'break') return s + (e.total_minutes || 0);
+    if (isBreakLike(e.entry_type)) return s + (e.total_minutes || 0);
     return s + (e.break_minutes || 0);
   }, 0);
   const workDays = Object.values(calEntriesByDay).filter(d => d.some(e => e.end_time)).length;
@@ -2181,7 +2207,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                       >
                         <p className="truncate text-sm font-medium text-slate-800">{staffById[entry.user_id]?.name || 'Personal'}</p>
                         <p className="truncate text-xs text-slate-500">
-                          {formatDate(entry.start_time)} · {entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}
+                          {formatDate(entry.start_time)} · {entryKindLabel(entry.entry_type) || TIME_CATEGORY_LABELS[entry.category as TimeCategory]}
                           {(timeEntryProjectLabel(entry) || entry.work_order?.title) ? ` · ${timeEntryProjectLabel(entry) || entry.work_order?.title}` : ''}
                           {' · '}{formatMinutes(entry.total_minutes || 0)}
                         </p>
@@ -2260,7 +2286,7 @@ function AdminTimeView({ user }: { user: Profile }) {
               const staffTodayAbsences = todayAbsencesByStaff[staff.id] || [];
               const activeEntry = staffTodayEntries.find(entry => !entry.end_time);
               const activeAbsence = staffTodayAbsences[0];
-              const todayTotal = staffTodayEntries.filter(entry => entry.entry_type !== 'break').reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
+              const todayTotal = staffTodayEntries.filter(entry => !isBreakLike(entry.entry_type)).reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
               return (
                 <button
                   type="button"
@@ -2273,7 +2299,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                       <p className="font-semibold text-slate-800 break-words">{staff.name}</p>
                       <p className="mt-1 text-sm text-slate-500">
                         {viewTab === 'today'
-                          ? activeAbsence ? `${ABSENCE_TYPE_LABEL[activeAbsence.absence_type]} ${ABSENCE_STATUS_LABEL[activeAbsence.status].toLowerCase()}` : activeEntry ? `Instämplad som ${activeEntry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[activeEntry.category as TimeCategory]}` : 'Inte instämplad'
+                          ? activeAbsence ? `${ABSENCE_TYPE_LABEL[activeAbsence.absence_type]} ${ABSENCE_STATUS_LABEL[activeAbsence.status].toLowerCase()}` : activeEntry ? `Instämplad som ${entryKindLabel(activeEntry.entry_type) || TIME_CATEGORY_LABELS[activeEntry.category as TimeCategory]}` : 'Inte instämplad'
                           : `Total ${formatMinutes(d.total)}`}
                       </p>
                     </div>
@@ -2335,7 +2361,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                     const activeEntry = staffTodayEntries.find(entry => !entry.end_time);
                     const activeAbsence = staffTodayAbsences[0];
                     const latestEntry = activeEntry || staffTodayEntries[0];
-                    const todayTotal = staffTodayEntries.filter(entry => entry.entry_type !== 'break').reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
+                    const todayTotal = staffTodayEntries.filter(entry => !isBreakLike(entry.entry_type)).reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
                     return (
                       <tr key={staff.id} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => openStaffModal(staff)}>
                         <td className="px-4 py-3">
@@ -2359,7 +2385,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                             </Badge>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-slate-700">{activeAbsence ? ABSENCE_TYPE_LABEL[activeAbsence.absence_type] : latestEntry ? latestEntry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[latestEntry.category as TimeCategory] : '--'}</td>
+                        <td className="px-4 py-3 text-slate-700">{activeAbsence ? ABSENCE_TYPE_LABEL[activeAbsence.absence_type] : latestEntry ? entryKindLabel(latestEntry.entry_type) || TIME_CATEGORY_LABELS[latestEntry.category as TimeCategory] : '--'}</td>
                         <td className="px-4 py-3 text-slate-600 max-w-[220px] truncate">{latestEntry ? timeEntryProjectLabel(latestEntry) || latestEntry.work_order?.title || '--' : '--'}</td>
                         <td className="px-4 py-3 text-slate-700">{activeAbsence ? activeAbsence.start_time?.slice(0, 5) || 'Heldag' : latestEntry ? new Date(latestEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
                         <td className="px-4 py-3 text-slate-700">{activeAbsence ? activeAbsence.end_time?.slice(0, 5) || 'Heldag' : latestEntry?.end_time ? new Date(latestEntry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
@@ -2576,10 +2602,10 @@ function AdminTimeView({ user }: { user: Profile }) {
                       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
                     const dayAbsences = adminAbsencesByDay[dayKey] || [];
                     const dayWorkMinutes = dayEntries
-                      .filter(entry => entry.entry_type !== 'break')
+                      .filter(entry => !isBreakLike(entry.entry_type))
                       .reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
                     const dayBreakMinutes = dayEntries.reduce((sum, entry) => {
-                      if (entry.entry_type === 'break') return sum + (entry.total_minutes || 0);
+                      if (isBreakLike(entry.entry_type)) return sum + (entry.total_minutes || 0);
                       return sum + (entry.break_minutes || 0);
                     }, 0);
                     const isFuture = dayKey > localDateKey(new Date());
@@ -2636,7 +2662,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                         {dayEntries.map(entry => (
                           <tr key={entry.id} className="border-b border-slate-100 hover:bg-slate-50">
                             <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{new Date(entry.start_time).toLocaleDateString('sv-SE', { weekday: 'short' })}</td>
-                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entry.entry_type === 'break' ? 'Rast' : TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</td>
+                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entryKindLabel(entry.entry_type) || TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</td>
                             <td className="px-3 py-2 text-slate-600 max-w-[180px] truncate">{timeEntryProjectLabel(entry) || entry.work_order?.title || '--'}</td>
                             <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}</td>
                             <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entry.end_time ? new Date(entry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
@@ -2737,7 +2763,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                   const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                   const dayEntries = calEntriesByDay[dateStr] || [];
                   const dayAbsences = calAbsencesByDay[dateStr] || [];
-                  const work = dayEntries.filter(e => e.end_time && e.entry_type !== 'break').reduce((s, e) => s + (e.total_minutes || 0), 0);
+                  const work = dayEntries.filter(e => e.end_time && !isBreakLike(e.entry_type)).reduce((s, e) => s + (e.total_minutes || 0), 0);
                   const hasPending = dayEntries.some(e => e.status === 'submitted' || e.status === 'change_requested');
                   const isWeekend = ((new Date(calYear, calMonth, day).getDay() + 6) % 7) >= 5;
                   return (

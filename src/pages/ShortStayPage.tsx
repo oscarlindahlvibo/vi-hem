@@ -438,6 +438,15 @@ function overlaps(booking: ShortStayBooking, day: string) {
   return booking.start_date <= day && booking.end_date > day;
 }
 
+// Same check as isCancelledBooking() in
+// supabase/functions/vihem-sync-beds24-bookings/index.ts -- beds24_status
+// is free text straight from Beds24's API, this is the one place both
+// sides agree on what counts as "not a real reservation".
+function isCancelledBeds24Status(status: string | null | undefined) {
+  const value = String(status || '').toLowerCase();
+  return value.includes('cancel') || value.includes('deleted');
+}
+
 function rangeOverlaps(aStart: string, aEnd: string, bStart: string, bEnd: string) {
   return aStart < bEnd && bStart < aEnd;
 }
@@ -702,7 +711,13 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
       setError(unitsRes.error?.message || bookingsRes.error?.message || 'Kunde inte ladda korttidsuthyrning.');
     } else {
       setUnits((unitsRes.data || []) as ShortStayUnit[]);
-      setBookings((bookingsRes.data || []) as ShortStayBooking[]);
+      // beds24_status is written by the sync but was never read anywhere --
+      // a booking Beds24 reports as cancelled (or one the sync's own
+      // reconciliation hasn't caught yet, see
+      // vihem-sync-beds24-bookings/index.ts) would otherwise still count
+      // as a real reservation here, which is exactly what was tripping the
+      // "potentiella dubbelbokningar" detector on stale cancellations.
+      setBookings(((bookingsRes.data || []) as ShortStayBooking[]).filter(booking => !isCancelledBeds24Status(booking.beds24_status)));
       setCommonCleanings(commonCleaningsRes.error && isMissingSchemaError(commonCleaningsRes.error)
         ? []
         : (commonCleaningsRes.data || []) as CommonCleaning[]);
