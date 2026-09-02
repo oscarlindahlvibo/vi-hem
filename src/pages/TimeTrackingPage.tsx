@@ -526,6 +526,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       customer_project_id: payload.category === 'customer_project' ? payload.customer_project_id || null : null,
       entry_type: payload.entry_type || 'work',
       customer_name: payload.customer_name || null,
+      project_billing_scope: payload.category === 'customer_project' ? payload.project_billing_scope || 'included_in_quote' : 'internal',
       status,
     };
     if (isNew) {
@@ -1247,9 +1248,12 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
   const [entryType, setEntryType] = useState<TimeEntryKind>(entry?.entry_type || 'work');
   const [workOrderId, setWorkOrderId] = useState(entry?.work_order_id || '');
   const [customerProjectId, setCustomerProjectId] = useState(entry?.customer_project_id || '');
+  const [projectBillingScope, setProjectBillingScope] = useState<TimeEntry['project_billing_scope']>(entry?.project_billing_scope || 'included_in_quote');
   const [startTime, setStartTime] = useState(defaultStart);
   const [endTime, setEndTime] = useState(defaultEnd);
-  const [breakMins, setBreakMins] = useState(entry?.break_minutes ?? 30);
+  // Empty by default -- prefilling 30 meant every retroactive entry had to
+  // be manually cleared/corrected even when there was no break at all.
+  const [breakMins, setBreakMins] = useState<number | ''>(entry?.break_minutes ?? '');
   const [comment, setComment] = useState(entry?.comment || '');
 
   // Reset when modal opens with new entry
@@ -1259,15 +1263,16 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
       setEntryType(entry?.entry_type || 'work');
       setWorkOrderId(entry?.work_order_id || '');
       setCustomerProjectId(entry?.customer_project_id || '');
+      setProjectBillingScope(entry?.project_billing_scope || 'included_in_quote');
       setStartTime(defaultStart);
       setEndTime(defaultEnd);
-      setBreakMins(entry?.break_minutes ?? 30);
+      setBreakMins(entry?.break_minutes ?? '');
       setComment(entry?.comment || '');
     }
   }, [open, entry?.id]);
 
   const previewMins = startTime && endTime
-    ? calcMinutes(new Date(startTime).toISOString(), new Date(endTime).toISOString(), entryType === 'break' ? 0 : breakMins)
+    ? calcMinutes(new Date(startTime).toISOString(), new Date(endTime).toISOString(), entryType === 'break' ? 0 : Number(breakMins) || 0)
     : null;
 
   const isValid = !!startTime;
@@ -1283,10 +1288,11 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
       entry_type: entryType,
       start_time: new Date(startTime).toISOString(),
       end_time: endTime ? new Date(endTime).toISOString() : undefined,
-      break_minutes: entryType === 'break' ? 0 : breakMins,
+      break_minutes: entryType === 'break' ? 0 : Number(breakMins) || 0,
       work_order_id: workOrderId || null,
       customer_project_id: category === 'customer_project' ? customerProjectId || null : null,
       customer_name: category === 'customer_project' ? selectedProject?.customer_name || null : null,
+      project_billing_scope: category === 'customer_project' ? projectBillingScope : 'internal',
       comment,
       submitNow,
     };
@@ -1323,6 +1329,18 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
           )}
         </div>
 
+        {category === 'customer_project' && (
+          <Select
+            label="Tidstyp"
+            value={projectBillingScope}
+            onChange={e => setProjectBillingScope(e.target.value as TimeEntry['project_billing_scope'])}
+            options={[
+              { value: 'included_in_quote', label: 'Ordinarie projektarbete' },
+              { value: 'outside_quote', label: 'ÄTA-tid (utanför offert)' },
+            ]}
+          />
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input label="Start" type="datetime-local" value={startTime} onChange={e => setStartTime(e.target.value)} />
           <Input label="Slut (valfritt om pågående)" type="datetime-local" value={endTime} onChange={e => setEndTime(e.target.value)} />
@@ -1330,7 +1348,8 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
 
         {entryType === 'work' && (
           <Input label="Rast (minuter)" type="number" min={0} max={480} value={breakMins}
-            onChange={e => setBreakMins(Math.max(0, parseInt(e.target.value) || 0))} />
+            placeholder="0"
+            onChange={e => setBreakMins(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value) || 0))} />
         )}
 
         {previewMins !== null && (
