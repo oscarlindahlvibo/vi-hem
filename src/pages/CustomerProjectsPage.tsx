@@ -334,6 +334,15 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     () => timeEntries.filter(entry => entry.customer_project_id === selectedProject?.id),
     [timeEntries, selectedProject?.id]
   );
+  // Time stamped as ÄTA-tid (project_billing_scope='outside_quote') only
+  // ever fed the project's generic "Fakturerbar tid" total -- it never
+  // showed up anywhere someone looking at the ÄTA tab would see it,
+  // separate from formal vihem_project_change_orders records. Surfaced
+  // here too so staff/admin can actually find it.
+  const projectAtaTimeEntries = useMemo(
+    () => projectTimeEntries.filter(entry => entry.project_billing_scope === 'outside_quote'),
+    [projectTimeEntries]
+  );
   const projectWorkOrders = useMemo(
     () => workOrders.filter(wo => wo.customer_project_id === selectedProject?.id),
     [workOrders, selectedProject?.id]
@@ -1300,7 +1309,12 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                       <ListRow
                         key={entry.id}
                         title={staff.find(s => s.id === entry.user_id)?.name || 'Användare'}
-                        meta={`${formatDate(entry.start_time)} · ${hours(entry.total_minutes || 0)}${isAdmin ? ` · ${entry.project_billable === false ? 'Ej fakturerbar' : 'Fakturerbar'}` : ''}`}
+                        meta={[
+                          formatDate(entry.start_time),
+                          hours(entry.total_minutes || 0),
+                          entry.project_billing_scope === 'outside_quote' ? 'ÄTA-tid' : '',
+                          isAdmin ? (entry.project_billable === false ? 'Ej fakturerbar' : 'Fakturerbar') : '',
+                        ].filter(Boolean).join(' · ')}
                         value={entry.comment || ''}
                       />
                     ))}
@@ -1367,6 +1381,24 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                       />
                     ))}
                   </SectionList>
+                )}
+
+                {tab === 'change-orders' && (
+                  <div className="mt-6">
+                    <SectionList
+                      title="ÄTA-tid (registrerad tid utanför offert)"
+                      empty="Ingen tid registrerad som ÄTA-tid ännu."
+                    >
+                      {projectAtaTimeEntries.map(entry => (
+                        <ListRow
+                          key={entry.id}
+                          title={staff.find(s => s.id === entry.user_id)?.name || 'Användare'}
+                          meta={`${formatDate(entry.start_time)} · ${hours(entry.total_minutes || 0)}`}
+                          value={isAdmin ? money((entry.total_minutes || 0) / 60 * (selectedProject.hourly_rate || 0)) : (entry.comment || '')}
+                        />
+                      ))}
+                    </SectionList>
+                  </div>
                 )}
 
                 {isAdmin && tab === 'quotes' && (
