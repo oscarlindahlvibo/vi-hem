@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { queueOfflineMutation } from '../lib/offlineQueue';
 import { useAuth } from '../contexts/AuthContext';
+import { useTimeCategories, type TimeCategoryOption } from '../contexts/TimeCategoriesContext';
 import {
   Card,
   Badge,
@@ -154,44 +155,148 @@ type AdminMainTimeTab = 'own' | 'staff';
 
 function AdminCombinedTimeView({ user, initialAction }: { user: Profile; initialAction?: TimeTrackingInitialAction }) {
   const [tab, setTab] = useState<AdminMainTimeTab>('own');
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-1">
-        <button
-          type="button"
-          onClick={() => setTab('own')}
-          className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-            tab === 'own' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
-          }`}
-        >
-          <Clock className="w-4 h-4" />
-          Min tid
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab('staff')}
-          className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-            tab === 'staff' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          Personalens tid
-        </button>
+      <div className="flex items-center gap-2">
+        <div className="grid flex-1 grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-1">
+          <button
+            type="button"
+            onClick={() => setTab('own')}
+            className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              tab === 'own' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            Min tid
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('staff')}
+            className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              tab === 'staff' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            Personalens tid
+          </button>
+        </div>
+        <Button variant="secondary" size="sm" onClick={() => setShowCategoryManager(true)} className="gap-1.5 flex-shrink-0">
+          <ClipboardList className="w-4 h-4" />
+          Kategorier
+        </Button>
       </div>
 
       {tab === 'own' ? <StaffTimeView user={user} initialAction={initialAction} /> : <AdminTimeView user={user} />}
+
+      <CategoryManagerModal open={showCategoryManager} onClose={() => setShowCategoryManager(false)} organisationId={user.organisation_id} userId={user.id} />
     </div>
+  );
+}
+
+function CategoryManagerModal({ open, onClose, organisationId, userId }: {
+  open: boolean; onClose: () => void; organisationId: string | null; userId: string;
+}) {
+  const { refresh } = useTimeCategories();
+  const [allCategories, setAllCategories] = useState<TimeCategoryOption[]>([]);
+  const [newLabel, setNewLabel] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function loadAll() {
+    if (!organisationId) return;
+    const { data } = await supabase
+      .from('vihem_time_categories')
+      .select('id, key, label, active, sort_order, is_builtin')
+      .eq('organisation_id', organisationId)
+      .order('sort_order', { ascending: true });
+    setAllCategories((data || []) as TimeCategoryOption[]);
+  }
+
+  useEffect(() => { if (open) loadAll(); }, [open, organisationId]);
+
+  function slugify(label: string) {
+    const base = label
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return base || `kategori_${Date.now()}`;
+  }
+
+  async function handleAdd() {
+    if (!organisationId || !newLabel.trim()) return;
+    setSaving(true);
+    setError('');
+    try {
+      let key = slugify(newLabel);
+      if (allCategories.some(c => c.key === key)) key = `${key}_${Date.now().toString(36)}`;
+      const { error: insertError } = await supabase.from('vihem_time_categories').insert({
+        organisation_id: organisationId,
+        key,
+        label: newLabel.trim(),
+        sort_order: allCategories.length + 1,
+        is_builtin: false,
+        created_by: userId,
+      });
+      if (insertError) throw insertError;
+      setNewLabel('');
+      await loadAll();
+      await refresh();
+    } catch (err: any) {
+      setError(err.message || 'Kunde inte lägga till kategorin.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleToggleActive(id: string, active: boolean) {
+    await supabase.from('vihem_time_categories').update({ active }).eq('id', id);
+    await loadAll();
+    await refresh();
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Kategorier för stämplingar">
+      <div className="space-y-4">
+        <p className="text-sm text-slate-500">
+          Kategorierna visas när personal stämplar in eller loggar tid i efterhand. De 9 grundkategorierna kan inte tas bort, men egna kategorier (t.ex. "Städning") går att lägga till och inaktivera.
+        </p>
+        <div className="space-y-2">
+          {allCategories.map(c => (
+            <div key={c.id} className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${c.active ? 'border-slate-200' : 'border-slate-100 bg-slate-50'}`}>
+              <span className={`text-sm ${c.active ? 'text-slate-800' : 'text-slate-400 line-through'}`}>
+                {c.label}{c.is_builtin && <span className="ml-2 text-xs text-slate-400 no-underline">Grundkategori</span>}
+              </span>
+              {!c.is_builtin && (
+                <Button variant="ghost" size="sm" onClick={() => handleToggleActive(c.id, !c.active)}>
+                  {c.active ? 'Inaktivera' : 'Aktivera'}
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 pt-2 border-t border-slate-100">
+          <Input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="Ny kategori, t.ex. Städning" className="flex-1" />
+          <Button variant="primary" onClick={handleAdd} loading={saving} disabled={!newLabel.trim()}>
+            <Plus className="w-4 h-4" /> Lägg till
+          </Button>
+        </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+      </div>
+    </Modal>
   );
 }
 
 // ─── Staff view ───────────────────────────────────────────────────────────────
 
 type StaffTab = 'list' | 'calendar';
-type WorkOrderSummary = Pick<WorkOrder, 'id' | 'title' | 'status'>;
+type WorkOrderSummary = Pick<WorkOrder, 'id' | 'title' | 'status' | 'customer_project_id'>;
 type CustomerProjectSummary = Pick<CustomerProject, 'id' | 'title' | 'name' | 'customer_name' | 'status'>;
 
 function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?: TimeTrackingInitialAction }) {
+  const { labelFor } = useTimeCategories();
   const [tab, setTab] = useState<StaffTab>('list');
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [currentEntry, setCurrentEntry] = useState<TimeEntry | null>(null);
@@ -317,7 +422,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       }, {} as Record<string, DailyWorkSummary>));
 
       const { data: wos } = await supabase
-        .from('vihem_work_orders').select('id, title, status')
+        .from('vihem_work_orders').select('id, title, status, customer_project_id')
         .in('status', ['new', 'assigned', 'started', 'paused']);
       setWorkOrders(wos || []);
 
@@ -722,7 +827,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
                     {String(elapsedSeconds % 60).padStart(2, '0')}
                   </p>
                   <p className={`text-xs mt-0.5 ${toneStyle.sub}`}>
-                    {TIME_CATEGORY_LABELS[currentEntry.category]}{currentEntry.category === 'customer_project' && currentEntry.project_billing_scope === 'outside_quote' ? ' · ÄTA-tid' : ''} · Startade {new Date(currentEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+                    {labelFor(currentEntry.category)}{currentEntry.category === 'customer_project' && currentEntry.project_billing_scope === 'outside_quote' ? ' · ÄTA-tid' : ''} · Startade {new Date(currentEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
                     {timeEntryProjectLabel(currentEntry) && ` · ${timeEntryProjectLabel(currentEntry)}`}
                   </p>
                 </div>
@@ -1049,6 +1154,7 @@ function DayWorkCard({ dayKey, entries, absences, summary, onEditEntry, onAddEnt
   onAddEntry: () => void;
   onEditComment: () => void;
 }) {
+  const { labelFor } = useTimeCategories();
   const sortedEntries = [...entries].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
   const workMinutes = sortedEntries
     .filter(entry => !isBreakLike(entry.entry_type) && entry.end_time)
@@ -1114,7 +1220,7 @@ function DayWorkCard({ dayKey, entries, absences, summary, onEditEntry, onAddEnt
                         {new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
                         {entry.end_time ? `-${new Date(entry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}` : '-pågår'}
                       </span>
-                      <span className="text-xs text-slate-500">{entryKindLabel(entry.entry_type) || TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
+                      <span className="text-xs text-slate-500">{entryKindLabel(entry.entry_type) || labelFor(entry.category)}</span>
                       {entry.work_order?.title && <span className="text-xs text-slate-500 truncate">· {entry.work_order.title}</span>}
                       {projectLabel && <span className="text-xs text-slate-500 truncate">· Projekt: {projectLabel}</span>}
                     </div>
@@ -1156,6 +1262,7 @@ function DayWorkCard({ dayKey, entries, absences, summary, onEditEntry, onAddEnt
 // ─── Entry card ────────────────────────────────────────────────────────────────
 
 function EntryCard({ entry, onEdit, showEdit }: { entry: any; onEdit: () => void; showEdit: boolean }) {
+  const { labelFor } = useTimeCategories();
   const projectLabel = timeEntryProjectLabel(entry);
 
   return (
@@ -1166,7 +1273,7 @@ function EntryCard({ entry, onEdit, showEdit }: { entry: any; onEdit: () => void
             <Badge className={getTimeStatusColor(entry.status)}>
               {STATUS_LABEL[entry.status as TimeStatus] || entry.status}
             </Badge>
-            <span className="text-xs text-slate-500">{entryKindLabel(entry.entry_type) || TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</span>
+            <span className="text-xs text-slate-500">{entryKindLabel(entry.entry_type) || labelFor(entry.category)}</span>
             {entry.work_order?.title && (
               <span className="text-xs text-slate-500 truncate">· {entry.work_order.title}</span>
             )}
@@ -1208,6 +1315,12 @@ function projectOptionLabel(project: CustomerProjectSummary) {
   return [project.title || project.name || 'Namnlöst projekt', project.customer_name].filter(Boolean).join(' · ');
 }
 
+function workOrderOptionLabel(wo: WorkOrderSummary, customerProjects: CustomerProjectSummary[]) {
+  if (!wo.customer_project_id) return wo.title;
+  const project = customerProjects.find(p => p.id === wo.customer_project_id);
+  return project ? `${wo.title} (${projectOptionLabel(project)})` : wo.title;
+}
+
 function timeEntryProjectLabel(entry: Pick<TimeEntry, 'customer_name'> & { customer_project?: CustomerProjectSummary | null }) {
   if (entry.customer_project) return projectOptionLabel(entry.customer_project);
   return entry.customer_name || '';
@@ -1221,6 +1334,7 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
   title?: string;
   submitLabel?: string;
 }) {
+  const { categories } = useTimeCategories();
   const [category, setCategory] = useState<TimeCategory>('general');
   const [workOrderId, setWorkOrderId] = useState('');
   const [customerProjectId, setCustomerProjectId] = useState('');
@@ -1236,9 +1350,17 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
     <Modal open={open} onClose={() => { onClose(); reset(); }} title={title}>
       <div className="space-y-4">
         <Select label="Kategori" value={category} onChange={e => setCategory(e.target.value as TimeCategory)}
-          options={Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))} />
-        <Select label="Arbetsorder (valfritt)" value={workOrderId} onChange={e => setWorkOrderId(e.target.value)}
-          options={[{ value: '', label: 'Ingen' }, ...workOrders.map(wo => ({ value: wo.id, label: wo.title }))]} />
+          options={categories.length > 0 ? categories.map(c => ({ value: c.key, label: c.label })) : Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))} />
+        <Select label="Arbetsorder (valfritt)" value={workOrderId} onChange={e => {
+          const id = e.target.value;
+          setWorkOrderId(id);
+          const wo = workOrders.find(w => w.id === id);
+          if (wo?.customer_project_id) {
+            setCategory('customer_project');
+            setCustomerProjectId(wo.customer_project_id);
+          }
+        }}
+          options={[{ value: '', label: 'Ingen' }, ...workOrders.map(wo => ({ value: wo.id, label: workOrderOptionLabel(wo, customerProjects) }))]} />
         {category === 'customer_project' && (
           <>
             <Select
@@ -1292,6 +1414,7 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
   defaultDate?: string;
   approvedEditMode?: 'request' | 'admin';
 }) {
+  const { categories } = useTimeCategories();
   const now = new Date();
   const defaultStart = defaultDate
     ? `${defaultDate}T09:00`
@@ -1365,12 +1488,20 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
               { value: 'lunch', label: 'Lunch' },
             ]} />
           <Select label="Kategori" value={category} onChange={e => setCategory(e.target.value as TimeCategory)}
-            options={Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))} />
+            options={categories.length > 0 ? categories.map(c => ({ value: c.key, label: c.label })) : Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))} />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Select label="Arbetsorder (valfritt)" value={workOrderId} onChange={e => setWorkOrderId(e.target.value)}
-            options={[{ value: '', label: 'Ingen' }, ...workOrders.map(wo => ({ value: wo.id, label: wo.title }))]} />
+          <Select label="Arbetsorder (valfritt)" value={workOrderId} onChange={e => {
+            const id = e.target.value;
+            setWorkOrderId(id);
+            const wo = workOrders.find(w => w.id === id);
+            if (wo?.customer_project_id) {
+              setCategory('customer_project');
+              setCustomerProjectId(wo.customer_project_id);
+            }
+          }}
+            options={[{ value: '', label: 'Ingen' }, ...workOrders.map(wo => ({ value: wo.id, label: workOrderOptionLabel(wo, customerProjects) }))]} />
           {category === 'customer_project' ? (
             <Select
               label="Kundprojekt"
@@ -1645,6 +1776,7 @@ function AbsenceRequestModal({ open, onClose, onSubmit, defaultDate, title = 'An
 // ─── Admin view ────────────────────────────────────────────────────────────────
 
 function AdminTimeView({ user }: { user: Profile }) {
+  const { labelFor } = useTimeCategories();
   const [viewTab, setViewTab] = useState<'today' | 'timesheets'>('today');
   const [monthFilter, setMonthFilter] = useState(() => {
     const d = new Date();
@@ -1713,7 +1845,7 @@ function AdminTimeView({ user }: { user: Profile }) {
 
   async function fetchAdminOptions() {
     const [{ data: wos }, { data: projectsData }] = await Promise.all([
-      supabase.from('vihem_work_orders').select('id, title, status').in('status', ['new', 'assigned', 'started', 'paused']),
+      supabase.from('vihem_work_orders').select('id, title, status, customer_project_id').in('status', ['new', 'assigned', 'started', 'paused']),
       supabase.from('vihem_customer_projects').select('id, title, name, customer_name, status').not('status', 'in', '(archived,completed,cancelled)').order('updated_at', { ascending: false }),
     ]);
     setWorkOrders(wos || []);
@@ -2212,7 +2344,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                       >
                         <p className="truncate text-sm font-medium text-slate-800">{staffById[entry.user_id]?.name || 'Personal'}</p>
                         <p className="truncate text-xs text-slate-500">
-                          {formatDate(entry.start_time)} · {entryKindLabel(entry.entry_type) || TIME_CATEGORY_LABELS[entry.category as TimeCategory]}
+                          {formatDate(entry.start_time)} · {entryKindLabel(entry.entry_type) || labelFor(entry.category)}
                           {(timeEntryProjectLabel(entry) || entry.work_order?.title) ? ` · ${timeEntryProjectLabel(entry) || entry.work_order?.title}` : ''}
                           {' · '}{formatMinutes(entry.total_minutes || 0)}
                         </p>
@@ -2304,7 +2436,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                       <p className="font-semibold text-slate-800 break-words">{staff.name}</p>
                       <p className="mt-1 text-sm text-slate-500">
                         {viewTab === 'today'
-                          ? activeAbsence ? `${ABSENCE_TYPE_LABEL[activeAbsence.absence_type]} ${ABSENCE_STATUS_LABEL[activeAbsence.status].toLowerCase()}` : activeEntry ? `Instämplad som ${entryKindLabel(activeEntry.entry_type) || TIME_CATEGORY_LABELS[activeEntry.category as TimeCategory]}` : 'Inte instämplad'
+                          ? activeAbsence ? `${ABSENCE_TYPE_LABEL[activeAbsence.absence_type]} ${ABSENCE_STATUS_LABEL[activeAbsence.status].toLowerCase()}` : activeEntry ? `Instämplad som ${entryKindLabel(activeEntry.entry_type) || labelFor(activeEntry.category)}` : 'Inte instämplad'
                           : `Total ${formatMinutes(d.total)}`}
                       </p>
                     </div>
@@ -2390,7 +2522,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                             </Badge>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-slate-700">{activeAbsence ? ABSENCE_TYPE_LABEL[activeAbsence.absence_type] : latestEntry ? entryKindLabel(latestEntry.entry_type) || TIME_CATEGORY_LABELS[latestEntry.category as TimeCategory] : '--'}</td>
+                        <td className="px-4 py-3 text-slate-700">{activeAbsence ? ABSENCE_TYPE_LABEL[activeAbsence.absence_type] : latestEntry ? entryKindLabel(latestEntry.entry_type) || labelFor(latestEntry.category) : '--'}</td>
                         <td className="px-4 py-3 text-slate-600 max-w-[220px] truncate">{latestEntry ? timeEntryProjectLabel(latestEntry) || latestEntry.work_order?.title || '--' : '--'}</td>
                         <td className="px-4 py-3 text-slate-700">{activeAbsence ? activeAbsence.start_time?.slice(0, 5) || 'Heldag' : latestEntry ? new Date(latestEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
                         <td className="px-4 py-3 text-slate-700">{activeAbsence ? activeAbsence.end_time?.slice(0, 5) || 'Heldag' : latestEntry?.end_time ? new Date(latestEntry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
@@ -2673,7 +2805,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                         {dayEntries.map(entry => (
                           <tr key={entry.id} className="border-b border-slate-100 hover:bg-slate-50">
                             <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{new Date(entry.start_time).toLocaleDateString('sv-SE', { weekday: 'short' })}</td>
-                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entryKindLabel(entry.entry_type) || TIME_CATEGORY_LABELS[entry.category as TimeCategory]}</td>
+                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entryKindLabel(entry.entry_type) || labelFor(entry.category)}</td>
                             <td className="px-3 py-2 text-slate-600 max-w-[180px] truncate">{timeEntryProjectLabel(entry) || entry.work_order?.title || '--'}</td>
                             <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}</td>
                             <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entry.end_time ? new Date(entry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>

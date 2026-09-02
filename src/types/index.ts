@@ -25,7 +25,8 @@ export type ModuleKey =
   | 'skatteverket'
   | 'jour'
   | 'fleet_management'
-  | 'operations';
+  | 'operations'
+  | 'payroll';
 
 export interface Organisation {
   id: string;

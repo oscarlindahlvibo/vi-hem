@@ -57,6 +57,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { TIME_CATEGORY_LABELS } from '../lib/utils';
+import { useTimeCategories } from '../contexts/TimeCategoriesContext';
 import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
 import type { TimeCategory } from '../types';
 import { WorkOrderOperationsPanel } from '../components/WorkOrderOperationsPanel';
@@ -74,6 +75,7 @@ interface WOWithRelations extends Omit<WorkOrder, 'property' | 'apartment' | 'te
   assigned?: WorkOrderPerson;
   creator?: WorkOrderPerson;
   maintenance_request?: { id: string; title: string; status: string; tenant_id: string } | null;
+  customer_project?: { title: string | null; name: string | null } | null;
 }
 
 type CreateWorkOrderForm = {
@@ -162,6 +164,7 @@ function isWorkOrderOverdue(order: Pick<WorkOrder, 'status' | 'due_date' | 'sche
 
 export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: { onNavigate: (page: string) => void; initialWorkOrderId?: string }) {
   const { user, loading: authLoading } = useAuth();
+  const { categories: timeCategories } = useTimeCategories();
   const [workOrders, setWorkOrders] = useState<WOWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -270,7 +273,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
           tenant:vihem_profiles!work_orders_tenant_id_fkey(name),
           assigned:vihem_profiles!work_orders_assigned_to_fkey(name),
           creator:vihem_profiles!work_orders_created_by_fkey(name),
-          maintenance_request:vihem_maintenance_requests(id,title,status,tenant_id)`
+          maintenance_request:vihem_maintenance_requests(id,title,status,tenant_id),
+          customer_project:vihem_customer_projects(title,name)`
         )
         .order('created_at', { ascending: false });
 
@@ -736,7 +740,12 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         user_id: user.id,
         organisation_id: user.organisation_id || null,
         work_order_id: selectedWorkOrder.id,
-        category: stampCategory,
+        // A work order created inside a customer project (see
+        // CustomerProjectsPage's "Arbetsordrar" tab) needs customer_project_id
+        // set too -- refresh_customer_project_financials sums time straight
+        // off vihem_time_entries.customer_project_id, not work_order_id.
+        customer_project_id: selectedWorkOrder.customer_project_id || null,
+        category: selectedWorkOrder.customer_project_id ? 'customer_project' : stampCategory,
         start_time: new Date().toISOString(),
         end_time: null,
         break_minutes: 0,
@@ -1253,7 +1262,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                   <div className="min-w-0 flex-1">
                     <h3 className="font-semibold text-slate-900 leading-snug break-words">{wo.title}</h3>
                     <p className="mt-1 text-sm text-slate-500 break-words">
-                      {wo.property?.name || 'Ingen fastighet'}
+                      {wo.property?.name || (wo.customer_project ? `Kundprojekt: ${wo.customer_project.title || wo.customer_project.name}` : 'Ingen fastighet')}
                     </p>
                   </div>
                   <ChevronRight className="w-4 h-4 text-slate-400 shrink-0 mt-1" />
@@ -2108,7 +2117,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
               label="Kategori"
               value={stampCategory}
               onChange={(e) => setStampCategory(e.target.value as TimeCategory)}
-              options={Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))}
+              options={timeCategories.length > 0 ? timeCategories.map(c => ({ value: c.key, label: c.label })) : Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))}
             />
             <Textarea
               label="Kommentar (valfritt)"

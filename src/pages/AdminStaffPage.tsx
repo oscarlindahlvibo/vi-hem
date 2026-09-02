@@ -23,13 +23,14 @@ import { defaultNotificationSettings, NOTIFICATION_SETTING_LABELS, type Notifica
 // grant per staff member. Core features (maintenance, work orders, time
 // tracking, ...) are always on for every staff member and aren't listed
 // here, matching DEFAULT_MODULE_STATE in App.tsx.
-// 'finance' and 'skatteverket' are deliberately excluded: those pages and
-// their underlying RLS policies are hard-gated to role='admin' everywhere
-// today, not just this nav toggle -- granting staff a module.finance row
-// would show a checkbox that does nothing (they'd still be blocked), which
-// is worse than not offering it. Extending real staff access to financial
-// data is a separate, bigger decision (touching finance RLS), not this
-// feature -- see the chat message this shipped with.
+// 'finance', 'skatteverket' and 'payroll' were previously excluded here
+// because their RLS was hard-gated to role='admin' everywhere -- ticking
+// the checkbox would have done nothing. 20260902130000_module_grants_extend_finance.sql
+// added module.finance/module.skatteverket/module.payroll as alternate
+// paths through that RLS (finance via vihem_user_has_company_access,
+// skatteverket and payroll directly), so every optional module now follows
+// the same one grant pattern -- see that migration for exactly what a
+// grant here does and does not unlock.
 const GRANTABLE_MODULES: { key: ModuleKey; label: string }[] = [
   { key: 'inventory_management', label: 'Lager' },
   { key: 'customer_projects', label: 'Kundprojekt' },
@@ -40,6 +41,9 @@ const GRANTABLE_MODULES: { key: ModuleKey; label: string }[] = [
   { key: 'jour', label: 'Jour' },
   { key: 'fleet_management', label: 'Fleet Manager' },
   { key: 'operations', label: 'Drift & rutiner' },
+  { key: 'finance', label: 'Ekonomi' },
+  { key: 'skatteverket', label: 'Skatteverket' },
+  { key: 'payroll', label: 'Löneunderlag' },
 ];
 
 const WEEKDAYS = [

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { queueOfflineMutation } from '../lib/offlineQueue';
 import { useAuth } from '../contexts/AuthContext';
+import { useTimeCategories } from '../contexts/TimeCategoriesContext';
 import {
   Card,
   Badge,
@@ -68,6 +69,7 @@ interface MRWithRelations extends Omit<MaintenanceRequest, 'tenant' | 'property'
 
 export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
   const { user, loading: authLoading } = useAuth();
+  const { categories: timeCategories } = useTimeCategories();
   const [requests, setRequests] = useState<MRWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1548,7 +1550,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                   label="Kategori"
                   value={stampCategory}
                   onChange={(e) => setStampCategory(e.target.value as TimeCategory)}
-                  options={Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))}
+                  options={timeCategories.length > 0 ? timeCategories.map(c => ({ value: c.key, label: c.label })) : Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))}
                 />
                 <Textarea
                   label="Kommentar (valfritt)"

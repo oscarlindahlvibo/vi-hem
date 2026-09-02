@@ -109,10 +109,10 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Scanna underlag', icon: <ScanLine className="w-5 h-5" />, page: 'document-scanner', roles: ['staff', 'admin'], module: 'finance' },
     ] },
     { label: 'Ekonomi', icon: <Landmark className="w-5 h-5" />, items: [
-      { label: 'Ekonomi', icon: <Landmark className="w-5 h-5" />, page: 'finance', roles: ['admin'], module: 'finance' },
-      { label: 'Ekonomi V2 (beta)', icon: <Landmark className="w-5 h-5" />, page: 'finance-v2', roles: ['admin'], module: 'finance' },
-      { label: 'Skatteverket', icon: <Landmark className="w-5 h-5" />, page: 'skatteverket', roles: ['admin'], module: 'skatteverket' },
-      { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['admin'] },
+      { label: 'Ekonomi', icon: <Landmark className="w-5 h-5" />, page: 'finance', roles: ['staff', 'admin'], module: 'finance' },
+      { label: 'Ekonomi V2 (beta)', icon: <Landmark className="w-5 h-5" />, page: 'finance-v2', roles: ['staff', 'admin'], module: 'finance' },
+      { label: 'Skatteverket', icon: <Landmark className="w-5 h-5" />, page: 'skatteverket', roles: ['staff', 'admin'], module: 'skatteverket' },
+      { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['staff', 'admin'], module: 'payroll' },
       { label: 'E-post & underlag', icon: <Mail className="w-5 h-5" />, page: 'mail-search', roles: ['staff', 'admin'] },
     ] },
     { label: 'Personal', icon: <Users className="w-5 h-5" />, items: [

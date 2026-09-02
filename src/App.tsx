@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { TimeCategoriesProvider } from './contexts/TimeCategoriesContext';
 import { Layout } from './components/Layout';
 import { LoginPage } from './components/LoginPage';
 import { ResetPasswordPage } from './components/ResetPasswordPage';
@@ -112,6 +113,7 @@ const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
   'jour',
   'fleet_management',
   'operations',
+  'payroll',
 ];
 
 const DEFAULT_MODULE_STATE: ModuleState = {
@@ -131,6 +133,7 @@ const DEFAULT_MODULE_STATE: ModuleState = {
   jour: false,
   fleet_management: false,
   operations: false,
+  payroll: false,
 };
 
 function normalizeAppPath(path: string) {
@@ -587,13 +590,18 @@ function AppInner() {
         return <SmsPage />;
 
       case 'finance':
-        if (!isAdmin || !enabledModules.finance) return renderDashboard();
+        // Same per-person module-grant pattern as jour/operations/fleet --
+        // staff need an explicit module.finance grant (AdminStaffPage.tsx),
+        // enforced by enabledModules already zeroing this out for staff
+        // without one. See 20260902130000_module_grants_extend_finance.sql
+        // for the matching RLS change.
+        if (!isStaff || !enabledModules.finance) return renderDashboard();
         return <FinancePage onNavigate={navigate} />;
 
       case 'finance-v2':
         // Foundation-stage Accounted integration. Same gate as legacy
-        // 'finance': org admin + the org's finance module enabled.
-        if (!isAdmin || !enabledModules.finance) return renderDashboard();
+        // 'finance': staff module grant + the org's finance module enabled.
+        if (!isStaff || !enabledModules.finance) return renderDashboard();
         return <FinanceV2Page />;
 
       case 'tenant-invoices':
@@ -608,7 +616,7 @@ function AppInner() {
         return <AgreementsV2Page />;
 
       case 'skatteverket':
-        if (!isAdmin || !enabledModules.skatteverket) return renderDashboard();
+        if (!isStaff || !enabledModules.skatteverket) return renderDashboard();
         return <SkatteverketPage onNavigate={navigate} />;
 
       case 'jour':
@@ -620,7 +628,7 @@ function AppInner() {
         return <FleetPage onNavigate={navigate} />;
 
       case 'admin-payroll':
-        if (!isAdmin) return renderDashboard();
+        if (!isStaff || !enabledModules.payroll) return renderDashboard();
         return <AdminPayrollPage onNavigate={navigate} />;
 
       case 'admin-terminations':
@@ -660,7 +668,9 @@ export default function App() {
   return (
     <AppErrorBoundary>
       <AuthProvider>
-        <AppInner />
+        <TimeCategoriesProvider>
+          <AppInner />
+        </TimeCategoriesProvider>
       </AuthProvider>
     </AppErrorBoundary>
   );

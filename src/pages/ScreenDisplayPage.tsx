@@ -5,7 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
 import { Button, LoadingPage } from '../components/ui';
 import type { CalendarEvent, CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, MaintenanceRequest, Meeting, MeetingActionItem, MeetingAgendaItem, MeetingDecision, News, Profile, ShortStayBooking, ShortStayUnit, StaffAbsenceRequest, TimeEntry, WorkOrder } from '../types';
-import { formatDate, formatDateTime, MR_PRIORITY_LABELS, MR_STATUS_LABELS, TIME_CATEGORY_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS, entryKindLabel } from '../lib/utils';
+import { formatDate, formatDateTime, MR_PRIORITY_LABELS, MR_STATUS_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS, entryKindLabel } from '../lib/utils';
+import { useTimeCategories } from '../contexts/TimeCategoriesContext';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import {
   DEFAULT_SCREEN_KEY,
@@ -1210,6 +1211,7 @@ function PresentationScreen({
   screenWidth: number;
   screenHeight: number;
 }) {
+  const { labelFor } = useTimeCategories();
   const [weatherText, setWeatherText] = useState('Laddar väder...');
   const todayKey = dateKey(today());
   const absentToday = absenceRequests.filter(request => request.start_date <= todayKey && request.end_date >= todayKey);
@@ -1282,7 +1284,7 @@ function PresentationScreen({
   ].filter(Boolean);
 
   const timeEntryTitle = (entry: TimeEntry) => {
-    return entryKindLabel(entry.entry_type) || entry.work_order?.title || entry.customer_project?.title || entry.customer_project?.name || entry.property?.name || TIME_CATEGORY_LABELS[entry.category] || 'Arbete';
+    return entryKindLabel(entry.entry_type) || entry.work_order?.title || entry.customer_project?.title || entry.customer_project?.name || entry.property?.name || labelFor(entry.category) || 'Arbete';
   };
   const isOrderOverdue = (order: WorkOrder) => Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
   const assigneeLabel = (order: WorkOrder) => workOrderAssigneeLabel(order, staffMembers, true);

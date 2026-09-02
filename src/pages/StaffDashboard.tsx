@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, Badge, StatCard, LoadingPage } from '../components/ui';
-import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, TIME_CATEGORY_LABELS, isBreakLike, entryKindLabel, clockTone, CLOCK_TONE_STYLES, LUNCH_WARNING_MINUTES, LUNCH_OVERDUE_MINUTES } from '../lib/utils';
+import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, isBreakLike, entryKindLabel, clockTone, CLOCK_TONE_STYLES, LUNCH_WARNING_MINUTES, LUNCH_OVERDUE_MINUTES } from '../lib/utils';
+import { useTimeCategories } from '../contexts/TimeCategoriesContext';
 import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News, Profile, ShortStayBooking, CustomerProject } from '../types';
 import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, Square, Repeat2, Coffee, Utensils, BedDouble, Briefcase } from 'lucide-react';
 
@@ -45,8 +46,8 @@ function customerProjectLabel(project: any) {
   return project?.title || project?.name || project?.customer_name || '';
 }
 
-function timeEntryLabel(entry: TimeEntry) {
-  return entryKindLabel(entry.entry_type) || TIME_CATEGORY_LABELS[entry.category] || 'Arbete';
+function timeEntryLabel(entry: TimeEntry, labelFor: (key: string) => string) {
+  return entryKindLabel(entry.entry_type) || labelFor(entry.category) || 'Arbete';
 }
 
 function absenceStatusColor(status: StaffAbsenceStatus) {
@@ -77,6 +78,7 @@ function localDateKey(date = new Date()) {
 
 export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
   const { user } = useAuth();
+  const { labelFor } = useTimeCategories();
   const [loading, setLoading] = useState(true);
   const [newMRCount, setNewMRCount] = useState(0);
   const [urgentMRCount, setUrgentMRCount] = useState(0);
@@ -420,7 +422,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
                   <p className={`shrink-0 font-mono text-sm font-bold ${toneStyle.mono}`}>{elapsedLabel}</p>
                 </div>
                 <p className="mt-1 text-sm font-semibold">
-                  {timeEntryLabel(activeTimeEntry)}
+                  {timeEntryLabel(activeTimeEntry, labelFor)}
                   {(customerProjectLabel(activeTimeEntry.customer_project) || activeTimeEntry.work_order?.title) && (
                     <> · {customerProjectLabel(activeTimeEntry.customer_project) || activeTimeEntry.work_order?.title}</>
                   )}
@@ -725,7 +727,7 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Badge className={entry.entry_type === 'break' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
-                        {timeEntryLabel(entry)}
+                        {timeEntryLabel(entry, labelFor)}
                       </Badge>
                       {(customerProjectLabel(entry.customer_project) || entry.work_order?.title) && (
                         <Badge className="bg-slate-100 text-slate-700">

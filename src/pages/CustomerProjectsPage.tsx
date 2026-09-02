@@ -34,7 +34,7 @@ import {
   Select,
   Textarea,
 } from '../components/ui';
-import { formatDate } from '../lib/utils';
+import { formatDate, WO_CATEGORIES, WO_STATUS_LABELS } from '../lib/utils';
 import type {
   CustomerProject,
   CustomerProjectStatus,
@@ -51,6 +51,8 @@ import type {
   ProjectSelfCheck,
   ProjectSelfCheckTemplate,
   TimeEntry,
+  WOPriority,
+  WorkOrder,
 } from '../types';
 
 interface CustomerProjectsPageProps { onNavigate: (page: string) => void; }
@@ -144,12 +146,13 @@ const defaultCustomerForm = {
   notes: '',
 };
 
-type ProjectTabId = 'overview' | 'time' | 'materials' | 'change-orders' | 'quotes' | 'self-checks' | 'inspections' | 'deviations' | 'invoice' | 'documents' | 'activity';
+type ProjectTabId = 'overview' | 'time' | 'work-orders' | 'materials' | 'change-orders' | 'quotes' | 'self-checks' | 'inspections' | 'deviations' | 'invoice' | 'documents' | 'activity';
 type ProjectListView = 'quotes' | 'active' | 'all';
 
 const PROJECT_TABS: { key: ProjectTabId; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'overview', label: 'Översikt', Icon: ClipboardList },
   { key: 'time', label: 'Tid', Icon: Timer },
+  { key: 'work-orders', label: 'Arbetsordrar', Icon: Hammer },
   { key: 'materials', label: 'Material', Icon: Package },
   { key: 'change-orders', label: 'ÄTA', Icon: Receipt },
   { key: 'quotes', label: 'Offert', Icon: FileText },
@@ -164,6 +167,7 @@ const PROJECT_TABS: { key: ProjectTabId; label: string; Icon: React.ComponentTyp
 const STAFF_PROJECT_TABS: ProjectTabId[] = [
   'overview',
   'time',
+  'work-orders',
   'materials',
   'change-orders',
   'self-checks',
@@ -181,6 +185,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
   const [staff, setStaff] = useState<Profile[]>([]);
   const [assignments, setAssignments] = useState<ProjectAssignment[]>([]);
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
+  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [materials, setMaterials] = useState<ProjectMaterialEntry[]>([]);
   const [changeOrders, setChangeOrders] = useState<ProjectChangeOrder[]>([]);
   const [quotes, setQuotes] = useState<ProjectQuoteVersion[]>([]);
@@ -197,6 +202,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showTimeModal, setShowTimeModal] = useState(false);
+  const [showWorkOrderModal, setShowWorkOrderModal] = useState(false);
   const [showMaterialModal, setShowMaterialModal] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<ProjectMaterialEntry | null>(null);
   const [showChangeModal, setShowChangeModal] = useState(false);
@@ -221,6 +227,14 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     comment: '',
     project_billable: true,
     project_billing_scope: 'outside_quote',
+  });
+  const [workOrderForm, setWorkOrderForm] = useState({
+    title: '',
+    description: '',
+    category: WO_CATEGORIES[0],
+    priority: 'normal' as WOPriority,
+    assigned_to: '',
+    due_date: '',
   });
   const [materialForm, setMaterialForm] = useState({
     name: '',
@@ -320,6 +334,10 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     () => timeEntries.filter(entry => entry.customer_project_id === selectedProject?.id),
     [timeEntries, selectedProject?.id]
   );
+  const projectWorkOrders = useMemo(
+    () => workOrders.filter(wo => wo.customer_project_id === selectedProject?.id),
+    [workOrders, selectedProject?.id]
+  );
   const projectMaterials = useMemo(
     () => materials.filter(entry => entry.project_id === selectedProject?.id),
     [materials, selectedProject?.id]
@@ -409,6 +427,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       if (projectIds.length === 0) {
         setAssignments([]);
         setTimeEntries([]);
+        setWorkOrders([]);
         setMaterials([]);
         setChangeOrders([]);
         setQuotes([]);
@@ -430,9 +449,10 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       const timeSelect = isAdmin
         ? '*'
         : 'id, user_id, organisation_id, customer_project_id, start_time, end_time, total_minutes, comment, work_type, entry_type, category, created_at, updated_at';
-      const [assignmentRes, timeRes, materialRes, changeRes, quoteRes, templateRes, selfCheckRes, inspectionRes, deviationRes, invoiceRes, activityRes] = await Promise.all([
+      const [assignmentRes, timeRes, workOrderRes, materialRes, changeRes, quoteRes, templateRes, selfCheckRes, inspectionRes, deviationRes, invoiceRes, activityRes] = await Promise.all([
         supabase.from('vihem_project_assignments').select('*').in('project_id', projectIds),
         supabase.from('vihem_time_entries').select(timeSelect).in('customer_project_id', projectIds).order('start_time', { ascending: false }),
+        supabase.from('vihem_work_orders').select('id, title, description, category, priority, status, customer_project_id, assigned_to, due_date, created_at').in('customer_project_id', projectIds).order('created_at', { ascending: false }),
         supabase.from('vihem_project_material_entries').select(materialSelect).in('project_id', projectIds).order('created_at', { ascending: false }),
         supabase.from('vihem_project_change_orders').select(changeOrderSelect).in('project_id', projectIds).order('created_at', { ascending: false }),
         isAdmin ? supabase.from('vihem_project_quote_versions').select('*, lines:vihem_project_quote_lines(*)').in('project_id', projectIds).order('created_at', { ascending: false }) : Promise.resolve({ data: [] }),
@@ -446,6 +466,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
 
       setAssignments((assignmentRes.data || []) as ProjectAssignment[]);
       setTimeEntries((timeRes.data || []) as unknown as TimeEntry[]);
+      setWorkOrders((workOrderRes.data || []) as unknown as WorkOrder[]);
       setMaterials((materialRes.data || []) as unknown as ProjectMaterialEntry[]);
       setChangeOrders((changeRes.data || []) as unknown as ProjectChangeOrder[]);
       setQuotes((quoteRes.data || []) as ProjectQuoteVersion[]);
@@ -945,6 +966,46 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     }
   }
 
+  function openNewWorkOrder() {
+    setWorkOrderForm({ title: '', description: '', category: WO_CATEGORIES[0], priority: 'normal', assigned_to: '', due_date: '' });
+    setError('');
+    setShowWorkOrderModal(true);
+  }
+
+  async function handleSaveWorkOrder() {
+    if (!selectedProject || !user?.organisation_id) return;
+    setSaving(true);
+    setError('');
+    try {
+      if (!workOrderForm.title.trim()) throw new Error('Ange en titel.');
+      // property_id stays null -- this work order belongs to the customer
+      // project instead, and time logged against it rolls into the
+      // project's own time total via customer_project_id (see
+      // refresh_customer_project_financials, which sums straight off
+      // vihem_time_entries.customer_project_id).
+      const { error: insertError } = await supabase.from('vihem_work_orders').insert({
+        organisation_id: user.organisation_id,
+        customer_project_id: selectedProject.id,
+        title: workOrderForm.title,
+        description: workOrderForm.description,
+        category: workOrderForm.category,
+        priority: workOrderForm.priority,
+        status: 'new',
+        assigned_to: workOrderForm.assigned_to || null,
+        due_date: workOrderForm.due_date || null,
+        created_by: user.id,
+      });
+      if (insertError) throw insertError;
+      await logActivity(selectedProject.id, 'work_order_created', `Arbetsorder skapad: ${workOrderForm.title}.`);
+      setShowWorkOrderModal(false);
+      await fetchAll();
+    } catch (err: any) {
+      setError(err.message || 'Kunde inte skapa arbetsorder.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleSaveInvoiceBasis() {
     if (!selectedProject || !isAdmin) return;
     setSaving(true);
@@ -1246,6 +1307,27 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                   </SectionList>
                 )}
 
+                {tab === 'work-orders' && (
+                  <SectionList
+                    title="Arbetsordrar"
+                    action={<Button size="sm" onClick={openNewWorkOrder}><Plus className="w-4 h-4" /> Ny arbetsorder</Button>}
+                    empty="Ingen arbetsorder skapad för projektet."
+                  >
+                    {projectWorkOrders.map(wo => (
+                      <ListRow
+                        key={wo.id}
+                        title={wo.title}
+                        meta={[
+                          WO_STATUS_LABELS[wo.status] || wo.status,
+                          wo.assigned_to ? (staff.find(s => s.id === wo.assigned_to)?.name || 'Tilldelad') : 'Ej tilldelad',
+                          wo.due_date ? `Förfaller ${formatDate(wo.due_date)}` : '',
+                        ].filter(Boolean).join(' · ')}
+                        value=""
+                      />
+                    ))}
+                  </SectionList>
+                )}
+
                 {tab === 'materials' && (
                   <SectionList
                     title="Material"
@@ -1384,6 +1466,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       <CustomerModal open={showCustomerModal} onClose={() => setShowCustomerModal(false)} form={customerForm} setForm={setCustomerForm} onSave={handleSaveCustomer} saving={saving} error={error} />
       <ProjectModal open={showProjectModal} onClose={() => setShowProjectModal(false)} form={projectForm} setForm={setProjectForm} customers={customers} staff={staff} onSave={handleSaveProject} saving={saving} error={error} />
       <TimeModal open={showTimeModal} onClose={() => setShowTimeModal(false)} form={timeForm} setForm={setTimeForm} staff={staff} isAdmin={isAdmin} onSave={handleSaveTime} saving={saving} error={error} />
+      <WorkOrderModal open={showWorkOrderModal} onClose={() => setShowWorkOrderModal(false)} form={workOrderForm} setForm={setWorkOrderForm} staff={staff} onSave={handleSaveWorkOrder} saving={saving} error={error} />
       <MaterialModal open={showMaterialModal} onClose={() => { setShowMaterialModal(false); setEditingMaterial(null); resetMaterialForm(); }} form={materialForm} setForm={setMaterialForm} onSave={handleSaveMaterial} saving={saving} error={error} editing={Boolean(editingMaterial)} isAdmin={isAdmin} />
       <ChangeOrderModal open={showChangeModal} onClose={() => setShowChangeModal(false)} form={changeForm} setForm={setChangeForm} onSave={handleSaveChangeOrder} saving={saving} error={error} isAdmin={isAdmin} />
       {isAdmin && <QuoteModal open={showQuoteModal} onClose={() => setShowQuoteModal(false)} form={quoteForm} setForm={setQuoteForm} onSave={handleSaveQuote} saving={saving} error={error} />}
@@ -1861,6 +1944,32 @@ function InspectionModal({ open, onClose, form, setForm, staff, onSave, saving, 
         <Input label="Signatur" value={form.signature_name} onChange={(e) => setForm({ ...form, signature_name: e.target.value })} />
         {error && <ErrorBox message={error} />}
         <ModalActions onClose={onClose} onSave={onSave} saving={saving} saveLabel="Spara besiktning" />
+      </div>
+    </Modal>
+  );
+}
+
+function WorkOrderModal({ open, onClose, form, setForm, staff, onSave, saving, error }: any) {
+  return (
+    <Modal open={open} onClose={onClose} title="Ny arbetsorder" size="lg">
+      <div className="space-y-4">
+        <Input label="Titel" value={form.title} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, title: e.target.value })} />
+        <Textarea label="Beskrivning" value={form.description} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, description: e.target.value })} rows={3} />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Select label="Kategori" value={form.category} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, category: e.target.value })} options={WO_CATEGORIES.map((c: string) => ({ value: c, label: c }))} />
+          <Select label="Prioritet" value={form.priority} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, priority: e.target.value })} options={[
+            { value: 'low', label: 'Låg' },
+            { value: 'normal', label: 'Normal' },
+            { value: 'high', label: 'Hög' },
+            { value: 'urgent', label: 'Akut' },
+          ]} />
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Select label="Tilldelad (valfritt)" value={form.assigned_to} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, assigned_to: e.target.value })} options={[{ value: '', label: 'Ingen' }, ...staff.map((p: Profile) => ({ value: p.id, label: p.name }))]} />
+          <Input label="Förfallodatum (valfritt)" type="date" value={form.due_date} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, due_date: e.target.value })} />
+        </div>
+        {error && <ErrorBox message={error} />}
+        <ModalActions onClose={onClose} onSave={onSave} saving={saving} saveLabel="Skapa arbetsorder" />
       </div>
     </Modal>
   );

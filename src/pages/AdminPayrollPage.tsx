@@ -10,7 +10,8 @@ import {
   EmptyState,
   LoadingPage,
 } from '../components/ui';
-import { formatMinutes, TIME_CATEGORY_LABELS, formatDateTime } from '../lib/utils';
+import { formatMinutes, formatDateTime } from '../lib/utils';
+import { useTimeCategories } from '../contexts/TimeCategoriesContext';
 import { TimeEntry, Profile } from '../types';
 
 const TIME_STATUS_LABELS: Record<string, string> = {
@@ -29,6 +30,7 @@ const TIME_STATUS_COLORS: Record<string, string> = {
 
 interface AdminPayrollPageProps { onNavigate: (page: string) => void; }
 export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPageProps) {
+  const { labelFor } = useTimeCategories();
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -269,7 +271,7 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
                 <div>
                   <span className="text-slate-500">Kategori</span>
                   <p className="font-medium text-slate-800">
-                    {TIME_CATEGORY_LABELS[entry.category as keyof typeof TIME_CATEGORY_LABELS] || entry.category}
+                    {labelFor(entry.category)}
                   </p>
                 </div>
                 <div>
