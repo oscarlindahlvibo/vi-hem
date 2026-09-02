@@ -1798,8 +1798,13 @@ function AdminTimeView({ user }: { user: Profile }) {
       supabase
         .from('vihem_time_entries')
         .select('*, work_order:work_order_id(id, title), customer_project:customer_project_id(id, title, name, customer_name)')
-        .gte('start_time', start)
-        .lte('start_time', end)
+        // Plain start_time-in-range misses anyone who clocked in yesterday
+        // evening and is still clocked in past midnight -- their
+        // start_time is yesterday's date, so "Instämplade just nu" showed
+        // 0 even while they were genuinely still on the clock. Also
+        // include any entry that's still open (no end_time yet) no
+        // matter when it started.
+        .or(`and(start_time.gte.${start},start_time.lte.${end}),end_time.is.null`)
         .order('start_time', { ascending: false }),
       supabase
         .from('vihem_staff_absence_requests')
@@ -2539,42 +2544,48 @@ function AdminTimeView({ user }: { user: Profile }) {
               <p className="text-sm text-slate-400">Inga frånvaroärenden för perioden.</p>
             ) : (
               <div className="space-y-2">
-                {selectedStaffAbsences.map(request => (
-                  <div key={request.id} className="flex flex-col gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-semibold text-slate-800">{ABSENCE_TYPE_LABEL[request.absence_type]}</span>
-                        <Badge className={absenceStatusColor(request.status)}>{ABSENCE_STATUS_LABEL[request.status]}</Badge>
+                {selectedStaffAbsences.map(request => {
+                  const isPending = request.status === 'submitted';
+                  return (
+                    <div key={request.id} className={`flex flex-col gap-2 rounded-lg border px-3 py-2 sm:flex-row sm:items-center sm:justify-between ${isPending ? 'border-amber-300 bg-amber-50' : 'border-slate-100 bg-white'}`}>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold text-slate-800">{ABSENCE_TYPE_LABEL[request.absence_type]}</span>
+                          <Badge className={absenceStatusColor(request.status)}>{ABSENCE_STATUS_LABEL[request.status]}</Badge>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">{absenceDateTimeLabel(request)}</p>
+                        {request.comment && <p className="text-xs text-slate-500 mt-1">{request.comment}</p>}
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">{absenceDateTimeLabel(request)}</p>
-                      {request.comment && <p className="text-xs text-slate-500 mt-1">{request.comment}</p>}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {isPending && (
+                          <>
+                            <Button size="sm" variant="primary" className="!bg-green-600 !shadow-green-600/25 !ring-green-500 hover:!bg-green-700" onClick={() => reviewAbsenceRequest(request.id, 'approved')}>
+                              Godkänn
+                            </Button>
+                            <Button size="sm" variant="danger" onClick={() => reviewAbsenceRequest(request.id, 'rejected')}>
+                              Avvisa
+                            </Button>
+                            <span className="text-slate-300">|</span>
+                          </>
+                        )}
+                        <button
+                          onClick={() => {
+                            setAdminEditingAbsence(request);
+                            setAdminAbsenceDefaultDate(request.start_date);
+                            setStaffModalOpen(false);
+                            setAdminAbsenceModalOpen(true);
+                          }}
+                          className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                        >
+                          Redigera
+                        </button>
+                        <button onClick={() => deleteAdminAbsence(request)} className="text-xs text-red-500 hover:text-red-600 font-medium">
+                          Ta bort
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => {
-                          setAdminEditingAbsence(request);
-                          setAdminAbsenceDefaultDate(request.start_date);
-                          setStaffModalOpen(false);
-                          setAdminAbsenceModalOpen(true);
-                        }}
-                        className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                      >
-                        Redigera
-                      </button>
-                      <button onClick={() => deleteAdminAbsence(request)} className="text-xs text-red-500 hover:text-red-600 font-medium">
-                        Ta bort
-                      </button>
-                      {request.status === 'submitted' && (
-                        <>
-                          <span className="text-slate-300">|</span>
-                        <button onClick={() => reviewAbsenceRequest(request.id, 'approved')} className="text-xs text-green-600 hover:text-green-700 font-medium">Godkänn</button>
-                        <span className="text-slate-300">|</span>
-                        <button onClick={() => reviewAbsenceRequest(request.id, 'rejected')} className="text-xs text-red-500 hover:text-red-600 font-medium">Avvisa</button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </Card>

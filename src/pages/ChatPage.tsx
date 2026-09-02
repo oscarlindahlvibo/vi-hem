@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Archive, ChevronRight, MessageCircle, Plus, Send, X } from 'lucide-react';
+import { Archive, ChevronRight, MessageCircle, Paperclip, Plus, Send, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -15,6 +15,7 @@ import type { ChatMessage, ChatThread, Profile } from '../types';
 
 interface ChatPageProps {
   onNavigate: (page: string) => void;
+  initialThreadId?: string;
 }
 
 type ChatMode = 'tenant' | 'staff' | 'group';
@@ -26,11 +27,12 @@ type ChatThreadWithRelations = ChatThread & {
   participants?: {
     id: string;
     user_id: string;
+    last_read_at: string | null;
     user?: ThreadUser | null;
   }[];
 };
 
-export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
+export function ChatPage({ onNavigate: _onNavigate, initialThreadId }: ChatPageProps) {
   const { user } = useAuth();
   const [threads, setThreads] = useState<ChatThreadWithRelations[]>([]);
   const [selectedThread, setSelectedThread] = useState<ChatThreadWithRelations | null>(null);
@@ -49,7 +51,12 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
   const [statusFilter, setStatusFilter] = useState<'open' | 'closed' | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showMobileMessages, setShowMobileMessages] = useState(false);
+  const [pendingAttachment, setPendingAttachment] = useState<{ url: string; name: string } | null>(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [attachmentError, setAttachmentError] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const initialThreadHandledRef = useRef(false);
 
   const isStaff = user?.role === 'staff' || user?.role === 'admin' || user?.role === 'superadmin';
 
@@ -66,6 +73,19 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
     fetchMessages(selectedThread.id);
     markThreadAsRead(selectedThread.id);
   }, [selectedThread?.id]);
+
+  // Opening the app from a "Nytt chattmeddelande" notification should land
+  // directly in that conversation, not just the thread list -- runs once,
+  // as soon as the referenced thread has actually loaded.
+  useEffect(() => {
+    if (!initialThreadId || initialThreadHandledRef.current || threads.length === 0) return;
+    const thread = threads.find((candidate) => candidate.id === initialThreadId);
+    if (thread) {
+      initialThreadHandledRef.current = true;
+      setSelectedThread(thread);
+      setShowMobileMessages(true);
+    }
+  }, [initialThreadId, threads]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -91,7 +111,7 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
           last_message_at,
           created_at,
           tenant:vihem_profiles!chat_threads_tenant_id_fkey(id, name, email, role),
-          participants:vihem_chat_participants(id, user_id, user:vihem_profiles!chat_participants_user_id_fkey(id, name, email, role))
+          participants:vihem_chat_participants(id, user_id, last_read_at, user:vihem_profiles!chat_participants_user_id_fkey(id, name, email, role))
         `)
         .order('last_message_at', { ascending: false });
 
@@ -138,7 +158,7 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
       setMessagesLoading(true);
       const { data, error } = await supabase
         .from('vihem_chat_messages')
-        .select('id, thread_id, sender_id, message, created_at, read_at, sender:vihem_profiles!chat_messages_sender_id_fkey(id, name)')
+        .select('id, thread_id, sender_id, message, created_at, read_at, attachment_url, attachment_type, attachment_name, sender:vihem_profiles!chat_messages_sender_id_fkey(id, name)')
         .eq('thread_id', threadId)
         .order('created_at', { ascending: true });
 
@@ -152,25 +172,56 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
   };
 
   const markThreadAsRead = async (threadId: string) => {
+    if (!user) return;
     try {
       await supabase
         .from('vihem_chat_messages')
         .update({ read_at: new Date().toISOString() })
         .eq('thread_id', threadId)
-        .neq('sender_id', user?.id)
+        .neq('sender_id', user.id)
         .is('read_at', null);
+
+      // Per-participant read marker (vihem_chat_participants.last_read_at)
+      // drives the unread indicator in the thread list -- distinct from
+      // the message-level read_at above, which is shared across every
+      // reader in a group thread and can't tell "unread for ME" on its own.
+      const nowIso = new Date().toISOString();
+      await supabase
+        .from('vihem_chat_participants')
+        .update({ last_read_at: nowIso })
+        .eq('thread_id', threadId)
+        .eq('user_id', user.id);
+      setThreads((current) => current.map((thread) => thread.id !== threadId ? thread : {
+        ...thread,
+        participants: (thread.participants || []).map((participant) =>
+          participant.user_id === user.id ? { ...participant, last_read_at: nowIso } : participant
+        ),
+      }));
 
       // Chat notifications are a compact inbox badge. Opening chat marks the
       // corresponding notification stream as seen as well.
       await supabase
         .from('vihem_notifications')
         .update({ read_at: new Date().toISOString() })
-        .eq('user_id', user?.id)
+        .eq('user_id', user.id)
         .in('type', ['chat', 'message', 'chat_message'])
         .is('read_at', null);
     } catch (error) {
       console.error('Error marking thread as read:', error);
     }
+  };
+
+  // A thread is unread for the current user if their own participant
+  // row's last_read_at predates the thread's last message -- covers both
+  // "never opened" (last_read_at null) and "opened before this message
+  // arrived". Sending a message yourself also updates your own
+  // last_read_at (see sendMessage), so your own outgoing message never
+  // flags the thread as unread for you.
+  const isThreadUnread = (thread: ChatThreadWithRelations) => {
+    const own = (thread.participants || []).find((participant) => participant.user_id === user?.id);
+    if (!own) return false;
+    if (!own.last_read_at) return true;
+    return new Date(own.last_read_at).getTime() < new Date(thread.last_message_at).getTime();
   };
 
   const getThreadParticipants = (thread: ChatThreadWithRelations) =>
@@ -317,14 +368,39 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
     }
   };
 
+  const handleAttachmentSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !user || !selectedThread) return;
+
+    setAttachmentError('');
+    setUploadingAttachment(true);
+    try {
+      const extension = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+      const path = `${selectedThread.id}/${Date.now()}-${crypto.randomUUID()}${extension}`;
+      const { error: uploadError } = await supabase.storage.from('vihem-chat-attachments').upload(path, file, { contentType: file.type });
+      if (uploadError) throw uploadError;
+      const { data } = supabase.storage.from('vihem-chat-attachments').getPublicUrl(path);
+      setPendingAttachment({ url: data.publicUrl, name: file.name });
+    } catch (error) {
+      console.error('Error uploading attachment:', error);
+      setAttachmentError('Kunde inte ladda upp bilden. Försök igen.');
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
   const sendMessage = async () => {
-    if (!messageText.trim() || !selectedThread || !user) return;
+    if ((!messageText.trim() && !pendingAttachment) || !selectedThread || !user) return;
 
     try {
       const { error: messageError } = await supabase.from('vihem_chat_messages').insert({
         thread_id: selectedThread.id,
         sender_id: user.id,
         message: messageText.trim(),
+        attachment_url: pendingAttachment?.url || null,
+        attachment_type: pendingAttachment ? 'image' : null,
+        attachment_name: pendingAttachment?.name || null,
       });
       if (messageError) throw messageError;
 
@@ -334,8 +410,13 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
         .eq('id', selectedThread.id);
 
       setMessageText('');
+      setPendingAttachment(null);
       fetchMessages(selectedThread.id);
       fetchThreads();
+      // Sending doesn't otherwise touch last_read_at -- without this, your
+      // own outgoing message (which bumps the thread's last_message_at)
+      // would make the thread look unread to yourself in the list.
+      markThreadAsRead(selectedThread.id);
     } catch (error) {
       console.error('Error sending message:', error);
     }
@@ -399,27 +480,33 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100">
-                  {filteredThreads.map((thread) => (
-                    <button
-                      key={thread.id}
-                      onClick={() => { setSelectedThread(thread); setShowMobileMessages(true); }}
-                      className={`w-full p-4 text-left hover:bg-slate-50 transition-colors ${selectedThread?.id === thread.id ? 'bg-blue-50 border-l-2 border-blue-500' : ''}`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-slate-900 truncate text-sm">{getThreadTitle(thread)}</p>
-                          <p className="text-xs text-slate-500 truncate">{getThreadSubtitle(thread)}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs text-slate-400">{formatDateTime(thread.last_message_at)}</span>
-                            <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${thread.status === 'open' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
-                              {thread.status === 'open' ? 'Öppen' : 'Stängd'}
-                            </span>
+                  {filteredThreads.map((thread) => {
+                    const unread = isThreadUnread(thread);
+                    return (
+                      <button
+                        key={thread.id}
+                        onClick={() => { setSelectedThread(thread); setShowMobileMessages(true); }}
+                        className={`w-full p-4 text-left transition-colors ${selectedThread?.id === thread.id ? 'bg-blue-50 border-l-2 border-blue-500' : unread ? 'bg-emerald-50 hover:bg-emerald-100' : 'hover:bg-slate-50'}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              {unread && <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-700" aria-label="Oläst" />}
+                              <p className={`truncate text-sm ${unread ? 'font-bold text-emerald-900' : 'font-semibold text-slate-900'}`}>{getThreadTitle(thread)}</p>
+                            </div>
+                            <p className="text-xs text-slate-500 truncate">{getThreadSubtitle(thread)}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className={`text-xs ${unread ? 'font-semibold text-emerald-700' : 'text-slate-400'}`}>{formatDateTime(thread.last_message_at)}</span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${thread.status === 'open' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
+                                {thread.status === 'open' ? 'Öppen' : 'Stängd'}
+                              </span>
+                            </div>
                           </div>
+                          <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
                         </div>
-                        <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -476,7 +563,12 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
                             {!isOwn && (
                               <p className="text-xs font-semibold mb-1 opacity-60">{msg.sender?.name}</p>
                             )}
-                            <p className="break-words leading-relaxed">{msg.message}</p>
+                            {msg.attachment_url && (
+                              <a href={msg.attachment_url} target="_blank" rel="noreferrer" className="mb-1.5 block">
+                                <img src={msg.attachment_url} alt={msg.attachment_name || 'Bifogad bild'} className="max-h-56 w-full rounded-lg object-cover" />
+                              </a>
+                            )}
+                            {msg.message && <p className="break-words leading-relaxed">{msg.message}</p>}
                             <p className={`text-xs mt-1 ${isOwn ? 'text-blue-200' : 'text-slate-400'}`}>
                               {formatDateTime(msg.created_at)}
                             </p>
@@ -489,9 +581,29 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
                 </div>
 
                 <div className="border-t border-slate-200 p-3 bg-white">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
+                  {attachmentError && <p className="mb-2 text-xs font-semibold text-red-600">{attachmentError}</p>}
+                  {pendingAttachment && (
+                    <div className="mb-2 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
+                      <img src={pendingAttachment.url} alt={pendingAttachment.name} className="h-10 w-10 rounded object-cover" />
+                      <span className="min-w-0 flex-1 truncate text-xs text-slate-600">{pendingAttachment.name}</span>
+                      <button type="button" onClick={() => setPendingAttachment(null)} className="shrink-0 text-slate-400 hover:text-slate-600" aria-label="Ta bort bild">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex items-end gap-2">
+                    <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleAttachmentSelect} />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={selectedThread.status !== 'open' || uploadingAttachment}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-50"
+                      aria-label="Bifoga bild"
+                    >
+                      {uploadingAttachment ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" /> : <Paperclip size={16} />}
+                    </button>
+                    <textarea
+                      rows={1}
                       placeholder={selectedThread.status === 'open' ? 'Skriv ett meddelande...' : 'Konversationen är stängd'}
                       value={messageText}
                       disabled={selectedThread.status !== 'open'}
@@ -502,13 +614,13 @@ export function ChatPage({ onNavigate: _onNavigate }: ChatPageProps) {
                           sendMessage();
                         }
                       }}
-                      className="flex-1 px-4 py-2 border border-slate-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+                      className="max-h-32 min-h-[2.5rem] flex-1 resize-y rounded-2xl border border-slate-200 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
                     />
                     <Button
                       onClick={sendMessage}
                       variant="primary"
-                      disabled={!messageText.trim() || selectedThread.status !== 'open'}
-                      className="rounded-full aspect-square px-3"
+                      disabled={(!messageText.trim() && !pendingAttachment) || selectedThread.status !== 'open'}
+                      className="shrink-0 rounded-full aspect-square px-3"
                     >
                       <Send size={16} />
                     </Button>

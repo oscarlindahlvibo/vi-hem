@@ -1125,6 +1125,7 @@ export interface ChatParticipant {
   thread_id: string;
   user_id: string;
   created_at: string;
+  last_read_at: string | null;
   user?: Profile;
 }
 
@@ -1135,6 +1136,9 @@ export interface ChatMessage {
   message: string;
   read_at: string | null;
   created_at: string;
+  attachment_url: string | null;
+  attachment_type: string | null;
+  attachment_name: string | null;
   sender?: Profile;
 }
 

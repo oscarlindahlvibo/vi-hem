@@ -442,6 +442,10 @@ function AppInner() {
       return <FleetPage onNavigate={navigate} initialVehicleId={currentPage.split('/')[1]} />;
     }
 
+    if (currentPage.startsWith('chat/')) {
+      return <ChatPage onNavigate={navigate} initialThreadId={currentPage.split('/')[1]} />;
+    }
+
     switch (currentPage) {
       case 'dashboard':
         return renderDashboard();
