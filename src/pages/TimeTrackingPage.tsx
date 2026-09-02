@@ -335,11 +335,17 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
 
   async function finishOpenEntries() {
     const end = new Date().toISOString();
+    // Closed purely by the stämpelklocka (start_time set by handleStampIn/
+    // handleSwitchJob/etc at the moment of clocking in, end_time set here
+    // at the moment of clocking out) -- nothing about it was typed in by
+    // hand, so it's approved automatically instead of sitting as
+    // 'submitted' pending review. Any later edit still needs review: see
+    // handleSaveEntry's previousStatus === 'approved' check.
     if (!navigator.onLine && currentEntry) {
       const breakMinutes = currentEntry.entry_type === 'break' ? 0 : currentEntry.break_minutes;
       await queueOfflineMutation('time_entry_update', {
         id: currentEntry.id,
-        data: { end_time: end, total_minutes: calcMinutes(currentEntry.start_time, end, breakMinutes), status: 'submitted' },
+        data: { end_time: end, total_minutes: calcMinutes(currentEntry.start_time, end, breakMinutes), status: 'approved', approved_by: null, approved_at: end },
       }, `time-entry:${currentEntry.id}`);
       return;
     }
@@ -358,7 +364,9 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       const { error: updateError } = await supabase.from('vihem_time_entries').update({
         end_time: end,
         total_minutes: total,
-        status: 'submitted',
+        status: 'approved',
+        approved_by: null,
+        approved_at: end,
       }).eq('id', entry.id);
       if (updateError) throw updateError;
     }));
@@ -509,8 +517,30 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
 
   async function handleSaveEntry(payload: Partial<TimeEntry> & { submitNow?: boolean }, entryId?: string) {
     const isNew = !entryId;
-    const previousStatus = entryId ? entries.find(e => e.id === entryId)?.status : null;
-    const status = previousStatus === 'approved' ? 'change_requested' : (payload.submitNow ? 'submitted' : 'draft');
+    const existingEntry = entryId ? entries.find(e => e.id === entryId) : null;
+    const previousStatus = existingEntry?.status || null;
+    // Backdating an existing entry's start to before what it already had
+    // recorded (typically the actual clock-in moment) can't be verified
+    // automatically, so it always needs review -- even if the entry was
+    // still a draft and even if the person wasn't otherwise submitting it.
+    const isBackdated = !isNew && !!existingEntry && !!payload.start_time && new Date(payload.start_time) < new Date(existingEntry.start_time);
+    const isAdminUser = user.role === 'admin' || user.role === 'superadmin';
+
+    let status: TimeStatus;
+    if (isAdminUser) {
+      // Admins are the ones who'd otherwise review this -- their own
+      // entries (this is the self-service "Min tid" path; editing a staff
+      // member's entries goes through handleAdminSaveEntry instead) don't
+      // need to go through themselves for approval.
+      status = 'approved';
+    } else if (previousStatus === 'approved') {
+      status = 'change_requested';
+    } else if (isBackdated) {
+      status = 'submitted';
+    } else {
+      status = payload.submitNow ? 'submitted' : 'draft';
+    }
+
     const data: any = {
       user_id: user.id,
       organisation_id: user.organisation_id || null,
@@ -528,6 +558,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       customer_name: payload.customer_name || null,
       project_billing_scope: payload.category === 'customer_project' ? payload.project_billing_scope || 'included_in_quote' : 'internal',
       status,
+      ...(isAdminUser ? { approved_by: user.id, approved_at: new Date().toISOString() } : {}),
     };
     if (isNew) {
       if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', data, `time-entry:${user.id}:${data.start_time}`);
@@ -1861,6 +1892,7 @@ function AdminTimeView({ user }: { user: Profile }) {
       customer_project_id: payload.category === 'customer_project' ? payload.customer_project_id || null : null,
       entry_type: payload.entry_type || 'work',
       customer_name: payload.customer_name || null,
+      project_billing_scope: payload.category === 'customer_project' ? payload.project_billing_scope || 'included_in_quote' : 'internal',
       status: 'approved',
       approved_by: user.id,
       approved_at: new Date().toISOString(),
