@@ -39,7 +39,6 @@ import { MeetingsPage } from './pages/MeetingsPage';
 import { MeetingsV2Page } from './modules/meetings-v2/pages/MeetingsV2Page';
 import { MeetingSeriesPage } from './modules/meeting-series/pages/MeetingSeriesPage';
 import { ScreenDisplayPage } from './pages/ScreenDisplayPage';
-import { ScreenPairPage } from './pages/ScreenPairPage';
 import { ScreenSettingsPage } from './pages/ScreenSettingsPage';
 import { GuestLaundryPage } from './pages/GuestLaundryPage';
 import { FinancePage } from './pages/FinancePage';
@@ -168,23 +167,12 @@ function isAgreementVerifyRoute() {
   return path === '/verify' || hashPath === '/verify';
 }
 
-// Ett redan betrott mötesskärm-fysiskt-enhet parkopplar sig här -- avsiktligt
-// ALDRIG inloggad som en vanlig VI-HEM-användare (se planen, avsnitt 4/7:
-// skärmsessionen har ingen Postgres/Auth-identitet alls, bara ett
-// sessions-token validerat av vihem-meeting-screen-data).
-function isScreenPairRoute() {
-  const path = normalizeAppPath(window.location.pathname);
-  const hashPath = normalizeAppPath(window.location.hash.replace(/^#/, '').split('?')[0] || '/');
-  return path === '/screen/pair' || hashPath === '/screen/pair';
-}
-
 function AppInner() {
   const { user, loading, passwordRecovery } = useAuth();
   const isScreenPath = isScreenRoute();
   const isGuestLaundryPath = isGuestLaundryRoute();
   const isAgreementSignPath = isAgreementSignRoute();
   const isAgreementVerifyPath = isAgreementVerifyRoute();
-  const isScreenPairPath = isScreenPairRoute();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [notificationCount, setNotificationCount] = useState(0);
   const [chatNotificationCount, setChatNotificationCount] = useState(0);
@@ -412,7 +400,6 @@ function AppInner() {
 
   if (isScreenPath) return <ScreenDisplayPage />;
 
-  if (isScreenPairPath) return <ScreenPairPage />;
 
   if (!user) return <LoginPage />;
 

@@ -229,27 +229,72 @@ export async function createMissingDocument(input: { organisationId: string; mee
   if (error) throw error;
 }
 
-// --- Screen pairing --------------------------------------------------------
+// --- Screen switching --------------------------------------------------------
+// Reuses VI-HEM's existing screen system (a physical screen is a logged-in
+// role='screen' account picking a named screen_key, see ScreenDisplayPage.tsx)
+// instead of a separate pairing/login layer. An override row is purely
+// additive on top of a screen's normal configured view -- ScreenDisplayPage
+// checks for one and shows the meeting segment instead when present.
+// Deleting the row is the entire "return to normal display" action.
 
-export async function createScreenPairingCode(meetingId: string, segmentKey: SegmentKey, displayRole: 'meeting_main' | 'staff_week_plan', label: string) {
-  const { data, error } = await supabase.functions.invoke('vihem-meeting-screen-pair', {
-    body: { action: 'create', meeting_id: meetingId, segment_key: segmentKey, display_role: displayRole, label },
-  });
-  if (error) throw error;
-  return data as { session_id: string; code: string; expires_at: string };
-}
-
-export async function listScreenSessions(meetingId: string) {
+export async function listOrgScreens(organisationId: string) {
   const { data, error } = await supabase
-    .from('vihem_meeting_screen_sessions')
-    .select('id, display_role, label, status, pairing_expires_at, session_expires_at, last_seen_at, created_at')
-    .eq('meeting_id', meetingId)
-    .order('created_at', { ascending: false });
+    .from('vihem_screen_settings')
+    .select('id, screen_key, screen_view')
+    .eq('organisation_id', organisationId)
+    .order('screen_key');
   if (error) throw error;
   return data || [];
 }
 
-export async function revokeScreenSession(id: string) {
-  const { error } = await supabase.from('vihem_meeting_screen_sessions').update({ status: 'revoked', revoked_at: new Date().toISOString() }).eq('id', id);
+export async function getScreenProfileId(organisationId: string) {
+  const { data } = await supabase
+    .from('vihem_profiles')
+    .select('id')
+    .eq('organisation_id', organisationId)
+    .eq('role', 'screen')
+    .eq('active', true)
+    .limit(1)
+    .maybeSingle();
+  return data?.id || null;
+}
+
+export async function listScreenOverridesForMeeting(meetingId: string) {
+  const { data, error } = await supabase.from('vihem_meeting_screen_overrides').select('*').eq('meeting_id', meetingId);
+  if (error) throw error;
+  return data || [];
+}
+
+export async function listScreenOverridesForOrg(organisationId: string) {
+  const { data, error } = await supabase.from('vihem_meeting_screen_overrides').select('*').eq('organisation_id', organisationId);
+  if (error) throw error;
+  return data || [];
+}
+
+export async function setScreenOverride(input: {
+  organisationId: string; screenKey: string; meetingId: string; segmentKey: SegmentKey;
+  displayMode: 'meeting_main' | 'staff_week_plan'; createdBy: string;
+}) {
+  const { error } = await supabase.from('vihem_meeting_screen_overrides').upsert({
+    organisation_id: input.organisationId, screen_key: input.screenKey, meeting_id: input.meetingId,
+    segment_key: input.segmentKey, display_mode: input.displayMode, created_by: input.createdBy,
+  }, { onConflict: 'organisation_id,screen_key' });
+  if (error) throw error;
+  // Grants the org's shared screen login RLS read access to this specific
+  // segment's agenda/decisions/actions (see 20260902170000's segment RLS) --
+  // without this the screen would see nothing for the toggled meeting.
+  const screenProfileId = await getScreenProfileId(input.organisationId);
+  if (screenProfileId) {
+    await addSegmentParticipant(input.meetingId, screenProfileId, 'screen');
+  }
+}
+
+export async function clearScreenOverride(organisationId: string, screenKey: string) {
+  const { error } = await supabase.from('vihem_meeting_screen_overrides').delete().eq('organisation_id', organisationId).eq('screen_key', screenKey);
+  if (error) throw error;
+}
+
+export async function clearScreenOverridesForMeeting(meetingId: string) {
+  const { error } = await supabase.from('vihem_meeting_screen_overrides').delete().eq('meeting_id', meetingId);
   if (error) throw error;
 }

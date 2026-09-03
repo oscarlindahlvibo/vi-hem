@@ -185,6 +185,29 @@ export function ScreenDisplayPage() {
   const dayCount = screenSize.width < 1400 ? 8 : screenSize.width < 1700 ? 9 : 10;
   const days = useMemo(() => Array.from({ length: dayCount }, (_, index) => dateKey(addDays(today(), index))), [dayCount]);
 
+  // Fredagsmöte: a leader can flip this named screen to show a meeting
+  // segment from the control view (vihem_meeting_screen_overrides) --
+  // purely additive on top of whatever this screen is normally configured
+  // to show. Polled independently of the big fetchScreenData below so this
+  // works no matter which view the screen is otherwise on.
+  const [screenOverride, setScreenOverride] = useState<{ meeting_id: string; segment_key: string; display_mode: string } | null>(null);
+  useEffect(() => {
+    if (!allowed || !user?.organisation_id) return;
+    let cancelled = false;
+    async function checkOverride() {
+      const { data } = await supabase
+        .from('vihem_meeting_screen_overrides')
+        .select('meeting_id, segment_key, display_mode')
+        .eq('organisation_id', user!.organisation_id)
+        .eq('screen_key', selectedScreenKey)
+        .maybeSingle();
+      if (!cancelled) setScreenOverride(data || null);
+    }
+    checkOverride();
+    const interval = window.setInterval(checkOverride, 10000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [allowed, user?.organisation_id, selectedScreenKey]);
+
   useEffect(() => {
     if (loading || user || localStorage.getItem(SCREEN_DEVICE_SESSION_KEY) !== 'true') return;
 
@@ -745,7 +768,13 @@ export function ScreenDisplayPage() {
 
       {dataError && <div className="mb-4 rounded-2xl bg-red-500/20 px-5 py-4 text-red-100 ring-1 ring-red-400/30">{dataError}</div>}
 
-      {view === 'short-stay' ? (
+      {screenOverride ? (
+        <MeetingSegmentScreen
+          meetingId={screenOverride.meeting_id}
+          displayMode={screenOverride.display_mode}
+          screenHeight={screenSize.height}
+        />
+      ) : view === 'short-stay' ? (
         <ShortStayScreen units={units} bookings={bookings} days={days} screenHeight={screenSize.height} />
       ) : view === 'work-orders' ? (
         <WorkOrderScreen workOrders={workOrders} customerProjects={customerProjects} staffMembers={staffMembers} screenHeight={screenSize.height} />
@@ -810,6 +839,128 @@ function ScreenHeaderClock() {
       <span className="text-slate-400">
         {now.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}
       </span>
+    </div>
+  );
+}
+
+// Fredagsmöte: renders a segment (meeting_main or the staff segment's
+// week-plan board) for a screen that's been flipped over via
+// vihem_meeting_screen_overrides. Fetches independently, query-level
+// filtered so private/sensitive notes never come back at all -- not a
+// render-time hide, an actual .not()/.neq() on the request.
+function MeetingSegmentScreen({ meetingId, displayMode, screenHeight }: { meetingId: string; displayMode: string; screenHeight: number }) {
+  const [meeting, setMeeting] = useState<{ title: string; status: string } | null>(null);
+  const [agendaItems, setAgendaItems] = useState<any[]>([]);
+  const [decisions, setDecisions] = useState<any[]>([]);
+  const [actionItems, setActionItems] = useState<any[]>([]);
+  const [incomingHandoffs, setIncomingHandoffs] = useState<any[]>([]);
+  const [weekPlanItems, setWeekPlanItems] = useState<any[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (displayMode === 'staff_week_plan') {
+        const { data: m } = await supabase.from('vihem_meetings').select('title, status').eq('id', meetingId).maybeSingle();
+        const { data: items } = await supabase
+          .from('vihem_meeting_week_plan_items')
+          .select('id, title, responsible_user_id, planned_date, deadline, status, material_needed, blockers, highlighted, sort_order')
+          .eq('meeting_id', meetingId)
+          .order('sort_order');
+        if (cancelled) return;
+        setMeeting(m || null);
+        const responsibleIds = Array.from(new Set((items || []).map((i: any) => i.responsible_user_id).filter(Boolean)));
+        const { data: profiles } = responsibleIds.length
+          ? await supabase.from('vihem_profiles').select('id, name').in('id', responsibleIds)
+          : { data: [] as any[] };
+        const nameById = new Map((profiles || []).map((p: any) => [p.id, p.name]));
+        if (!cancelled) setWeekPlanItems((items || []).map((i: any) => ({ ...i, responsible_name: i.responsible_user_id ? nameById.get(i.responsible_user_id) || '' : '' })));
+        return;
+      }
+
+      const [{ data: m }, { data: agenda }, { data: dec }, { data: actions }, { data: handoffs }] = await Promise.all([
+        supabase.from('vihem_meetings').select('title, status').eq('id', meetingId).maybeSingle(),
+        // Query-level exclusion: private notes never leave the database
+        // for this request at all, regardless of what the screen renders.
+        supabase.from('vihem_meeting_agenda_items')
+          .select('id, title, sort_order, status, note_tags, sensitivity, notes')
+          .eq('meeting_id', meetingId)
+          .neq('sensitivity', 'sensitive')
+          .order('sort_order'),
+        supabase.from('vihem_meeting_decisions').select('id, title, status').eq('meeting_id', meetingId).order('created_at'),
+        supabase.from('vihem_meeting_action_items').select('id, title, status, due_date').eq('meeting_id', meetingId).order('created_at'),
+        supabase.rpc('get_meeting_handoffs_for_segment', { p_meeting_id: meetingId }),
+      ]);
+      if (cancelled) return;
+      setMeeting(m || null);
+      setAgendaItems((agenda || []).map((item: any) => ({
+        ...item,
+        // Belt-and-braces: even though sensitive rows are excluded above,
+        // an item's free-text note itself is only shown if explicitly
+        // tagged 'shared' -- an untagged or private-tagged note stays off
+        // the screen even if the item itself isn't marked sensitive.
+        note: Array.isArray(item.note_tags) && item.note_tags.includes('shared') ? item.notes : '',
+      })));
+      setDecisions(dec || []);
+      setActionItems(actions || []);
+      setIncomingHandoffs(handoffs || []);
+    }
+    load();
+    const interval = window.setInterval(load, 10000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [meetingId, displayMode]);
+
+  if (!meeting) return <div className="flex h-full items-center justify-center text-slate-400">Laddar möte...</div>;
+
+  if (displayMode === 'staff_week_plan') {
+    return (
+      <div className="overflow-y-auto p-6 text-white" style={{ height: screenHeight - 60 }}>
+        <h1 className="mb-6 text-4xl font-bold">Veckoplan</h1>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {weekPlanItems.map((item) => (
+            <div key={item.id} className={`rounded-2xl p-5 ${item.highlighted ? 'bg-blue-900 ring-4 ring-blue-500' : 'bg-slate-900'}`}>
+              <p className="text-xl font-semibold">{item.title}</p>
+              <p className="mt-1 text-base text-slate-400">{item.responsible_name || 'Ej tilldelad'} {item.planned_date ? `· ${item.planned_date}` : ''}</p>
+              {item.material_needed && <p className="mt-2 text-sm text-slate-300">Material: {item.material_needed}</p>}
+              {item.blockers && <p className="mt-2 text-sm text-red-300">Hinder: {item.blockers}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-y-auto p-6 text-white" style={{ height: screenHeight - 60 }}>
+      <h1 className="mb-1 text-4xl font-bold">{meeting.title}</h1>
+      <p className="mb-6 text-lg text-slate-400">{meeting.status}</p>
+
+      {incomingHandoffs.length > 0 && (
+        <div className="mb-6 rounded-2xl border border-blue-800 bg-blue-950/50 p-5">
+          <h2 className="mb-2 text-xl font-semibold text-blue-300">Från föregående delmöte</h2>
+          {incomingHandoffs.map((h: any) => <p key={h.id} className="text-lg text-slate-200">{h.forwarded_text}</p>)}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-6">
+        <div>
+          <h2 className="mb-3 text-2xl font-semibold text-slate-300">Agenda</h2>
+          <div className="space-y-2">
+            {agendaItems.map((item) => (
+              <div key={item.id} className="rounded-xl bg-slate-900 p-4">
+                <p className="text-xl font-semibold">{item.title}</p>
+                {item.note && <p className="mt-1 text-base text-slate-400">{item.note}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <h2 className="mb-3 text-2xl font-semibold text-slate-300">Beslut &amp; åtgärder</h2>
+          <div className="space-y-2">
+            {decisions.map((d: any) => <p key={d.id} className="rounded-xl bg-emerald-950/40 p-3 text-lg text-emerald-200">{d.title}</p>)}
+            {actionItems.map((a: any) => <p key={a.id} className="rounded-xl bg-amber-950/40 p-3 text-lg text-amber-200">{a.title}{a.due_date ? ` · ${a.due_date}` : ''}</p>)}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

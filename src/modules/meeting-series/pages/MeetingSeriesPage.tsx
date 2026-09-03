@@ -13,7 +13,7 @@ import { WeekPlanBoard } from '../components/WeekPlanBoard';
 import * as api from '../api';
 import type {
   MeetingSeries, SegmentMeeting, SegmentAgendaItem, SegmentParticipant, IncomingHandoff,
-  MeetingAiRun, MeetingAiSuggestion, WeekPlanItem, NoteTag, SegmentKey,
+  MeetingAiRun, MeetingAiSuggestion, WeekPlanItem, NoteTag, SegmentKey, MeetingScreenOverride, OrgScreen,
 } from '../types';
 import type { Profile } from '../../../types';
 import { Calendar, Users, Sparkles, MonitorPlay, ClipboardCheck, ArrowRightCircle, Clock, Plus, ShieldCheck } from 'lucide-react';
@@ -168,12 +168,12 @@ function SegmentControlView({ meeting, allSegments, staff, currentUserId, onMeet
   const [aiRuns, setAiRuns] = useState<MeetingAiRun[]>([]);
   const [suggestions, setSuggestions] = useState<MeetingAiSuggestion[]>([]);
   const [weekPlanItems, setWeekPlanItems] = useState<WeekPlanItem[]>([]);
-  const [screenSessions, setScreenSessions] = useState<any[]>([]);
+  const [orgScreens, setOrgScreens] = useState<OrgScreen[]>([]);
+  const [screenOverrides, setScreenOverrides] = useState<MeetingScreenOverride[]>([]);
   const [triggeringAi, setTriggeringAi] = useState(false);
   const [aiError, setAiError] = useState('');
   const [handoffComposerItem, setHandoffComposerItem] = useState<SegmentAgendaItem | 'quick' | null>(null);
   const [showCloseModal, setShowCloseModal] = useState(false);
-  const [pairingCode, setPairingCode] = useState<{ code: string; label: string } | null>(null);
 
   const isParticipant = participants.some(p => p.user_id === currentUserId);
   const myRole = participants.find(p => p.user_id === currentUserId)?.role;
@@ -182,7 +182,7 @@ function SegmentControlView({ meeting, allSegments, staff, currentUserId, onMeet
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [agenda, parts, handoffs, dec, actions, runs, sugg, weekPlan, screens] = await Promise.all([
+      const [agenda, parts, handoffs, dec, actions, runs, sugg, weekPlan, screens, overrides] = await Promise.all([
         api.listAgendaItems(meeting.id),
         api.listSegmentParticipants(meeting.id),
         api.listIncomingHandoffs(meeting.id),
@@ -191,11 +191,12 @@ function SegmentControlView({ meeting, allSegments, staff, currentUserId, onMeet
         api.listAiRuns(meeting.id),
         api.listSuggestionsForMeeting(meeting.id),
         meeting.segment_key === 'staff' ? api.listWeekPlanItems(meeting.id) : Promise.resolve([]),
-        api.listScreenSessions(meeting.id),
+        api.listOrgScreens(meeting.organisation_id),
+        api.listScreenOverridesForMeeting(meeting.id),
       ]);
       setAgendaItems(agenda); setParticipants(parts); setIncomingHandoffs(handoffs);
       setDecisions(dec); setActionItems(actions); setAiRuns(runs); setSuggestions(sugg);
-      setWeekPlanItems(weekPlan); setScreenSessions(screens);
+      setWeekPlanItems(weekPlan); setOrgScreens(screens as OrgScreen[]); setScreenOverrides(overrides as MeetingScreenOverride[]);
     } finally {
       setLoading(false);
     }
@@ -341,32 +342,43 @@ function SegmentControlView({ meeting, allSegments, staff, currentUserId, onMeet
 
         <Card className="p-4">
           <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-700"><MonitorPlay className="h-4 w-4" /> Skärmar</h4>
+          <p className="mb-2 text-xs text-slate-500">Byt en befintlig skärm till mötesvyn. Den återgår till sin ordinarie visning automatiskt när delmötet avslutas, eller direkt om du klickar "Återgå" här.</p>
           <div className="space-y-2">
-            {screenSessions.map(s => (
-              <div key={s.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-2 py-1.5">
-                <div>
-                  <p className="text-xs font-medium text-slate-700">{s.label || s.display_role}</p>
-                  <Badge className={s.status === 'active' ? 'bg-emerald-100 text-emerald-700' : s.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-500'}>{s.status}</Badge>
+            {orgScreens.length === 0 && <p className="text-xs text-slate-400">Inga skärmar konfigurerade för organisationen ännu (Administration → Skärminställningar).</p>}
+            {orgScreens.map(screen => {
+              const override = screenOverrides.find(o => o.screen_key === screen.screen_key);
+              const isThisMeeting = override?.meeting_id === meeting.id;
+              return (
+                <div key={screen.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-2 py-1.5">
+                  <div>
+                    <p className="text-xs font-medium text-slate-700">{screen.screen_key}</p>
+                    {override && (
+                      <Badge className={isThisMeeting ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}>
+                        {isThisMeeting ? `Visar detta möte (${override.display_mode === 'staff_week_plan' ? 'veckoplan' : 'mötesvy'})` : 'Upptagen av annat möte'}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex gap-1.5">
+                    {isThisMeeting ? (
+                      <Button size="sm" variant="ghost" onClick={async () => { await api.clearScreenOverride(meeting.organisation_id, screen.screen_key); fetchAll(); }}>Återgå</Button>
+                    ) : (
+                      <>
+                        <Button size="sm" variant="secondary" onClick={async () => {
+                          await api.setScreenOverride({ organisationId: meeting.organisation_id, screenKey: screen.screen_key, meetingId: meeting.id, segmentKey: meeting.segment_key as SegmentKey, displayMode: 'meeting_main', createdBy: currentUserId });
+                          fetchAll();
+                        }}>Visa mötet</Button>
+                        {meeting.segment_key === 'staff' && (
+                          <Button size="sm" variant="secondary" onClick={async () => {
+                            await api.setScreenOverride({ organisationId: meeting.organisation_id, screenKey: screen.screen_key, meetingId: meeting.id, segmentKey: meeting.segment_key as SegmentKey, displayMode: 'staff_week_plan', createdBy: currentUserId });
+                            fetchAll();
+                          }}>Visa veckoplan</Button>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
-                {s.status !== 'revoked' && (
-                  <Button size="sm" variant="ghost" onClick={async () => { await api.revokeScreenSession(s.id); fetchAll(); }}>Koppla bort</Button>
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 flex flex-col gap-2">
-            <Button size="sm" variant="secondary" onClick={async () => {
-              const res = await api.createScreenPairingCode(meeting.id, meeting.segment_key as SegmentKey, 'meeting_main', 'Skärm 1');
-              setPairingCode({ code: res.code, label: 'Skärm 1 (mötesvy)' });
-              fetchAll();
-            }}>+ Anslut mötesskärm</Button>
-            {meeting.segment_key === 'staff' && (
-              <Button size="sm" variant="secondary" onClick={async () => {
-                const res = await api.createScreenPairingCode(meeting.id, meeting.segment_key as SegmentKey, 'staff_week_plan', 'Skärm 2');
-                setPairingCode({ code: res.code, label: 'Skärm 2 (veckoplan)' });
-                fetchAll();
-              }}>+ Anslut veckoplan-skärm</Button>
-            )}
+              );
+            })}
           </div>
         </Card>
       </div>
@@ -397,18 +409,17 @@ function SegmentControlView({ meeting, allSegments, staff, currentUserId, onMeet
           agendaItems={agendaItems}
           nextSegmentOptions={nextSegmentOptions}
           onClose={() => setShowCloseModal(false)}
-          onDone={async () => { setShowCloseModal(false); await api.updateSegmentStatus(meeting.id, 'completed'); await onMeetingChanged(); fetchAll(); }}
+          onDone={async () => {
+            setShowCloseModal(false);
+            await api.updateSegmentStatus(meeting.id, 'completed');
+            // Any screen showing this segment reverts to its normal
+            // display -- deleting the override row is the entire "return
+            // to normal" action, see api.ts.
+            await api.clearScreenOverridesForMeeting(meeting.id);
+            await onMeetingChanged();
+            fetchAll();
+          }}
         />
-      )}
-
-      {pairingCode && (
-        <Modal open onClose={() => setPairingCode(null)} title={`Parkopplingskod — ${pairingCode.label}`}>
-          <div className="space-y-3 text-center">
-            <p className="text-sm text-slate-500">Ange denna kod på skärmen (/screen/pair). Koden gäller i 10 minuter och kan bara användas en gång.</p>
-            <p className="text-4xl font-bold tracking-widest text-slate-800">{pairingCode.code}</p>
-            <Button variant="secondary" onClick={() => setPairingCode(null)}>Stäng</Button>
-          </div>
-        </Modal>
       )}
     </div>
   );

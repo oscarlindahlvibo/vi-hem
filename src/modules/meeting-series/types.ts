@@ -9,6 +9,23 @@ export type ParticipantRole = 'leader' | 'secretary' | 'owner' | 'finance' | 'fo
 export type NoteTag = 'private' | 'shared' | 'sensitive' | 'decision' | 'action' | 'information' | 'idea' | 'question' | 'hinder' | 'ai_eligible' | 'ai_excluded';
 export type DisplayRole = 'meeting_main' | 'staff_week_plan';
 
+export interface MeetingScreenOverride {
+  id: string;
+  organisation_id: string;
+  screen_key: string;
+  meeting_id: string;
+  segment_key: SegmentKey;
+  display_mode: DisplayRole;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface OrgScreen {
+  id: string;
+  screen_key: string;
+  screen_view: string;
+}
+
 export interface MeetingSeries {
   id: string;
   organisation_id: string;
