@@ -1416,12 +1416,21 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
 }) {
   const { categories } = useTimeCategories();
   const now = new Date();
-  const defaultStart = defaultDate
-    ? `${defaultDate}T09:00`
-    : toLocalDatetimeValue(entry?.start_time || now.toISOString());
-  const defaultEnd = defaultDate
-    ? `${defaultDate}T17:00`
-    : (entry?.end_time ? toLocalDatetimeValue(entry.end_time) : '');
+  // An existing entry's own times always win, regardless of what a caller
+  // passes as defaultDate -- AdminTimeView's edit modal always supplies a
+  // defaultDate (falling back to the filtered month) even when editing a
+  // real entry, which previously overrode the actual clock-in/out times
+  // with 09:00-17:00 every time an admin opened the editor.
+  const defaultStart = entry?.start_time
+    ? toLocalDatetimeValue(entry.start_time)
+    : defaultDate
+      ? `${defaultDate}T09:00`
+      : toLocalDatetimeValue(now.toISOString());
+  const defaultEnd = entry?.end_time
+    ? toLocalDatetimeValue(entry.end_time)
+    : defaultDate
+      ? `${defaultDate}T17:00`
+      : '';
 
   const [category, setCategory] = useState<TimeCategory>(entry?.category || 'general');
   const [entryType, setEntryType] = useState<TimeEntryKind>(entry?.entry_type || 'work');
