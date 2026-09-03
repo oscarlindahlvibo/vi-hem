@@ -38,6 +38,12 @@ function minutes(value: string | null | undefined) {
   return hour * 60 + minute;
 }
 
+function localMinutesOf(iso: string) {
+  const parts = new Intl.DateTimeFormat("sv-SE", { timeZone: timezone, hour: "2-digit", minute: "2-digit" }).formatToParts(new Date(iso));
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return Number(values.hour) * 60 + Number(values.minute);
+}
+
 // Records the dedup key first (unique per user/day/reminder), then -- only
 // if that succeeded -- creates the notification via the shared
 // create_notification() RPC, passing setting_key so the recipient's own
@@ -91,7 +97,7 @@ Deno.serve(async request => {
       // 20260902100000_time_entries_lunch_type.sql) precisely so this
       // reminder can key off whether the person is actually on lunch
       // right now, not just any short break.
-      const hasOpenLunch = (openEntries || []).some((entry: any) => entry.entry_type === "lunch");
+      const openLunchEntry = (openEntries || []).find((entry: any) => entry.entry_type === "lunch");
       const dayKey = now.date;
       if (settings.shift_start_reminder && start !== null && now.minutes >= start && now.minutes <= start + 5 && !hasOpenWork) {
         if (await createOnce(client, schedule, `${dayKey}:shift-start`, "shift_start_reminder", "Ditt arbetspass börjar nu", `Hej ${profile.name || ""}, det är dags att stämpla in.`)) created++;
@@ -99,8 +105,15 @@ Deno.serve(async request => {
       if (settings.lunch_start_reminder && lunch !== null && now.minutes >= lunch && now.minutes <= lunch + 5 && hasOpenWork) {
         if (await createOnce(client, schedule, `${dayKey}:lunch-start`, "lunch_start_reminder", "Lunch börjar nu", "Det är dags att gå på lunch.")) created++;
       }
-      if (settings.lunch_return_reminder && lunch !== null && now.minutes >= lunch + lunchLength && now.minutes <= lunch + lunchLength + 5 && hasOpenLunch) {
-        if (await createOnce(client, schedule, `${dayKey}:lunch-return`, "lunch_return_reminder", "Lunchen är slut", "Det är dags att återgå till arbetet.")) created++;
+      if (settings.lunch_return_reminder && openLunchEntry) {
+        // Tied to when this person actually clocked in on lunch, not the
+        // scheduled lunch_start -- someone who goes to lunch late or early
+        // should still get reminded lunchLength minutes after their own
+        // clock-in, not at a fixed clock time.
+        const lunchClockInMinutes = localMinutesOf(openLunchEntry.start_time);
+        if (now.minutes >= lunchClockInMinutes + lunchLength && now.minutes <= lunchClockInMinutes + lunchLength + 5) {
+          if (await createOnce(client, schedule, `${dayKey}:lunch-return:${openLunchEntry.id}`, "lunch_return_reminder", "Lunchen är slut", "Det är dags att återgå till arbetet.")) created++;
+        }
       }
       if (settings.shift_end_reminder && end !== null && now.minutes >= end && now.minutes <= end + 5 && hasOpenWork) {
         if (await createOnce(client, schedule, `${dayKey}:shift-end`, "shift_end_reminder", "Ditt arbetspass slutar nu", "Kom ihåg att stämpla ut om du inte arbetar över.")) created++;
