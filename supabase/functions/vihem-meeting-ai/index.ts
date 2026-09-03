@@ -107,7 +107,34 @@ function meetingAnalysisSchema() {
             sourceAgendaItemId: { type: ['string', 'null'] },
             sourceNoteExcerpt: { type: 'string' },
             targetId: { type: ['string', 'null'] },
-            proposedValue: { type: 'object', additionalProperties: true },
+            // OpenAI's strict json_schema mode requires every object --
+            // nested ones included -- to have additionalProperties:false
+            // AND every property listed in required (nullable properties
+            // simulate "optional" via a ['string','null'] union). A truly
+            // free-form object isn't representable in strict mode, so this
+            // is a fixed field set covering every suggestion type's
+            // adapter in apply_meeting_ai_suggestion(): title/description/
+            // category/priority/status for work orders and customer
+            // projects, item_name/quantity/store_name/notes for purchase
+            // items. Irrelevant fields for a given suggestion type are
+            // just null.
+            proposedValue: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                title: { type: ['string', 'null'] },
+                description: { type: ['string', 'null'] },
+                category: { type: ['string', 'null'] },
+                priority: { type: ['string', 'null'], enum: [...PRIORITY_ENUM, null] },
+                status: { type: ['string', 'null'] },
+                customer_project_id: { type: ['string', 'null'] },
+                item_name: { type: ['string', 'null'] },
+                quantity: { type: ['string', 'null'] },
+                store_name: { type: ['string', 'null'] },
+                notes: { type: ['string', 'null'] },
+              },
+              required: ['title', 'description', 'category', 'priority', 'status', 'customer_project_id', 'item_name', 'quantity', 'store_name', 'notes'],
+            },
             responsibleUserId: { type: ['string', 'null'] },
             deadline: { type: ['string', 'null'] },
             priority: { type: 'string', enum: PRIORITY_ENUM },
