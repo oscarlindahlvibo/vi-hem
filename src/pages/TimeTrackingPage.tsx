@@ -503,7 +503,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     return customerProjects.find(project => project.id === projectId);
   }
 
-  async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope: TimeEntry['project_billing_scope'] = 'included_in_quote') {
+  async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope: TimeEntry['project_billing_scope'] = 'included_in_quote', changeOrderId?: string) {
     const project = getCustomerProject(customerProjectId);
     await finishOpenEntries();
     const payload = {
@@ -513,6 +513,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       customer_project_id: category === 'customer_project' ? customerProjectId || null : null,
       customer_name: category === 'customer_project' ? project?.customer_name || customerName || null : customerName || null,
       project_billing_scope: category === 'customer_project' ? projectBillingScope : 'internal',
+      project_change_order_id: category === 'customer_project' && projectBillingScope === 'outside_quote' ? changeOrderId || null : null,
       start_time: new Date().toISOString(), end_time: null,
       break_minutes: 0, total_minutes: 0, comment: comment || '', status: 'draft',
     };
@@ -525,7 +526,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     fetchData();
   }
 
-  async function handleSwitchJob(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope: TimeEntry['project_billing_scope'] = 'included_in_quote') {
+  async function handleSwitchJob(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope: TimeEntry['project_billing_scope'] = 'included_in_quote', changeOrderId?: string) {
     if (!currentEntry) return;
     const project = getCustomerProject(customerProjectId);
     await finishOpenEntries();
@@ -538,6 +539,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       customer_project_id: category === 'customer_project' ? customerProjectId || null : null,
       customer_name: category === 'customer_project' ? project?.customer_name || customerName || null : customerName || null,
       project_billing_scope: category === 'customer_project' ? projectBillingScope : 'internal',
+      project_change_order_id: category === 'customer_project' && projectBillingScope === 'outside_quote' ? changeOrderId || null : null,
       start_time: new Date().toISOString(),
       end_time: null,
       break_minutes: 0,
@@ -675,6 +677,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       entry_type: payload.entry_type || 'work',
       customer_name: payload.customer_name || null,
       project_billing_scope: payload.category === 'customer_project' ? payload.project_billing_scope || 'included_in_quote' : 'internal',
+      project_change_order_id: payload.category === 'customer_project' && payload.project_billing_scope === 'outside_quote' ? payload.project_change_order_id || null : null,
       status,
       ...(isAdminUser ? { approved_by: user.id, approved_at: new Date().toISOString() } : {}),
     };
@@ -1328,7 +1331,7 @@ function timeEntryProjectLabel(entry: Pick<TimeEntry, 'customer_name'> & { custo
 
 function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, title = 'Stämpla in', submitLabel = 'Stämpla in' }: {
   open: boolean; onClose: () => void;
-  onSubmit: (cat: TimeCategory, woId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope?: TimeEntry['project_billing_scope']) => void;
+  onSubmit: (cat: TimeCategory, woId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope?: TimeEntry['project_billing_scope'], changeOrderId?: string) => void;
   workOrders: WorkOrderSummary[];
   customerProjects: CustomerProjectSummary[];
   title?: string;
@@ -1339,9 +1342,23 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
   const [workOrderId, setWorkOrderId] = useState('');
   const [customerProjectId, setCustomerProjectId] = useState('');
   const [projectBillingScope, setProjectBillingScope] = useState<TimeEntry['project_billing_scope']>('included_in_quote');
+  const [changeOrderId, setChangeOrderId] = useState('');
+  const [changeOrders, setChangeOrders] = useState<{ id: string; change_order_number: string; title: string }[]>([]);
   const [comment, setComment] = useState('');
 
-  function reset() { setCategory('general'); setWorkOrderId(''); setCustomerProjectId(''); setProjectBillingScope('included_in_quote'); setComment(''); }
+  function reset() { setCategory('general'); setWorkOrderId(''); setCustomerProjectId(''); setProjectBillingScope('included_in_quote'); setChangeOrderId(''); setComment(''); }
+
+  // ÄTA-listan hör till ett specifikt kundprojekt -- hämtas när projektet
+  // eller tidstypen ändras, så personalen kan stämpla in mot en namngiven
+  // ÄTA (t.ex. "Byta ytterdörr") istället för bara en generell ÄTA-flagga.
+  useEffect(() => {
+    if (category === 'customer_project' && projectBillingScope === 'outside_quote' && customerProjectId) {
+      supabase.from('vihem_project_change_orders').select('id, change_order_number, title').eq('project_id', customerProjectId)
+        .then(({ data }) => setChangeOrders(data || []));
+    } else {
+      setChangeOrders([]);
+    }
+  }, [category, projectBillingScope, customerProjectId]);
 
   const selectedProject = customerProjects.find(project => project.id === customerProjectId);
   const requiresProject = category === 'customer_project';
@@ -1381,6 +1398,17 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
                 { value: 'outside_quote', label: 'ÄTA-tid (utanför offert)' },
               ]}
             />
+            {projectBillingScope === 'outside_quote' && (
+              <Select
+                label="ÄTA (valfritt)"
+                value={changeOrderId}
+                onChange={e => setChangeOrderId(e.target.value)}
+                options={[
+                  { value: '', label: changeOrders.length === 0 ? 'Ingen ÄTA skapad för projektet' : 'Generell ÄTA-tid, ej kopplad' },
+                  ...changeOrders.map(co => ({ value: co.id, label: `${co.change_order_number} · ${co.title}` })),
+                ]}
+              />
+            )}
           </>
         )}
         <Textarea label="Kommentar (valfritt)" value={comment} onChange={e => setComment(e.target.value)} rows={2} />
@@ -1388,7 +1416,7 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
           <Button variant="secondary" onClick={() => { onClose(); reset(); }} className="flex-1">Avbryt</Button>
           <Button
             variant="primary"
-            onClick={() => { onSubmit(category, workOrderId || undefined, comment, selectedProject?.customer_name || '', customerProjectId || undefined, projectBillingScope); reset(); }}
+            onClick={() => { onSubmit(category, workOrderId || undefined, comment, selectedProject?.customer_name || '', customerProjectId || undefined, projectBillingScope, changeOrderId || undefined); reset(); }}
             disabled={requiresProject && !customerProjectId}
             className="flex-1 gap-2"
           >
@@ -1437,6 +1465,8 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
   const [workOrderId, setWorkOrderId] = useState(entry?.work_order_id || '');
   const [customerProjectId, setCustomerProjectId] = useState(entry?.customer_project_id || '');
   const [projectBillingScope, setProjectBillingScope] = useState<TimeEntry['project_billing_scope']>(entry?.project_billing_scope || 'included_in_quote');
+  const [changeOrderId, setChangeOrderId] = useState(entry?.project_change_order_id || '');
+  const [changeOrders, setChangeOrders] = useState<{ id: string; change_order_number: string; title: string }[]>([]);
   const [startTime, setStartTime] = useState(defaultStart);
   const [endTime, setEndTime] = useState(defaultEnd);
   // Empty by default -- prefilling 30 meant every retroactive entry had to
@@ -1452,12 +1482,22 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
       setWorkOrderId(entry?.work_order_id || '');
       setCustomerProjectId(entry?.customer_project_id || '');
       setProjectBillingScope(entry?.project_billing_scope || 'included_in_quote');
+      setChangeOrderId(entry?.project_change_order_id || '');
       setStartTime(defaultStart);
       setEndTime(defaultEnd);
       setBreakMins(entry?.break_minutes ?? '');
       setComment(entry?.comment || '');
     }
   }, [open, entry?.id]);
+
+  useEffect(() => {
+    if (category === 'customer_project' && projectBillingScope === 'outside_quote' && customerProjectId) {
+      supabase.from('vihem_project_change_orders').select('id, change_order_number, title').eq('project_id', customerProjectId)
+        .then(({ data }) => setChangeOrders(data || []));
+    } else {
+      setChangeOrders([]);
+    }
+  }, [category, projectBillingScope, customerProjectId]);
 
   const previewMins = startTime && endTime
     ? calcMinutes(new Date(startTime).toISOString(), new Date(endTime).toISOString(), entryType === 'break' ? 0 : Number(breakMins) || 0)
@@ -1481,6 +1521,7 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
       customer_project_id: category === 'customer_project' ? customerProjectId || null : null,
       customer_name: category === 'customer_project' ? selectedProject?.customer_name || null : null,
       project_billing_scope: category === 'customer_project' ? projectBillingScope : 'internal',
+      project_change_order_id: category === 'customer_project' && projectBillingScope === 'outside_quote' ? changeOrderId || null : null,
       comment,
       submitNow,
     };
@@ -1534,6 +1575,17 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
             options={[
               { value: 'included_in_quote', label: 'Ordinarie projektarbete' },
               { value: 'outside_quote', label: 'ÄTA-tid (utanför offert)' },
+            ]}
+          />
+        )}
+        {category === 'customer_project' && projectBillingScope === 'outside_quote' && (
+          <Select
+            label="ÄTA (valfritt)"
+            value={changeOrderId}
+            onChange={e => setChangeOrderId(e.target.value)}
+            options={[
+              { value: '', label: changeOrders.length === 0 ? 'Ingen ÄTA skapad för projektet' : 'Generell ÄTA-tid, ej kopplad' },
+              ...changeOrders.map(co => ({ value: co.id, label: `${co.change_order_number} · ${co.title}` })),
             ]}
           />
         )}
@@ -2065,6 +2117,7 @@ function AdminTimeView({ user }: { user: Profile }) {
       entry_type: payload.entry_type || 'work',
       customer_name: payload.customer_name || null,
       project_billing_scope: payload.category === 'customer_project' ? payload.project_billing_scope || 'included_in_quote' : 'internal',
+      project_change_order_id: payload.category === 'customer_project' && payload.project_billing_scope === 'outside_quote' ? payload.project_change_order_id || null : null,
       status: 'approved',
       approved_by: user.id,
       approved_at: new Date().toISOString(),

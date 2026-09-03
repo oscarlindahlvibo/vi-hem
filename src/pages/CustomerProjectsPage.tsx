@@ -202,10 +202,12 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showTimeModal, setShowTimeModal] = useState(false);
+  const [editingTimeEntry, setEditingTimeEntry] = useState<TimeEntry | null>(null);
   const [showWorkOrderModal, setShowWorkOrderModal] = useState(false);
   const [showMaterialModal, setShowMaterialModal] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<ProjectMaterialEntry | null>(null);
   const [showChangeModal, setShowChangeModal] = useState(false);
+  const [editingChangeOrder, setEditingChangeOrder] = useState<ProjectChangeOrder | null>(null);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
   const [showDocumentModal, setShowDocumentModal] = useState(false);
   const [showSelfCheckTemplateModal, setShowSelfCheckTemplateModal] = useState(false);
@@ -227,7 +229,52 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     comment: '',
     project_billable: true,
     project_billing_scope: 'outside_quote',
+    change_order_id: '',
   });
+
+  function defaultTimeForm() {
+    return {
+      work_date: new Date().toISOString().slice(0, 10),
+      user_id: user?.id || '',
+      start_time: '08:00',
+      end_time: '16:00',
+      break_minutes: '30',
+      work_type: '',
+      comment: '',
+      project_billable: true,
+      project_billing_scope: 'outside_quote',
+      change_order_id: '',
+    };
+  }
+
+  function openNewTimeEntry() {
+    setEditingTimeEntry(null);
+    setTimeForm(defaultTimeForm());
+    setError('');
+    setShowTimeModal(true);
+  }
+
+  function openEditTimeEntry(entry: TimeEntry) {
+    const start = new Date(entry.start_time);
+    const end = entry.end_time ? new Date(entry.end_time) : null;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const workTypeMatch = /^(.*?):\s/.exec(entry.comment || '');
+    setEditingTimeEntry(entry);
+    setTimeForm({
+      work_date: `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`,
+      user_id: entry.user_id,
+      start_time: `${pad(start.getHours())}:${pad(start.getMinutes())}`,
+      end_time: end ? `${pad(end.getHours())}:${pad(end.getMinutes())}` : '16:00',
+      break_minutes: String(entry.break_minutes || 0),
+      work_type: workTypeMatch ? workTypeMatch[1] : '',
+      comment: workTypeMatch ? (entry.comment || '').slice(workTypeMatch[0].length) : (entry.comment || ''),
+      project_billable: entry.project_billable !== false,
+      project_billing_scope: entry.project_billing_scope || 'outside_quote',
+      change_order_id: entry.project_change_order_id || '',
+    });
+    setError('');
+    setShowTimeModal(true);
+  }
   const [workOrderForm, setWorkOrderForm] = useState({
     title: '',
     description: '',
@@ -557,6 +604,29 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     setShowMaterialModal(true);
   }
 
+  function openNewChangeOrder() {
+    setEditingChangeOrder(null);
+    setChangeForm({ title: '', description: '', reason: '', requested_by: '', status: 'draft', billing_mode: 'separate', estimated_amount: '0', actual_amount: '0' });
+    setError('');
+    setShowChangeModal(true);
+  }
+
+  function openEditChangeOrder(changeOrder: ProjectChangeOrder) {
+    setEditingChangeOrder(changeOrder);
+    setChangeForm({
+      title: changeOrder.title || '',
+      description: changeOrder.description || '',
+      reason: changeOrder.reason || '',
+      requested_by: changeOrder.requested_by || '',
+      status: changeOrder.status,
+      billing_mode: changeOrder.billing_mode,
+      estimated_amount: String(changeOrder.estimated_amount ?? 0),
+      actual_amount: String(changeOrder.actual_amount ?? 0),
+    });
+    setError('');
+    setShowChangeModal(true);
+  }
+
   function calculatedMaterialSalePrice(form = materialForm) {
     const purchasePrice = Number(form.purchase_price) || 0;
     const markup = Number(form.markup_percent) || 0;
@@ -655,28 +725,39 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       const end = new Date(`${timeForm.work_date}T${timeForm.end_time}`);
       const totalMinutes = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000) - (Number(timeForm.break_minutes) || 0));
       if (totalMinutes <= 0) throw new Error('Kontrollera start- och sluttid.');
-      const { error: insertError } = await supabase.from('vihem_time_entries').insert({
-        organisation_id: user.organisation_id,
-        user_id: timeForm.user_id || user.id,
-        customer_project_id: selectedProject.id,
-        category: 'customer_project',
-        entry_type: 'work',
-        customer_name: customers.find(c => c.id === selectedProject.customer_id)?.name || selectedProject.customer_name,
+      const payload = {
         start_time: start.toISOString(),
         end_time: end.toISOString(),
         break_minutes: Number(timeForm.break_minutes) || 0,
         total_minutes: totalMinutes,
         comment: `${timeForm.work_type ? `${timeForm.work_type}: ` : ''}${timeForm.comment}`,
-        status: isAdmin ? 'approved' : 'submitted',
-        approved_by: isAdmin ? user.id : null,
-        approved_at: isAdmin ? new Date().toISOString() : null,
         project_billable: timeForm.project_billable,
         project_billing_scope: timeForm.project_billing_scope,
-      });
-      if (insertError) throw insertError;
+        // Ties this entry to one specific ÄTA (vihem_project_change_orders)
+        // instead of only the generic "outside_quote" flag -- lets staff
+        // clock in against a named ÄTA like "Byta ytterdörr". Column
+        // already existed on vihem_time_entries, unused by any UI before.
+        project_change_order_id: timeForm.project_billing_scope === 'outside_quote' ? (timeForm.change_order_id || null) : null,
+      };
+      const { error: saveError } = editingTimeEntry
+        ? await supabase.from('vihem_time_entries').update(payload).eq('id', editingTimeEntry.id)
+        : await supabase.from('vihem_time_entries').insert({
+            organisation_id: user.organisation_id,
+            user_id: timeForm.user_id || user.id,
+            customer_project_id: selectedProject.id,
+            category: 'customer_project',
+            entry_type: 'work',
+            customer_name: customers.find(c => c.id === selectedProject.customer_id)?.name || selectedProject.customer_name,
+            status: isAdmin ? 'approved' : 'submitted',
+            approved_by: isAdmin ? user.id : null,
+            approved_at: isAdmin ? new Date().toISOString() : null,
+            ...payload,
+          });
+      if (saveError) throw saveError;
       await refreshFinancials(selectedProject.id);
-      await logActivity(selectedProject.id, 'time_reported', `${hours(totalMinutes)} tid rapporterades.`);
+      await logActivity(selectedProject.id, editingTimeEntry ? 'time_updated' : 'time_reported', editingTimeEntry ? `Tidrapport uppdaterades (${hours(totalMinutes)}).` : `${hours(totalMinutes)} tid rapporterades.`);
       setShowTimeModal(false);
+      setEditingTimeEntry(null);
       await fetchAll();
     } catch (err: any) {
       setError(err.message || 'Kunde inte spara tidrapport.');
@@ -733,25 +814,30 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     setError('');
     try {
       if (!changeForm.title.trim()) throw new Error('Ange rubrik.');
-      const number = `ÄTA-${String(projectChangeOrders.length + 1).padStart(3, '0')}`;
-      const { error: insertError } = await supabase.from('vihem_project_change_orders').insert({
-        project_id: selectedProject.id,
-        change_order_number: number,
+      const payload = {
         title: changeForm.title,
         description: changeForm.description,
         reason: changeForm.reason,
         requested_by: changeForm.requested_by,
-        status: isAdmin ? changeForm.status : 'draft',
-        billing_mode: isAdmin ? changeForm.billing_mode : 'internal_note',
-        estimated_amount: isAdmin ? Number(changeForm.estimated_amount) || 0 : 0,
-        actual_amount: isAdmin ? Number(changeForm.actual_amount) || 0 : 0,
-        customer_approved_at: isAdmin && changeForm.status === 'approved_by_customer' ? new Date().toISOString() : null,
-        created_by: user?.id,
-      });
-      if (insertError) throw insertError;
+        status: isAdmin ? changeForm.status : (editingChangeOrder ? editingChangeOrder.status : 'draft'),
+        billing_mode: isAdmin ? changeForm.billing_mode : (editingChangeOrder ? editingChangeOrder.billing_mode : 'internal_note'),
+        estimated_amount: isAdmin ? Number(changeForm.estimated_amount) || 0 : (editingChangeOrder ? editingChangeOrder.estimated_amount : 0),
+        actual_amount: isAdmin ? Number(changeForm.actual_amount) || 0 : (editingChangeOrder ? editingChangeOrder.actual_amount : 0),
+        customer_approved_at: isAdmin && changeForm.status === 'approved_by_customer' ? new Date().toISOString() : (editingChangeOrder?.customer_approved_at || null),
+      };
+      const { error: saveError } = editingChangeOrder
+        ? await supabase.from('vihem_project_change_orders').update(payload).eq('id', editingChangeOrder.id)
+        : await supabase.from('vihem_project_change_orders').insert({
+            project_id: selectedProject.id,
+            change_order_number: `ÄTA-${String(projectChangeOrders.length + 1).padStart(3, '0')}`,
+            created_by: user?.id,
+            ...payload,
+          });
+      if (saveError) throw saveError;
       await refreshFinancials(selectedProject.id);
-      await logActivity(selectedProject.id, 'change_order_created', `ÄTA skapades: ${changeForm.title}.`);
+      await logActivity(selectedProject.id, editingChangeOrder ? 'change_order_updated' : 'change_order_created', editingChangeOrder ? `ÄTA uppdaterades: ${changeForm.title}.` : `ÄTA skapades: ${changeForm.title}.`);
       setShowChangeModal(false);
+      setEditingChangeOrder(null);
       await fetchAll();
     } catch (err: any) {
       setError(err.message || 'Kunde inte spara ÄTA.');
@@ -1219,7 +1305,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                     options={Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label }))}
                     className="min-w-[190px]"
                   />
-                  <Button variant="secondary" onClick={() => setShowTimeModal(true)} className="gap-2">
+                  <Button variant="secondary" onClick={openNewTimeEntry} className="gap-2">
                     <Timer className="w-4 h-4" /> Rapportera tid
                   </Button>
                 </div>
@@ -1302,22 +1388,30 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                 {tab === 'time' && (
                   <SectionList
                     title="Tidrapporter"
-                    action={<Button size="sm" onClick={() => setShowTimeModal(true)}><Plus className="w-4 h-4" /> Lägg till tid</Button>}
+                    action={<Button size="sm" onClick={openNewTimeEntry}><Plus className="w-4 h-4" /> Lägg till tid</Button>}
                     empty="Ingen tid rapporterad."
                   >
-                    {projectTimeEntries.map(entry => (
-                      <ListRow
-                        key={entry.id}
-                        title={staff.find(s => s.id === entry.user_id)?.name || 'Användare'}
-                        meta={[
-                          formatDate(entry.start_time),
-                          hours(entry.total_minutes || 0),
-                          entry.project_billing_scope === 'outside_quote' ? 'ÄTA-tid' : '',
-                          isAdmin ? (entry.project_billable === false ? 'Ej fakturerbar' : 'Fakturerbar') : '',
-                        ].filter(Boolean).join(' · ')}
-                        value={entry.comment || ''}
-                      />
-                    ))}
+                    {projectTimeEntries.map(entry => {
+                      const linkedChangeOrder = entry.project_change_order_id ? projectChangeOrders.find(co => co.id === entry.project_change_order_id) : null;
+                      return (
+                        <ListRow
+                          key={entry.id}
+                          title={staff.find(s => s.id === entry.user_id)?.name || 'Användare'}
+                          meta={[
+                            formatDate(entry.start_time),
+                            hours(entry.total_minutes || 0),
+                            entry.project_billing_scope === 'outside_quote' ? (linkedChangeOrder ? `ÄTA-tid · ${linkedChangeOrder.change_order_number}` : 'ÄTA-tid') : '',
+                            isAdmin ? (entry.project_billable === false ? 'Ej fakturerbar' : 'Fakturerbar') : '',
+                          ].filter(Boolean).join(' · ')}
+                          value={entry.comment || ''}
+                          action={
+                            <Button size="sm" variant="ghost" onClick={() => openEditTimeEntry(entry)} className="gap-1">
+                              <Edit2 className="w-3.5 h-3.5" /> Redigera
+                            </Button>
+                          }
+                        />
+                      );
+                    })}
                   </SectionList>
                 )}
 
@@ -1369,7 +1463,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                 {tab === 'change-orders' && (
                   <SectionList
                     title="ÄTA"
-                    action={<Button size="sm" onClick={() => setShowChangeModal(true)}><Plus className="w-4 h-4" /> Ny ÄTA</Button>}
+                    action={<Button size="sm" onClick={openNewChangeOrder}><Plus className="w-4 h-4" /> Ny ÄTA</Button>}
                     empty="Ingen ÄTA skapad."
                   >
                     {projectChangeOrders.map(item => (
@@ -1378,6 +1472,11 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                         title={`${item.change_order_number} · ${item.title}`}
                         meta={isAdmin ? `${item.status} · ${item.billing_mode}` : `${item.status} · ${item.reason || 'Ingen orsak angiven'}`}
                         value={isAdmin ? money(item.actual_amount || item.estimated_amount) : ''}
+                        action={
+                          <Button size="sm" variant="ghost" onClick={() => openEditChangeOrder(item)} className="gap-1">
+                            <Edit2 className="w-3.5 h-3.5" /> Redigera
+                          </Button>
+                        }
                       />
                     ))}
                   </SectionList>
@@ -1389,14 +1488,22 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                       title="ÄTA-tid (registrerad tid utanför offert)"
                       empty="Ingen tid registrerad som ÄTA-tid ännu."
                     >
-                      {projectAtaTimeEntries.map(entry => (
-                        <ListRow
-                          key={entry.id}
-                          title={staff.find(s => s.id === entry.user_id)?.name || 'Användare'}
-                          meta={`${formatDate(entry.start_time)} · ${hours(entry.total_minutes || 0)}`}
-                          value={isAdmin ? money((entry.total_minutes || 0) / 60 * (selectedProject.hourly_rate || 0)) : (entry.comment || '')}
-                        />
-                      ))}
+                      {projectAtaTimeEntries.map(entry => {
+                        const linkedChangeOrder = entry.project_change_order_id ? projectChangeOrders.find(co => co.id === entry.project_change_order_id) : null;
+                        return (
+                          <ListRow
+                            key={entry.id}
+                            title={staff.find(s => s.id === entry.user_id)?.name || 'Användare'}
+                            meta={`${formatDate(entry.start_time)} · ${hours(entry.total_minutes || 0)}${linkedChangeOrder ? ` · ${linkedChangeOrder.change_order_number} · ${linkedChangeOrder.title}` : ' · Ej kopplad till specifik ÄTA'}`}
+                            value={isAdmin ? money((entry.total_minutes || 0) / 60 * (selectedProject.hourly_rate || 0)) : (entry.comment || '')}
+                            action={
+                              <Button size="sm" variant="ghost" onClick={() => openEditTimeEntry(entry)} className="gap-1">
+                                <Edit2 className="w-3.5 h-3.5" /> Redigera
+                              </Button>
+                            }
+                          />
+                        );
+                      })}
                     </SectionList>
                   </div>
                 )}
@@ -1497,10 +1604,10 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
 
       <CustomerModal open={showCustomerModal} onClose={() => setShowCustomerModal(false)} form={customerForm} setForm={setCustomerForm} onSave={handleSaveCustomer} saving={saving} error={error} />
       <ProjectModal open={showProjectModal} onClose={() => setShowProjectModal(false)} form={projectForm} setForm={setProjectForm} customers={customers} staff={staff} onSave={handleSaveProject} saving={saving} error={error} />
-      <TimeModal open={showTimeModal} onClose={() => setShowTimeModal(false)} form={timeForm} setForm={setTimeForm} staff={staff} isAdmin={isAdmin} onSave={handleSaveTime} saving={saving} error={error} />
+      <TimeModal open={showTimeModal} onClose={() => { setShowTimeModal(false); setEditingTimeEntry(null); }} form={timeForm} setForm={setTimeForm} staff={staff} isAdmin={isAdmin} onSave={handleSaveTime} saving={saving} error={error} editing={Boolean(editingTimeEntry)} changeOrders={projectChangeOrders} />
       <WorkOrderModal open={showWorkOrderModal} onClose={() => setShowWorkOrderModal(false)} form={workOrderForm} setForm={setWorkOrderForm} staff={staff} onSave={handleSaveWorkOrder} saving={saving} error={error} />
       <MaterialModal open={showMaterialModal} onClose={() => { setShowMaterialModal(false); setEditingMaterial(null); resetMaterialForm(); }} form={materialForm} setForm={setMaterialForm} onSave={handleSaveMaterial} saving={saving} error={error} editing={Boolean(editingMaterial)} isAdmin={isAdmin} />
-      <ChangeOrderModal open={showChangeModal} onClose={() => setShowChangeModal(false)} form={changeForm} setForm={setChangeForm} onSave={handleSaveChangeOrder} saving={saving} error={error} isAdmin={isAdmin} />
+      <ChangeOrderModal open={showChangeModal} onClose={() => { setShowChangeModal(false); setEditingChangeOrder(null); }} form={changeForm} setForm={setChangeForm} onSave={handleSaveChangeOrder} saving={saving} error={error} isAdmin={isAdmin} editing={Boolean(editingChangeOrder)} />
       {isAdmin && <QuoteModal open={showQuoteModal} onClose={() => setShowQuoteModal(false)} form={quoteForm} setForm={setQuoteForm} onSave={handleSaveQuote} saving={saving} error={error} />}
       <DocumentModal open={showDocumentModal} onClose={() => setShowDocumentModal(false)} form={documentForm} setForm={setDocumentForm} onSave={handleSaveDocument} saving={saving} error={error} />
       <SelfCheckTemplateModal open={showSelfCheckTemplateModal} onClose={() => setShowSelfCheckTemplateModal(false)} form={selfCheckTemplateForm} setForm={setSelfCheckTemplateForm} onSave={handleSaveSelfCheckTemplate} saving={saving} error={error} />
@@ -1649,9 +1756,9 @@ function ProjectModal({ open, onClose, form, setForm, customers, staff, onSave, 
   );
 }
 
-function TimeModal({ open, onClose, form, setForm, staff, isAdmin, onSave, saving, error }: any) {
+function TimeModal({ open, onClose, form, setForm, staff, isAdmin, onSave, saving, error, editing, changeOrders }: any) {
   return (
-    <Modal open={open} onClose={onClose} title="Rapportera projekttid" size="lg">
+    <Modal open={open} onClose={onClose} title={editing ? 'Redigera tidrapport' : 'Rapportera projekttid'} size="lg">
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {isAdmin && <Select label="Användare" value={form.user_id} onChange={(e) => setForm({ ...form, user_id: e.target.value })} options={staff.map((p: Profile) => ({ value: p.id, label: p.name }))} />}
@@ -1661,19 +1768,28 @@ function TimeModal({ open, onClose, form, setForm, staff, isAdmin, onSave, savin
           <Input label="Rast minuter" type="number" value={form.break_minutes} onChange={(e) => setForm({ ...form, break_minutes: e.target.value })} />
           <Input label="Typ av arbete" value={form.work_type} onChange={(e) => setForm({ ...form, work_type: e.target.value })} />
         </div>
-        {isAdmin && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.project_billable} onChange={(e) => setForm({ ...form, project_billable: e.target.checked })} /> Fakturerbar tid</label>
-            <Select label="Debiteringsläge" value={form.project_billing_scope} onChange={(e) => setForm({ ...form, project_billing_scope: e.target.value })} options={[
-              { value: 'included_in_quote', label: 'Ingår i offert' },
-              { value: 'outside_quote', label: 'Utanför offert' },
-              { value: 'internal', label: 'Intern tid' },
-            ]} />
-          </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {isAdmin && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.project_billable} onChange={(e) => setForm({ ...form, project_billable: e.target.checked })} /> Fakturerbar tid</label>}
+          <Select label="Debiteringsläge" value={form.project_billing_scope} onChange={(e) => setForm({ ...form, project_billing_scope: e.target.value, change_order_id: e.target.value === 'outside_quote' ? form.change_order_id : '' })} options={[
+            { value: 'included_in_quote', label: 'Ingår i offert' },
+            { value: 'outside_quote', label: 'ÄTA-tid (utanför offert)' },
+            { value: 'internal', label: 'Intern tid' },
+          ]} />
+        </div>
+        {form.project_billing_scope === 'outside_quote' && (
+          <Select
+            label="ÄTA (valfritt)"
+            value={form.change_order_id}
+            onChange={(e) => setForm({ ...form, change_order_id: e.target.value })}
+            options={[
+              { value: '', label: changeOrders.length === 0 ? 'Ingen ÄTA skapad ännu' : 'Generell ÄTA-tid, ej kopplad' },
+              ...changeOrders.map((co: ProjectChangeOrder) => ({ value: co.id, label: `${co.change_order_number} · ${co.title}` })),
+            ]}
+          />
         )}
         <Textarea label="Kommentar" value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} rows={2} />
         {error && <ErrorBox message={error} />}
-        <ModalActions onClose={onClose} onSave={onSave} saving={saving} saveLabel="Spara tid" />
+        <ModalActions onClose={onClose} onSave={onSave} saving={saving} saveLabel={editing ? 'Spara ändringar' : 'Spara tid'} />
       </div>
     </Modal>
   );
@@ -1735,9 +1851,9 @@ function MaterialModal({ open, onClose, form, setForm, onSave, saving, error, ed
   );
 }
 
-function ChangeOrderModal({ open, onClose, form, setForm, onSave, saving, error, isAdmin }: any) {
+function ChangeOrderModal({ open, onClose, form, setForm, onSave, saving, error, isAdmin, editing }: any) {
   return (
-    <Modal open={open} onClose={onClose} title="Ny ÄTA" size="lg">
+    <Modal open={open} onClose={onClose} title={editing ? 'Redigera ÄTA' : 'Ny ÄTA'} size="lg">
       <div className="space-y-4">
         <Input label="Rubrik" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
         <Textarea label="Beskrivning" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
@@ -1767,7 +1883,7 @@ function ChangeOrderModal({ open, onClose, form, setForm, onSave, saving, error,
           )}
         </div>
         {error && <ErrorBox message={error} />}
-        <ModalActions onClose={onClose} onSave={onSave} saving={saving} saveLabel="Spara ÄTA" />
+        <ModalActions onClose={onClose} onSave={onSave} saving={saving} saveLabel={editing ? 'Spara ändringar' : 'Spara ÄTA'} />
       </div>
     </Modal>
   );
