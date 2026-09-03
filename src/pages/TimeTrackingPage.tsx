@@ -2354,6 +2354,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                         <p className="truncate text-sm font-medium text-slate-800">{staffById[entry.user_id]?.name || 'Personal'}</p>
                         <p className="truncate text-xs text-slate-500">
                           {formatDate(entry.start_time)} · {entryKindLabel(entry.entry_type) || labelFor(entry.category)}
+                          {entry.category === 'customer_project' && entry.project_billing_scope === 'outside_quote' ? ' - ÄTA' : ''}
                           {(timeEntryProjectLabel(entry) || entry.work_order?.title) ? ` · ${timeEntryProjectLabel(entry) || entry.work_order?.title}` : ''}
                           {' · '}{formatMinutes(entry.total_minutes || 0)}
                         </p>
@@ -2814,7 +2815,12 @@ function AdminTimeView({ user }: { user: Profile }) {
                         {dayEntries.map(entry => (
                           <tr key={entry.id} className="border-b border-slate-100 hover:bg-slate-50">
                             <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{new Date(entry.start_time).toLocaleDateString('sv-SE', { weekday: 'short' })}</td>
-                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entryKindLabel(entry.entry_type) || labelFor(entry.category)}</td>
+                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
+                              {entryKindLabel(entry.entry_type) || labelFor(entry.category)}
+                              {entry.category === 'customer_project' && entry.project_billing_scope === 'outside_quote' && (
+                                <span className="ml-1 font-semibold text-amber-600">- ÄTA</span>
+                              )}
+                            </td>
                             <td className="px-3 py-2 text-slate-600 max-w-[180px] truncate">{timeEntryProjectLabel(entry) || entry.work_order?.title || '--'}</td>
                             <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}</td>
                             <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{entry.end_time ? new Date(entry.end_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '--'}</td>
