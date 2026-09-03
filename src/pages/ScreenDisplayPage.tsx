@@ -1454,7 +1454,7 @@ function PresentationScreen({
   const visibleNews = scrollingNews ? [...activeNews, ...activeNews] : activeNews;
   const scrollingWorkOrders = activeWorkOrders.length > 10;
   const visibleWorkOrders = scrollingWorkOrders ? [...activeWorkOrders, ...activeWorkOrders] : activeWorkOrders;
-  const workOrderScrollSeconds = Math.max(20, activeWorkOrders.length * 4);
+  const workOrderScrollSeconds = Math.max(40, activeWorkOrders.length * 8);
 
   return (
     <div
