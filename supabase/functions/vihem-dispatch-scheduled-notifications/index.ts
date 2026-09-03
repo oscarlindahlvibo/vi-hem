@@ -105,14 +105,20 @@ Deno.serve(async request => {
       if (settings.lunch_start_reminder && lunch !== null && now.minutes >= lunch && now.minutes <= lunch + 5 && hasOpenWork) {
         if (await createOnce(client, schedule, `${dayKey}:lunch-start`, "lunch_start_reminder", "Lunch börjar nu", "Det är dags att gå på lunch.")) created++;
       }
-      if (settings.lunch_return_reminder && openLunchEntry) {
+      if (openLunchEntry) {
         // Tied to when this person actually clocked in on lunch, not the
         // scheduled lunch_start -- someone who goes to lunch late or early
         // should still get reminded lunchLength minutes after their own
         // clock-in, not at a fixed clock time.
         const lunchClockInMinutes = localMinutesOf(openLunchEntry.start_time);
-        if (now.minutes >= lunchClockInMinutes + lunchLength && now.minutes <= lunchClockInMinutes + lunchLength + 5) {
+        if (settings.lunch_return_reminder && now.minutes >= lunchClockInMinutes + lunchLength && now.minutes <= lunchClockInMinutes + lunchLength + 5) {
           if (await createOnce(client, schedule, `${dayKey}:lunch-return:${openLunchEntry.id}`, "lunch_return_reminder", "Lunchen är slut", "Det är dags att återgå till arbetet.")) created++;
+        }
+        // Second, separate nudge if they still haven't clocked back in --
+        // matches the 50-minute "overdue" threshold already shown in red on
+        // the stämpelklocka/TV UI (LUNCH_OVERDUE_MINUTES in lib/utils.ts).
+        if (settings.lunch_late_reminder && now.minutes >= lunchClockInMinutes + 50 && now.minutes <= lunchClockInMinutes + 55) {
+          if (await createOnce(client, schedule, `${dayKey}:lunch-late:${openLunchEntry.id}`, "lunch_late_reminder", "Sen från lunchen", "Du har varit på lunch i över 50 minuter -- glöm inte stämpla in igen.")) created++;
         }
       }
       if (settings.shift_end_reminder && end !== null && now.minutes >= end && now.minutes <= end + 5 && hasOpenWork) {
