@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
 import { Button, LoadingPage } from '../components/ui';
 import type { CalendarEvent, CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, MaintenanceRequest, Meeting, MeetingActionItem, MeetingAgendaItem, MeetingDecision, News, Profile, ShortStayBooking, ShortStayUnit, StaffAbsenceRequest, TimeEntry, WorkOrder } from '../types';
-import { formatDate, formatDateTime, MR_PRIORITY_LABELS, MR_STATUS_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS, entryKindLabel } from '../lib/utils';
+import { formatDate, formatDateTime, MR_PRIORITY_LABELS, MR_STATUS_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS, entryKindLabel, clockTone } from '../lib/utils';
 import { useTimeCategories } from '../contexts/TimeCategoriesContext';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import {
@@ -1369,6 +1369,15 @@ function PresentationScreen({
   const availableHeight = Math.max(screenHeight - 54, 480);
   const compact = true;
 
+  // Drives the orange/red lunch-overrun coloring on the Instämplade panel
+  // below -- ticks independently of the ~60s data refresh so a lunch entry
+  // visibly crosses the 45/50-minute thresholds without waiting on a refetch.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = window.setInterval(() => setNowTick(Date.now()), 15_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     async function fetchWeather() {
@@ -1547,15 +1556,28 @@ function PresentationScreen({
                     <p className="rounded-xl bg-white/5 px-3 py-3 font-bold text-slate-300" style={{ fontSize: 14 }}>Ingen är instämplad just nu.</p>
                   ) : (
                     <>
-                      {clockedInEntries.slice(0, 9).map(entry => (
-                        <div key={entry.id} className="grid grid-cols-[minmax(76px,0.85fr)_minmax(92px,1.15fr)_auto] items-center gap-1.5 rounded-md bg-white/10 px-2 py-1">
-                          <p className="truncate font-black" style={{ fontSize: 11.5 }}>{entry.user?.name || 'Personal'}</p>
-                          <p className="truncate font-semibold text-emerald-100" style={{ fontSize: 10.5 }}>{timeEntryTitle(entry)}</p>
-                          <p className="whitespace-nowrap font-bold text-slate-400" style={{ fontSize: 9.5 }}>
-                            {new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                        </div>
-                      ))}
+                      {clockedInEntries.slice(0, 9).map(entry => {
+                        const elapsedSeconds = (nowTick - new Date(entry.start_time).getTime()) / 1000;
+                        const tone = clockTone(entry.entry_type, elapsedSeconds);
+                        // work/break stay the panel's existing neutral look
+                        // -- only a lunch entry that's run long enough
+                        // switches to the orange/red alert styling.
+                        const rowClass = tone === 'lunchOverdue'
+                          ? 'bg-red-500/25 ring-1 ring-red-300/40'
+                          : tone === 'lunchWarning'
+                            ? 'bg-orange-500/20 ring-1 ring-orange-300/30'
+                            : 'bg-white/10';
+                        const labelClass = tone === 'lunchOverdue' ? 'text-red-100' : tone === 'lunchWarning' ? 'text-orange-100' : 'text-emerald-100';
+                        return (
+                          <div key={entry.id} className={`grid grid-cols-[minmax(76px,0.85fr)_minmax(92px,1.15fr)_auto] items-center gap-1.5 rounded-md px-2 py-1 ${rowClass}`}>
+                            <p className="truncate font-black" style={{ fontSize: 11.5 }}>{entry.user?.name || 'Personal'}</p>
+                            <p className={`truncate font-semibold ${labelClass}`} style={{ fontSize: 10.5 }}>{timeEntryTitle(entry)}</p>
+                            <p className="whitespace-nowrap font-bold text-slate-400" style={{ fontSize: 9.5 }}>
+                              {new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        );
+                      })}
                       {absentToday.slice(0, 6).map(request => (
                         <div key={request.id} className="grid grid-cols-[minmax(76px,0.85fr)_minmax(92px,1.15fr)_auto] items-center gap-1.5 rounded-md bg-rose-400/10 px-2 py-1 ring-1 ring-rose-300/20">
                           <p className="truncate font-black" style={{ fontSize: 11.5 }}>{request.user?.name || 'Personal'}</p>
