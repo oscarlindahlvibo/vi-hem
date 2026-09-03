@@ -1428,7 +1428,7 @@ function PresentationScreen({
       if (aDue !== bDue) return aDue - bDue;
       return (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9);
     })
-    .slice(0, 12);
+    .slice(0, 40);
   const activeMeetings = meetings.slice(0, 4);
   const customTickerItems = [
     ...(settings.customTickerItems || []),
@@ -1452,6 +1452,9 @@ function PresentationScreen({
   const rightPanelRows = rightPanelCount === 0 ? '1fr' : rightPanelCount === 1 ? '1fr' : rightPanelCount === 2 ? '0.62fr 1.38fr' : '0.66fr 1.15fr 0.35fr';
   const scrollingNews = activeNews.length > 1;
   const visibleNews = scrollingNews ? [...activeNews, ...activeNews] : activeNews;
+  const scrollingWorkOrders = activeWorkOrders.length > 10;
+  const visibleWorkOrders = scrollingWorkOrders ? [...activeWorkOrders, ...activeWorkOrders] : activeWorkOrders;
+  const workOrderScrollSeconds = Math.max(20, activeWorkOrders.length * 4);
 
   return (
     <div
@@ -1482,27 +1485,34 @@ function PresentationScreen({
               </h3>
               <span className="rounded-full bg-white/10 px-2.5 py-0.5 font-black" style={{ fontSize: 14 }}>{workOrders.length}</span>
             </div>
-            <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-hidden">
               {activeWorkOrders.length === 0 ? (
                 <p className="rounded-xl bg-white/5 px-4 py-5 font-bold text-slate-300" style={{ fontSize: 16 }}>Inga aktiva arbetsordrar.</p>
-              ) : activeWorkOrders.slice(0, 10).map(order => (
-                <div key={order.id} className="grid grid-cols-[minmax(0,1.15fr)_minmax(96px,0.45fr)_minmax(120px,0.55fr)] items-center gap-2 rounded-lg bg-white/10 px-2.5 py-1.5">
-                  <div className="min-w-0">
-                    <p className="truncate font-black" style={{ fontSize: 14 }}>{order.title}</p>
-                    <p className="truncate font-semibold text-slate-300" style={{ fontSize: 10.5 }}>
-                      {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
-                    </p>
-                  </div>
-                  <div className="flex min-w-0 justify-start gap-1">
-                    <span className="truncate rounded-full bg-amber-400/15 px-2 py-0.5 font-black text-amber-100" style={{ fontSize: 10 }}>
-                      {isOrderOverdue(order) ? 'Försenad' : WO_STATUS_LABELS[order.status]}
-                    </span>
-                  </div>
-                  <span className="truncate rounded-full bg-blue-400/15 px-2 py-0.5 text-center font-black text-blue-100" style={{ fontSize: 10 }}>
-                    {assigneeLabel(order)}
-                  </span>
+              ) : (
+                <div
+                  className="space-y-1.5"
+                  style={scrollingWorkOrders ? { animation: `vihemNewsScroll ${workOrderScrollSeconds}s linear infinite` } : undefined}
+                >
+                  {visibleWorkOrders.map((order, index) => (
+                    <div key={`${order.id}-${index}`} className="grid grid-cols-[minmax(0,1.15fr)_minmax(96px,0.45fr)_minmax(120px,0.55fr)] items-center gap-2 rounded-lg bg-white/10 px-2.5 py-1.5">
+                      <div className="min-w-0">
+                        <p className="truncate font-black" style={{ fontSize: 14 }}>{order.title}</p>
+                        <p className="truncate font-semibold text-slate-300" style={{ fontSize: 10.5 }}>
+                          {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex min-w-0 justify-start gap-1">
+                        <span className="truncate rounded-full bg-amber-400/15 px-2 py-0.5 font-black text-amber-100" style={{ fontSize: 10 }}>
+                          {isOrderOverdue(order) ? 'Försenad' : WO_STATUS_LABELS[order.status]}
+                        </span>
+                      </div>
+                      <span className="truncate rounded-full bg-blue-400/15 px-2 py-0.5 text-center font-black text-blue-100" style={{ fontSize: 10 }}>
+                        {assigneeLabel(order)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           </section>
         )}
