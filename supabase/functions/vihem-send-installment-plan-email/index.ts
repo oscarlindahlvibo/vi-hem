@@ -22,6 +22,8 @@ Deno.serve(async (req) => {
     const organisationId = typeof body.organisation_id === "string" ? body.organisation_id : "";
     const planId = typeof body.plan_id === "string" ? body.plan_id : "";
     const scheduleId = typeof body.schedule_id === "string" ? body.schedule_id : "";
+    const pdfBase64 = typeof body.pdf_base64 === "string" ? body.pdf_base64 : "";
+    const pdfFilename = typeof body.pdf_filename === "string" && body.pdf_filename ? body.pdf_filename : "faktura.pdf";
     if (!organisationId || !planId) return json({ error: "Organisation och plan saknas." }, 400);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -73,6 +75,7 @@ Deno.serve(async (req) => {
         toName: customer?.name || "",
         subject: `Avbetalningsplan ${plan.plan_number}`,
         text,
+        attachment: pdfBase64 ? { fileName: pdfFilename, contentType: "application/pdf", bytes: decodeBase64(pdfBase64) } : undefined,
       });
     } catch (sendErr) {
       const code = googleMailerErrorCode(sendErr);
@@ -93,6 +96,7 @@ Deno.serve(async (req) => {
   }
 });
 
+function decodeBase64(value: string) { return Uint8Array.from(atob(value), (c) => c.charCodeAt(0)); }
 function money(value: number) { return new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK" }).format(Number(value || 0)); }
 function formatDate(value: string) { return new Intl.DateTimeFormat("sv-SE").format(new Date(`${value}T12:00:00`)); }
 function json(body: Record<string, unknown>, status = 200) { return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } }); }

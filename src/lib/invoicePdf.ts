@@ -153,10 +153,12 @@ export function buildInvoicePdfBlob({ invoice, lines, formatCurrency }: InvoiceP
   commands.push(text(formatCurrency(Number(invoice.total_amount), invoice.currency), 470, y, 13, 'bold'));
 
   const footerY = 58;
-  commands.push(line(margin, footerY + 28, pageWidth - margin, footerY + 28));
-  commands.push(text(company?.bankgiro ? `Bankgiro ${company.bankgiro}` : '', margin, footerY + 12, 8));
-  commands.push(text(company?.plusgiro ? `Plusgiro ${company.plusgiro}` : '', margin + 150, footerY + 12, 8));
-  commands.push(text(company?.iban ? `IBAN ${company.iban}` : '', margin + 300, footerY + 12, 8));
+  commands.push(line(margin, footerY + 40, pageWidth - margin, footerY + 40));
+  commands.push(text(company?.bankgiro ? `Bankgiro ${company.bankgiro}` : '', margin, footerY + 24, 8));
+  commands.push(text(company?.plusgiro ? `Plusgiro ${company.plusgiro}` : '', margin + 150, footerY + 24, 8));
+  commands.push(text(company?.iban ? `IBAN ${company.iban}` : '', margin + 300, footerY + 24, 8));
+  commands.push(text(company?.swish_number ? `Swish ${company.swish_number}` : '', margin, footerY + 12, 8));
+  commands.push(text(company?.bic ? `BIC ${company.bic}` : '', margin + 150, footerY + 12, 8));
   commands.push(text(invoice.notes ? `Anteckning: ${invoice.notes}` : '', margin, footerY - 4, 8));
 
   const stream = commands.filter(Boolean).join('\n');

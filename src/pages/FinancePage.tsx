@@ -69,6 +69,11 @@ const emptyCompanyForm = {
   phone: '',
   invoice_prefix: '',
   default_payment_terms_days: '30',
+  bankgiro: '',
+  plusgiro: '',
+  swish_number: '',
+  iban: '',
+  bic: '',
 };
 
 const emptyCustomerForm = {
@@ -1193,6 +1198,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       phone: company.phone ?? '',
       invoice_prefix: company.invoice_prefix ?? '',
       default_payment_terms_days: String(company.default_payment_terms_days ?? 30),
+      bankgiro: company.bankgiro ?? '',
+      plusgiro: company.plusgiro ?? '',
+      swish_number: company.swish_number ?? '',
+      iban: company.iban ?? '',
+      bic: company.bic ?? '',
     });
     setCompanyModalOpen(true);
   };
@@ -1313,6 +1323,11 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
       phone: companyForm.phone.trim(),
       invoice_prefix: companyForm.invoice_prefix.trim().toUpperCase(),
       default_payment_terms_days: Math.max(0, Math.round(toNumber(companyForm.default_payment_terms_days, 30))),
+      bankgiro: companyForm.bankgiro.trim(),
+      plusgiro: companyForm.plusgiro.trim(),
+      swish_number: companyForm.swish_number.trim(),
+      iban: companyForm.iban.trim(),
+      bic: companyForm.bic.trim(),
       updated_by: user?.id ?? null,
     };
 
@@ -5498,6 +5513,14 @@ export function FinancePage({ onNavigate: _onNavigate }: FinancePageProps) {
           <Input label="E-post" type="email" value={companyForm.email} onChange={e => setCompanyForm(prev => ({ ...prev, email: e.target.value }))} />
           <Input label="Telefon" value={companyForm.phone} onChange={e => setCompanyForm(prev => ({ ...prev, phone: e.target.value }))} />
           <Input label="Betalvillkor dagar" type="number" value={companyForm.default_payment_terms_days} onChange={e => setCompanyForm(prev => ({ ...prev, default_payment_terms_days: e.target.value }))} />
+        </div>
+        <p className="mt-6 text-xs font-bold uppercase tracking-wider text-slate-500">Betalningsuppgifter (visas på fakturor)</p>
+        <div className="mt-3 grid gap-4 md:grid-cols-2">
+          <Input label="Bankgiro" value={companyForm.bankgiro} onChange={e => setCompanyForm(prev => ({ ...prev, bankgiro: e.target.value }))} />
+          <Input label="Plusgiro" value={companyForm.plusgiro} onChange={e => setCompanyForm(prev => ({ ...prev, plusgiro: e.target.value }))} />
+          <Input label="Swish-nummer" value={companyForm.swish_number} onChange={e => setCompanyForm(prev => ({ ...prev, swish_number: e.target.value }))} />
+          <Input label="IBAN" value={companyForm.iban} onChange={e => setCompanyForm(prev => ({ ...prev, iban: e.target.value }))} />
+          <Input label="BIC/SWIFT" value={companyForm.bic} onChange={e => setCompanyForm(prev => ({ ...prev, bic: e.target.value }))} />
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => { setCompanyModalOpen(false); setSelectedCompany(null); }}>Avbryt</Button>

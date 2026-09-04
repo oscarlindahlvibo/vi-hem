@@ -24,8 +24,24 @@ export interface GmailSendParams {
   attachment?: { fileName: string; contentType: string; bytes: Uint8Array };
 }
 
+// response.json() has been observed to hang indefinitely (never resolves
+// OR rejects) on non-2xx bodies in this edge runtime -- reading the body as
+// text first (with a hard timeout) and parsing that manually sidesteps
+// whatever is wrong with its streaming/json() path specifically.
+async function readBodySafely(response: Response): Promise<{ raw: string; json: any }> {
+  const raw = await Promise.race([
+    response.text(),
+    new Promise<string>((_, reject) => setTimeout(() => reject(new Error("BODY_READ_TIMEOUT")), 10000)),
+  ]).catch(() => "");
+  let json: any = {};
+  try { json = raw ? JSON.parse(raw) : {}; } catch { /* not JSON */ }
+  return { raw, json };
+}
+
 export async function sendGmailMessage(db: any, organisationId: string, params: GmailSendParams): Promise<void> {
+  console.log("[gmail-mailer] requesting token", { organisationId, subject: params.fromEmail });
   const accessToken = await googleToken(db, organisationId, params.fromEmail, GMAIL_SEND_SCOPE);
+  console.log("[gmail-mailer] got token, sending", { len: accessToken.length });
   const raw = base64url(buildRfc822Message(params));
   const response = await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/${encodeURIComponent(params.fromEmail)}/messages/send`,
@@ -33,10 +49,13 @@ export async function sendGmailMessage(db: any, organisationId: string, params: 
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ raw }),
+      signal: AbortSignal.timeout(15000),
     },
   );
+  console.log("[gmail-mailer] send response", { status: response.status });
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
+    const { raw: rawBody, json: payload } = await readBodySafely(response);
+    console.log("[gmail-mailer] send error body", rawBody.slice(0, 500));
     throw new Error(`GOOGLE_GMAIL_SEND_FAILED:${response.status}:${payload.error?.status || ""}:${payload.error?.message || ""}`);
   }
 }
@@ -127,16 +146,19 @@ async function googleToken(db: any, organisationId: string, subject: string, sco
     throw new Error("GOOGLE_PRIVATE_KEY_INVALID");
   }
   const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(unsigned));
+  console.log("[gmail-mailer] jwt signed, fetching token", { scope, subject });
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${unsigned}.${b64url(new Uint8Array(signature))}`,
+    signal: AbortSignal.timeout(15000),
   });
+  console.log("[gmail-mailer] token response", { status: response.status });
+  const { raw: rawBody, json: payload } = await readBodySafely(response);
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
+    console.log("[gmail-mailer] token error body", rawBody.slice(0, 500));
     throw new Error(`GOOGLE_TOKEN_FAILED:${payload.error || "unknown"}:${payload.error_description || ""}`);
   }
-  const payload = await response.json();
   if (!payload.access_token) throw new Error("GOOGLE_TOKEN_FAILED:missing_token:");
   return payload.access_token as string;
 }

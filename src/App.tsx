@@ -43,6 +43,7 @@ import { ScreenSettingsPage } from './pages/ScreenSettingsPage';
 import { GuestLaundryPage } from './pages/GuestLaundryPage';
 import { FinancePage } from './pages/FinancePage';
 import { FinanceV2Page } from './modules/finance-v2/pages/FinanceV2Page';
+import { InstallmentPlansPage } from './pages/InstallmentPlansPage';
 import { AgreementsV2Page } from './modules/agreements-v2/pages/AgreementsV2Page';
 import { PublicAgreementSignPage } from './modules/agreements-v2/pages/PublicAgreementSignPage';
 import { PublicAgreementVerifyPage } from './modules/agreements-v2/pages/PublicAgreementVerifyPage';
@@ -612,6 +613,10 @@ function AppInner() {
         // 'finance': staff module grant + the org's finance module enabled.
         if (!isStaff || !enabledModules.finance) return renderDashboard();
         return <FinanceV2Page />;
+
+      case 'installment-plans':
+        if (!isStaff || !enabledModules.finance) return renderDashboard();
+        return <InstallmentPlansPage />;
 
       case 'tenant-invoices':
         if (!isTenant || !enabledModules.finance) return renderDashboard();

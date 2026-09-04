@@ -77,6 +77,9 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [inlineCustomers, setInlineCustomers] = useState<FinanceCustomer[]>([]);
   const [customerDraft, setCustomerDraft] = useState<CustomerDraft>({ name: '', customerType: 'company', companyId: companies[0]?.id ?? '', organisationNumber: '', personalNumber: '', email: '', phone: '' });
+  const [showCustomerManager, setShowCustomerManager] = useState(false);
+  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
+  const [updatedCustomers, setUpdatedCustomers] = useState<Record<string, FinanceCustomer>>({});
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentDate, setPaymentDate] = useState(today);
   const [paymentMethod, setPaymentMethod] = useState('bank_transfer');
@@ -203,8 +206,12 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
 
   const availableCustomers = useMemo(() => {
     const merged = [...customers, ...inlineCustomers];
-    return merged.filter((customer, index) => merged.findIndex(item => item.id === customer.id) === index);
-  }, [customers, inlineCustomers]);
+    const deduped = merged.filter((customer, index) => merged.findIndex(item => item.id === customer.id) === index);
+    // The customer list comes from the parent page as a one-time fetch --
+    // apply any edits made here immediately instead of waiting on a full
+    // page reload to see them reflected.
+    return deduped.map(customer => updatedCustomers[customer.id] ?? customer);
+  }, [customers, inlineCustomers, updatedCustomers]);
 
   const updateForm = (key: keyof PlanForm, value: string) => setForm(current => ({ ...current, [key]: value }));
 
@@ -217,15 +224,37 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
     setExternalInvoices(current => current.map(row => row.id === id ? { ...row, [key]: value } : row));
   };
 
-  const createInlineCustomer = async () => {
+  const resetCustomerDraft = (companyId: string) => setCustomerDraft({ name: '', customerType: 'company', companyId, organisationNumber: '', personalNumber: '', email: '', phone: '' });
+
+  const startEditCustomer = (customer: FinanceCustomer) => {
+    setEditingCustomerId(customer.id);
+    setCustomerDraft({
+      name: customer.name,
+      customerType: customer.customer_type,
+      companyId: customer.company_id ?? companies[0]?.id ?? '',
+      organisationNumber: customer.organisation_number,
+      personalNumber: customer.personal_number,
+      email: customer.email,
+      phone: customer.phone,
+    });
+    setShowCustomerManager(true);
+    setShowNewCustomer(true);
+  };
+
+  const cancelCustomerEdit = () => {
+    setEditingCustomerId(null);
+    resetCustomerDraft(form.companyId);
+    setShowNewCustomer(false);
+  };
+
+  const saveCustomer = async () => {
     if (!organisationId || !customerDraft.name.trim() || !customerDraft.companyId) {
       setError('Fyll i kundnamn och välj bolag innan kunden sparas.');
       return;
     }
     setSaving(true);
     setError('');
-    const { data, error: customerError } = await supabase.from('vihem_finance_customers').insert({
-      organisation_id: organisationId,
+    const payload = {
       company_id: customerDraft.companyId,
       customer_type: customerDraft.customerType,
       name: customerDraft.name.trim(),
@@ -234,18 +263,36 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
       email: customerDraft.email.trim(),
       phone: customerDraft.phone.trim(),
       invoice_email: customerDraft.email.trim(),
-      payment_terms_days: 30,
-      notes: '',
-      created_by: userId,
-    }).select('*').single();
-    if (customerError || !data) {
-      setError(customerError?.message ?? 'Kunden kunde inte skapas.');
-      setSaving(false);
-      return;
+    };
+    if (editingCustomerId) {
+      const { data, error: customerError } = await supabase.from('vihem_finance_customers').update(payload).eq('id', editingCustomerId).select('*').single();
+      if (customerError || !data) {
+        setError(customerError?.message ?? 'Kunden kunde inte sparas.');
+        setSaving(false);
+        return;
+      }
+      setUpdatedCustomers(current => ({ ...current, [data.id]: data as FinanceCustomer }));
+      setInlineCustomers(current => current.map(customer => customer.id === data.id ? (data as FinanceCustomer) : customer));
+      setNotice('Kunden uppdaterades.');
+      setEditingCustomerId(null);
+    } else {
+      const { data, error: customerError } = await supabase.from('vihem_finance_customers').insert({
+        organisation_id: organisationId,
+        payment_terms_days: 30,
+        notes: '',
+        created_by: userId,
+        ...payload,
+      }).select('*').single();
+      if (customerError || !data) {
+        setError(customerError?.message ?? 'Kunden kunde inte skapas.');
+        setSaving(false);
+        return;
+      }
+      setInlineCustomers(current => [...current.filter(customer => customer.id !== data.id), data as FinanceCustomer]);
+      setForm(current => ({ ...current, customerId: data.id }));
+      setNotice('Kunden skapades.');
     }
-    setInlineCustomers(current => [...current.filter(customer => customer.id !== data.id), data as FinanceCustomer]);
-    setForm(current => ({ ...current, customerId: data.id }));
-    setCustomerDraft({ name: '', customerType: 'company', companyId: form.companyId, organisationNumber: '', personalNumber: '', email: '', phone: '' });
+    resetCustomerDraft(form.companyId);
     setShowNewCustomer(false);
     setSaving(false);
   };
@@ -378,13 +425,31 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
     } finally { setSaving(false); }
   };
 
+  const buildScheduleInvoicePdf = async (invoiceId: string) => {
+    const [{ data: invoice, error: invoiceError }, { data: lines, error: linesError }] = await Promise.all([
+      supabase.from('vihem_invoices').select('*, company:company_id(*), customer:customer_id(*)').eq('id', invoiceId).single(),
+      supabase.from('vihem_invoice_lines').select('*').eq('invoice_id', invoiceId).order('line_no'),
+    ]);
+    if (invoiceError || linesError || !invoice) throw new Error(invoiceError?.message ?? linesError?.message ?? 'Kunde inte läsa fakturaunderlaget.');
+    return buildInvoicePdfBlob({ invoice: invoice as Invoice, lines: (lines ?? []) as InvoiceLine[], formatCurrency: (value, currency = 'SEK') => new Intl.NumberFormat('sv-SE', { style: 'currency', currency }).format(value) });
+  };
+
+  const blobToBase64 = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+    reader.onerror = () => reject(reader.error ?? new Error('Kunde inte läsa PDF-filen.'));
+    reader.readAsDataURL(blob);
+  });
+
   const sendScheduleInvoice = async (row: InstallmentSchedule) => {
     if (!selectedPlan) return;
     setSaving(true); setError(''); setNotice('');
     try {
       const invoiceId = row.invoice_id ?? await generateScheduleInvoice(row, false);
       if (!invoiceId) return;
-      const { error: sendError } = await supabase.functions.invoke('vihem-send-installment-plan-email', { body: { organisation_id: organisationId, plan_id: selectedPlan.id, schedule_id: row.id } });
+      const pdfFileName = `${selectedPlan.plan_number}-del-${row.installment_no}.pdf`;
+      const pdfBase64 = await blobToBase64(await buildScheduleInvoicePdf(invoiceId));
+      const { error: sendError } = await supabase.functions.invoke('vihem-send-installment-plan-email', { body: { organisation_id: organisationId, plan_id: selectedPlan.id, schedule_id: row.id, pdf_base64: pdfBase64, pdf_filename: pdfFileName } });
       if (sendError) {
         // Non-2xx responses leave `error` a generic FunctionsHttpError --
         // the real {error: "..."} body the function sent is only reachable
@@ -408,12 +473,7 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
     try {
       const invoiceId = row.invoice_id ?? await generateScheduleInvoice(row, false);
       if (!invoiceId) return;
-      const [{ data: invoice, error: invoiceError }, { data: lines, error: linesError }] = await Promise.all([
-        supabase.from('vihem_invoices').select('*, company:company_id(*), customer:customer_id(*)').eq('id', invoiceId).single(),
-        supabase.from('vihem_invoice_lines').select('*').eq('invoice_id', invoiceId).order('line_no'),
-      ]);
-      if (invoiceError || linesError || !invoice) throw new Error(invoiceError?.message ?? linesError?.message ?? 'Kunde inte läsa fakturaunderlaget.');
-      const blob = buildInvoicePdfBlob({ invoice: invoice as Invoice, lines: (lines ?? []) as InvoiceLine[], formatCurrency: (value, currency = 'SEK') => new Intl.NumberFormat('sv-SE', { style: 'currency', currency }).format(value) });
+      const blob = await buildScheduleInvoicePdf(invoiceId);
       await saveOrShareFile(blob, `${selectedPlan.plan_number}-del-${row.installment_no}.pdf`);
     } catch (invoiceError) {
       setError(invoiceError instanceof Error ? invoiceError.message : 'Kunde inte skapa PDF-filen.');
@@ -437,8 +497,51 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
 
   if (loading) return <Card><p className="text-sm text-slate-500">Laddar avbetalningsplaner...</p></Card>;
 
+  const customerFormBlock = (
+    <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+      <p className="mb-3 text-sm font-bold text-slate-900">{editingCustomerId ? 'Redigera kund' : 'Ny kund'}</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Input label="Namn" value={customerDraft.name} onChange={event => setCustomerDraft(current => ({ ...current, name: event.target.value }))} />
+        <Select label="Bolag" value={customerDraft.companyId} onChange={event => setCustomerDraft(current => ({ ...current, companyId: event.target.value }))} options={companies.map(company => ({ value: company.id, label: company.name }))} />
+        <Select label="Typ" value={customerDraft.customerType} onChange={event => setCustomerDraft(current => ({ ...current, customerType: event.target.value as CustomerDraft['customerType'], organisationNumber: event.target.value === 'private' ? '' : current.organisationNumber, personalNumber: event.target.value === 'private' ? current.personalNumber : '' }))} options={[{ value: 'company', label: 'Företag' }, { value: 'private', label: 'Privatperson' }, { value: 'brf', label: 'Bostadsrättsförening' }]} />
+        {customerDraft.customerType === 'private' ? <Input label="Personnummer" value={customerDraft.personalNumber} onChange={event => setCustomerDraft(current => ({ ...current, personalNumber: event.target.value }))} /> : <Input label="Organisationsnummer" value={customerDraft.organisationNumber} onChange={event => setCustomerDraft(current => ({ ...current, organisationNumber: event.target.value }))} />}
+        <Input label="E-post" type="email" value={customerDraft.email} onChange={event => setCustomerDraft(current => ({ ...current, email: event.target.value }))} />
+        <Input label="Telefon" value={customerDraft.phone} onChange={event => setCustomerDraft(current => ({ ...current, phone: event.target.value }))} />
+      </div>
+      <div className="mt-3 flex gap-2">
+        <Button size="sm" onClick={() => void saveCustomer()} loading={saving}><UserPlus className="h-4 w-4" />{editingCustomerId ? 'Spara ändringar' : 'Spara kund och välj'}</Button>
+        {editingCustomerId && <Button size="sm" variant="secondary" onClick={cancelCustomerEdit}>Avbryt</Button>}
+      </div>
+    </div>
+  );
+
   return <div className="installment-plans-panel installment-plans-layout gap-5">
     <div className="space-y-4">
+      <Card>
+        <div className="flex items-start justify-between gap-3">
+          <div><h2 className="text-lg font-bold text-slate-950">Kunder</h2><p className="mt-1 text-sm text-slate-500">Lägg upp och redigera kunder för avbetalningsplaner.</p></div>
+          <Button size="sm" variant="secondary" onClick={() => { setShowCustomerManager(value => !value); if (!showCustomerManager) { setEditingCustomerId(null); resetCustomerDraft(form.companyId); } }}><UserPlus className="h-4 w-4" />{showCustomerManager ? 'Stäng' : 'Hantera kunder'}</Button>
+        </div>
+        {showCustomerManager && (
+          <div className="mt-4 space-y-3">
+            {!showNewCustomer && <Button size="sm" onClick={() => { setEditingCustomerId(null); resetCustomerDraft(form.companyId); setShowNewCustomer(true); }}><UserPlus className="h-4 w-4" />Ny kund</Button>}
+            {showNewCustomer && customerFormBlock}
+            <div className="max-h-72 space-y-2 overflow-auto">
+              {availableCustomers.length === 0 ? (
+                <p className="text-sm text-slate-500">Inga kunder ännu.</p>
+              ) : availableCustomers.map(customer => (
+                <div key={customer.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 text-sm">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-slate-900">{customer.name}</p>
+                    <p className="truncate text-xs text-slate-500">{companies.find(c => c.id === customer.company_id)?.name ?? 'Inget bolag'}{customer.email ? ` · ${customer.email}` : ''}</p>
+                  </div>
+                  <Button size="sm" variant="secondary" onClick={() => startEditCustomer(customer)}>Redigera</Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
       <Card>
         <div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-bold text-slate-950">Avbetalningsplaner</h2><p className="mt-1 text-sm text-slate-500">Administrativ uppföljning av skuld. Fakturautkast skapas först när du väljer det och bokförs inte automatiskt.</p></div><Button size="sm" onClick={() => setShowCreate(value => !value)}><Plus className="h-4 w-4" />Ny plan</Button></div>
         <div className="mt-4 flex flex-wrap gap-2"><Badge className="bg-amber-50 text-amber-800">Ej bokföringsbar</Badge><Badge className="bg-slate-100 text-slate-700">{plans.length} planer</Badge></div>
@@ -447,7 +550,7 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
       {notice && <p className={`rounded-xl border p-3 text-sm font-medium ${noticeIsError ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{notice}</p>}
       {showCreate && <Card className="overflow-hidden border-blue-100 p-0 shadow-md"><div className="bg-gradient-to-r from-blue-700 to-indigo-600 px-5 py-5 text-white"><div className="flex items-center gap-3"><div className="rounded-xl bg-white/15 p-2"><ReceiptText className="h-5 w-5" /></div><div><h3 className="text-lg font-bold">Ny avbetalningsplan</h3><p className="mt-0.5 text-sm text-blue-100">Samla flera underlag i en tydlig plan.</p></div></div></div><div className="space-y-6 p-5">
         <section><p className="mb-3 text-xs font-bold uppercase tracking-wider text-blue-700">1. Vem gäller planen?</p><div className="grid gap-3 sm:grid-cols-2"><Select label="Bolag" value={form.companyId} onChange={event => { updateForm('companyId', event.target.value); setSelectedInvoiceIds([]); setCustomerDraft(current => ({ ...current, companyId: event.target.value })); }} options={companies.map(company => ({ value: company.id, label: company.name }))} /><div><Select label="Kund" value={form.customerId} onChange={event => updateForm('customerId', event.target.value)} options={[{ value: '', label: 'Ingen vald kund' }, ...availableCustomers.filter(customer => !form.companyId || customer.company_id === form.companyId).map(customer => ({ value: customer.id, label: customer.name }))]} /><button type="button" onClick={() => setShowNewCustomer(value => !value)} className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-blue-700 hover:text-blue-900"><UserPlus className="h-4 w-4" />{showNewCustomer ? 'Stäng kundskapande' : 'Skapa ny kund här'}</button></div></div>
-          {showNewCustomer && <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-4"><p className="mb-3 text-sm font-bold text-slate-900">Ny kund</p><div className="grid gap-3 sm:grid-cols-2"><Input label="Namn" value={customerDraft.name} onChange={event => setCustomerDraft(current => ({ ...current, name: event.target.value }))} /><Select label="Typ" value={customerDraft.customerType} onChange={event => setCustomerDraft(current => ({ ...current, customerType: event.target.value as CustomerDraft['customerType'], organisationNumber: event.target.value === 'private' ? '' : current.organisationNumber, personalNumber: event.target.value === 'private' ? current.personalNumber : '' }))} options={[{ value: 'company', label: 'Företag' }, { value: 'private', label: 'Privatperson' }, { value: 'brf', label: 'Bostadsrättsförening' }]} />{customerDraft.customerType === 'private' ? <Input label="Personnummer" value={customerDraft.personalNumber} onChange={event => setCustomerDraft(current => ({ ...current, personalNumber: event.target.value }))} /> : <Input label="Organisationsnummer" value={customerDraft.organisationNumber} onChange={event => setCustomerDraft(current => ({ ...current, organisationNumber: event.target.value }))} />}<Input label="E-post" type="email" value={customerDraft.email} onChange={event => setCustomerDraft(current => ({ ...current, email: event.target.value }))} /><Input label="Telefon" value={customerDraft.phone} onChange={event => setCustomerDraft(current => ({ ...current, phone: event.target.value }))} /></div><Button className="mt-3" size="sm" onClick={() => void createInlineCustomer()} loading={saving}><UserPlus className="h-4 w-4" />Spara kund och välj</Button></div>}
+          {showNewCustomer && customerFormBlock}
         </section>
         <section><div className="mb-3 flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wider text-blue-700">2. Ursprungsfakturor</p><p className="mt-1 text-sm text-slate-500">Välj en eller flera obetalda fakturor. De kopplas till samma plan.</p></div>{eligibleInvoices.length > 0 && <button type="button" className="text-sm font-semibold text-blue-700" onClick={() => setSelectedInvoiceIds(current => current.length === eligibleInvoices.length ? [] : eligibleInvoices.map(invoice => invoice.id))}>{selectedInvoiceIds.length === eligibleInvoices.length ? 'Avmarkera alla' : 'Välj alla'}</button>}</div>{eligibleInvoices.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">Inga obetalda fakturor för valt bolag.</div> : <div className="max-h-56 space-y-2 overflow-auto rounded-xl border border-slate-200 bg-slate-50/70 p-3">{eligibleInvoices.map(invoice => { const amount = Number(invoice.balance_due ?? Number(invoice.total_amount) - Number(invoice.paid_amount)); return <label key={invoice.id} className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition ${selectedInvoiceIds.includes(invoice.id) ? 'border-blue-300 bg-blue-50' : 'border-transparent bg-white hover:border-slate-200'}`}><input className="h-4 w-4 accent-blue-600" type="checkbox" checked={selectedInvoiceIds.includes(invoice.id)} onChange={event => setSelectedInvoiceIds(current => event.target.checked ? [...current, invoice.id] : current.filter(id => id !== invoice.id))} /><ReceiptText className="h-4 w-4 text-slate-400" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-900">{invoice.invoice_number ?? 'Utan nummer'}</span><span className="block text-xs text-slate-500">Förfallo {invoice.due_date ?? 'saknas'}</span></span><span className="text-sm font-bold text-slate-900">{money(amount)}</span></label>; })}</div>}<p className="mt-2 text-xs font-semibold text-slate-500">{selectedInvoiceIds.length} valda fakturor</p></section>
         <section><div className="mb-3 flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wider text-blue-700">3. Övriga ursprungsunderlag</p><p className="mt-1 text-sm text-slate-500">Lägg till flera externa fakturor eller äldre underlag.</p></div><Button size="sm" variant="secondary" onClick={addExternalInvoice}><Plus className="h-4 w-4" />Lägg till underlag</Button></div>{externalInvoices.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">Inga externa underlag tillagda.</div> : <div className="space-y-3">{externalInvoices.map((invoice, index) => <div key={invoice.id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="mb-3 flex items-center justify-between"><p className="text-sm font-bold text-slate-900">Externt underlag {index + 1}</p><button type="button" aria-label="Ta bort underlag" onClick={() => setExternalInvoices(current => current.filter(row => row.id !== invoice.id))} className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button></div><div className="grid gap-3 sm:grid-cols-2"><Input label="Fakturanummer" value={invoice.number} onChange={event => updateExternalInvoice(invoice.id, 'number', event.target.value)} /><Input label="Belopp" type="number" min="0" step="0.01" value={invoice.amount} onChange={event => updateExternalInvoice(invoice.id, 'amount', event.target.value)} /><Input label="Fakturadatum" type="date" value={invoice.date} onChange={event => updateExternalInvoice(invoice.id, 'date', event.target.value)} /><Input label="Förfallodatum" type="date" value={invoice.dueDate} onChange={event => updateExternalInvoice(invoice.id, 'dueDate', event.target.value)} /><Input label="Beskrivning" value={invoice.description} onChange={event => updateExternalInvoice(invoice.id, 'description', event.target.value)} /></div></div>)}</div>}</section>
