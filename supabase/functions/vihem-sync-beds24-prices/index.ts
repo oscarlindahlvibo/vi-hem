@@ -13,8 +13,9 @@ const BEDS24_BASE_URL = "https://api.beds24.com/v2";
 // mistake in the price rules only misprices the near future, not months out.
 const SYNC_DAYS = 120;
 
-type Season = { id: string; start_date: string; end_date: string; priority: number };
+type Season = { id: string; name: string; start_date: string; end_date: string; priority: number };
 type Rate = { unit_id: string; season_id: string | null; price_per_night: number };
+type LosDiscount = { id: string; unit_id: string; season_id: string | null; min_nights: number; discount_percent: number; beds24_fixed_price_id: string | null };
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
@@ -41,23 +42,25 @@ Deno.serve(async (req: Request) => {
 
     const { data: units } = await serviceClient
       .from("vihem_short_stay_units")
-      .select("id, name, beds24_enabled, beds24_room_id")
+      .select("id, name, beds24_enabled, beds24_room_id, beds24_property_id")
       .eq("organisation_id", organisationId)
       .eq("beds24_enabled", true)
       .neq("beds24_room_id", "");
     if (!units || units.length === 0) return json({ error: "Ingen enhet är kopplad mot Beds24 än." }, 400);
 
-    const [{ data: seasons }, { data: rates }] = await Promise.all([
-      serviceClient.from("vihem_short_stay_seasons").select("id, start_date, end_date, priority").eq("organisation_id", organisationId),
+    const [{ data: seasons }, { data: rates }, { data: discounts }] = await Promise.all([
+      serviceClient.from("vihem_short_stay_seasons").select("id, name, start_date, end_date, priority").eq("organisation_id", organisationId),
       serviceClient.from("vihem_short_stay_rates").select("unit_id, season_id, price_per_night").eq("organisation_id", organisationId),
+      serviceClient.from("vihem_short_stay_los_discounts").select("id, unit_id, season_id, min_nights, discount_percent, beds24_fixed_price_id").eq("organisation_id", organisationId),
     ]);
 
     const token = await ensureAccessToken(serviceClient, connection);
     const today = new Date().toISOString().slice(0, 10);
 
-    const results: { unit_id: string; unit_name: string; days_synced: number; error?: string }[] = [];
+    const results: { unit_id: string; unit_name: string; days_synced: number; discount_rules_synced?: number; error?: string }[] = [];
     for (const unit of units) {
       const roomId = Number(unit.beds24_room_id);
+      const propertyId = Number(unit.beds24_property_id);
       if (!Number.isFinite(roomId)) {
         results.push({ unit_id: unit.id, unit_name: unit.name, days_synced: 0, error: "Ogiltigt Beds24 room id." });
         continue;
@@ -77,8 +80,51 @@ Deno.serve(async (req: Request) => {
         const text = await response.text();
         if (!response.ok) throw new Error(readBeds24Error(safeJson(text), response.status, "Beds24 avvisade prisuppdateringen."));
         const daysSynced = ranges.reduce((sum, r) => sum + (dayDiff(r.from, r.to) + 1), 0);
-        results.push({ unit_id: unit.id, unit_name: unit.name, days_synced: daysSynced });
-        await serviceClient.from("vihem_short_stay_price_sync_log").insert({ organisation_id: organisationId, unit_id: unit.id, status: "ok", message: `${ranges.length} intervall, ${daysSynced} dagar.`, days_synced: daysSynced });
+
+        const unitDiscounts = ((discounts || []) as LosDiscount[]).filter(d => d.unit_id === unit.id);
+        let discountRulesSynced = 0;
+        const discountErrors: string[] = [];
+        for (const discount of unitDiscounts) {
+          const season = discount.season_id ? (seasons || []).find((s: Season) => s.id === discount.season_id) : null;
+          if (discount.season_id && !season) continue;
+          const basePrice = getBaseNightlyPrice((rates || []) as Rate[], unit.id, season?.id ?? null);
+          if (basePrice === null) continue;
+          const discountedPrice = Math.round(basePrice * (1 - discount.discount_percent / 100));
+          // A season-scoped tier gets that season's exact date range. A
+          // "gäller alla säsonger" tier (season_id null) has no natural
+          // range of its own, so it rides the same rolling sync window as
+          // the base calendar price -- re-pushed with a fresh window every
+          // sync, same as the calendar prices are.
+          const firstNight = season?.start_date ?? today;
+          const lastNight = season?.end_date ?? addDays(today, SYNC_DAYS - 1);
+          try {
+            const beds24Id = await pushFixedPrice(token, {
+              id: discount.beds24_fixed_price_id ? Number(discount.beds24_fixed_price_id) : undefined,
+              propertyId: Number.isFinite(propertyId) ? propertyId : undefined,
+              roomId,
+              name: `${season?.name ?? 'Alla säsonger'} · ${discount.min_nights}+ nätter (${discount.discount_percent}%)`,
+              firstNight,
+              lastNight,
+              minNights: discount.min_nights,
+              roomPrice: discountedPrice,
+            });
+            if (beds24Id && beds24Id !== discount.beds24_fixed_price_id) {
+              await serviceClient.from("vihem_short_stay_los_discounts").update({ beds24_fixed_price_id: beds24Id }).eq("id", discount.id);
+            }
+            discountRulesSynced++;
+          } catch (discountError) {
+            discountErrors.push(discountError instanceof Error ? discountError.message : "Okänt fel för rabattregel.");
+          }
+        }
+
+        results.push({ unit_id: unit.id, unit_name: unit.name, days_synced: daysSynced, discount_rules_synced: discountRulesSynced, error: discountErrors.length ? discountErrors.join(" · ") : undefined });
+        await serviceClient.from("vihem_short_stay_price_sync_log").insert({
+          organisation_id: organisationId,
+          unit_id: unit.id,
+          status: discountErrors.length ? "failed" : "ok",
+          message: `${ranges.length} prisintervall, ${daysSynced} dagar. ${discountRulesSynced} rabattregler synkade.${discountErrors.length ? ` Fel: ${discountErrors.join(" · ")}` : ""}`,
+          days_synced: daysSynced,
+        });
       } catch (unitError) {
         const message = unitError instanceof Error ? unitError.message : "Okänt fel mot Beds24.";
         results.push({ unit_id: unit.id, unit_name: unit.name, days_synced: 0, error: message });
@@ -144,6 +190,30 @@ function buildPriceRanges(unitId: string, startDate: string, days: number, seaso
     }
   }
   return ranges;
+}
+
+// Creates or updates one Beds24 "fixed price" rule (their mechanism for a
+// different nightly rate once a booking reaches a minimum number of
+// nights) and returns the rule's Beds24 id so the caller can store it for
+// future updates. The exact shape of a successful response's `new`/
+// `modified` object isn't byte-verified against live docs (only read
+// against /inventory/fixedPrices was verified before this was written),
+// so this tries the plausible id locations defensively and logs the raw
+// response the first time a rule is created, to confirm/correct against
+// on the first real sync.
+async function pushFixedPrice(token: string, rule: { id?: number; propertyId?: number; roomId: number; name: string; firstNight: string; lastNight: string; minNights: number; roomPrice: number }) {
+  const response = await fetch(`${BEDS24_BASE_URL}/inventory/fixedPrices`, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json", token },
+    body: JSON.stringify([rule]),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(readBeds24Error(safeJson(text), response.status, "Beds24 avvisade rabattregeln."));
+  const payload = safeJson(text);
+  const first = Array.isArray(payload) ? payload[0] : payload;
+  if (!rule.id) console.log("[beds24-prices] fixedPrices create response", text.slice(0, 500));
+  const foundId = first?.new?.id ?? first?.modified?.id ?? first?.id ?? rule.id;
+  return foundId ? String(foundId) : null;
 }
 
 // --- Beds24 auth (duplicate of vihem-beds24-connection/index.ts's token

@@ -942,6 +942,7 @@ export interface ShortStayLosDiscount {
   season_id: string | null;
   min_nights: number;
   discount_percent: number;
+  beds24_fixed_price_id: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
