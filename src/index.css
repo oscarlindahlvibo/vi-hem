@@ -14,7 +14,7 @@
 }
 
 .installment-plans-panel { width: 100%; max-width: 1440px; margin-inline: auto; }
-.installment-plans-layout { grid-template-columns: minmax(320px, 0.92fr) minmax(0, 1.35fr); align-items: start; }
+.installment-plans-layout { display: grid; grid-template-columns: minmax(320px, 0.92fr) minmax(0, 1.35fr); align-items: start; }
 .installment-plans-filters { grid-template-columns: minmax(0, 1fr) minmax(150px, 0.55fr); }
 .installment-plans-detail { min-width: 0; min-height: 420px; }
 .installment-plans-empty { display: grid; min-height: 280px; place-items: center; padding: 2rem 1rem; text-align: center; }
