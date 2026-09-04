@@ -911,6 +911,52 @@ export interface ShortStayBooking {
   unit?: ShortStayUnit;
 }
 
+export interface ShortStaySeason {
+  id: string;
+  organisation_id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  priority: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ShortStayRate {
+  id: string;
+  organisation_id: string;
+  unit_id: string;
+  season_id: string | null;
+  price_per_night: number;
+  currency: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ShortStayLosDiscount {
+  id: string;
+  organisation_id: string;
+  unit_id: string;
+  season_id: string | null;
+  min_nights: number;
+  discount_percent: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ShortStayPriceSyncLog {
+  id: string;
+  organisation_id: string;
+  unit_id: string | null;
+  status: 'ok' | 'failed';
+  message: string;
+  days_synced: number;
+  created_at: string;
+}
+
 export type TimeCategory = 'general' | 'work_order' | 'maintenance' | 'customer_project' | 'admin' | 'travel' | 'shopping' | 'standby' | 'other';
 export type TimeStatus = 'draft' | 'submitted' | 'change_requested' | 'approved' | 'rejected';
 export type TimeEntryType = 'work' | 'break' | 'lunch';

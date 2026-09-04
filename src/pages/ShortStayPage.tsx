@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { formatDateTime } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
+import { ShortStayPricingPanel } from '../components/ShortStayPricingPanel';
 import {
   Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea,
 } from '../components/ui';
@@ -22,7 +23,7 @@ interface ShortStayPageProps {
   onNavigate: (page: string) => void;
 }
 
-type Tab = 'overview' | 'calendar' | 'cleaning' | 'bookings' | 'key_boxes' | 'receipts' | 'settings';
+type Tab = 'overview' | 'calendar' | 'cleaning' | 'bookings' | 'pricing' | 'key_boxes' | 'receipts' | 'settings';
 
 interface KeyBox {
   id: string;
@@ -1470,6 +1471,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
           ['calendar', 'Kalender'],
           ['cleaning', 'Städning'],
           ['bookings', 'Bokningar'],
+          ...(isAdmin ? [['pricing', 'Priser']] : []),
           ['key_boxes', 'Nyckelboxar'],
           ['receipts', 'Kvitton'],
           ...(isAdmin ? [['settings', 'Inställningar']] : []),
@@ -1920,6 +1922,8 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
             </div>
           )}
         </div>
+      ) : tab === 'pricing' ? (
+        <ShortStayPricingPanel organisationId={organisationId || ''} units={units} />
       ) : tab === 'receipts' ? (
         <div className="space-y-4">
           <Card className="p-5">
