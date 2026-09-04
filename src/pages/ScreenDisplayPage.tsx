@@ -793,6 +793,7 @@ export function ScreenDisplayPage() {
           maintenanceRequests={maintenanceRequests}
           calendarEvents={calendarEvents}
           staffMembers={staffMembers}
+          screenWidth={screenSize.width}
           screenHeight={screenSize.height}
           lastUpdated={lastUpdated}
         />
@@ -979,6 +980,7 @@ function MeetingScreen({
   maintenanceRequests,
   calendarEvents,
   staffMembers,
+  screenWidth,
   screenHeight,
   lastUpdated,
 }: {
@@ -995,10 +997,16 @@ function MeetingScreen({
   maintenanceRequests: MaintenanceRequest[];
   calendarEvents: CalendarEvent[];
   staffMembers: Pick<Profile, 'id' | 'name'>[];
+  screenWidth: number;
   screenHeight: number;
   lastUpdated: Date | null;
 }) {
   const availableHeight = Math.max(screenHeight - 54, 520);
+  // TVs run this at 1920px+ where 3-4 fixed-ratio columns have plenty of
+  // room; a desktop browser window checking the same screen is often much
+  // narrower, which squeezed those columns down to unreadable slivers.
+  // Below this width, drop to a 2-column grid instead.
+  const isCompact = screenWidth < 1500;
   const configuredMeeting = screen.meetingId ? meetings.find(meeting => meeting.id === screen.meetingId) : null;
   const currentMeeting = configuredMeeting || meetings.find(meeting => meeting.status === 'in_progress') || meetings[0];
   const meetingPart = screen.meetingPart || 'full';
@@ -1296,15 +1304,34 @@ function MeetingScreen({
       </div>
 
       {meetingPart === 'part-1' ? (
-        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '1.3fr 0.85fr 0.85fr' }}>
+        isCompact ? (
+          <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1.2fr 1fr' }}>
+            <div className="col-span-2 grid min-h-0">{agendaPanel}</div>
+            {workOrderPanel}
+            {projectPanel}
+          </div>
+        ) : (
+          <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '1.3fr 0.85fr 0.85fr' }}>
+            {agendaPanel}
+            {workOrderPanel}
+            {projectPanel}
+          </div>
+        )
+      ) : meetingPart === 'part-2' ? (
+        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: isCompact ? '1fr 1fr' : '0.85fr 1.3fr' }}>
+          {maintenancePanel}
+          {decisionsAndTasksPanel}
+        </div>
+      ) : isCompact ? (
+        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }}>
           {agendaPanel}
           {workOrderPanel}
           {projectPanel}
-        </div>
-      ) : meetingPart === 'part-2' ? (
-        <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '0.85fr 1.3fr' }}>
-          {maintenancePanel}
-          {decisionsAndTasksPanel}
+          <section className="grid min-h-0 gap-2" style={{ gridTemplateRows: '0.62fr 0.7fr 0.7fr' }}>
+            {maintenancePanel}
+            {calendarPanel}
+            {decisionsAndTasksPanel}
+          </section>
         </div>
       ) : (
         <div className="grid min-h-0 gap-2" style={{ gridTemplateColumns: '0.78fr 1fr 1fr 0.82fr' }}>
