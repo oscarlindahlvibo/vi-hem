@@ -1020,6 +1020,13 @@ function MeetingScreen({
   // dess plats i den synliga (avbockade bortfiltrerade) listan -- annars
   // byter alla kvarvarande punkter nummer varje gång en punkt bockas av.
   const agendaNumberByItemId = new Map(selectedAgenda.map((item, index) => [item.id, index + 1]));
+  // The leader's own device (MeetingsPage.tsx) persists which point it has
+  // selected onto the meeting row -- fall back to the first open item for
+  // meetings that predate that (or haven't had anything selected yet), so
+  // the screen still highlights something sensible.
+  const currentAgendaItemId = currentMeeting?.current_agenda_item_id || visibleAgenda[0]?.id || null;
+  const currentAgendaItem = currentAgendaItemId ? visibleAgenda.find(item => item.id === currentAgendaItemId) || null : null;
+  const otherVisibleAgenda = visibleAgenda.filter(item => item.id !== currentAgendaItemId);
   const openDecisions = currentMeeting ? decisions.filter(d => d.meeting_id === currentMeeting.id) : [];
   const openActionItems = currentMeeting ? actionItems.filter(a => a.meeting_id === currentMeeting.id) : [];
   const activeWorkOrders = workOrders.slice(0, meetingPart === 'part-1' ? 40 : 18);
@@ -1044,18 +1051,33 @@ function MeetingScreen({
         </h3>
         <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-black">{visibleAgenda.length}/{selectedAgenda.length}</span>
       </div>
-      <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden">
         {visibleAgenda.length === 0 ? (
           <p className="rounded-xl bg-white/5 px-4 py-5 text-sm font-bold text-slate-300">Ingen dagordning kopplad till valt möte.</p>
-        ) : visibleAgenda.slice(0, agendaLimit).map((item) => (
-          <div key={item.id} className="grid grid-cols-[24px_minmax(0,1fr)] gap-2 rounded-lg bg-white/10 px-2 py-1.5">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-500 text-[10px] font-black">{agendaNumberByItemId.get(item.id)}</span>
-            <div className="min-w-0">
-              <p className="truncate text-xs font-black">{item.title}</p>
-              {item.notes && <p className="text-[10px] font-semibold leading-tight text-slate-300" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{item.notes}</p>}
+        ) : (
+          <>
+            {currentAgendaItem && (
+              <div className="shrink-0 rounded-xl bg-blue-500/25 px-3 py-2.5 ring-2 ring-blue-400/60">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-500 text-xs font-black">{agendaNumberByItemId.get(currentAgendaItem.id)}</span>
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-200">Pågår nu</span>
+                </div>
+                <p className="mt-1.5 text-2xl font-black leading-snug">{currentAgendaItem.title}</p>
+                {currentAgendaItem.notes && (
+                  <p className="mt-1.5 text-sm font-semibold leading-snug text-blue-50" style={{ display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{currentAgendaItem.notes}</p>
+                )}
+              </div>
+            )}
+            <div className="min-h-0 flex-1 space-y-1 overflow-hidden">
+              {otherVisibleAgenda.slice(0, agendaLimit).map((item) => (
+                <div key={item.id} className="grid grid-cols-[24px_minmax(0,1fr)] items-center gap-2 rounded-lg bg-white/5 px-2 py-1">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/10 text-[9px] font-black text-slate-300">{agendaNumberByItemId.get(item.id)}</span>
+                  <p className="truncate text-[11px] font-bold text-slate-400">{item.title}</p>
+                </div>
+              ))}
             </div>
-          </div>
-        ))}
+          </>
+        )}
       </div>
     </section>
   );

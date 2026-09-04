@@ -278,6 +278,7 @@ export interface Meeting {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  current_agenda_item_id?: string | null;
   template?: MeetingTemplate | null;
   agenda_items?: MeetingAgendaItem[];
   notes?: MeetingNote[];

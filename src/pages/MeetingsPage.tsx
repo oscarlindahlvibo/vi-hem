@@ -355,6 +355,15 @@ export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => voi
     }
   }
 
+  // Keeps the TV screen in sync with whichever agenda item the leader is
+  // currently on -- persisted on the meeting row (current_agenda_item_id)
+  // rather than kept only in this page's local state, since
+  // ScreenDisplayPage.tsx runs as a completely separate session.
+  function selectAgendaItem(meetingId: string, itemId: string | null) {
+    setSelectedAgendaId(itemId);
+    void supabase.from('vihem_meetings').update({ current_agenda_item_id: itemId }).eq('id', meetingId);
+  }
+
   async function loadMeetingDetails(meetingId: string) {
     if (!user?.organisation_id) return;
     const [agendaRes, protocolRes, decisionsRes, actionsRes] = await Promise.all([
@@ -371,7 +380,7 @@ export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => voi
     const selectedLoadedAgenda = selectedAgendaId ? loadedAgenda.find(item => item.id === selectedAgendaId) : null;
     if (!selectedLoadedAgenda || selectedLoadedAgenda.status === 'done') {
       const nextAgenda = loadedAgenda.find(item => item.status !== 'done') || loadedAgenda[0] || null;
-      setSelectedAgendaId(nextAgenda?.id || null);
+      selectAgendaItem(meetingId, nextAgenda?.id || null);
     }
   }
 
@@ -678,7 +687,7 @@ export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => voi
       const nextAgenda = agendaItems
         .filter(row => row.id !== item.id)
         .find(row => (row as MeetingAgendaItemMvp).status !== 'done') || null;
-      setSelectedAgendaId(nextAgenda?.id || null);
+      selectAgendaItem(selectedMeeting.id, nextAgenda?.id || null);
     }
     await loadMeetingDetails(selectedMeeting.id);
   }
@@ -953,7 +962,7 @@ export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => voi
               meeting={selectedMeeting}
               agendaItems={agendaItems}
               selectedAgenda={selectedAgenda}
-              setSelectedAgendaId={setSelectedAgendaId}
+              setSelectedAgendaId={(id) => selectAgendaItem(selectedMeeting.id, id)}
               protocolRows={protocolRows}
               decisions={decisions}
               actionItems={actionItems}
