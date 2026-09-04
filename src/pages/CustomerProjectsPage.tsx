@@ -1188,6 +1188,8 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
   }
 
   const totalMinutes = projectTimeEntries.reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
+  const ataMinutes = projectAtaTimeEntries.reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
+  const regularMinutes = totalMinutes - ataMinutes;
   const billableMinutes = projectTimeEntries.filter(entry => entry.project_billable !== false).reduce((sum, entry) => sum + (entry.total_minutes || 0), 0);
   const materialCost = projectMaterials.reduce((sum, item) => sum + Number(item.purchase_price || 0) * Number(item.quantity || 0), 0);
   const materialSale = projectMaterials.reduce((sum, item) => sum + Number(item.sale_price || 0) * Number(item.quantity || 0), 0);
@@ -1313,16 +1315,18 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
             </Card>
 
             {isAdmin ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
-                <Stat label="Totala timmar" value={hours(totalMinutes)} icon={<Timer className="w-5 h-5" />} />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+                <Stat label="Ordinarie tid" value={hours(regularMinutes)} icon={<Timer className="w-5 h-5" />} />
+                <Stat label="ÄTA-tid" value={hours(ataMinutes)} icon={<Timer className="w-5 h-5 text-amber-600" />} />
                 <Stat label="Fakturerbar tid" value={money(timeValue)} icon={<Coins className="w-5 h-5" />} />
                 <Stat label="Materialvärde" value={money(materialSale)} icon={<Package className="w-5 h-5" />} />
                 <Stat label="ÄTA-belopp" value={money(changeOrderAmount)} icon={<Receipt className="w-5 h-5" />} />
                 <Stat label="Fakturerbart" value={money(invoiceable)} icon={<FileText className="w-5 h-5" />} />
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <Stat label="Rapporterad tid" value={hours(totalMinutes)} icon={<Timer className="w-5 h-5" />} />
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Stat label="Ordinarie tid" value={hours(regularMinutes)} icon={<Timer className="w-5 h-5" />} />
+                <Stat label="ÄTA-tid" value={hours(ataMinutes)} icon={<Timer className="w-5 h-5 text-amber-600" />} />
                 <Stat label="Materialrader" value={`${projectMaterials.length}`} icon={<Package className="w-5 h-5" />} />
                 <Stat label="ÄTA" value={`${projectChangeOrders.length}`} icon={<Receipt className="w-5 h-5" />} />
               </div>
