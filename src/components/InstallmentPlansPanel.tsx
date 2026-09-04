@@ -385,7 +385,14 @@ export function InstallmentPlansPanel({ organisationId, companies, customers, in
       const invoiceId = row.invoice_id ?? await generateScheduleInvoice(row, false);
       if (!invoiceId) return;
       const { error: sendError } = await supabase.functions.invoke('vihem-send-installment-plan-email', { body: { organisation_id: organisationId, plan_id: selectedPlan.id, schedule_id: row.id } });
-      if (sendError) throw sendError;
+      if (sendError) {
+        // Non-2xx responses leave `error` a generic FunctionsHttpError --
+        // the real {error: "..."} body the function sent is only reachable
+        // via error.context, the raw Response.
+        const context = (sendError as { context?: Response }).context;
+        const parsed = context ? await context.clone().json().catch(() => null) : null;
+        throw new Error(parsed?.error || sendError.message);
+      }
       setNotice('Fakturan skickades med e-post.');
       await refresh();
       const next = plans.find(item => item.id === selectedPlan.id);
