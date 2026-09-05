@@ -13,7 +13,13 @@
 // step doesn't need new bucket policies of its own.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, corsHeaders, errorJson, isAuthContext, json, requireCompanyAccess } from "../_shared/vihem-auth.ts";
-import { readSmtpConfigFromEnv, sendMailWithAttachment } from "../_shared/smtp-mailer.ts";
+import { sendGmailMessage, googleMailerErrorCode, googleMailerFriendlyMessage } from "../_shared/google-workspace-mailer.ts";
+
+// Same designated sender as vihem-send-installment-plan-email -- sent via
+// the Gmail API (Domain-Wide Delegation impersonates this address), not
+// SMTP, since the edge-function container has no SMTP relay configured.
+const SENDER_EMAIL = "faktura@vibogruppen.se";
+const SENDER_NAME = "VI-HEM";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
@@ -93,14 +99,19 @@ Deno.serve(async (req: Request) => {
     if (downloadErr || !fileBlob) throw new Error(downloadErr?.message || "Kunde inte hämta den uppladdade filen.");
 
     const bytes = new Uint8Array(await fileBlob.arrayBuffer());
-    const smtp = readSmtpConfigFromEnv();
 
-    await sendMailWithAttachment(smtp, {
-      toEmail: invoiceInboxEmail,
-      subject: `Underlag från VI-HEM – ${company.name}`,
-      text: `Skickat automatiskt från VI-HEM-scannern för ${company.name}. Bifogad fil: ${fileName}.`,
-      attachment: { fileName, contentType, bytes },
-    });
+    try {
+      await sendGmailMessage(auth.adminClient, company.organisation_id, {
+        fromEmail: SENDER_EMAIL,
+        fromName: SENDER_NAME,
+        toEmail: invoiceInboxEmail,
+        subject: `Underlag från VI-HEM – ${company.name}`,
+        text: `Skickat automatiskt från VI-HEM-scannern för ${company.name}. Bifogad fil: ${fileName}.`,
+        attachment: { fileName, contentType, bytes },
+      });
+    } catch (sendErr) {
+      throw new Error(googleMailerFriendlyMessage(googleMailerErrorCode(sendErr)));
+    }
 
     const { error: updateErr } = await auth.adminClient
       .from("vihem_accounted_scanner_uploads")
