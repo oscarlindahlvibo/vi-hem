@@ -21,14 +21,18 @@ skarp fakturering innan anslutningen faktiskt är verifierad.
 
 ## 1. Miljövariabler att verifiera i Supabase INNAN någon sparar en nyckel
 
-- [ ] **`VIHEM_ACCOUNTED_SECRET_KEY`** satt i edge function-miljön
+- [x] **`VIHEM_ACCOUNTED_SECRET_KEY`** satt i edge function-miljön
       (produktion). Utan denna kastar `save_company_link` ett
       `SECRET_ENCRYPTION_UNAVAILABLE`-fel — ofarligt (inget sparas
       okrypterat), men bättre att sätta i förväg än att upptäcka det mitt i
-      ett måndagsmöte.
-- [ ] SMTP-variablerna som redan används av `vihem-send-invoice-emails` är
-      satta, **om** scanner → Accounted-vidarebefordran ska användas
-      (samma `_shared/smtp-mailer.ts`-konfiguration).
+      ett måndagsmöte. **Klart** (2026-09-05): genererad och tillagd i
+      docker-compose.yml:s `functions:`-tjänst.
+- [x] Scanner → Accounted-vidarebefordran skickas via Gmail API:et (samma
+      Google Workspace-koppling/avsändare `faktura@vibogruppen.se` som
+      avbetalningsfakturorna), **inte** SMTP — `_shared/smtp-mailer.ts` är
+      inte längre inblandad i den här vägen eftersom edge function-
+      containern saknar SMTP-relä. Ingen ytterligare miljövariabel behövs
+      för det här steget.
 - [ ] `VIHEM_ACCOUNTED_WEBHOOK_URL` — valfri. Om den inte sätts härleds
       webhook-URL:en automatiskt från `SUPABASE_URL`. Sätt den explicit bara
       om den publika URL:en skiljer sig från `SUPABASE_URL` (t.ex. en egen
