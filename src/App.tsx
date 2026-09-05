@@ -616,7 +616,7 @@ function AppInner() {
 
       case 'installment-plans':
         if (!isStaff || !enabledModules.finance) return renderDashboard();
-        return <InstallmentPlansPage />;
+        return <InstallmentPlansPage onNavigate={navigate} />;
 
       case 'tenant-invoices':
         if (!isTenant || !enabledModules.finance) return renderDashboard();

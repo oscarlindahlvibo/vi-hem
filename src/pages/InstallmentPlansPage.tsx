@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { InstallmentPlansPanel } from '../components/InstallmentPlansPanel';
-import { Card, EmptyState, LoadingPage, PageHeader } from '../components/ui';
+import { Button, Card, EmptyState, LoadingPage, PageHeader } from '../components/ui';
 import {
   listCompaniesForInstallmentPlans,
   listFinanceCustomersForInstallmentPlans,
@@ -21,7 +21,11 @@ function describeError(error: unknown) {
   return error instanceof Error ? error.message : 'Ett oväntat fel inträffade.';
 }
 
-export function InstallmentPlansPage() {
+interface InstallmentPlansPageProps {
+  onNavigate: (page: string) => void;
+}
+
+export function InstallmentPlansPage({ onNavigate }: InstallmentPlansPageProps) {
   const { user } = useAuth();
   const [companies, setCompanies] = useState<FinanceCompany[]>([]);
   const [customers, setCustomers] = useState<FinanceCustomer[]>([]);
@@ -61,6 +65,10 @@ export function InstallmentPlansPage() {
         subtitle="Administrativ uppföljning av skuld, delbetalningar och betalningsplaner."
       />
       {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">
+        <span>Bankgiro, Swish, plusgiro m.m. som visas på fakturorna ställs in per bolag, inte här.</span>
+        <Button size="sm" variant="secondary" onClick={() => onNavigate('finance')}><Landmark className="h-4 w-4" /> Öppna Ekonomi → Bolag</Button>
+      </div>
       {companies.length === 0 ? (
         <Card className="mt-4">
           <EmptyState
