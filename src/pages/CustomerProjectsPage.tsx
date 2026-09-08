@@ -18,6 +18,7 @@ import {
   Timer,
   Users,
   Edit2,
+  UserPlus,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -652,6 +653,20 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleCreateCustomerInline(draft: typeof defaultCustomerForm) {
+    if (!user?.organisation_id) throw new Error('Ingen organisation.');
+    if (!draft.name.trim()) throw new Error('Ange kundnamn.');
+    const { data, error: insertError } = await supabase.from('vihem_project_customers').insert({
+      ...draft,
+      organisation_id: user.organisation_id,
+      created_by: user.id,
+    }).select('*').single();
+    if (insertError) throw insertError;
+    const created = data as unknown as ProjectCustomer;
+    setCustomers(current => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
+    return created;
   }
 
   async function handleSaveProject() {
@@ -1607,7 +1622,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
       </div>
 
       <CustomerModal open={showCustomerModal} onClose={() => setShowCustomerModal(false)} form={customerForm} setForm={setCustomerForm} onSave={handleSaveCustomer} saving={saving} error={error} />
-      <ProjectModal open={showProjectModal} onClose={() => setShowProjectModal(false)} form={projectForm} setForm={setProjectForm} customers={customers} staff={staff} onSave={handleSaveProject} saving={saving} error={error} />
+      <ProjectModal open={showProjectModal} onClose={() => setShowProjectModal(false)} form={projectForm} setForm={setProjectForm} customers={customers} staff={staff} onSave={handleSaveProject} saving={saving} error={error} onCreateCustomer={handleCreateCustomerInline} />
       <TimeModal open={showTimeModal} onClose={() => { setShowTimeModal(false); setEditingTimeEntry(null); }} form={timeForm} setForm={setTimeForm} staff={staff} isAdmin={isAdmin} onSave={handleSaveTime} saving={saving} error={error} editing={Boolean(editingTimeEntry)} changeOrders={projectChangeOrders} />
       <WorkOrderModal open={showWorkOrderModal} onClose={() => setShowWorkOrderModal(false)} form={workOrderForm} setForm={setWorkOrderForm} staff={staff} onSave={handleSaveWorkOrder} saving={saving} error={error} />
       <MaterialModal open={showMaterialModal} onClose={() => { setShowMaterialModal(false); setEditingMaterial(null); resetMaterialForm(); }} form={materialForm} setForm={setMaterialForm} onSave={handleSaveMaterial} saving={saving} error={error} editing={Boolean(editingMaterial)} isAdmin={isAdmin} />
@@ -1706,7 +1721,12 @@ function CustomerModal({ open, onClose, form, setForm, onSave, saving, error }: 
   );
 }
 
-function ProjectModal({ open, onClose, form, setForm, customers, staff, onSave, saving, error }: any) {
+function ProjectModal({ open, onClose, form, setForm, customers, staff, onSave, saving, error, onCreateCustomer }: any) {
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [newCustomer, setNewCustomer] = useState(defaultCustomerForm);
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [customerError, setCustomerError] = useState('');
+
   function toggleUser(userId: string) {
     const next = form.assigned_user_ids.includes(userId)
       ? form.assigned_user_ids.filter((id: string) => id !== userId)
@@ -1714,12 +1734,37 @@ function ProjectModal({ open, onClose, form, setForm, customers, staff, onSave, 
     setForm({ ...form, assigned_user_ids: next });
   }
 
+  async function saveNewCustomer() {
+    setCustomerError('');
+    setCreatingCustomer(true);
+    try {
+      const created = await onCreateCustomer(newCustomer);
+      setForm({ ...form, customer_id: created.id });
+      setShowNewCustomer(false);
+      setNewCustomer(defaultCustomerForm);
+    } catch (err: any) {
+      setCustomerError(err.message || 'Kunde inte spara kund.');
+    } finally {
+      setCreatingCustomer(false);
+    }
+  }
+
   return (
     <Modal open={open} onClose={onClose} title="Nytt kundprojekt" size="xl">
       <div className="space-y-5">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input label="Projektnamn" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          <Select label="Kund" value={form.customer_id} onChange={(e) => setForm({ ...form, customer_id: e.target.value })} options={[{ value: '', label: 'Välj kund' }, ...customers.map((c: ProjectCustomer) => ({ value: c.id, label: c.name }))]} />
+          <div>
+            <Select label="Kund" value={form.customer_id} onChange={(e) => setForm({ ...form, customer_id: e.target.value })} options={[{ value: '', label: 'Välj kund' }, ...customers.map((c: ProjectCustomer) => ({ value: c.id, label: c.name }))]} />
+            <button
+              type="button"
+              onClick={() => { setCustomerError(''); setShowNewCustomer(value => !value); }}
+              className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-blue-700 hover:text-blue-900"
+            >
+              <UserPlus className="h-4 w-4" />
+              {showNewCustomer ? 'Stäng kundskapande' : 'Ny kund'}
+            </button>
+          </div>
           <Input label="Projektadress" value={form.project_address} onChange={(e) => setForm({ ...form, project_address: e.target.value })} />
           <Select label="Projektkategori" value={form.project_type} onChange={(e) => setForm({ ...form, project_type: e.target.value })} options={PROJECT_TYPES.map(type => ({ value: type, label: type }))} />
           <Select label="Prioritet" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} options={[
@@ -1741,6 +1786,32 @@ function ProjectModal({ open, onClose, form, setForm, customers, staff, onSave, 
           <Input label="Intern referens" value={form.internal_reference} onChange={(e) => setForm({ ...form, internal_reference: e.target.value })} />
           <Input label="Extern referens" value={form.external_reference} onChange={(e) => setForm({ ...form, external_reference: e.target.value })} />
         </div>
+        {showNewCustomer && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+            <p className="mb-3 text-xs font-bold uppercase tracking-wider text-blue-700">Ny kund</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Select label="Kundtyp" value={newCustomer.customer_type} onChange={(e) => setNewCustomer({ ...newCustomer, customer_type: e.target.value, identity_number: e.target.value === 'private' ? '' : newCustomer.identity_number })} options={[
+                { value: 'private', label: 'Privatperson' },
+                { value: 'company', label: 'Företag' },
+                { value: 'brf', label: 'Bostadsrättsförening' },
+                { value: 'property_owner', label: 'Fastighetsägare' },
+                { value: 'internal', label: 'Intern kund' },
+              ]} />
+              <Input label="Namn" value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} />
+              {newCustomer.customer_type !== 'private' && <Input label="Organisationsnummer" value={newCustomer.identity_number} onChange={(e) => setNewCustomer({ ...newCustomer, identity_number: e.target.value })} />}
+              <Input label="Kontaktperson" value={newCustomer.contact_person} onChange={(e) => setNewCustomer({ ...newCustomer, contact_person: e.target.value })} />
+              <Input label="Telefon" value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} />
+              <Input label="E-post" type="email" value={newCustomer.email} onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })} />
+            </div>
+            {customerError && <div className="mt-3"><ErrorBox message={customerError} /></div>}
+            <div className="mt-3">
+              <Button size="sm" onClick={() => void saveNewCustomer()} loading={creatingCustomer}>
+                <UserPlus className="h-4 w-4" />
+                Spara kund och välj
+              </Button>
+            </div>
+          </div>
+        )}
         <Textarea label="Beskrivning" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
         <div>
           <p className="mb-2 text-sm font-medium text-slate-700">Tilldelad personal</p>
