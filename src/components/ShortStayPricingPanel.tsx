@@ -146,10 +146,12 @@ export function ShortStayPricingPanel({ organisationId, units }: Props) {
     const price = Number(defaultPriceDraft);
     if (!(price >= 0)) { setError('Ange ett giltigt standardpris.'); return; }
     setSaving(true); setError('');
-    const { error: saveError } = await supabase.from('vihem_short_stay_rates').upsert(
-      { organisation_id: organisationId, unit_id: selectedUnitId, season_id: null, price_per_night: price },
-      { onConflict: 'unit_id,season_id' },
-    );
+    const existing = rates.find(rate => rate.unit_id === selectedUnitId && rate.season_id === null);
+    const { error: saveError } = existing
+      ? await supabase.from('vihem_short_stay_rates').update({ price_per_night: price }).eq('id', existing.id)
+      : await supabase.from('vihem_short_stay_rates').insert(
+          { organisation_id: organisationId, unit_id: selectedUnitId, season_id: null, price_per_night: price },
+        );
     setSaving(false);
     if (saveError) { setError(saveError.message); return; }
     setNotice('Standardpriset sparades.');
