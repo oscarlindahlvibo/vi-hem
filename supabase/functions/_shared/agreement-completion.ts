@@ -8,7 +8,10 @@
 // nothing to go stale).
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { buildAgreementPdf, type SignatureForPdf } from "./agreement-pdf.ts";
-import { readSmtpConfigFromEnv, sendMail } from "./smtp-mailer.ts";
+import { sendGmailMessage, googleMailerErrorCode, googleMailerFriendlyMessage } from "./google-workspace-mailer.ts";
+
+const SENDER_EMAIL = "faktura@vibogruppen.se";
+const SENDER_NAME = "VI-HEM";
 
 function randomVerificationCode(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(12));
@@ -90,37 +93,35 @@ export async function generateAndDeliverFinalPdf(db: SupabaseClient, agreementId
 
     const deliveries: { party: string; email: string; ok: boolean; error?: string }[] = [];
     const recipientParties = (parties || []).filter((p: any) => p.email);
-    if (recipientParties.length > 0) {
-      let smtpConfig;
+    for (const party of recipientParties) {
       try {
-        smtpConfig = readSmtpConfigFromEnv();
+        // SENDER_EMAIL is fixed rather than read per-organisation: today
+        // only VI-HEM's own org has Google Workspace send configured (see
+        // vihem-accounted-scanner-forward, which hardcodes the same
+        // address for the same reason). An org without it configured
+        // fails here exactly as it would with any other sender -- this
+        // isn't a regression, just not yet generalised.
+        await sendGmailMessage(db, agreement.organisation_id, {
+          fromEmail: SENDER_EMAIL,
+          fromName: SENDER_NAME,
+          toEmail: party.email,
+          toName: party.display_name,
+          subject: `Signerat dokument: ${agreement.title || agreement.document_number}`,
+          text: [
+            `${agreement.title || agreement.document_number} (${agreement.document_number}) har signerats av samtliga parter.`,
+            "",
+            "Det signerade dokumentet bifogas som PDF.",
+            "",
+            verificationUrl ? `Verifiera dokumentet: ${verificationUrl}` : "",
+          ].filter(Boolean).join("\n"),
+          attachment: { fileName: `${agreement.document_number}.pdf`, contentType: "application/pdf", bytes: pdfBytes },
+        });
+        deliveries.push({ party: party.display_name, email: party.email, ok: true });
+        await db.from("vihem_agreement_audit_events").insert({ agreement_id: agreementId, event_type: "pdf_sent_email", actor_type: "system", channel: "email", metadata: { to: maskEmail(party.email) } });
       } catch (err) {
-        for (const p of recipientParties) deliveries.push({ party: p.display_name, email: p.email, ok: false, error: err instanceof Error ? err.message : String(err) });
-        await db.from("vihem_agreement_audit_events").insert({ agreement_id: agreementId, event_type: "pdf_delivery_failed", actor_type: "system", channel: "email", metadata: { error: "SMTP not configured" } });
-        return { ok: true, storagePath, deliveries };
-      }
-      for (const party of recipientParties) {
-        try {
-          await sendMail(smtpConfig, {
-            toEmail: party.email,
-            toName: party.display_name,
-            subject: `Signerat dokument: ${agreement.title || agreement.document_number}`,
-            text: [
-              `${agreement.title || agreement.document_number} (${agreement.document_number}) har signerats av samtliga parter.`,
-              "",
-              "Det signerade dokumentet bifogas som PDF.",
-              "",
-              verificationUrl ? `Verifiera dokumentet: ${verificationUrl}` : "",
-            ].filter(Boolean).join("\n"),
-            attachment: { fileName: `${agreement.document_number}.pdf`, contentType: "application/pdf", bytes: pdfBytes },
-          });
-          deliveries.push({ party: party.display_name, email: party.email, ok: true });
-          await db.from("vihem_agreement_audit_events").insert({ agreement_id: agreementId, event_type: "pdf_sent_email", actor_type: "system", channel: "email", metadata: { to: maskEmail(party.email) } });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          deliveries.push({ party: party.display_name, email: party.email, ok: false, error: message });
-          await db.from("vihem_agreement_audit_events").insert({ agreement_id: agreementId, event_type: "pdf_delivery_failed", actor_type: "system", channel: "email", metadata: { to: maskEmail(party.email), error: message } });
-        }
+        const message = googleMailerFriendlyMessage(googleMailerErrorCode(err));
+        deliveries.push({ party: party.display_name, email: party.email, ok: false, error: message });
+        await db.from("vihem_agreement_audit_events").insert({ agreement_id: agreementId, event_type: "pdf_delivery_failed", actor_type: "system", channel: "email", metadata: { to: maskEmail(party.email), error: message } });
       }
     }
 

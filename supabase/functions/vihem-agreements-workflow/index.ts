@@ -10,11 +10,13 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, corsHeaders, errorJson, isAuthContext, json } from "../_shared/vihem-auth.ts";
 import { buildDynamicFieldContext, hashBlocks, mergeEntityContext, resolveBlocks, type AgreementBlock, type DynamicFieldContext } from "../_shared/agreement-snapshot.ts";
 import { buildSigningUrl, generateSigningToken, hashSigningToken } from "../_shared/agreement-tokens.ts";
-import { readSmtpConfigFromEnv, sendMail } from "../_shared/smtp-mailer.ts";
+import { sendGmailMessage, googleMailerErrorCode, googleMailerFriendlyMessage } from "../_shared/google-workspace-mailer.ts";
 import { generateAndDeliverFinalPdf } from "../_shared/agreement-completion.ts";
 
 const STAFF_ROLES = ["staff", "admin", "superadmin"];
 const REQUEST_TTL_DAYS = 30;
+const SENDER_EMAIL = "faktura@vibogruppen.se";
+const SENDER_NAME = "VI-HEM";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
@@ -174,7 +176,7 @@ Deno.serve(async (req: Request) => {
           let deliveryOk = false;
 
           if (channels.email && signer.email) {
-            const sent = await sendSigningEmail(org?.name || "VI-HEM", signer, agreement, signUrl);
+            const sent = await sendSigningEmail(db, agreement.organisation_id, org?.name || "VI-HEM", signer, agreement, signUrl);
             usedChannels.push("email");
             deliveryOk = deliveryOk || sent.ok;
             await writeAudit(db, agreementId, signer.id, sent.ok ? "sent_email" : "email_delivery_failed", "system", null, sent.ok ? {} : { error: sent.error }, version.id, contentHash, "email");
@@ -244,7 +246,7 @@ Deno.serve(async (req: Request) => {
 
         const usedChannels: string[] = [];
         if (signer.email) {
-          const sent = await sendSigningEmail(org?.name || "VI-HEM", signer, agreement, signUrl, true);
+          const sent = await sendSigningEmail(db, agreement.organisation_id, org?.name || "VI-HEM", signer, agreement, signUrl, true);
           usedChannels.push("email");
           await writeAudit(db, agreementId, signerId, sent.ok ? "reminder_sent" : "email_delivery_failed", "staff", auth.callerId, { channel: "email" }, agreement.current_version_id, null, "email");
         }
@@ -343,6 +345,8 @@ async function mergeLinkedEntity(db: any, context: DynamicFieldContext, entityTy
 }
 
 async function sendSigningEmail(
+  db: any,
+  organisationId: string,
   orgName: string,
   signer: { name: string; email: string },
   agreement: { title: string; document_number: string },
@@ -350,7 +354,6 @@ async function sendSigningEmail(
   isReminder = false,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    const config = readSmtpConfigFromEnv();
     const subject = isReminder
       ? `Påminnelse: ${agreement.title || agreement.document_number} väntar på din signatur`
       : `Du har fått ett dokument från ${orgName}`;
@@ -363,10 +366,12 @@ async function sendSigningEmail(
       "",
       "Länken är personlig och ska inte delas vidare.",
     ].join("\n");
-    await sendMail(config, { toEmail: signer.email, toName: signer.name, subject, text });
+    // SENDER_EMAIL is fixed rather than read per-organisation -- see the
+    // same note in _shared/agreement-completion.ts.
+    await sendGmailMessage(db, organisationId, { fromEmail: SENDER_EMAIL, fromName: SENDER_NAME, toEmail: signer.email, toName: signer.name, subject, text });
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: googleMailerFriendlyMessage(googleMailerErrorCode(err)) };
   }
 }
 
