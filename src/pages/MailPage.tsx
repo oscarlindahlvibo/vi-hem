@@ -18,14 +18,16 @@ async function invoke(body: Record<string, unknown>) {
   return data;
 }
 
-export function MailPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
-  const [tab, setTab] = useState<'search' | 'watchers' | 'settings'>('search');
+type MailPageTab = 'search' | 'watchers' | 'settings';
+
+export function MailPage({ onNavigate: _onNavigate, initialTab = 'search' }: { onNavigate: (page: string) => void; initialTab?: MailPageTab }) {
+  const [tab, setTab] = useState<MailPageTab>(initialTab);
   const [mode, setMode] = useState<'general' | 'invoice'>('general'); const [query, setQuery] = useState(''); const [accounts, setAccounts] = useState<Account[]>([]); const [accountId, setAccountId] = useState('all');
   const [dateFrom, setDateFrom] = useState(''); const [dateTo, setDateTo] = useState(''); const [sort, setSort] = useState<'date_desc' | 'date_asc'>('date_desc'); const [viewMode, setViewMode] = useState<'mixed' | 'grouped'>('mixed');
   const [groups, setGroups] = useState<{ account: Account; results: SearchResult[]; error: { code: string; message: string } | null }[]>([]); const [selected, setSelected] = useState<any>(null); const [loading, setLoading] = useState(false); const [message, setMessage] = useState(''); const [configured, setConfigured] = useState(false); const [drive, setDrive] = useState<DriveSettings>({ folder_id: '', enabled: false, auto_import: false, updated_at: null }); const [driveFolderId, setDriveFolderId] = useState(''); const [driveEnabled, setDriveEnabled] = useState(false); const [driveAutoImport, setDriveAutoImport] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null); const emptyAccount = { email: '', display_name: '', description: '', active: true, search_general: true, search_invoices: true }; const [form, setForm] = useState(emptyAccount);
   const [rules, setRules] = useState<WatchRule[]>([]); const [hits, setHits] = useState<WatchHit[]>([]); const [hitPaymentFilter, setHitPaymentFilter] = useState<'all' | 'paid' | 'unpaid'>('all'); const [hitVisibilityFilter, setHitVisibilityFilter] = useState<'active' | 'cleared' | 'all'>('active'); const [editingRuleId, setEditingRuleId] = useState<string | null>(null); const emptyRule = { name: '', keywords: '', match_mode: 'any' as 'any' | 'all', enabled: true, account_ids: [] as string[] }; const [ruleForm, setRuleForm] = useState(emptyRule);
-  const changeTab = (next: 'search' | 'watchers' | 'settings') => { setMessage(''); setTab(next); };
+  const changeTab = (next: MailPageTab) => { setMessage(''); setTab(next); };
   useScrollLock(Boolean(selected));
 
   const load = async () => { try { const data = await invoke({ action: 'status' }); setAccounts(data.accounts || []); setConfigured(Boolean(data.configured)); const nextDrive = data.drive || { folder_id: '', enabled: false, auto_import: false, updated_at: null }; setDrive(nextDrive); setDriveFolderId(nextDrive.folder_id || ''); setDriveEnabled(Boolean(nextDrive.enabled)); setDriveAutoImport(Boolean(nextDrive.auto_import)); } catch (e) { setMessage(e instanceof Error ? e.message : 'Kunde inte läsa Gmail-status.'); } };

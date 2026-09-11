@@ -481,6 +481,10 @@ function AppInner() {
         if (!isStaff) return renderDashboard();
         return <MailPage onNavigate={navigate} />;
 
+      case 'mail-watchers':
+        if (!isStaff) return renderDashboard();
+        return <MailPage onNavigate={navigate} initialTab="watchers" />;
+
       case 'news':
         return <NewsPage onNavigate={navigate} />;
 

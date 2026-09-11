@@ -188,7 +188,7 @@ async function runWatchers(db: any) {
           // etc.) for admin-defined keyword rules -- staff have no business reason
           // to see hits from that, so only admins/superadmins are notified.
           const { data: recipients } = await db.from("vihem_profiles").select("id").eq("organisation_id", rule.organisation_id).in("role", ["admin", "superadmin"]);
-          if (recipients?.length) await db.from("vihem_notifications").insert(recipients.map((recipient: { id: string }) => ({ user_id: recipient.id, organisation_id: rule.organisation_id, title: `E-postmatchning: ${rule.name}`, message: `${result.subject} · ${account.display_name || account.email}`, type: "info", link: "mail" })));
+          if (recipients?.length) await db.from("vihem_notifications").insert(recipients.map((recipient: { id: string }) => ({ user_id: recipient.id, organisation_id: rule.organisation_id, title: `E-postmatchning: ${rule.name}`, message: `${result.subject} · ${account.display_name || account.email}`, type: "info", link: "mail-watchers" })));
         }
       }
       await db.from("vihem_mail_watch_rules").update({ last_run_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", rule.id);

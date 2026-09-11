@@ -18,6 +18,17 @@ import {
 } from 'lucide-react';
 
 interface NotificationsPageProps { onNavigate: (page: string) => void; }
+
+const resolveNotificationLink = (notification: Notification) => {
+  const text = `${notification.title} ${notification.message}`.toLowerCase();
+
+  if (notification.link === 'mail' || text.includes('fakturamatch') || text.includes('e-postmatchning')) {
+    return 'mail-watchers';
+  }
+
+  return notification.link;
+};
+
 export function NotificationsPage({ onNavigate }: NotificationsPageProps) {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -245,7 +256,7 @@ export function NotificationsPage({ onNavigate }: NotificationsPageProps) {
                   if (!notification.read_at) {
                     markAsRead(notification.id);
                   }
-                  if (notification.link) onNavigate(notification.link);
+                  if (notification.link) onNavigate(resolveNotificationLink(notification));
                 }}
               >
                 <div className="flex items-start justify-between">
