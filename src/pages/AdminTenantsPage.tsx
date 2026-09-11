@@ -10,12 +10,13 @@ import {
   Button,
   Modal,
   Input,
+  Select,
   PageHeader,
   EmptyState,
   LoadingPage,
   SearchInput,
 } from '../components/ui';
-import { formatDate, formatCurrency } from '../lib/utils';
+import { formatDate, formatCurrency, RENT_VAT_OPTIONS } from '../lib/utils';
 import { Profile, Tenancy, Apartment, Property } from '../types';
 import { listEntityAgreements } from '../modules/agreements-v2/api';
 import type { AgreementListItem } from '../modules/agreements-v2/types';
@@ -51,11 +52,13 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
     apartment_id: '',
     start_date: '',
     monthly_rent: '',
+    rent_vat_rate: '0',
   });
   const [linkTenancyFormData, setLinkTenancyFormData] = useState({
     apartment_id: '',
     start_date: '',
     monthly_rent: '',
+    rent_vat_rate: '0',
   });
 
   useEffect(() => {
@@ -163,6 +166,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
             organisation_id: user?.organisation_id,
             start_date: tenantFormData.start_date,
             monthly_rent: parseFloat(tenantFormData.monthly_rent) || 0,
+            rent_vat_rate: parseFloat(tenantFormData.rent_vat_rate) || 0,
             status: 'active',
           });
           if (tenancyError) throw tenancyError;
@@ -179,7 +183,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
       }
       setShowTenantModal(false);
       setEditingTenant(null);
-      setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '' });
+      setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0' });
       fetchData();
     } catch (error: any) {
       console.error('Error saving tenant:', error);
@@ -200,10 +204,11 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
         organisation_id: user?.organisation_id,
         start_date: linkTenancyFormData.start_date,
         monthly_rent: parseFloat(linkTenancyFormData.monthly_rent),
+        rent_vat_rate: parseFloat(linkTenancyFormData.rent_vat_rate) || 0,
         status: 'active',
       });
       setShowLinkTenancyModal(false);
-      setLinkTenancyFormData({ apartment_id: '', start_date: '', monthly_rent: '' });
+      setLinkTenancyFormData({ apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0' });
       fetchData();
     } catch (error) {
       console.error('Error linking tenancy:', error);
@@ -221,6 +226,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
       apartment_id: '',
       start_date: '',
       monthly_rent: '',
+      rent_vat_rate: '0',
     });
     setEditingTenant(tenant);
     setShowTenantModal(true);
@@ -267,7 +273,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
             <Button
               onClick={() => {
                 setEditingTenant(null);
-                setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '' });
+                setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0' });
                 setShowTenantModal(true);
               }}
               variant="primary"
@@ -460,7 +466,10 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                           </div>
                           <div>
                             <span className="text-slate-500">Månadshyra</span>
-                            <p className="font-medium text-slate-800">{formatCurrency(tenancy.monthly_rent)}</p>
+                            <p className="font-medium text-slate-800">
+                              {formatCurrency(tenancy.monthly_rent)}
+                              {tenancy.rent_vat_rate > 0 && <span className="text-slate-500 font-normal"> + {tenancy.rent_vat_rate}% moms</span>}
+                            </p>
                           </div>
                           {tenancy.end_date && (
                             <div>
@@ -628,6 +637,13 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                     placeholder="T.ex. 12000"
                   />
                 </div>
+                <Select
+                  label="Moms på hyra"
+                  value={tenantFormData.rent_vat_rate}
+                  onChange={(e) => setTenantFormData({ ...tenantFormData, rent_vat_rate: e.target.value })}
+                  options={RENT_VAT_OPTIONS}
+                  hint="Endast vid uthyrning till momsregistrerat företag (frivillig skattskyldighet). Annars momsfritt."
+                />
 
                 {!tenantFormData.apartment_id && (
                   <p className="text-xs text-slate-400">Lämna lägenhet tom för att skapa hyresgästen utan hyresförhållande.</p>
@@ -697,6 +713,13 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
             value={linkTenancyFormData.monthly_rent}
             onChange={(e) => setLinkTenancyFormData({ ...linkTenancyFormData, monthly_rent: e.target.value })}
             placeholder="T.ex. 15000"
+          />
+          <Select
+            label="Moms på hyra"
+            value={linkTenancyFormData.rent_vat_rate}
+            onChange={(e) => setLinkTenancyFormData({ ...linkTenancyFormData, rent_vat_rate: e.target.value })}
+            options={RENT_VAT_OPTIONS}
+            hint="Endast vid uthyrning till momsregistrerat företag (frivillig skattskyldighet). Annars momsfritt."
           />
           <div className="flex gap-3 justify-end pt-2">
             <Button variant="secondary" onClick={() => setShowLinkTenancyModal(false)}>Avbryt</Button>

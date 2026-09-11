@@ -379,7 +379,7 @@ export interface Apartment {
   property_id: string;
   organisation_id: string | null;
   apartment_number: string;
-  unit_type: 'apartment' | 'commercial' | 'storage';
+  unit_type: 'apartment' | 'commercial' | 'storage' | 'garage';
   size: number;
   rooms: number;
   rent: number;
@@ -421,6 +421,7 @@ export interface Tenancy {
   start_date: string;
   end_date: string | null;
   monthly_rent: number;
+  rent_vat_rate: number;
   contract_file_url: string;
   move_in_date: string | null;
   contact_person: string;

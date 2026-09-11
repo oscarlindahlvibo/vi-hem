@@ -93,12 +93,14 @@ export const UNIT_TYPE_LABELS: Record<string, string> = {
   apartment: 'Lägenhet',
   commercial: 'Lokal',
   storage: 'Förråd',
+  garage: 'Garage',
 };
 
 export const UNIT_TYPE_LABELS_PLURAL: Record<string, string> = {
   apartment: 'Lägenheter',
   commercial: 'Lokaler',
   storage: 'Förråd',
+  garage: 'Garage',
 };
 
 export function unitTypeLabel(unitType: string | null | undefined): string {
@@ -109,12 +111,14 @@ export const UNIT_TYPE_OPTIONS = [
   { value: 'apartment', label: 'Lägenhet' },
   { value: 'commercial', label: 'Lokal' },
   { value: 'storage', label: 'Förråd' },
+  { value: 'garage', label: 'Garage' },
 ];
 
 const UNIT_TYPE_NEW_LABELS: Record<string, string> = {
   apartment: 'Ny lägenhet',
   commercial: 'Ny lokal',
   storage: 'Nytt förråd',
+  garage: 'Nytt garage',
 };
 
 export function newUnitLabel(unitType: string | null | undefined): string {
@@ -125,11 +129,20 @@ const UNIT_NUMBER_LABELS: Record<string, string> = {
   apartment: 'Lägenhetsnummer',
   commercial: 'Lokalnummer',
   storage: 'Förrådsnummer',
+  garage: 'Garagenummer',
 };
 
 export function unitNumberLabel(unitType: string | null | undefined): string {
   return UNIT_NUMBER_LABELS[unitType || 'apartment'] || UNIT_NUMBER_LABELS.apartment;
 }
+
+// Rent is normally VAT-exempt in Sweden, but a landlord can opt into
+// charging VAT on rent for a lease with a VAT-registered company tenant
+// ("frivillig skattskyldighet för moms") — always at the standard 25% rate.
+export const RENT_VAT_OPTIONS = [
+  { value: '0', label: 'Momsfritt' },
+  { value: '25', label: '+ moms (25%)' },
+];
 
 export function floorLabel(floor: number | null | undefined): string {
   if (floor === null || floor === undefined) return '';

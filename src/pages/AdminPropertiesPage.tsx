@@ -28,7 +28,7 @@ const APARTMENT_STATUS_OPTIONS = [
 
 const defaultAptForm = {
   // Basic
-  unit_type: 'apartment' as 'apartment' | 'commercial' | 'storage',
+  unit_type: 'apartment' as 'apartment' | 'commercial' | 'storage' | 'garage',
   apartment_number: '', size: '', rooms: '', rent: '', floor: '',
   storage: false, parking: false, balcony: false, balcony_size: '',
   status: 'vacant' as string,
@@ -123,7 +123,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
       p.city.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const UNIT_TYPE_SORT_ORDER: Record<string, number> = { apartment: 0, commercial: 1, storage: 2 };
+  const UNIT_TYPE_SORT_ORDER: Record<string, number> = { apartment: 0, commercial: 1, storage: 2, garage: 3 };
 
   const getPropertyApartments = (propertyId: string) =>
     apartments
@@ -194,7 +194,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
       unit_type: apartmentFormData.unit_type,
       apartment_number: apartmentFormData.apartment_number,
       size: parseFloat(apartmentFormData.size) || 0,
-      rooms: parseInt(apartmentFormData.rooms) || 0,
+      rooms: parseFloat(apartmentFormData.rooms) || 0,
       rent: parseFloat(apartmentFormData.rent) || 0,
       floor: parseInt(String(apartmentFormData.floor)) || 0,
       storage: apartmentFormData.storage,
@@ -533,7 +533,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
             </div>
             <div className="grid grid-cols-3 gap-4">
               <Input label="Storlek (m²)" type="number" value={apartmentFormData.size} onChange={(e) => setF('size', e.target.value)} placeholder="75" />
-              <Input label="Antal rum" type="number" value={apartmentFormData.rooms} onChange={(e) => setF('rooms', e.target.value)} placeholder="3" />
+              <Input label="Antal rum" type="number" step="0.5" value={apartmentFormData.rooms} onChange={(e) => setF('rooms', e.target.value)} placeholder="T.ex. 2.5" />
               <Input label="Månadshyra (kr)" type="number" value={apartmentFormData.rent} onChange={(e) => setF('rent', e.target.value)} placeholder="12000" />
             </div>
             <div>
