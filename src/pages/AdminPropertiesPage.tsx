@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Building2, Plus, Edit2, Home, Users, ChevronRight,
   Key, Network, Zap, Droplets, Thermometer, Wind,
-  Lock, MailOpen, CarFront, Package, Layers, KeyRound, BookOpen,
+  Lock, MailOpen, CarFront, Package, Layers, KeyRound, BookOpen, Trash2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -179,6 +179,24 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
     fetchData();
   };
 
+  const deleteProperty = async (property: Property) => {
+    const unitCount = getPropertyApartments(property.id).length;
+    if (unitCount > 0) {
+      alert(`Fastigheten har ${unitCount} enhet${unitCount === 1 ? '' : 'er'} kvar. Ta bort alla lägenheter, lokaler, förråd och garage i fastigheten innan den kan raderas.`);
+      return;
+    }
+    if (!window.confirm(`Ta bort fastigheten "${property.name}"? Detta går inte att ångra.`)) return;
+    const { error } = await supabase.from('vihem_properties').delete().eq('id', property.id);
+    if (error) {
+      alert(error.code === '23503'
+        ? 'Kan inte ta bort fastigheten — det finns fortfarande kopplad information (t.ex. felanmälningar, arbetsordrar eller dokument) som måste tas bort eller flyttas först.'
+        : `Kunde inte ta bort fastigheten: ${error.message}`);
+      return;
+    }
+    if (selectedProperty?.id === property.id) setSelectedProperty(null);
+    fetchData();
+  };
+
   // ── Apartment save ─────────────────────────────────────────────────────────
   const handleSaveApartment = async () => {
     if (!selectedProperty) return;
@@ -233,6 +251,23 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
     setApartmentFormData(defaultAptForm);
     setKeyIds([]);
     setNetworkOutlets([]);
+    fetchData();
+  };
+
+  const deleteApartment = async (apt: Apartment) => {
+    const label = unitTypeLabel(apt.unit_type).toLowerCase();
+    if (getCurrentTenant(apt.id)) {
+      alert(`${unitTypeLabel(apt.unit_type)} ${apt.apartment_number} har ett aktivt hyresförhållande. Avsluta det under Hyresgäster innan enheten kan tas bort.`);
+      return;
+    }
+    if (!window.confirm(`Ta bort ${label} ${apt.apartment_number}? Detta går inte att ångra.`)) return;
+    const { error } = await supabase.from('vihem_apartments').delete().eq('id', apt.id);
+    if (error) {
+      alert(error.code === '23503'
+        ? `Kan inte ta bort — det finns fortfarande kopplade arbetsordrar, felanmälningar, besiktningar eller dokument. Ta bort eller flytta dessa först.`
+        : `Kunde inte ta bort: ${error.message}`);
+      return;
+    }
     fetchData();
   };
 
@@ -383,6 +418,9 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
                 <Button variant="secondary" onClick={() => openEditPropertyModal(selectedProperty)} className="gap-1">
                   <Edit2 className="w-3.5 h-3.5" /> Redigera
                 </Button>
+                <Button variant="danger" onClick={() => deleteProperty(selectedProperty)} className="gap-1">
+                  <Trash2 className="w-3.5 h-3.5" /> Radera
+                </Button>
                 <Button
                   variant="primary"
                   onClick={openCreateApartmentModal}
@@ -478,9 +516,14 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
                           </div>
                         )}
                       </div>
-                      <button onClick={() => openEditApartmentModal(apt)} className="p-2 hover:bg-slate-100 rounded-lg ml-3">
-                        <Edit2 className="w-4 h-4 text-slate-500" />
-                      </button>
+                      <div className="flex items-center gap-1 ml-3">
+                        <button onClick={() => openEditApartmentModal(apt)} className="p-2 hover:bg-slate-100 rounded-lg">
+                          <Edit2 className="w-4 h-4 text-slate-500" />
+                        </button>
+                        <button onClick={() => deleteApartment(apt)} className="p-2 hover:bg-red-50 rounded-lg">
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </button>
+                      </div>
                     </div>
                   </Card>
                 );
