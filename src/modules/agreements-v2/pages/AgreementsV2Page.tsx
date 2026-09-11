@@ -13,12 +13,15 @@ import {
   getAgreement,
   getTemplate,
   listAgreements,
+  listExistingEntityLinkOptions,
   listExistingPartyOptions,
   listTemplates,
   remindSigner,
   removeAttachment,
   resendFinalPdf,
+  resolveAgreementPrefill,
   saveBlocks,
+  saveEntityLinks,
   saveParties,
   saveSigners,
   saveTemplateBlocks,
@@ -28,6 +31,7 @@ import {
   uploadAttachment,
   AgreementApiError,
 } from '../api';
+import type { AgreementPrefillContext, ExistingEntityLinkOption } from '../api';
 import type {
   Agreement,
   AgreementAttachment,
@@ -36,6 +40,7 @@ import type {
   AgreementDetail,
   BlockType,
   AgreementDocumentType,
+  AgreementEntityLink,
   AgreementListItem,
   AgreementParty,
   AgreementSignature,
@@ -50,7 +55,7 @@ import { blockTypeDef, createBlock } from '../blocks/blockTypes';
 import { BLOCK_CATEGORIES } from '../blocks/blockCategories';
 import { Modal } from '../../../components/ui';
 import { useScrollLock } from '../../../lib/utils';
-import { ArchiveIcon, ArrowLeft, Bell, ChevronDown, Download, Edit3, FileSignature, FileText, Fingerprint, Globe, MoreHorizontal, Paperclip, PenLine, Plus, RefreshCw, Send, Trash2, Users, XCircle } from 'lucide-react';
+import { ArchiveIcon, ArrowLeft, Bell, ChevronDown, Download, Edit3, FileSignature, FileText, Fingerprint, Globe, Link2, MoreHorizontal, Paperclip, PenLine, Plus, RefreshCw, Send, Trash2, Users, XCircle } from 'lucide-react';
 
 function describeError(err: unknown): string {
   if (err instanceof AgreementApiError) return err.message;
@@ -112,15 +117,50 @@ function Badge({ status }: { status: AgreementStatus }) {
   return <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[status]}`}>{STATUS_LABELS[status]}</span>;
 }
 
-export function AgreementsV2Page() {
+export interface AgreementsV2Prefill { kind: 'tenancy' | 'tenant' | 'apartment'; id: string }
+
+export function AgreementsV2Page({ initialPrefill }: { initialPrefill?: AgreementsV2Prefill } = {}) {
   const { user } = useAuth();
   const [tab, setTab] = useState<'archive' | 'templates'>('archive');
   const [selectedAgreementId, setSelectedAgreementId] = useState<string | null>(null);
+  const [openStep, setOpenStep] = useState<EditorStep | undefined>(undefined);
+
+  // Deep-link prefill (see App.tsx's `agreements-v2/new/<kind>/<id>` route):
+  // resolve the referenced tenant/apartment/property once, then show the
+  // "new document" modal already filled in rather than skipping
+  // confirmation entirely -- creating a document is still one deliberate
+  // click, just with nothing left to look up or retype by hand.
+  const [prefillStatus, setPrefillStatus] = useState<'idle' | 'loading' | 'ready' | 'dismissed' | 'error'>(initialPrefill ? 'loading' : 'idle');
+  const [prefillContext, setPrefillContext] = useState<AgreementPrefillContext | null>(null);
+  const [prefillError, setPrefillError] = useState('');
+
+  useEffect(() => {
+    if (!initialPrefill || !user?.organisation_id) return;
+    let cancelled = false;
+    resolveAgreementPrefill(initialPrefill.kind, initialPrefill.id, user.organisation_id)
+      .then((ctx) => { if (!cancelled) { setPrefillContext(ctx); setPrefillStatus('ready'); } })
+      .catch((err) => { if (!cancelled) { setPrefillError(describeError(err)); setPrefillStatus('error'); } });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPrefill?.kind, initialPrefill?.id, user?.organisation_id]);
 
   if (!user?.organisation_id) return null;
 
   if (selectedAgreementId) {
-    return <AgreementEditor agreementId={selectedAgreementId} organisationId={user.organisation_id} onBack={() => setSelectedAgreementId(null)} />;
+    return <AgreementEditor agreementId={selectedAgreementId} organisationId={user.organisation_id} initialStep={openStep} onBack={() => setSelectedAgreementId(null)} />;
+  }
+
+  if (prefillStatus === 'loading') return <p className="text-sm text-slate-500">Förbereder avtal...</p>;
+  if (prefillStatus === 'error') return <p className="text-sm text-red-700">{prefillError}</p>;
+  if (prefillStatus === 'ready' && prefillContext) {
+    return (
+      <NewDocumentModal
+        organisationId={user.organisation_id}
+        prefill={prefillContext}
+        onClose={() => setPrefillStatus('dismissed')}
+        onCreated={(id) => { setOpenStep('parties'); setSelectedAgreementId(id); }}
+      />
+    );
   }
 
   return (
@@ -290,11 +330,11 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
   );
 }
 
-function NewDocumentModal({ organisationId, onClose, onCreated }: { organisationId: string; onClose: () => void; onCreated: (id: string) => void }) {
+function NewDocumentModal({ organisationId, onClose, onCreated, prefill }: { organisationId: string; onClose: () => void; onCreated: (id: string) => void; prefill?: AgreementPrefillContext }) {
   const [documentType, setDocumentType] = useState<AgreementDocumentType>('agreement');
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState(prefill?.title || '');
   const [templates, setTemplates] = useState<AgreementTemplate[]>([]);
-  const [templateId, setTemplateId] = useState<string>('');
+  const [templateId, setTemplateId] = useState<string>(prefill?.templateId || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -309,6 +349,11 @@ function NewDocumentModal({ organisationId, onClose, onCreated }: { organisation
     setError('');
     try {
       const created = await createAgreement({ document_type: documentType, title, template_id: templateId || undefined });
+      if (prefill) {
+        if (prefill.entityLinks.length > 0) await saveEntityLinks(created.id, prefill.entityLinks);
+        if (prefill.party) await saveParties(created.id, [prefill.party]);
+        if (prefill.signer) await saveSigners(created.id, [prefill.signer]);
+      }
       onCreated(created.id);
     } catch (err) {
       setError(describeError(err));
@@ -322,6 +367,12 @@ function NewDocumentModal({ organisationId, onClose, onCreated }: { organisation
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-bold text-slate-900">Nytt dokument</h2>
         <div className="mt-4 space-y-4">
+          {prefill && (
+            <div className="flex items-start gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
+              <Link2 className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>Kopplas automatiskt till: <strong>{prefill.summary}</strong></span>
+            </div>
+          )}
           <div>
             <p className="mb-1.5 text-sm font-medium text-slate-700">Vad vill du skapa?</p>
             <div className="grid grid-cols-3 gap-2">
@@ -364,9 +415,9 @@ function NewDocumentModal({ organisationId, onClose, onCreated }: { organisation
 
 type EditorStep = 'content' | 'parties' | 'signing' | 'attachments' | 'history';
 
-function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId: string; organisationId: string; onBack: () => void }) {
+function AgreementEditor({ agreementId, organisationId, initialStep, onBack }: { agreementId: string; organisationId: string; initialStep?: EditorStep; onBack: () => void }) {
   const [detail, setDetail] = useState<AgreementDetail | null>(null);
-  const [step, setStep] = useState<EditorStep>('content');
+  const [step, setStep] = useState<EditorStep>(initialStep || 'content');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -382,6 +433,7 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
   const [blocks, setBlocks] = useState<AgreementBlock[]>([]);
   const [parties, setParties] = useState<AgreementParty[]>([]);
   const [signers, setSigners] = useState<AgreementSigner[]>([]);
+  const [entityLinks, setEntityLinks] = useState<AgreementEntityLink[]>([]);
 
   // The last-PERSISTED shape of each, so we can tell whether the live state
   // above actually differs from what the backend has -- both for
@@ -392,6 +444,7 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
   const [savedBlocks, setSavedBlocks] = useState<AgreementBlock[]>([]);
   const [savedParties, setSavedParties] = useState<AgreementParty[]>([]);
   const [savedSigners, setSavedSigners] = useState<AgreementSigner[]>([]);
+  const [savedEntityLinks, setSavedEntityLinks] = useState<AgreementEntityLink[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -402,9 +455,11 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
       setBlocks(data.blocks);
       setParties(data.parties);
       setSigners(data.signers);
+      setEntityLinks(data.entity_links);
       setSavedBlocks(data.blocks);
       setSavedParties(data.parties);
       setSavedSigners(data.signers);
+      setSavedEntityLinks(data.entity_links);
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -440,7 +495,8 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
   const blocksDirty = editable && JSON.stringify(blocks) !== JSON.stringify(savedBlocks);
   const partiesDirty = editable && JSON.stringify(parties) !== JSON.stringify(savedParties);
   const signersDirty = editable && JSON.stringify(signers) !== JSON.stringify(savedSigners);
-  const currentStepDirty = (step === 'content' && blocksDirty) || (step === 'parties' && partiesDirty) || (step === 'signing' && signersDirty);
+  const entityLinksDirty = editable && JSON.stringify(entityLinks) !== JSON.stringify(savedEntityLinks);
+  const currentStepDirty = (step === 'content' && blocksDirty) || (step === 'parties' && (partiesDirty || entityLinksDirty)) || (step === 'signing' && signersDirty);
 
   // Persists whichever step's data is currently unsaved. Used both when
   // switching tabs (silent auto-save -- "spara blocken automatiskt när man
@@ -454,9 +510,9 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
         await saveBlocks(agreement.id, blocks);
         setSavedBlocks(blocks);
         setMessage('Innehållet sparades automatiskt.');
-      } else if (step === 'parties' && partiesDirty) {
-        await saveParties(agreement.id, parties);
-        setSavedParties(parties);
+      } else if (step === 'parties' && (partiesDirty || entityLinksDirty)) {
+        if (partiesDirty) { await saveParties(agreement.id, parties); setSavedParties(parties); }
+        if (entityLinksDirty) { await saveEntityLinks(agreement.id, entityLinks); setSavedEntityLinks(entityLinks); }
         setMessage('Parterna sparades automatiskt.');
       } else if (step === 'signing' && signersDirty) {
         await saveSigners(agreement.id, signers);
@@ -561,8 +617,10 @@ function AgreementEditor({ agreementId, organisationId, onBack }: { agreementId:
           onPartiesChange={setParties}
           signers={signers}
           onSignersChange={setSigners}
+          entityLinks={entityLinks}
+          onEntityLinksChange={setEntityLinks}
           editable={editable}
-          onSaved={(m) => { setMessage(m); setSavedParties(parties); }}
+          onSaved={(m) => { setMessage(m); setSavedParties(parties); setSavedEntityLinks(entityLinks); }}
           onError={setError}
         />
       )}
@@ -926,6 +984,8 @@ function PartiesStep({
   onPartiesChange,
   signers,
   onSignersChange,
+  entityLinks,
+  onEntityLinksChange,
   editable,
   onSaved,
   onError,
@@ -936,12 +996,21 @@ function PartiesStep({
   onPartiesChange: (parties: AgreementParty[]) => void;
   signers: AgreementSigner[];
   onSignersChange: (signers: AgreementSigner[]) => void;
+  entityLinks: AgreementEntityLink[];
+  onEntityLinksChange: (links: AgreementEntityLink[]) => void;
   editable: boolean;
   onSaved: (m: string) => void;
   onError: (e: string) => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [entityPickerOpen, setEntityPickerOpen] = useState(false);
+
+  const addEntityLink = (option: ExistingEntityLinkOption) => {
+    if (entityLinks.some((l) => l.entity_type === option.entity_type && l.entity_id === option.entity_id)) return;
+    onEntityLinksChange([...entityLinks, { entity_type: option.entity_type, entity_id: option.entity_id, label: option.label }]);
+  };
+  const removeEntityLink = (i: number) => onEntityLinksChange(entityLinks.filter((_, ii) => ii !== i));
 
   const addParty = (party: AgreementParty, alsoSigner: boolean) => {
     onPartiesChange([...parties, party]);
@@ -961,8 +1030,8 @@ function PartiesStep({
   const handleSave = async () => {
     setSaving(true);
     try {
-      await saveParties(agreementId, parties);
-      onSaved('Parter sparade.');
+      await Promise.all([saveParties(agreementId, parties), saveEntityLinks(agreementId, entityLinks)]);
+      onSaved('Parter och länkade objekt sparade.');
     } catch (err) {
       onError(describeError(err));
     } finally {
@@ -971,7 +1040,27 @@ function PartiesStep({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-slate-700">Länkade objekt</p>
+        <p className="text-xs text-slate-500">
+          Kopplar dokumentet till en hyresgäst/lägenhet/fastighet i VI-HEM, vilket låter {'{{tenant.x}}'}/{'{{apartment.x}}'}/{'{{property.x}}'}-fält i innehållet fyllas i automatiskt, och gör dokumentet synligt på den kopplade sidan.
+        </p>
+        {entityLinks.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {entityLinks.map((link, i) => (
+              <span key={`${link.entity_type}-${link.entity_id}`} className="flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                <Link2 className="h-3 w-3 text-slate-400" /> {link.label || link.entity_id}
+                {editable && <button onClick={() => removeEntityLink(i)} className="text-slate-400 transition-colors hover:text-red-600"><Trash2 className="h-3 w-3" /></button>}
+              </span>
+            ))}
+          </div>
+        )}
+        {editable && (
+          <button onClick={() => setEntityPickerOpen(true)} className="flex items-center gap-1.5 text-sm font-medium text-blue-600 transition-colors hover:text-blue-700"><Plus className="h-4 w-4" /> Länka objekt</button>
+        )}
+      </div>
+
       <p className="text-sm text-slate-500">
         En part kan vara en intern juridisk person, en känd kontakt/kund i VI-HEM, eller helt manuellt angiven — det krävs inte att motparten redan finns i systemet.
       </p>
@@ -1021,11 +1110,12 @@ function PartiesStep({
       {editable && (
         <div>
           <button onClick={handleSave} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
-            {saving ? 'Sparar...' : 'Spara parter'}
+            {saving ? 'Sparar...' : 'Spara parter och länkar'}
           </button>
         </div>
       )}
       <ExistingPartyPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} organisationId={organisationId} onPick={addParty} />
+      <EntityLinkPickerModal open={entityPickerOpen} onClose={() => setEntityPickerOpen(false)} organisationId={organisationId} onPick={addEntityLink} />
     </div>
   );
 }
@@ -1103,6 +1193,77 @@ function ExistingPartyPickerModal({
                         + Signatär
                       </button>
                     </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {!loading && options.filter(matches).length === 0 && <p className="text-sm text-slate-500">Inga träffar.</p>}
+      </div>
+    </Modal>
+  );
+}
+
+function EntityLinkPickerModal({
+  open,
+  onClose,
+  organisationId,
+  onPick,
+}: {
+  open: boolean;
+  onClose: () => void;
+  organisationId: string;
+  onPick: (option: ExistingEntityLinkOption) => void;
+}) {
+  const [options, setOptions] = useState<ExistingEntityLinkOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    listExistingEntityLinkOptions(organisationId).then(setOptions).catch(() => setOptions([])).finally(() => setLoading(false));
+  }, [open, organisationId]);
+
+  const groups: { label: string; type: ExistingEntityLinkOption['entity_type'] }[] = [
+    { label: 'Hyresgäster', type: 'tenant' },
+    { label: 'Lägenheter/lokaler', type: 'apartment' },
+    { label: 'Fastigheter', type: 'property' },
+  ];
+  const query = search.trim().toLowerCase();
+  const matches = (o: ExistingEntityLinkOption) => !query || o.label.toLowerCase().includes(query) || o.sublabel.toLowerCase().includes(query);
+
+  return (
+    <Modal open={open} onClose={onClose} title="Länka objekt">
+      <div className="space-y-4">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Sök hyresgäst, lägenhet eller fastighet..."
+          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+        />
+        {loading && <p className="text-sm text-slate-500">Laddar...</p>}
+        {!loading && groups.map((group) => {
+          const items = options.filter((o) => o.entity_type === group.type && matches(o));
+          if (items.length === 0) return null;
+          return (
+            <div key={group.type}>
+              <p className="mb-1.5 text-xs font-semibold uppercase text-slate-400">{group.label}</p>
+              <div className="space-y-1.5">
+                {items.map((o) => (
+                  <div key={`${o.entity_type}-${o.entity_id}`} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-slate-800">{o.label}</p>
+                      <p className="truncate text-xs text-slate-500">{o.sublabel}</p>
+                    </div>
+                    <button
+                      onClick={() => { onPick(o); onClose(); }}
+                      className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
+                    >
+                      Länka
+                    </button>
                   </div>
                 ))}
               </div>

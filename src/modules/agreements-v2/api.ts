@@ -144,6 +144,137 @@ export async function listExistingPartyOptions(organisationId: string): Promise<
   return options;
 }
 
+/**
+ * Resolves a tenancy/tenant/apartment id (passed via the `agreements-v2/new/
+ * <kind>/<id>` deep link, see App.tsx) into everything a new hyresavtal
+ * needs to start pre-linked: entity links for {{tenant.x}}/{{apartment.x}}/
+ * {{property.x}} dynamic-field resolution (matching the exact field set
+ * `mergeLinkedEntity` in vihem-agreements-workflow/index.ts actually reads,
+ * so what's previewed here is what the document will really resolve to), a
+ * suggested title/template, and -- when a tenant is known -- a ready-made
+ * party+signer so the admin doesn't have to re-add them by hand. Direct
+ * RLS-backed reads, same pattern as listExistingPartyOptions above.
+ */
+export interface AgreementPrefillContext {
+  title: string;
+  templateId: string;
+  summary: string;
+  entityLinks: AgreementEntityLink[];
+  party?: AgreementParty;
+  signer?: AgreementSigner;
+}
+
+export async function resolveAgreementPrefill(
+  kind: 'tenancy' | 'tenant' | 'apartment',
+  id: string,
+  organisationId: string,
+): Promise<AgreementPrefillContext> {
+  type TenantRow = { id: string; name: string; email: string | null; phone: string | null; bankid_personal_number: string | null };
+  type ApartmentRow = { id: string; apartment_number: string; unit_type: string; property_id: string };
+  type PropertyRow = { id: string; name: string };
+
+  let tenant: TenantRow | null = null;
+  let apartment: ApartmentRow | null = null;
+  let property: PropertyRow | null = null;
+
+  if (kind === 'tenancy') {
+    const { data: tenancy, error } = await supabase
+      .from('vihem_tenancies')
+      .select('tenant_id, apartment_id')
+      .eq('id', id)
+      .eq('organisation_id', organisationId)
+      .maybeSingle();
+    if (error) throw new AgreementApiError('DB_READ_FAILED', error.message);
+    if (!tenancy) throw new AgreementApiError('NOT_FOUND', 'Hyresförhållandet hittades inte.');
+    const [{ data: t }, { data: a }] = await Promise.all([
+      supabase.from('vihem_profiles').select('id, name, email, phone, bankid_personal_number').eq('id', tenancy.tenant_id).maybeSingle(),
+      supabase.from('vihem_apartments').select('id, apartment_number, unit_type, property_id').eq('id', tenancy.apartment_id).maybeSingle(),
+    ]);
+    tenant = t as TenantRow | null;
+    apartment = a as ApartmentRow | null;
+  } else if (kind === 'tenant') {
+    const { data: t } = await supabase.from('vihem_profiles').select('id, name, email, phone, bankid_personal_number').eq('id', id).eq('organisation_id', organisationId).maybeSingle();
+    tenant = t as TenantRow | null;
+  } else {
+    const { data: a } = await supabase.from('vihem_apartments').select('id, apartment_number, unit_type, property_id').eq('id', id).eq('organisation_id', organisationId).maybeSingle();
+    apartment = a as ApartmentRow | null;
+  }
+
+  if (apartment?.property_id) {
+    const { data: p } = await supabase.from('vihem_properties').select('id, name').eq('id', apartment.property_id).maybeSingle();
+    property = p as PropertyRow | null;
+  }
+
+  const entityLinks: AgreementEntityLink[] = [];
+  if (tenant) entityLinks.push({ entity_type: 'tenant', entity_id: tenant.id, label: tenant.name });
+  if (apartment) entityLinks.push({ entity_type: 'apartment', entity_id: apartment.id, label: `Lgh ${apartment.apartment_number}` });
+  if (property) entityLinks.push({ entity_type: 'property', entity_id: property.id, label: property.name });
+
+  let templateId = '';
+  if (apartment) {
+    const wantName = apartment.unit_type === 'apartment' ? 'Hyresavtal - Lägenhet' : apartment.unit_type === 'commercial' ? 'Hyresavtal - Lokal' : null;
+    if (wantName) {
+      const templates = await listTemplates({ status: 'active' });
+      templateId = templates.find((t) => t.name === wantName)?.id || '';
+    }
+  }
+
+  const titleParts = [apartment ? `Lgh ${apartment.apartment_number}` : null, tenant ? tenant.name : null].filter(Boolean);
+  const title = titleParts.length > 0 ? `Hyresavtal — ${titleParts.join(', ')}` : 'Hyresavtal';
+  const summary = [tenant?.name, apartment ? `Lgh ${apartment.apartment_number}` : null, property?.name].filter(Boolean).join(' · ') || 'Inget objekt kunde slås upp.';
+
+  const party: AgreementParty | undefined = tenant
+    ? { party_type: 'contact', display_name: tenant.name, org_number: '', email: tenant.email || '', phone: tenant.phone || '', address: '', source_type: 'tenant', source_id: tenant.id }
+    : undefined;
+  const signer: AgreementSigner | undefined = tenant
+    ? {
+        party_id: null,
+        profile_id: tenant.id,
+        name: tenant.name,
+        email: tenant.email || '',
+        phone: tenant.phone || '',
+        personal_number: '',
+        role_title: '',
+        signing_method: tenant.bankid_personal_number ? 'bankid' : 'handwritten',
+        signing_required: true,
+        sign_order: null,
+      }
+    : undefined;
+
+  return { title, templateId, summary, entityLinks, party, signer };
+}
+
+/** Options for the "Länka objekt" picker in the editor's Parter step --
+ * tenants, apartments (with their property name as context), and
+ * properties, so linking one is a search-and-click rather than typing a
+ * raw id. Same direct-RLS-read pattern as listExistingPartyOptions. */
+export interface ExistingEntityLinkOption {
+  entity_type: AgreementEntityType;
+  entity_id: string;
+  label: string;
+  sublabel: string;
+}
+
+export async function listExistingEntityLinkOptions(organisationId: string): Promise<ExistingEntityLinkOption[]> {
+  const [tenants, apartments, properties] = await Promise.all([
+    supabase.from('vihem_profiles').select('id, name').eq('organisation_id', organisationId).eq('role', 'tenant').eq('active', true).order('name'),
+    supabase.from('vihem_apartments').select('id, apartment_number, property:property_id(name)').eq('organisation_id', organisationId).order('apartment_number'),
+    supabase.from('vihem_properties').select('id, name').eq('organisation_id', organisationId).order('name'),
+  ]);
+  const options: ExistingEntityLinkOption[] = [];
+  for (const t of tenants.data || []) {
+    options.push({ entity_type: 'tenant', entity_id: t.id, label: t.name, sublabel: 'Hyresgäst' });
+  }
+  for (const a of (apartments.data || []) as any[]) {
+    const propName = Array.isArray(a.property) ? a.property[0]?.name : a.property?.name;
+    options.push({ entity_type: 'apartment', entity_id: a.id, label: `Lgh ${a.apartment_number}`, sublabel: propName || 'Lägenhet/lokal' });
+  }
+  for (const p of properties.data || []) {
+    options.push({ entity_type: 'property', entity_id: p.id, label: p.name, sublabel: 'Fastighet' });
+  }
+  return options;
+}
+
 export async function listMyAgreements(): Promise<AgreementListItem[]> {
   const [{ data, error }, { data: userData }] = await Promise.all([
     supabase

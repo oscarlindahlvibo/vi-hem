@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Building2, Plus, Edit2, Home, Users, ChevronRight,
   Key, Network, Zap, Droplets, Thermometer, Wind,
-  Lock, MailOpen, CarFront, Package, Layers, KeyRound, BookOpen, Trash2,
+  Lock, MailOpen, CarFront, Package, Layers, KeyRound, BookOpen, Trash2, FileSignature,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -17,6 +17,8 @@ import {
 import { Property, Apartment, Tenancy, Profile, KeyRecord, NetworkOutlet, Organisation } from '../types';
 import { OperationsAccessPage } from './OperationsAccessPage';
 import { OperationsRoutinesPage } from './OperationsRoutinesPage';
+import { listEntityAgreements } from '../modules/agreements-v2/api';
+import type { AgreementListItem } from '../modules/agreements-v2/types';
 
 const APARTMENT_STATUS_OPTIONS = [
   { value: 'vacant', label: 'Ledig' },
@@ -47,7 +49,7 @@ type AptFormData = typeof defaultAptForm;
 
 interface AdminPropertiesPageProps { onNavigate: (page: string) => void; }
 
-export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminPropertiesPageProps) {
+export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
   const { user } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   const [apartments, setApartments] = useState<Apartment[]>([]);
@@ -134,10 +136,11 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
         return typeDiff !== 0 ? typeDiff : a.apartment_number.localeCompare(b.apartment_number, 'sv');
       });
 
+  const getCurrentTenancy = (apartmentId: string): Tenancy | undefined =>
+    tenancies.find((t) => t.apartment_id === apartmentId && t.status === 'active');
+
   const getCurrentTenant = (apartmentId: string): Profile | undefined => {
-    const t = tenancies.find(
-      (t) => t.apartment_id === apartmentId && t.status === 'active'
-    );
+    const t = getCurrentTenancy(apartmentId);
     if (!t) return undefined;
     return profiles.find((p) => p.id === t.tenant_id);
   };
@@ -520,6 +523,13 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
                             {apt.notes}
                           </p>
                         )}
+                        <ApartmentAgreementsLink
+                          apartmentId={apt.id}
+                          onCreateAgreement={() => {
+                            const tenancy = getCurrentTenancy(apt.id);
+                            onNavigate(tenancy ? `agreements-v2/new/tenancy/${tenancy.id}` : `agreements-v2/new/apartment/${apt.id}`);
+                          }}
+                        />
                       </div>
                       <div className="flex items-center gap-1 ml-3">
                         <button onClick={() => openEditApartmentModal(apt)} className="p-2 hover:bg-slate-100 rounded-lg">
@@ -706,6 +716,29 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
           <Button variant="primary" onClick={handleSaveApartment}>Spara {unitTypeLabel(apartmentFormData.unit_type).toLowerCase()}</Button>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+// Same "Avtal" pattern AdminTenantsPage.tsx already has for a hyresgäst --
+// a lightweight count (not the full list; that lives in Avtal V2 itself)
+// plus a "Skapa avtal" deep link, via the generic entity-link table
+// (entity_type='apartment').
+function ApartmentAgreementsLink({ apartmentId, onCreateAgreement }: { apartmentId: string; onCreateAgreement: () => void }) {
+  const [agreements, setAgreements] = useState<AgreementListItem[]>([]);
+
+  useEffect(() => {
+    listEntityAgreements('apartment', apartmentId).then(setAgreements).catch(() => setAgreements([]));
+  }, [apartmentId]);
+
+  return (
+    <div className="flex items-center gap-2 text-xs mt-2">
+      <button onClick={onCreateAgreement} className="inline-flex items-center gap-1 font-medium text-blue-600 hover:text-blue-700">
+        <FileSignature className="w-3.5 h-3.5" /> Skapa avtal
+      </button>
+      {agreements.length > 0 && (
+        <span className="text-slate-400">· {agreements.length} kopplat{agreements.length === 1 ? '' : 'e'} avtal</span>
+      )}
     </div>
   );
 }

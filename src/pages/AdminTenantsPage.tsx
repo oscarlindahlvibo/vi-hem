@@ -692,18 +692,25 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
 
             {/* Avtal V2 (beta) -- linked via the generic entity-link
                 table (entity_type='tenant'), never a dedicated FK column
-                here. "+ Skapa avtal" just opens the module; it doesn't
-                deep-link a prefilled draft yet (the app's navigation is a
-                flat page-key switch with no query-param/context passing
-                between pages), so the admin picks/links this tenant from
-                inside Avtal V2 itself for now -- see docs/agreements-v2.md
-                "Öppna frågor" for the deferred deep-prefill flow. */}
+                here. "+ Skapa avtal" deep-links into a prefilled draft
+                (agreements-v2/new/<kind>/<id>, see App.tsx) rather than
+                just opening the module -- the active tenancy (if any)
+                carries tenant+apartment+property together so the right
+                mall and entity links get set up automatically. */}
             <div className="mt-6 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-800">
                   <FileSignature className="h-4 w-4 text-blue-600" /> Avtal
                 </h3>
-                <Button variant="secondary" size="sm" onClick={() => onNavigate('agreements-v2')} className="gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    const activeTenancy = getTenantTenancies(selectedTenant.id).find((t) => t.status === 'active');
+                    onNavigate(activeTenancy ? `agreements-v2/new/tenancy/${activeTenancy.id}` : `agreements-v2/new/tenant/${selectedTenant.id}`);
+                  }}
+                  className="gap-2"
+                >
                   <Plus className="w-4 h-4" /> Skapa avtal
                 </Button>
               </div>

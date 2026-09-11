@@ -452,6 +452,12 @@ function AppInner() {
       return <ChatPage onNavigate={navigate} initialThreadId={currentPage.split('/')[1]} />;
     }
 
+    if (currentPage.startsWith('agreements-v2/new/')) {
+      if (!isStaff) return renderDashboard();
+      const [, , kind, id] = currentPage.split('/');
+      return <AgreementsV2Page initialPrefill={{ kind: kind as 'tenancy' | 'tenant' | 'apartment', id }} />;
+    }
+
     switch (currentPage) {
       case 'dashboard':
         return renderDashboard();
