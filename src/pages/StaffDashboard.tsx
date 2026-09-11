@@ -9,6 +9,7 @@ import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, Cal
 
 interface StaffDashboardProps {
   onNavigate: (page: string) => void;
+  notificationCount?: number;
 }
 
 const ABSENCE_TYPE_LABEL: Record<StaffAbsenceType, string> = {
@@ -76,7 +77,7 @@ function localDateKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
+export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashboardProps) {
   const { user } = useAuth();
   const { labelFor } = useTimeCategories();
   const [loading, setLoading] = useState(true);
@@ -366,9 +367,9 @@ export function StaffDashboard({ onNavigate }: StaffDashboardProps) {
             title="Öppna aviseringar"
           >
             <AlertCircle className="h-5 w-5" />
-            {attentionCount > 0 && (
+            {notificationCount > 0 && (
               <span className="absolute -right-0.5 -top-0.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-rose-500 px-1 text-xs font-bold text-white">
-                {attentionCount > 99 ? '99+' : attentionCount}
+                {notificationCount > 99 ? '99+' : notificationCount}
               </span>
             )}
           </button>

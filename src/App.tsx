@@ -424,7 +424,7 @@ function AppInner() {
 
   const renderDashboard = () => {
     if (isTenant) return <TenantDashboard onNavigate={navigate} />;
-    return <StaffDashboard onNavigate={navigate} />;
+    return <StaffDashboard onNavigate={navigate} notificationCount={notificationCount} />;
   };
 
   function renderPage() {
