@@ -379,6 +379,7 @@ export interface Apartment {
   property_id: string;
   organisation_id: string | null;
   apartment_number: string;
+  unit_type: 'apartment' | 'commercial' | 'storage';
   size: number;
   rooms: number;
   rent: number;

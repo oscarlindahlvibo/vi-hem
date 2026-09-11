@@ -89,6 +89,62 @@ export const APARTMENT_STATUS_LABELS: Record<string, string> = {
   blocked: 'Spärrad',
 };
 
+export const UNIT_TYPE_LABELS: Record<string, string> = {
+  apartment: 'Lägenhet',
+  commercial: 'Lokal',
+  storage: 'Förråd',
+};
+
+export const UNIT_TYPE_LABELS_PLURAL: Record<string, string> = {
+  apartment: 'Lägenheter',
+  commercial: 'Lokaler',
+  storage: 'Förråd',
+};
+
+export function unitTypeLabel(unitType: string | null | undefined): string {
+  return UNIT_TYPE_LABELS[unitType || 'apartment'] || UNIT_TYPE_LABELS.apartment;
+}
+
+export const UNIT_TYPE_OPTIONS = [
+  { value: 'apartment', label: 'Lägenhet' },
+  { value: 'commercial', label: 'Lokal' },
+  { value: 'storage', label: 'Förråd' },
+];
+
+const UNIT_TYPE_NEW_LABELS: Record<string, string> = {
+  apartment: 'Ny lägenhet',
+  commercial: 'Ny lokal',
+  storage: 'Nytt förråd',
+};
+
+export function newUnitLabel(unitType: string | null | undefined): string {
+  return UNIT_TYPE_NEW_LABELS[unitType || 'apartment'] || UNIT_TYPE_NEW_LABELS.apartment;
+}
+
+const UNIT_NUMBER_LABELS: Record<string, string> = {
+  apartment: 'Lägenhetsnummer',
+  commercial: 'Lokalnummer',
+  storage: 'Förrådsnummer',
+};
+
+export function unitNumberLabel(unitType: string | null | undefined): string {
+  return UNIT_NUMBER_LABELS[unitType || 'apartment'] || UNIT_NUMBER_LABELS.apartment;
+}
+
+export function floorLabel(floor: number | null | undefined): string {
+  if (floor === null || floor === undefined) return '';
+  if (floor === 0) return 'BV';
+  if (floor === -1) return 'KV';
+  return String(floor);
+}
+
+export const FLOOR_OPTIONS = [
+  { value: '', label: 'Välj våning' },
+  { value: '-1', label: 'KV' },
+  { value: '0', label: 'BV' },
+  ...Array.from({ length: 30 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) })),
+];
+
 export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   contract: 'Hyresavtal',
   rules: 'Ordningsregler',

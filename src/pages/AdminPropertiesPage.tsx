@@ -7,11 +7,12 @@ import {
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  Card, Badge, Button, Modal, Input, Textarea,
+  Card, Badge, Button, Modal, Input, Textarea, Select,
   PageHeader, EmptyState, LoadingPage, SearchInput, Tabs,
 } from '../components/ui';
 import {
   formatCurrency, APARTMENT_STATUS_LABELS, getAptStatusColor,
+  unitTypeLabel, floorLabel, UNIT_TYPE_OPTIONS, newUnitLabel, FLOOR_OPTIONS, unitNumberLabel,
 } from '../lib/utils';
 import { Property, Apartment, Tenancy, Profile, KeyRecord, NetworkOutlet, Organisation } from '../types';
 import { OperationsAccessPage } from './OperationsAccessPage';
@@ -27,6 +28,7 @@ const APARTMENT_STATUS_OPTIONS = [
 
 const defaultAptForm = {
   // Basic
+  unit_type: 'apartment' as 'apartment' | 'commercial' | 'storage',
   apartment_number: '', size: '', rooms: '', rent: '', floor: '',
   storage: false, parking: false, balcony: false, balcony_size: '',
   status: 'vacant' as string,
@@ -121,8 +123,16 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
       p.city.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const UNIT_TYPE_SORT_ORDER: Record<string, number> = { apartment: 0, commercial: 1, storage: 2 };
+
   const getPropertyApartments = (propertyId: string) =>
-    apartments.filter((a) => a.property_id === propertyId);
+    apartments
+      .filter((a) => a.property_id === propertyId)
+      .slice()
+      .sort((a, b) => {
+        const typeDiff = (UNIT_TYPE_SORT_ORDER[a.unit_type] ?? 0) - (UNIT_TYPE_SORT_ORDER[b.unit_type] ?? 0);
+        return typeDiff !== 0 ? typeDiff : a.apartment_number.localeCompare(b.apartment_number, 'sv');
+      });
 
   const getCurrentTenant = (apartmentId: string): Profile | undefined => {
     const t = tenancies.find(
@@ -176,11 +186,12 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
     // Enforce apartment quota for new vihem_apartments
     if (!editingApartment && orgLimits) {
       if (apartments.length >= orgLimits.max_apartments) {
-        alert(`Licensgränsen för lägenheter är nådd (${orgLimits.max_apartments} st). Uppgradera licensen för att lägga till fler.`);
+        alert(`Licensgränsen för enheter är nådd (${orgLimits.max_apartments} st). Uppgradera licensen för att lägga till fler.`);
         return;
       }
     }
     const payload = {
+      unit_type: apartmentFormData.unit_type,
       apartment_number: apartmentFormData.apartment_number,
       size: parseFloat(apartmentFormData.size) || 0,
       rooms: parseInt(apartmentFormData.rooms) || 0,
@@ -240,9 +251,10 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
 
   const openEditApartmentModal = (apt: Apartment) => {
     setApartmentFormData({
+      unit_type: apt.unit_type || 'apartment',
       apartment_number: apt.apartment_number,
       size: String(apt.size), rooms: String(apt.rooms), rent: String(apt.rent),
-      floor: String(apt.floor || ''),
+      floor: apt.floor !== null && apt.floor !== undefined ? String(apt.floor) : '',
       storage: !!apt.storage, parking: !!apt.parking,
       balcony: apt.balcony || false,
       balcony_size: String(apt.balcony_size || ''),
@@ -282,7 +294,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <PageHeader title="Fastigheter" subtitle="Hantera fastigheter och lägenheter" />
+        <PageHeader title="Fastigheter" subtitle="Hantera fastigheter, lägenheter, lokaler och förråd" />
         <Button
           onClick={() => {
             if (orgLimits && properties.length >= orgLimits.max_properties) {
@@ -337,7 +349,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
                       <div className="flex items-center gap-2">
                         <Home className="w-4 h-4 text-blue-500" />
                         <span className="font-medium">{apts.length}</span>
-                        <span className="text-slate-500">lägenheter</span>
+                        <span className="text-slate-500">enheter</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Users className="w-4 h-4 text-green-500" />
@@ -346,7 +358,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
                       </div>
                     </div>
                     <button onClick={() => setSelectedProperty(property)} className="w-full mt-4 flex items-center justify-between text-blue-600 hover:text-blue-700 font-medium text-sm">
-                      <span>Visa lägenheter</span>
+                      <span>Visa enheter</span>
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   </Card>
@@ -376,9 +388,9 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
                   onClick={openCreateApartmentModal}
                   className="gap-1"
                   disabled={!!(orgLimits && apartments.length >= orgLimits.max_apartments)}
-                  title={orgLimits && apartments.length >= orgLimits.max_apartments ? `Licensgräns nådd (${orgLimits.max_apartments} lägenheter)` : undefined}
+                  title={orgLimits && apartments.length >= orgLimits.max_apartments ? `Licensgräns nådd (${orgLimits.max_apartments} enheter)` : undefined}
                 >
-                  <Plus className="w-3.5 h-3.5" /> Ny lägenhet
+                  <Plus className="w-3.5 h-3.5" /> Ny enhet
                 </Button>
               </div>
             </div>
@@ -386,7 +398,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
             {orgLimits && (
               <div className={`mt-3 flex items-center gap-2 text-xs px-3 py-2 rounded-lg w-fit ${apartments.length >= orgLimits.max_apartments ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-500'}`}>
                 <Home className="w-3.5 h-3.5" />
-                <span>Lägenheter (org-total): <strong>{apartments.length}</strong> / {orgLimits.max_apartments}</span>
+                <span>Enheter (org-total): <strong>{apartments.length}</strong> / {orgLimits.max_apartments}</span>
                 {apartments.length >= orgLimits.max_apartments && <span className="font-semibold">— licensgräns nådd</span>}
               </div>
             )}
@@ -411,7 +423,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
 
           <div className="space-y-3">
             {getPropertyApartments(selectedProperty.id).length === 0 ? (
-              <EmptyState icon={<Home className="w-12 h-12" />} title="Inga lägenheter" description="Lägg till din första lägenhet" />
+              <EmptyState icon={<Home className="w-12 h-12" />} title="Inga enheter" description="Lägg till en lägenhet, lokal eller förråd" />
             ) : (
               getPropertyApartments(selectedProperty.id).map((apt) => {
                 const tenant = getCurrentTenant(apt.id);
@@ -420,7 +432,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
-                          <h4 className="font-semibold text-slate-900">Lägenhet {apt.apartment_number}</h4>
+                          <h4 className="font-semibold text-slate-900">{unitTypeLabel(apt.unit_type)} {apt.apartment_number}</h4>
                           <Badge className={getAptStatusColor(apt.status) + ' text-xs'}>
                             {APARTMENT_STATUS_LABELS[apt.status as keyof typeof APARTMENT_STATUS_LABELS] || apt.status}
                           </Badge>
@@ -429,7 +441,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
                           <div><span className="text-slate-500">Storlek</span><p className="font-medium">{apt.size} m²</p></div>
                           <div><span className="text-slate-500">Rum</span><p className="font-medium">{apt.rooms}</p></div>
                           <div><span className="text-slate-500">Hyra</span><p className="font-medium">{formatCurrency(apt.rent)}</p></div>
-                          {apt.floor ? <div><span className="text-slate-500">Våning</span><p className="font-medium">{apt.floor}</p></div> : null}
+                          {apt.floor !== null && apt.floor !== undefined ? <div><span className="text-slate-500">Våning</span><p className="font-medium">{floorLabel(apt.floor)}</p></div> : null}
                         </div>
                         {/* Technical badges */}
                         <div className="flex flex-wrap gap-1.5 mt-2">
@@ -498,7 +510,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
       </Modal>
 
       {/* ── Apartment Modal ─────────────────────────────────────────────── */}
-      <Modal open={showApartmentModal} onClose={() => { setShowApartmentModal(false); setEditingApartment(null); }} title={editingApartment ? 'Redigera lägenhet' : 'Ny lägenhet'} size="xl">
+      <Modal open={showApartmentModal} onClose={() => { setShowApartmentModal(false); setEditingApartment(null); }} title={editingApartment ? `Redigera ${unitTypeLabel(apartmentFormData.unit_type).toLowerCase()}` : newUnitLabel(apartmentFormData.unit_type)} size="xl">
         {/* Tab bar */}
         <div className="flex gap-1 mb-5 p-1 bg-slate-100 rounded-xl">
           {(['basic', 'technical'] as const).map((tab) => (
@@ -514,9 +526,10 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
 
         {aptTab === 'basic' && (
           <div className="space-y-4">
+            <Select label="Typ" value={apartmentFormData.unit_type} onChange={(e) => setF('unit_type', e.target.value as AptFormData['unit_type'])} options={UNIT_TYPE_OPTIONS} />
             <div className="grid grid-cols-2 gap-4">
-              <Input label="Lägenhetsnummer" value={apartmentFormData.apartment_number} onChange={(e) => setF('apartment_number', e.target.value)} placeholder="T.ex. 101" />
-              <Input label="Våning" type="number" value={apartmentFormData.floor} onChange={(e) => setF('floor', e.target.value)} placeholder="T.ex. 2" />
+              <Input label={unitNumberLabel(apartmentFormData.unit_type)} value={apartmentFormData.apartment_number} onChange={(e) => setF('apartment_number', e.target.value)} placeholder="T.ex. 101" />
+              <Select label="Våning" value={apartmentFormData.floor} onChange={(e) => setF('floor', e.target.value)} options={FLOOR_OPTIONS} />
             </div>
             <div className="grid grid-cols-3 gap-4">
               <Input label="Storlek (m²)" type="number" value={apartmentFormData.size} onChange={(e) => setF('size', e.target.value)} placeholder="75" />
@@ -642,7 +655,7 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
 
         <div className="flex gap-3 justify-end pt-5 mt-2 border-t border-slate-100">
           <Button variant="secondary" onClick={() => { setShowApartmentModal(false); setEditingApartment(null); }}>Avbryt</Button>
-          <Button variant="primary" onClick={handleSaveApartment}>Spara lägenhet</Button>
+          <Button variant="primary" onClick={handleSaveApartment}>Spara {unitTypeLabel(apartmentFormData.unit_type).toLowerCase()}</Button>
         </div>
       </Modal>
     </div>
