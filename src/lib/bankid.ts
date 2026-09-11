@@ -81,6 +81,29 @@ export function normalizePersonalNumber(raw: string): string {
   }
   return '';
 }
+/** Birthdate parsed out of a normalized (12-digit) personnummer, or null if
+ * it isn't a plausible date. Used for age-based rent discounts. */
+export function birthDateFromPersonalNumber(pno: string): Date | null {
+  const normalized = normalizePersonalNumber(pno);
+  if (normalized.length !== 12) return null;
+  const year = parseInt(normalized.slice(0, 4), 10);
+  const month = parseInt(normalized.slice(4, 6), 10);
+  const day = parseInt(normalized.slice(6, 8), 10);
+  if (!year || !month || !day) return null;
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Last day of the month before the person turns `age` -- the final rent
+ * period an "until age N" discount should still apply to; the birthday's
+ * own month is excluded, matching how end_period eligibility is checked
+ * against a rent period's month-start date. */
+export function lastDiscountEligibleMonthEnd(pno: string, age: number): Date | null {
+  const birth = birthDateFromPersonalNumber(pno);
+  if (!birth) return null;
+  return new Date(birth.getFullYear() + age, birth.getMonth(), 0);
+}
+
 export function formatPersonalNumber(pno: string) { const digits = pno.replace(/\D/g, ''); return digits.length === 12 ? `${digits.slice(0, 8)}-${digits.slice(8)}` : pno; }
 export function maskPersonalNumber(pno: string) { const digits = pno.replace(/\D/g, ''); return digits.length === 12 ? `${digits.slice(0, 8)}-****` : '****'; }
 export const BANKID_ENABLED = true;

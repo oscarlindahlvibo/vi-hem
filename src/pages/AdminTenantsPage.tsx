@@ -3,7 +3,7 @@ import { Users, Plus, Edit2, Home, Mail, Phone, KeyRound, RefreshCw, FileSignatu
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { createUserAccount, resetUserPassword, sendUserPasswordResetEmail } from '../lib/userAdmin';
-import { normalizePersonalNumber } from '../lib/bankid';
+import { normalizePersonalNumber, lastDiscountEligibleMonthEnd } from '../lib/bankid';
 import {
   Card,
   Badge,
@@ -59,6 +59,10 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
     rent_vat_rate: '0',
     company_id: '',
     addons: [] as Addon[],
+    rent_override_choice: '' as '' | 'update_apartment' | 'temporary_note',
+    discount_percent: '',
+    discount_age_based: false,
+    discount_age_limit: '25',
   });
   const [linkTenancyFormData, setLinkTenancyFormData] = useState({
     apartment_id: '',
@@ -67,6 +71,10 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
     rent_vat_rate: '0',
     company_id: '',
     addons: [] as Addon[],
+    rent_override_choice: '' as '' | 'update_apartment' | 'temporary_note',
+    discount_percent: '',
+    discount_age_based: false,
+    discount_age_limit: '25',
   });
 
   useEffect(() => {
@@ -183,6 +191,63 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
     if (error) throw error;
   };
 
+  const saveDiscountForTenancy = async (
+    tenancyId: string,
+    companyId: string,
+    startDate: string,
+    discountPercent: string,
+    ageBased: boolean,
+    ageLimit: string,
+    personalNumber: string,
+  ) => {
+    const percent = Number(discountPercent);
+    if (!percent) return;
+    const period = `${startDate.slice(0, 7)}-01`;
+    let endPeriod: string | null = null;
+    if (ageBased) {
+      const cutoff = lastDiscountEligibleMonthEnd(personalNumber, Number(ageLimit) || 25);
+      if (!cutoff) throw new Error('Kunde inte räkna ut åldersgränsen för rabatten.');
+      endPeriod = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
+    }
+    const description = ageBased ? `Rabatt ${percent}% (till fyllda ${ageLimit} år)` : `Rabatt ${percent}%`;
+    const { error } = await supabase.from('vihem_rent_adjustments').insert({
+      organisation_id: user?.organisation_id,
+      company_id: companyId,
+      tenancy_id: tenancyId,
+      rent_period: period,
+      description,
+      amount: 0,
+      percentage_rate: -Math.abs(percent),
+      vat_rate: 0,
+      adjustment_type: 'indexed',
+      start_period: period,
+      end_period: endPeriod,
+      status: 'active',
+      created_by: user?.id,
+    });
+    if (error) throw error;
+  };
+
+  const applyRentOverride = async (
+    apt: Apartment,
+    choice: '' | 'update_apartment' | 'temporary_note',
+    newRent: number,
+    tenantName: string,
+    startDate: string,
+  ) => {
+    if (!choice || newRent === apt.rent) return;
+    if (choice === 'update_apartment') {
+      const { error } = await supabase.from('vihem_apartments').update({ rent: newRent }).eq('id', apt.id);
+      if (error) throw error;
+    } else {
+      const direction = newRent > apt.rent ? 'höjning' : 'sänkning';
+      const note = `Tillfällig ${direction}: ${tenantName} betalar ${newRent.toLocaleString('sv-SE')} kr fr.o.m. ${startDate} (ordinarie hyra ${apt.rent.toLocaleString('sv-SE')} kr).`;
+      const combined = apt.notes ? `${apt.notes}\n${note}` : note;
+      const { error } = await supabase.from('vihem_apartments').update({ notes: combined }).eq('id', apt.id);
+      if (error) throw error;
+    }
+  };
+
   const handleSaveTenant = async () => {
     const rawPno = tenantFormData.bankid_personal_number.trim();
     const normalizedPno = rawPno ? normalizePersonalNumber(rawPno) : null;
@@ -190,9 +255,22 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
       setSaveError('Personnumret måste vara 10 eller 12 siffror, t.ex. 199001011234 eller 900101-1234.');
       return;
     }
-    if (!editingTenant && tenantFormData.addons.some((a) => a.description.trim()) && !tenantFormData.company_id) {
-      setSaveError('Välj bolag för att kunna lägga till tillval.');
-      return;
+    if (!editingTenant) {
+      const needsCompany = tenantFormData.addons.some((a) => a.description.trim()) || !!Number(tenantFormData.discount_percent);
+      if (needsCompany && !tenantFormData.company_id) {
+        setSaveError('Välj bolag för att kunna lägga till tillval eller rabatt.');
+        return;
+      }
+      const aptForTenancy = apartments.find((a) => a.id === tenantFormData.apartment_id);
+      const typedRent = Number(tenantFormData.monthly_rent) || 0;
+      if (aptForTenancy && aptForTenancy.rent > 0 && typedRent > 0 && typedRent !== aptForTenancy.rent && !tenantFormData.rent_override_choice) {
+        setSaveError('Ange om den ändrade hyran ska uppdatera lägenhetens ordinarie hyra eller bara gälla tillfälligt.');
+        return;
+      }
+      if (tenantFormData.discount_age_based && Number(tenantFormData.discount_percent) && !normalizePersonalNumber(tenantFormData.bankid_personal_number)) {
+        setSaveError('Ange hyresgästens personnummer för att kunna räkna ut en åldersrelaterad rabatt.');
+        return;
+      }
     }
     setSaving(true);
     setSaveError('');
@@ -246,13 +324,20 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
           if (newTenancy && tenantFormData.addons.some((a) => a.description.trim())) {
             await saveAddonsForTenancy(newTenancy.id, tenantFormData.company_id, tenantFormData.start_date, tenantFormData.addons, rentVatRate);
           }
+          if (newTenancy && Number(tenantFormData.discount_percent)) {
+            await saveDiscountForTenancy(newTenancy.id, tenantFormData.company_id, tenantFormData.start_date, tenantFormData.discount_percent, tenantFormData.discount_age_based, tenantFormData.discount_age_limit, normalizedPno || '');
+          }
+          const aptForTenancy = apartments.find((a) => a.id === tenantFormData.apartment_id);
+          if (aptForTenancy) {
+            await applyRentOverride(aptForTenancy, tenantFormData.rent_override_choice, parseFloat(tenantFormData.monthly_rent) || 0, tenantFormData.name, tenantFormData.start_date);
+          }
         }
 
         setCreatedCredentials({ email: tenantFormData.email, tempPassword: newAccount.temp_password });
       }
       setShowTenantModal(false);
       setEditingTenant(null);
-      setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0', company_id: '', addons: [] });
+      setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0', company_id: '', addons: [], rent_override_choice: '', discount_percent: '', discount_age_based: false, discount_age_limit: '25' });
       fetchData();
     } catch (error: any) {
       console.error('Error saving tenant:', error);
@@ -264,8 +349,20 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
 
   const handleLinkTenancy = async () => {
     if (!selectedTenant) return;
-    if (linkTenancyFormData.addons.some((a) => a.description.trim()) && !linkTenancyFormData.company_id) {
-      setSaveError('Välj bolag för att kunna lägga till tillval.');
+    const needsCompany = linkTenancyFormData.addons.some((a) => a.description.trim()) || !!Number(linkTenancyFormData.discount_percent);
+    if (needsCompany && !linkTenancyFormData.company_id) {
+      setSaveError('Välj bolag för att kunna lägga till tillval eller rabatt.');
+      return;
+    }
+    const aptForLink = getApartmentInfo(linkTenancyFormData.apartment_id);
+    const typedRent = Number(linkTenancyFormData.monthly_rent) || 0;
+    if (aptForLink && aptForLink.rent > 0 && typedRent > 0 && typedRent !== aptForLink.rent && !linkTenancyFormData.rent_override_choice) {
+      setSaveError('Ange om den ändrade hyran ska uppdatera lägenhetens ordinarie hyra eller bara gälla tillfälligt.');
+      return;
+    }
+    const tenantPno = normalizePersonalNumber(selectedTenant.bankid_personal_number || '');
+    if (linkTenancyFormData.discount_age_based && Number(linkTenancyFormData.discount_percent) && !tenantPno) {
+      setSaveError('Hyresgästen saknar personnummer -- kan inte räkna ut en åldersrelaterad rabatt.');
       return;
     }
     setSaving(true);
@@ -286,12 +383,27 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
       }).select('id').single();
       if (error) throw error;
 
+      // Unlike the "Ny hyresgäst" flow, linking an existing tenant to an
+      // apartment never marked it rented -- it stayed "Ledig" and could be
+      // linked to a second tenant at the same time.
+      const { error: apartmentError } = await supabase
+        .from('vihem_apartments')
+        .update({ status: 'rented' })
+        .eq('id', linkTenancyFormData.apartment_id);
+      if (apartmentError) throw apartmentError;
+
       if (newTenancy && linkTenancyFormData.addons.some((a) => a.description.trim())) {
         await saveAddonsForTenancy(newTenancy.id, linkTenancyFormData.company_id, linkTenancyFormData.start_date, linkTenancyFormData.addons, rentVatRate);
       }
+      if (newTenancy && Number(linkTenancyFormData.discount_percent)) {
+        await saveDiscountForTenancy(newTenancy.id, linkTenancyFormData.company_id, linkTenancyFormData.start_date, linkTenancyFormData.discount_percent, linkTenancyFormData.discount_age_based, linkTenancyFormData.discount_age_limit, tenantPno);
+      }
+      if (apt) {
+        await applyRentOverride(apt, linkTenancyFormData.rent_override_choice, typedRent, selectedTenant.name || '', linkTenancyFormData.start_date);
+      }
 
       setShowLinkTenancyModal(false);
-      setLinkTenancyFormData({ apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0', company_id: '', addons: [] });
+      setLinkTenancyFormData({ apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0', company_id: '', addons: [], rent_override_choice: '', discount_percent: '', discount_age_based: false, discount_age_limit: '25' });
       fetchData();
     } catch (error: any) {
       console.error('Error linking tenancy:', error);
@@ -315,6 +427,10 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
       rent_vat_rate: '0',
       company_id: '',
       addons: [],
+      rent_override_choice: '',
+      discount_percent: '',
+      discount_age_based: false,
+      discount_age_limit: '25',
     });
     setEditingTenant(tenant);
     setShowTenantModal(true);
@@ -361,7 +477,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
             <Button
               onClick={() => {
                 setEditingTenant(null);
-                setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0', company_id: '', addons: [] });
+                setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0', company_id: '', addons: [], rent_override_choice: '', discount_percent: '', discount_age_based: false, discount_age_limit: '25' });
                 setSaveError('');
                 setShowTenantModal(true);
               }}
@@ -696,6 +812,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                         apartment_id: e.target.value,
                         monthly_rent: apt?.rent ? String(apt.rent) : tenantFormData.monthly_rent,
                         company_id: resolveCompanyId(apt),
+                        rent_override_choice: '',
                       });
                     }}
                     disabled={!tenantFormData.property_id}
@@ -741,13 +858,22 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                 )}
 
                 {tenantFormData.apartment_id && (
-                  <AddonsEditor
-                    companyId={tenantFormData.company_id}
-                    onCompanyChange={(v) => setTenantFormData({ ...tenantFormData, company_id: v })}
-                    companies={companies}
-                    addons={tenantFormData.addons}
-                    onAddonsChange={(addons) => setTenantFormData({ ...tenantFormData, addons })}
-                  />
+                  <>
+                    <RentAdjustmentSection
+                      apartment={apartments.find((a) => a.id === tenantFormData.apartment_id)}
+                      monthlyRent={tenantFormData.monthly_rent}
+                      personalNumber={normalizePersonalNumber(tenantFormData.bankid_personal_number)}
+                      fields={tenantFormData}
+                      onChange={(patch) => setTenantFormData({ ...tenantFormData, ...patch })}
+                    />
+                    <AddonsEditor
+                      companyId={tenantFormData.company_id}
+                      onCompanyChange={(v) => setTenantFormData({ ...tenantFormData, company_id: v })}
+                      companies={companies}
+                      addons={tenantFormData.addons}
+                      onAddonsChange={(addons) => setTenantFormData({ ...tenantFormData, addons })}
+                    />
+                  </>
                 )}
               </div>
             </div>
@@ -793,7 +919,9 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                 setLinkTenancyFormData({
                   ...linkTenancyFormData,
                   apartment_id: e.target.value,
+                  monthly_rent: apt?.rent ? String(apt.rent) : linkTenancyFormData.monthly_rent,
                   company_id: resolveCompanyId(apt),
+                  rent_override_choice: '',
                 });
               }}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -832,13 +960,22 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
           />
 
           {linkTenancyFormData.apartment_id && (
-            <AddonsEditor
-              companyId={linkTenancyFormData.company_id}
-              onCompanyChange={(v) => setLinkTenancyFormData({ ...linkTenancyFormData, company_id: v })}
-              companies={companies}
-              addons={linkTenancyFormData.addons}
-              onAddonsChange={(addons) => setLinkTenancyFormData({ ...linkTenancyFormData, addons })}
-            />
+            <>
+              <RentAdjustmentSection
+                apartment={apartments.find((a) => a.id === linkTenancyFormData.apartment_id)}
+                monthlyRent={linkTenancyFormData.monthly_rent}
+                personalNumber={normalizePersonalNumber(selectedTenant?.bankid_personal_number || '')}
+                fields={linkTenancyFormData}
+                onChange={(patch) => setLinkTenancyFormData({ ...linkTenancyFormData, ...patch })}
+              />
+              <AddonsEditor
+                companyId={linkTenancyFormData.company_id}
+                onCompanyChange={(v) => setLinkTenancyFormData({ ...linkTenancyFormData, company_id: v })}
+                companies={companies}
+                addons={linkTenancyFormData.addons}
+                onAddonsChange={(addons) => setLinkTenancyFormData({ ...linkTenancyFormData, addons })}
+              />
+            </>
           )}
 
           {saveError && (
@@ -927,6 +1064,110 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+interface RentAdjustmentFields {
+  rent_override_choice: '' | 'update_apartment' | 'temporary_note';
+  discount_percent: string;
+  discount_age_based: boolean;
+  discount_age_limit: string;
+}
+
+// Surfaces when the typed rent differs from the apartment's own rent (staff
+// must explicitly say whether that's a permanent change to the apartment's
+// rent or a note-only, tenant-specific deviation), plus an optional
+// percentage rent discount -- either open-ended or automatically cut off
+// the month before the tenant turns a given age, computed from their
+// personnummer.
+function RentAdjustmentSection({ apartment, monthlyRent, personalNumber, fields, onChange }: {
+  apartment?: Apartment;
+  monthlyRent: string;
+  personalNumber: string;
+  fields: RentAdjustmentFields;
+  onChange: (patch: Partial<RentAdjustmentFields>) => void;
+}) {
+  const typedRent = Number(monthlyRent) || 0;
+  const hasConflict = !!apartment && apartment.rent > 0 && typedRent > 0 && typedRent !== apartment.rent;
+
+  const ageCutoff = fields.discount_age_based && personalNumber
+    ? lastDiscountEligibleMonthEnd(personalNumber, Number(fields.discount_age_limit) || 25)
+    : null;
+
+  return (
+    <div className="space-y-4">
+      {hasConflict && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
+          <p className="text-sm font-medium text-amber-900">
+            Hyran ({typedRent.toLocaleString('sv-SE')} kr) skiljer sig från lägenhetens ordinarie hyra ({apartment!.rent.toLocaleString('sv-SE')} kr).
+          </p>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="rent-override-choice"
+              checked={fields.rent_override_choice === 'update_apartment'}
+              onChange={() => onChange({ rent_override_choice: 'update_apartment' })}
+              className="mt-1"
+            />
+            <span className="text-sm text-amber-900">Uppdatera lägenhetens ordinarie hyra till {typedRent.toLocaleString('sv-SE')} kr</span>
+          </label>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="rent-override-choice"
+              checked={fields.rent_override_choice === 'temporary_note'}
+              onChange={() => onChange({ rent_override_choice: 'temporary_note' })}
+              className="mt-1"
+            />
+            <span className="text-sm text-amber-900">Nej, tillfällig {typedRent > apartment!.rent ? 'höjning' : 'sänkning'} -- lägg till en anmärkning på lägenheten så båda beloppen syns</span>
+          </label>
+        </div>
+      )}
+
+      <div className="border-t border-slate-200 pt-3 space-y-3">
+        <p className="text-sm font-medium text-slate-700">Rabatt på hyran</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Input
+            label="Rabatt (%)"
+            type="number"
+            value={fields.discount_percent}
+            onChange={(e) => onChange({ discount_percent: e.target.value })}
+            placeholder="T.ex. 10"
+          />
+        </div>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={fields.discount_age_based}
+            onChange={(e) => onChange({ discount_age_based: e.target.checked })}
+            className="w-4 h-4 rounded border-slate-300"
+          />
+          <span className="text-sm text-slate-700">Åldersrelaterad -- upphör automatiskt vid en viss ålder</span>
+        </label>
+        {fields.discount_age_based && (
+          <div className="pl-6 space-y-1">
+            <Input
+              label="Gäller till fyllda år"
+              type="number"
+              value={fields.discount_age_limit}
+              onChange={(e) => onChange({ discount_age_limit: e.target.value })}
+              placeholder="25"
+            />
+            {!personalNumber && (
+              <p className="text-xs text-red-600">Hyresgästen saknar personnummer -- kan inte räkna ut åldern automatiskt.</p>
+            )}
+            {personalNumber && !ageCutoff && (
+              <p className="text-xs text-red-600">Kunde inte tolka personnumret.</p>
+            )}
+            {ageCutoff && (
+              <p className="text-xs text-slate-500">
+                Rabatten läggs på hyror t.o.m. {ageCutoff.toLocaleDateString('sv-SE', { year: 'numeric', month: 'long' })}.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

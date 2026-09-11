@@ -515,6 +515,11 @@ export function AdminPropertiesPage({ onNavigate: _onNavigate }: AdminProperties
                             <span>Uthyrd till {tenant.name || tenant.email}</span>
                           </div>
                         )}
+                        {apt.notes && (
+                          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 mt-2 whitespace-pre-line">
+                            {apt.notes}
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-1 ml-3">
                         <button onClick={() => openEditApartmentModal(apt)} className="p-2 hover:bg-slate-100 rounded-lg">
