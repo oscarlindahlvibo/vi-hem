@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Plus, Edit2, Home, Mail, Phone, KeyRound, RefreshCw, FileSignature } from 'lucide-react';
+import { Users, Plus, Edit2, Home, Mail, Phone, KeyRound, RefreshCw, FileSignature, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { createUserAccount, resetUserPassword, sendUserPasswordResetEmail } from '../lib/userAdmin';
@@ -17,9 +17,12 @@ import {
   SearchInput,
 } from '../components/ui';
 import { formatDate, formatCurrency, RENT_VAT_OPTIONS } from '../lib/utils';
-import { Profile, Tenancy, Apartment, Property } from '../types';
+import { Profile, Tenancy, Apartment, Property, FinanceCompany } from '../types';
 import { listEntityAgreements } from '../modules/agreements-v2/api';
 import type { AgreementListItem } from '../modules/agreements-v2/types';
+
+interface Addon { description: string; amount: string; }
+const emptyAddon: Addon = { description: '', amount: '' };
 
 interface AdminTenantsPageProps { onNavigate: (page: string) => void; }
 export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
@@ -28,6 +31,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
   const [tenancies, setTenancies] = useState<Tenancy[]>([]);
   const [apartments, setApartments] = useState<Apartment[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
+  const [companies, setCompanies] = useState<FinanceCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTenant, setSelectedTenant] = useState<Profile | null>(null);
@@ -53,12 +57,16 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
     start_date: '',
     monthly_rent: '',
     rent_vat_rate: '0',
+    company_id: '',
+    addons: [] as Addon[],
   });
   const [linkTenancyFormData, setLinkTenancyFormData] = useState({
     apartment_id: '',
     start_date: '',
     monthly_rent: '',
     rent_vat_rate: '0',
+    company_id: '',
+    addons: [] as Addon[],
   });
 
   useEffect(() => {
@@ -76,16 +84,18 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [tenantsRes, tenanciesRes, aptsRes, propsRes] = await Promise.all([
+      const [tenantsRes, tenanciesRes, aptsRes, propsRes, companiesRes] = await Promise.all([
         supabase.from('vihem_profiles').select('*').eq('role', 'tenant').order('name'),
         supabase.from('vihem_tenancies').select('*'),
         supabase.from('vihem_apartments').select('*'),
         supabase.from('vihem_properties').select('*'),
+        supabase.from('vihem_companies').select('id, name').order('name'),
       ]);
       if (tenantsRes.data) setTenants(tenantsRes.data);
       if (tenanciesRes.data) setTenancies(tenanciesRes.data);
       if (aptsRes.data) setApartments(aptsRes.data);
       if (propsRes.data) setProperties(propsRes.data);
+      if (companiesRes.data) setCompanies(companiesRes.data as FinanceCompany[]);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -124,11 +134,64 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
     return apartments.filter((a) => !rentedApartmentIds.includes(a.id) && a.status !== 'rented');
   };
 
+  // Grouped by fastighet, each group sorted by lägenhetsnummer -- otherwise
+  // apartments from every property show up interleaved in one flat list.
+  const getAvailableApartmentsByProperty = () => {
+    const groups = new Map<string, Apartment[]>();
+    for (const apt of getAvailableApartments()) {
+      const list = groups.get(apt.property_id) || [];
+      list.push(apt);
+      groups.set(apt.property_id, list);
+    }
+    return Array.from(groups.entries())
+      .map(([propertyId, apts]) => ({
+        property: getPropertyInfo(propertyId),
+        apartments: apts.slice().sort((a, b) => a.apartment_number.localeCompare(b.apartment_number, 'sv', { numeric: true })),
+      }))
+      .sort((a, b) => (a.property?.name || '').localeCompare(b.property?.name || '', 'sv'));
+  };
+
+  // A lease's "bolag" (for its tillval invoicing) defaults to whatever the
+  // apartment/property is already tagged with, when that's set -- staff can
+  // still override it, since many existing properties have no company_id yet.
+  const resolveCompanyId = (apt?: Apartment) => {
+    if (!apt) return '';
+    const prop = getPropertyInfo(apt.property_id);
+    return apt.company_id || prop?.company_id || '';
+  };
+
+  const saveAddonsForTenancy = async (tenancyId: string, companyId: string, startDate: string, addons: Addon[], vatRate: number) => {
+    const period = `${startDate.slice(0, 7)}-01`;
+    const rows = addons
+      .filter((a) => a.description.trim() && Number(a.amount) !== 0 && !Number.isNaN(Number(a.amount)))
+      .map((a) => ({
+        organisation_id: user?.organisation_id,
+        company_id: companyId,
+        tenancy_id: tenancyId,
+        rent_period: period,
+        description: a.description.trim(),
+        amount: Number(a.amount),
+        vat_rate: vatRate,
+        adjustment_type: 'recurring',
+        start_period: period,
+        end_period: null,
+        status: 'active',
+        created_by: user?.id,
+      }));
+    if (rows.length === 0) return;
+    const { error } = await supabase.from('vihem_rent_adjustments').insert(rows);
+    if (error) throw error;
+  };
+
   const handleSaveTenant = async () => {
     const rawPno = tenantFormData.bankid_personal_number.trim();
     const normalizedPno = rawPno ? normalizePersonalNumber(rawPno) : null;
     if (rawPno && !normalizedPno) {
       setSaveError('Personnumret måste vara 10 eller 12 siffror, t.ex. 199001011234 eller 900101-1234.');
+      return;
+    }
+    if (!editingTenant && tenantFormData.addons.some((a) => a.description.trim()) && !tenantFormData.company_id) {
+      setSaveError('Välj bolag för att kunna lägga till tillval.');
       return;
     }
     setSaving(true);
@@ -159,16 +222,18 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
 
         // Create tenancy if apartment selected
         if (newAccount.user_id && tenantFormData.apartment_id && tenantFormData.start_date) {
-          const { error: tenancyError } = await supabase.from('vihem_tenancies').insert({
+          const rentVatRate = parseFloat(tenantFormData.rent_vat_rate) || 0;
+          const { data: newTenancy, error: tenancyError } = await supabase.from('vihem_tenancies').insert({
             tenant_id: newAccount.user_id,
             apartment_id: tenantFormData.apartment_id,
             property_id: tenantFormData.property_id || null,
             organisation_id: user?.organisation_id,
+            company_id: tenantFormData.company_id || null,
             start_date: tenantFormData.start_date,
             monthly_rent: parseFloat(tenantFormData.monthly_rent) || 0,
-            rent_vat_rate: parseFloat(tenantFormData.rent_vat_rate) || 0,
+            rent_vat_rate: rentVatRate,
             status: 'active',
-          });
+          }).select('id').single();
           if (tenancyError) throw tenancyError;
 
           // Mark apartment as rented
@@ -177,13 +242,17 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
             .update({ status: 'rented' })
             .eq('id', tenantFormData.apartment_id);
           if (apartmentError) throw apartmentError;
+
+          if (newTenancy && tenantFormData.addons.some((a) => a.description.trim())) {
+            await saveAddonsForTenancy(newTenancy.id, tenantFormData.company_id, tenantFormData.start_date, tenantFormData.addons, rentVatRate);
+          }
         }
 
         setCreatedCredentials({ email: tenantFormData.email, tempPassword: newAccount.temp_password });
       }
       setShowTenantModal(false);
       setEditingTenant(null);
-      setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0' });
+      setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0', company_id: '', addons: [] });
       fetchData();
     } catch (error: any) {
       console.error('Error saving tenant:', error);
@@ -194,24 +263,41 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
   };
 
   const handleLinkTenancy = async () => {
+    if (!selectedTenant) return;
+    if (linkTenancyFormData.addons.some((a) => a.description.trim()) && !linkTenancyFormData.company_id) {
+      setSaveError('Välj bolag för att kunna lägga till tillval.');
+      return;
+    }
+    setSaving(true);
+    setSaveError('');
     try {
-      if (!selectedTenant) return;
       const apt = getApartmentInfo(linkTenancyFormData.apartment_id);
-      await supabase.from('vihem_tenancies').insert({
+      const rentVatRate = parseFloat(linkTenancyFormData.rent_vat_rate) || 0;
+      const { data: newTenancy, error } = await supabase.from('vihem_tenancies').insert({
         tenant_id: selectedTenant.id,
         apartment_id: linkTenancyFormData.apartment_id,
         property_id: apt?.property_id || null,
         organisation_id: user?.organisation_id,
+        company_id: linkTenancyFormData.company_id || null,
         start_date: linkTenancyFormData.start_date,
         monthly_rent: parseFloat(linkTenancyFormData.monthly_rent),
-        rent_vat_rate: parseFloat(linkTenancyFormData.rent_vat_rate) || 0,
+        rent_vat_rate: rentVatRate,
         status: 'active',
-      });
+      }).select('id').single();
+      if (error) throw error;
+
+      if (newTenancy && linkTenancyFormData.addons.some((a) => a.description.trim())) {
+        await saveAddonsForTenancy(newTenancy.id, linkTenancyFormData.company_id, linkTenancyFormData.start_date, linkTenancyFormData.addons, rentVatRate);
+      }
+
       setShowLinkTenancyModal(false);
-      setLinkTenancyFormData({ apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0' });
+      setLinkTenancyFormData({ apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0', company_id: '', addons: [] });
       fetchData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error linking tenancy:', error);
+      setSaveError(error.message || 'Kunde inte länka hyresförhållandet');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -227,6 +313,8 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
       start_date: '',
       monthly_rent: '',
       rent_vat_rate: '0',
+      company_id: '',
+      addons: [],
     });
     setEditingTenant(tenant);
     setShowTenantModal(true);
@@ -273,7 +361,8 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
             <Button
               onClick={() => {
                 setEditingTenant(null);
-                setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0' });
+                setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0', company_id: '', addons: [] });
+                setSaveError('');
                 setShowTenantModal(true);
               }}
               variant="primary"
@@ -423,7 +512,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
               </div>
 
               <Button
-                onClick={() => setShowLinkTenancyModal(true)}
+                onClick={() => { setSaveError(''); setShowLinkTenancyModal(true); }}
                 variant="secondary"
                 className="gap-2"
               >
@@ -587,7 +676,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Välj fastighet</option>
-                    {properties.map((p) => (
+                    {properties.slice().sort((a, b) => a.name.localeCompare(b.name, 'sv')).map((p) => (
                       <option key={p.id} value={p.id}>{p.name} — {p.address}</option>
                     ))}
                   </select>
@@ -606,6 +695,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                         ...tenantFormData,
                         apartment_id: e.target.value,
                         monthly_rent: apt?.rent ? String(apt.rent) : tenantFormData.monthly_rent,
+                        company_id: resolveCompanyId(apt),
                       });
                     }}
                     disabled={!tenantFormData.property_id}
@@ -614,6 +704,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                     <option value="">Välj lägenhet</option>
                     {apartments
                       .filter((a) => a.property_id === tenantFormData.property_id && a.status !== 'rented')
+                      .sort((a, b) => a.apartment_number.localeCompare(b.apartment_number, 'sv', { numeric: true }))
                       .map((apt) => (
                         <option key={apt.id} value={apt.id}>
                           Lgh {apt.apartment_number} — {apt.rooms} rok, {apt.size} m²{apt.rent ? ` — ${Number(apt.rent).toLocaleString('sv-SE')} kr/mån` : ''}
@@ -648,6 +739,16 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                 {!tenantFormData.apartment_id && (
                   <p className="text-xs text-slate-400">Lämna lägenhet tom för att skapa hyresgästen utan hyresförhållande.</p>
                 )}
+
+                {tenantFormData.apartment_id && (
+                  <AddonsEditor
+                    companyId={tenantFormData.company_id}
+                    onCompanyChange={(v) => setTenantFormData({ ...tenantFormData, company_id: v })}
+                    companies={companies}
+                    addons={tenantFormData.addons}
+                    onAddonsChange={(addons) => setTenantFormData({ ...tenantFormData, addons })}
+                  />
+                )}
               </div>
             </div>
           )}
@@ -679,7 +780,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
 
       <Modal
         open={showLinkTenancyModal}
-        onClose={() => setShowLinkTenancyModal(false)}
+        onClose={() => { setShowLinkTenancyModal(false); setSaveError(''); }}
         title="Länka hyresförhållande"
       >
         <div className="space-y-4">
@@ -687,18 +788,26 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
             <label className="block text-sm font-medium text-slate-700 mb-1">Lägenhet</label>
             <select
               value={linkTenancyFormData.apartment_id}
-              onChange={(e) => setLinkTenancyFormData({ ...linkTenancyFormData, apartment_id: e.target.value })}
+              onChange={(e) => {
+                const apt = apartments.find((a) => a.id === e.target.value);
+                setLinkTenancyFormData({
+                  ...linkTenancyFormData,
+                  apartment_id: e.target.value,
+                  company_id: resolveCompanyId(apt),
+                });
+              }}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Välj en lägenhet</option>
-              {getAvailableApartments().map((apt) => {
-                const prop = getPropertyInfo(apt.property_id);
-                return (
-                  <option key={apt.id} value={apt.id}>
-                    {prop?.name} — Lägenhet {apt.apartment_number} ({apt.size} m²)
-                  </option>
-                );
-              })}
+              {getAvailableApartmentsByProperty().map((group) => (
+                <optgroup key={group.property?.id || 'unknown'} label={group.property?.name || 'Okänd fastighet'}>
+                  {group.apartments.map((apt) => (
+                    <option key={apt.id} value={apt.id}>
+                      Lägenhet {apt.apartment_number} ({apt.size} m²)
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
           </div>
           <Input
@@ -721,9 +830,26 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
             options={RENT_VAT_OPTIONS}
             hint="Endast vid uthyrning till momsregistrerat företag (frivillig skattskyldighet). Annars momsfritt."
           />
+
+          {linkTenancyFormData.apartment_id && (
+            <AddonsEditor
+              companyId={linkTenancyFormData.company_id}
+              onCompanyChange={(v) => setLinkTenancyFormData({ ...linkTenancyFormData, company_id: v })}
+              companies={companies}
+              addons={linkTenancyFormData.addons}
+              onAddonsChange={(addons) => setLinkTenancyFormData({ ...linkTenancyFormData, addons })}
+            />
+          )}
+
+          {saveError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
+              {saveError}
+            </div>
+          )}
+
           <div className="flex gap-3 justify-end pt-2">
-            <Button variant="secondary" onClick={() => setShowLinkTenancyModal(false)}>Avbryt</Button>
-            <Button variant="primary" onClick={handleLinkTenancy}>Länka</Button>
+            <Button variant="secondary" onClick={() => { setShowLinkTenancyModal(false); setSaveError(''); }}>Avbryt</Button>
+            <Button variant="primary" onClick={handleLinkTenancy} loading={saving}>Länka</Button>
           </div>
         </div>
       </Modal>
@@ -801,6 +927,78 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+// Bolag + tillval (parkering, extra förråd, etc.) for a lease being created
+// or linked -- each tillval becomes a recurring vihem_rent_adjustments row
+// once the tenancy is saved, so it flows into the same monthly fakturaunderlag
+// as the rent itself instead of being tracked separately.
+function AddonsEditor({ companyId, onCompanyChange, companies, addons, onAddonsChange }: {
+  companyId: string;
+  onCompanyChange: (value: string) => void;
+  companies: FinanceCompany[];
+  addons: Addon[];
+  onAddonsChange: (addons: Addon[]) => void;
+}) {
+  const updateAddon = (index: number, patch: Partial<Addon>) => {
+    onAddonsChange(addons.map((a, i) => (i === index ? { ...a, ...patch } : a)));
+  };
+  const removeAddon = (index: number) => {
+    onAddonsChange(addons.filter((_, i) => i !== index));
+  };
+
+  return (
+    <div className="border-t border-slate-200 pt-3 space-y-3">
+      <Select
+        label="Bolag"
+        value={companyId}
+        onChange={(e) => onCompanyChange(e.target.value)}
+        options={[{ value: '', label: 'Välj bolag' }, ...companies.map((c) => ({ value: c.id, label: c.name }))]}
+        hint="Krävs bara om tillval läggs till nedan -- avgör vilket bolag som fakturerar dem."
+      />
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm font-medium text-slate-700">Tillval utöver hyran</p>
+          <button
+            type="button"
+            onClick={() => onAddonsChange([...addons, { ...emptyAddon }])}
+            className="inline-flex items-center gap-1 text-sm font-semibold text-blue-700 hover:text-blue-900"
+          >
+            <Plus className="w-3.5 h-3.5" /> Lägg till tillval
+          </button>
+        </div>
+        {addons.length === 0 ? (
+          <p className="text-xs text-slate-400">T.ex. parkeringsplats eller extra förråd -- läggs till som ett återkommande tillägg på hyresavin.</p>
+        ) : (
+          <div className="space-y-2">
+            {addons.map((addon, index) => (
+              <div key={index} className="flex gap-2 items-start">
+                <div className="flex-1">
+                  <Input
+                    value={addon.description}
+                    onChange={(e) => updateAddon(index, { description: e.target.value })}
+                    placeholder="T.ex. Parkeringsplats"
+                  />
+                </div>
+                <div className="w-28">
+                  <Input
+                    type="number"
+                    value={addon.amount}
+                    onChange={(e) => updateAddon(index, { amount: e.target.value })}
+                    placeholder="Kr/mån"
+                  />
+                </div>
+                <button type="button" onClick={() => removeAddon(index)} className="p-2 mt-0.5 hover:bg-red-50 rounded-lg shrink-0">
+                  <Trash2 className="w-4 h-4 text-red-500" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

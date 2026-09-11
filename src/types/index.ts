@@ -349,6 +349,7 @@ export interface MeetingActionItem {
 export interface Property {
   id: string;
   organisation_id: string | null;
+  company_id?: string | null;
   name: string;
   address: string;
   city: string;
@@ -378,6 +379,7 @@ export interface Apartment {
   id: string;
   property_id: string;
   organisation_id: string | null;
+  company_id?: string | null;
   apartment_number: string;
   unit_type: 'apartment' | 'commercial' | 'storage' | 'garage';
   size: number;
