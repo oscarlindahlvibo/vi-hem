@@ -753,15 +753,24 @@ bekräftade i databasen att vardera gjorde exakt det den skulle.
 
 ## 23. Öppna frågor / kvarstående arbete till nästa etapp
 
-1. **BankID-koppling** — se punkt 10 för exakt vad som krävs. Sedan punkt
-   24 gäller detta även den slutliga PDF:en: en BankID-signering skulle
-   fylla i `bankid_personal_number`/`bankid_reference` på
-   `vihem_agreement_signatures`, vilket PDF-generatorn redan har stöd för
-   att rendera (maskerat personnummer + referens + verifieringslänk) —
-   bara själva signeringsflödet saknas, inte PDF-sidan av det.
-2. **Riktig deep-link-prefill** från lägenhets-/hyresgästsidan till en ny
-   Avtal V2-utkast (kräver en delad navigerings-/state-mekanism som inte
-   finns i appen idag, se punkt 20).
+1. ~~**BankID-koppling**~~ — **Klart** (2026-09-12). Signeringsflödet
+   fungerar; två separata buggar som blockerade det i praktiken är
+   fixade: `vihem_agreement_signature_requests` unika begränsning
+   räknade även återkallade rader (bytt till ett partiellt index,
+   `WHERE revoked_at IS NULL`), och signerings-/påminnelsemejl gick via
+   det aldrig konfigurerade SMTP-reläet (bytt till samma Gmail-koppling
+   som scanner-vidarebefordran redan använder).
+2. ~~**Riktig deep-link-prefill**~~ — **Klart** (2026-09-12). "Skapa
+   avtal" på en hyresgäst (med aktivt hyresförhållande) eller en
+   lägenhet i Fastigheter navigerar till
+   `agreements-v2/new/<tenancy|tenant|apartment>/<id>` (samma
+   `split('/')`-parammönster som `fleet/<id>`/`chat/<id>` redan
+   använder i `App.tsx`), som slår upp kontexten, föreslår rätt mall +
+   titel, och efter "Skapa" förifyller entitetslänkar samt
+   hyresgästen som part+signatär. Samtidigt byggdes den UI som
+   `save_entity_links` saknade helt (se punkt 19/22): ett "Länkade
+   objekt"-kort i Parter-steget, sök-och-länka mot hyresgäst/lägenhet/
+   fastighet.
 3. **Sekventiell signering** — datamodellen (`sign_order`) finns,
    arbetsflödet tillämpar bara parallell signering.
 4. **En riktig testsvit** enligt uppdragets sektion 30-lista. Manuellt
@@ -777,16 +786,20 @@ bekräftade i databasen att vardera gjorde exakt det den skulle.
    separata mappar) är idag bara `category`-textfiltret i arkivet, inte en
    egen hierarki — bedömdes tillräckligt för "känslan av ett centralt
    arkiv" per uppdragets egen öppning för det, men kan byggas ut.
-7. **Motsvarande integration för fastigheter/lägenheter** (inte bara
-   hyresgäster) — `AdminPropertiesPage.tsx`s lägenhetsdetalj har ingen
-   "Avtal"-sektion än; samma mönster som `AdminTenantsPage.tsx` skulle
-   kunna återanvändas rakt av.
+7. ~~**Motsvarande integration för fastigheter/lägenheter**~~ — **Klart**
+   (2026-09-12). Lägenhetskortet i `AdminPropertiesPage.tsx` har nu en
+   "Avtal"-rad (kopplat-avtal-antal + "Skapa avtal"), samma
+   `list_entity_agreements('apartment', ...)`-mönster som
+   `AdminTenantsPage.tsx`.
 8. **`generateAndDeliverFinalPdf`s hantering av kopplade entiteter**
-   (`{{tenant.x}}`/`{{apartment.x}}`/`{{project.x}}`-block) är inte
-   end-to-end-testad med en riktig `entity_links`-rad i det fullständiga
-   signerings→PDF-flödet — bara var för sig (se punkt 19 för
-   entitetsuppslagningens egna schemafixar, punkt 24 för PDF-flödets
-   E2E-test, som använde ett fristående avtal utan entitetslänkar).
+   (`{{tenant.x}}`/`{{apartment.x}}`/`{{project.x}}`-block) — själva
+   token-upplösningen vid **utskick** (frysning av versionen,
+   `vihem-agreements-workflow`s "send") är nu verifierad end-to-end mot
+   en riktig hyresgäst+lägenhet+fastighet-länkning (se punkt 2): §1
+   Parter-blocket resolvade till riktiga namn/e-post/adress, inte tomma
+   strängar. Kvarstår: samma verifiering specifikt för den **slutliga
+   PDF:en** efter att alla signerat (punkt 24:s E2E-test använde ett
+   fristående avtal utan entitetslänkar).
 
 ## 24. Slutlig PDF: generering, leverans och verifiering (tillagd samma dag)
 
