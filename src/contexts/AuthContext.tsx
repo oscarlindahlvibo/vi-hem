@@ -114,6 +114,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    // A magic-link redirect (BankID login, password recovery) lands here
+    // with #access_token=... still in the URL -- supabase-js's own
+    // detectSessionInUrl hasn't necessarily finished processing it by the
+    // time this first getSession() resolves, so a null session here doesn't
+    // yet mean "not logged in". Ending `loading` on that would flash the
+    // login page for a moment before onAuthStateChange's SIGNED_IN fires
+    // and flips it back -- instead, leave `loading` on and let
+    // onAuthStateChange (below) be the one to turn it off, once it's had a
+    // chance to actually process the redirect.
+    const hasPendingUrlSession = /[#?&](access_token|token_hash)=/.test(window.location.hash + window.location.search);
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         fetchProfile(session.user.id)
@@ -126,10 +137,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(null);
             setLoading(false);
           });
-      } else {
+      } else if (!hasPendingUrlSession) {
         setLoading(false);
       }
     });
+
+    // Safety net: if the URL genuinely had a stale/invalid token (e.g. an
+    // expired magic link), onAuthStateChange never fires and `loading`
+    // would otherwise spin forever -- give it a few seconds, then fall back
+    // to showing the login page like a normal unauthenticated visit.
+    const pendingUrlSessionTimeout = hasPendingUrlSession
+      ? window.setTimeout(() => setLoading(false), 5000)
+      : null;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
@@ -143,14 +162,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           } catch (error) {
             console.error('Error fetching profile after sign in:', error);
             setUser(null);
+          } finally {
+            setLoading(false);
           }
         })();
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
+        setLoading(false);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      if (pendingUrlSessionTimeout) window.clearTimeout(pendingUrlSessionTimeout);
+    };
   }, []);
 
   async function signIn(email: string, password: string) {
