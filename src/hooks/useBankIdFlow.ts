@@ -14,10 +14,20 @@
 //     network call) -- Safari/WebKit silently treats that as a popup, not a
 //     user-gesture-triggered navigation, and blocks it. On mobile this
 //     hook instead does a full-page redirect (`window.location.href`),
-//     which isn't a popup and can't be blocked; the order ref is stashed in
-//     sessionStorage first so that when BankID's app redirects the mobile
-//     browser back to this same page, the hook resumes polling
-//     automatically instead of leaving the user stuck with no feedback.
+//     which isn't a popup and can't be blocked; the order ref is stashed
+//     first so that when BankID's app redirects the mobile browser back,
+//     the hook resumes polling automatically instead of leaving the user
+//     stuck with no feedback. This must be `localStorage`, not
+//     `sessionStorage`: when the BankID app hands control back via a
+//     universal/app link, iOS Safari and Android Chrome frequently land the
+//     return URL in a *new* tab or webview instance rather than reusing the
+//     exact one that navigated away, and `sessionStorage` doesn't follow
+//     across that boundary even though it's the same origin -- the user
+//     just sees a fresh login page with no memory of the pending order.
+//     `localStorage` is shared across tabs/instances for the same origin,
+//     so it survives the same-device round trip. (This is why cross-device
+//     QR login always worked: it never navigates away, so this boundary
+//     never comes up.)
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { bankIDLaunchUrl, BankIDError, collectBankIDOrder, type BankIDAuthOrder, type BankIDCollectResult } from '../lib/bankid';
 
@@ -43,7 +53,7 @@ export interface BankIdFlowState {
   reset: () => void;
 }
 
-/** `intent` scopes the sessionStorage key and the resume-on-return check --
+/** `intent` scopes the localStorage key and the resume-on-return check --
  * a pending sign order must never get picked up as if it were a login
  * order, or vice versa, if both happen to be mid-flight in the same
  * browser tab lineage. `signingToken` is only relevant for an Avtal V2
@@ -72,7 +82,7 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
   }, []);
 
   const clearPending = useCallback(() => {
-    try { window.sessionStorage.removeItem(storageKey); } catch { /* private browsing etc. -- best effort only */ }
+    try { window.localStorage.removeItem(storageKey); } catch { /* private browsing etc. -- best effort only */ }
   }, [storageKey]);
 
   const finish = useCallback((finalStatus: 'complete' | 'failed', r?: BankIDCollectResult, errMsg?: string) => {
@@ -120,7 +130,7 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
     if (isMobileDevice()) {
       const launchUrl = bankIDLaunchUrl(order);
       if (launchUrl) {
-        try { window.sessionStorage.setItem(storageKey, JSON.stringify({ orderRef: order.orderRef, startedAt: Date.now() })); } catch { /* best effort */ }
+        try { window.localStorage.setItem(storageKey, JSON.stringify({ orderRef: order.orderRef, startedAt: Date.now() })); } catch { /* best effort */ }
         setStatus('redirecting');
         setMessage('Öppnar BankID-appen...');
         window.location.href = launchUrl;
@@ -172,7 +182,7 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
   // page that has no idea an order was ever started.
   useEffect(() => {
     let raw: string | null = null;
-    try { raw = window.sessionStorage.getItem(storageKey); } catch { raw = null; }
+    try { raw = window.localStorage.getItem(storageKey); } catch { raw = null; }
     if (!raw) return;
     try {
       const saved = JSON.parse(raw) as { orderRef: string; startedAt: number };
