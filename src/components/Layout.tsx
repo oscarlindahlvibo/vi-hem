@@ -117,7 +117,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['staff', 'admin'], module: 'payroll' },
       { label: 'E-post & underlag', icon: <Mail className="w-5 h-5" />, page: 'mail-search', roles: ['staff', 'admin'] },
     ] },
-    { label: 'Personal', icon: <Users className="w-5 h-5" />, items: [
+    { label: 'Kommunikation', icon: <Users className="w-5 h-5" />, items: [
       { label: 'Personal', icon: <Settings className="w-5 h-5" />, page: 'admin-staff', roles: ['admin'] },
       { label: 'Jour', icon: <ShieldAlert className="w-5 h-5" />, page: 'jour', roles: ['staff', 'admin'], module: 'jour' },
       { label: 'Chatt', icon: <MessageCircle className="w-5 h-5" />, page: 'chat', roles: ['tenant', 'staff', 'admin'] },
