@@ -1092,6 +1092,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
         customerProjects={customerProjects}
         title={stampMode === 'switch' ? 'Byt jobb' : 'Stämpla in'}
         submitLabel={stampMode === 'switch' ? 'Byt jobb' : 'Stämpla in'}
+        commentRequired={stampMode === 'switch'}
       />
 
       <EndDayModal
@@ -1329,13 +1330,17 @@ function timeEntryProjectLabel(entry: Pick<TimeEntry, 'customer_name'> & { custo
   return entry.customer_name || '';
 }
 
-function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, title = 'Stämpla in', submitLabel = 'Stämpla in' }: {
+function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, title = 'Stämpla in', submitLabel = 'Stämpla in', commentRequired = false }: {
   open: boolean; onClose: () => void;
   onSubmit: (cat: TimeCategory, woId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope?: TimeEntry['project_billing_scope'], changeOrderId?: string) => void;
   workOrders: WorkOrderSummary[];
   customerProjects: CustomerProjectSummary[];
   title?: string;
   submitLabel?: string;
+  /** Byt jobb ska alltid motiveras med en kommentar (vad man gick från/till)
+   * -- vanlig stämpla-in har inget att motivera mot ännu, så där är den
+   * fortsatt valfri. */
+  commentRequired?: boolean;
 }) {
   const { categories } = useTimeCategories();
   const [category, setCategory] = useState<TimeCategory>('general');
@@ -1345,8 +1350,15 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
   const [changeOrderId, setChangeOrderId] = useState('');
   const [changeOrders, setChangeOrders] = useState<{ id: string; change_order_number: string; title: string }[]>([]);
   const [comment, setComment] = useState('');
+  const [commentError, setCommentError] = useState('');
 
-  function reset() { setCategory('general'); setWorkOrderId(''); setCustomerProjectId(''); setProjectBillingScope('included_in_quote'); setChangeOrderId(''); setComment(''); }
+  function reset() { setCategory('general'); setWorkOrderId(''); setCustomerProjectId(''); setProjectBillingScope('included_in_quote'); setChangeOrderId(''); setComment(''); setCommentError(''); }
+
+  function submit() {
+    if (commentRequired && !comment.trim()) { setCommentError('Skriv en kommentar om vad du byter till.'); return; }
+    onSubmit(category, workOrderId || undefined, comment, selectedProject?.customer_name || '', customerProjectId || undefined, projectBillingScope, changeOrderId || undefined);
+    reset();
+  }
 
   // ÄTA-listan hör till ett specifikt kundprojekt -- hämtas när projektet
   // eller tidstypen ändras, så personalen kan stämpla in mot en namngiven
@@ -1411,12 +1423,18 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
             )}
           </>
         )}
-        <Textarea label="Kommentar (valfritt)" value={comment} onChange={e => setComment(e.target.value)} rows={2} />
+        <Textarea
+          label={commentRequired ? 'Kommentar' : 'Kommentar (valfritt)'}
+          value={comment}
+          onChange={e => { setComment(e.target.value); if (commentError) setCommentError(''); }}
+          rows={2}
+          error={commentError}
+        />
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={() => { onClose(); reset(); }} className="flex-1">Avbryt</Button>
           <Button
             variant="primary"
-            onClick={() => { onSubmit(category, workOrderId || undefined, comment, selectedProject?.customer_name || '', customerProjectId || undefined, projectBillingScope, changeOrderId || undefined); reset(); }}
+            onClick={submit}
             disabled={requiresProject && !customerProjectId}
             className="flex-1 gap-2"
           >
@@ -1650,10 +1668,16 @@ function EndDayModal({ open, onClose, onSubmit, defaultComment }: {
   defaultComment: string;
 }) {
   const [comment, setComment] = useState(defaultComment);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    if (open) setComment(defaultComment);
+    if (open) { setComment(defaultComment); setError(''); }
   }, [open, defaultComment]);
+
+  function submit() {
+    if (!comment.trim()) { setError('Skriv en kommentar om vad som gjorts innan du stämplar ut.'); return; }
+    onSubmit(comment);
+  }
 
   return (
     <Modal open={open} onClose={onClose} title="Stämpla ut för dagen">
@@ -1661,13 +1685,14 @@ function EndDayModal({ open, onClose, onSubmit, defaultComment }: {
         <Textarea
           label="Vad har utförts idag?"
           value={comment}
-          onChange={e => setComment(e.target.value)}
+          onChange={e => { setComment(e.target.value); if (error) setError(''); }}
           rows={4}
           placeholder="Sammanfatta dagens arbete..."
+          error={error}
         />
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={onClose} className="flex-1">Avbryt</Button>
-          <Button variant="danger" onClick={() => onSubmit(comment)} className="flex-1 gap-2">
+          <Button variant="danger" onClick={submit} className="flex-1 gap-2">
             <Square className="w-4 h-4" /> Stämpla ut
           </Button>
         </div>
