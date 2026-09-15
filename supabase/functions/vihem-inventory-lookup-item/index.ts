@@ -65,6 +65,7 @@ Deno.serve(async (req: Request) => {
 
     let pageText = "";
     let sourceUrl: string | null = null;
+    let imageUrl: string | null = null;
 
     if (rawUrl) {
       let target: URL;
@@ -79,9 +80,32 @@ Deno.serve(async (req: Request) => {
       if (isBlockedHost(target.hostname)) {
         return json({ error: "Den här adressen kan inte hämtas." }, 400);
       }
-      pageText = await fetchPageText(target.toString());
+      const page = await fetchPage(target.toString());
+      pageText = page.text;
       sourceUrl = target.toString();
       if (!pageText.trim()) return json({ error: "Kunde inte läsa något innehåll från sidan." }, 400);
+
+      // Bästa-försök: produktbilden är inte något AI:n behöver gissa fram --
+      // og:image/twitter:image är en väletablerad standard som i praktiken
+      // alla leverantörers produktsidor redan sätter (för länkförhandsvisningar
+      // i t.ex. Slack/sociala medier), så den plockas ut direkt med en regex
+      // och laddas upp till samma lagringsbucket som en manuell bilduppladdning
+      // -- annars skulle formuläret peka på en extern URL som kan sluta
+      // fungera om leverantören ändrar sin sajt. Misslyckas det (ingen
+      // og:image, blockerad värd, för stor fil, fel typ) hoppas det bara
+      // över -- själva artikeldata-uppslaget ska aldrig fallera för det.
+      const ogImage = extractOgImage(page.html, target.toString());
+      if (ogImage && !isBlockedHost(safeHostname(ogImage))) {
+        const fetched = await fetchImageBytes(ogImage);
+        if (fetched) {
+          const ext = (fetched.contentType.split("/")[1] || "jpg").split(";")[0].replace(/[^a-z0-9]/gi, "") || "jpg";
+          const path = `${profile.organisation_id}/${crypto.randomUUID()}-lookup.${ext}`;
+          const { error: uploadError } = await serviceClient.storage.from("vihem-inventory-images").upload(path, fetched.bytes, { contentType: fetched.contentType, upsert: false });
+          if (!uploadError) {
+            imageUrl = serviceClient.storage.from("vihem-inventory-images").getPublicUrl(path).data.publicUrl;
+          }
+        }
+      }
     } else {
       // Inklistrad text -- ingen hämtning görs, admin har själv kopierat innehållet.
       pageText = rawText.slice(0, MAX_TEXT_CHARS);
@@ -93,7 +117,7 @@ Deno.serve(async (req: Request) => {
     const result = await extractItemData(settings.openaiKey, settings.aiModel, pageText);
     if (!result.ok) return json({ error: result.error }, 502);
 
-    return json({ ok: true, data: result.data, source_url: sourceUrl });
+    return json({ ok: true, data: result.data, source_url: sourceUrl, image_url: imageUrl });
   } catch (error) {
     console.error(error);
     return json({ error: error instanceof Error ? error.message : "Internt serverfel" }, 400);
@@ -116,7 +140,7 @@ function isBlockedHost(hostname: string): boolean {
   return false;
 }
 
-async function fetchPageText(url: string): Promise<string> {
+async function fetchPage(url: string): Promise<{ html: string; text: string }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -130,7 +154,7 @@ async function fetchPageText(url: string): Promise<string> {
     });
     if (!res.ok) throw new Error(`Sidan svarade med status ${res.status}.`);
     const reader = res.body?.getReader();
-    if (!reader) return "";
+    if (!reader) return { html: "", text: "" };
     const chunks: Uint8Array[] = [];
     let received = 0;
     while (true) {
@@ -147,7 +171,96 @@ async function fetchPageText(url: string): Promise<string> {
       }
     }
     const html = new TextDecoder("utf-8").decode(concatBytes(chunks));
-    return htmlToText(html).slice(0, MAX_TEXT_CHARS);
+    return { html, text: htmlToText(html).slice(0, MAX_TEXT_CHARS) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** og:image/twitter:image -- checked in document order, first match wins. */
+function extractOgImage(html: string, baseUrl: string): string | null {
+  const metaTags = html.match(/<meta\b[^>]*>/gi) || [];
+  const attr = (tag: string, name: string) => {
+    const m = tag.match(new RegExp(`${name}\\s*=\\s*["']([^"']*)["']`, "i"));
+    return m ? m[1] : null;
+  };
+  for (const tag of metaTags) {
+    const key = (attr(tag, "property") || attr(tag, "name") || "").toLowerCase();
+    if (["og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"].includes(key)) {
+      const content = attr(tag, "content");
+      if (content) {
+        try {
+          return new URL(decodeHtmlEntities(content), baseUrl).toString();
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// content="...&amp;..." -- attribute values keep HTML entities as-is, so a
+// URL with multiple query params (extremely common for CDN/thumbnail
+// image URLs) comes out with literal "&amp;" instead of "&" unless decoded
+// first, which silently mangles the query string.
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;|&apos;/gi, "'");
+}
+
+function safeHostname(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
+const MAX_IMAGE_BYTES = 6_000_000;
+
+async function fetchImageBytes(url: string): Promise<{ bytes: Uint8Array; contentType: string } | null> {
+  let target: URL;
+  try {
+    target = new URL(url);
+  } catch {
+    return null;
+  }
+  if (target.protocol !== "http:" && target.protocol !== "https:") return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(target.toString(), {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; VIHEM-Lager/1.0)" },
+    });
+    if (!res.ok) return null;
+    const contentType = (res.headers.get("content-type") || "").split(";")[0].trim();
+    if (!contentType.startsWith("image/")) return null;
+    const reader = res.body?.getReader();
+    if (!reader) return null;
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        received += value.byteLength;
+        if (received > MAX_IMAGE_BYTES) {
+          await reader.cancel().catch(() => {});
+          return null;
+        }
+        chunks.push(value);
+      }
+    }
+    return { bytes: concatBytes(chunks), contentType };
+  } catch {
+    return null;
   } finally {
     clearTimeout(timeout);
   }
