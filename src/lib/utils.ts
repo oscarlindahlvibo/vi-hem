@@ -231,6 +231,8 @@ export const TERMINATION_STATUS_LABELS: Record<string, string> = {
 export type NotificationSettings = {
   work_order_assigned: boolean;
   work_order_unassigned: boolean;
+  work_order_overdue: boolean;
+  work_order_comment: boolean;
   maintenance_created_staff: boolean;
   maintenance_comment_staff: boolean;
   staff_absence_submitted: boolean;
@@ -249,6 +251,8 @@ export type NotificationSettings = {
 export const defaultNotificationSettings: NotificationSettings = {
   work_order_assigned: true,
   work_order_unassigned: true,
+  work_order_overdue: true,
+  work_order_comment: true,
   maintenance_created_staff: true,
   maintenance_comment_staff: true,
   staff_absence_submitted: true,
@@ -269,6 +273,8 @@ export type BooleanNotificationSettingKey = Exclude<keyof NotificationSettings, 
 export const NOTIFICATION_SETTING_LABELS: { key: BooleanNotificationSettingKey; label: string; description: string }[] = [
   { key: 'work_order_assigned', label: 'Arbetsorder tilldelad', description: 'Notifiera när en arbetsorder tilldelas användaren.' },
   { key: 'work_order_unassigned', label: 'Otilldelad arbetsorder', description: 'Notifiera personal när en arbetsorder läggs upp utan ansvarig.' },
+  { key: 'work_order_overdue', label: 'Försenad arbetsorder', description: 'Notifiera tilldelad personal varje vardagsmorgon kl 7 om arbetsordern är försenad och inte slutförd.' },
+  { key: 'work_order_comment', label: 'Kommentar på arbetsorder', description: 'Notifiera tilldelad personal och den som skapade arbetsordern när någon kommenterar den.' },
   { key: 'maintenance_created_staff', label: 'Ny felanmälan', description: 'Notifiera all personal när en felanmälan kommer in.' },
   { key: 'maintenance_comment_staff', label: 'Kommentar på felanmälan', description: 'Notifiera personal när en hyresgäst kommenterar en felanmälan.' },
   { key: 'staff_absence_submitted', label: 'Frånvaro från personal', description: 'Notifiera admin när personal sjukanmäler sig eller ansöker om ledighet.' },

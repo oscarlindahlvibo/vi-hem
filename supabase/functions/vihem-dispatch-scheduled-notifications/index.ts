@@ -48,8 +48,10 @@ function localMinutesOf(iso: string) {
 // if that succeeded -- creates the notification via the shared
 // create_notification() RPC, passing setting_key so the recipient's own
 // notification preference (falling back to the org's) gates it, same as
-// every other notification path in the app.
-async function createOnce(client: any, row: { organisation_id: string; user_id: string }, key: string, settingKey: string, title: string, message: string) {
+// every other notification path in the app. `type`/`link` default to the
+// time-clock reminders this function originally only handled; other
+// reminders (e.g. overdue work orders) pass their own.
+async function createOnce(client: any, row: { organisation_id: string; user_id: string }, key: string, settingKey: string, title: string, message: string, type = "time_entry", link = "timetracking") {
   const { data, error } = await client.from("vihem_notification_delivery_log").insert({ organisation_id: row.organisation_id, user_id: row.user_id, delivery_key: key, notification_type: settingKey }).select("id").maybeSingle();
   if (error?.code === "23505") return false;
   if (error) throw error;
@@ -59,8 +61,8 @@ async function createOnce(client: any, row: { organisation_id: string; user_id: 
     org_uuid: row.organisation_id,
     notification_title: title,
     notification_message: message,
-    notification_type: "time_entry",
-    notification_link: "timetracking",
+    notification_type: type,
+    notification_link: link,
     setting_key: settingKey,
   });
   if (rpcError) throw rpcError;
@@ -123,6 +125,35 @@ Deno.serve(async request => {
       }
       if (settings.shift_end_reminder && end !== null && now.minutes >= end && now.minutes <= end + 5 && hasOpenWork) {
         if (await createOnce(client, schedule, `${dayKey}:shift-end`, "shift_end_reminder", "Ditt arbetspass slutar nu", "Kom ihåg att stämpla ut om du inte arbetar över.")) created++;
+      }
+    }
+
+    // Overdue work orders: due_date is a plain date (no time-of-day), so
+    // there's no finer "the moment it became overdue" to catch than the
+    // next weekday-morning check -- this single 07:00-07:05 window check
+    // IS both "notify as soon as it's overdue" (the first weekday morning
+    // it's found overdue) and "then every weekday morning" (now.date makes
+    // the delivery-log dedup key change daily, so it fires again each
+    // subsequent weekday morning until the order is completed/cancelled).
+    if (settings.work_order_overdue && now.weekday >= 1 && now.weekday <= 5 && now.minutes >= 420 && now.minutes <= 425) {
+      const { data: overdueOrders } = await client
+        .from("vihem_work_orders")
+        .select("id,title,due_date,assigned_to,assigned_to_ids")
+        .eq("organisation_id", settingsRow.organisation_id)
+        .lt("due_date", now.date)
+        .not("status", "in", "(completed,cancelled)");
+      for (const order of overdueOrders || []) {
+        const assigneeIds = new Set<string>(order.assigned_to_ids || []);
+        if (order.assigned_to) assigneeIds.add(order.assigned_to);
+        for (const userId of assigneeIds) {
+          const row = { organisation_id: settingsRow.organisation_id, user_id: userId };
+          if (await createOnce(
+            client, row, `${now.date}:work-order-overdue:${order.id}`, "work_order_overdue",
+            "Arbetsorder försenad",
+            `"${order.title || "Arbetsorder"}" skulle ha varit klar ${order.due_date} och är inte slutförd.`,
+            "work_order", `workorder/${order.id}`,
+          )) created++;
+        }
       }
     }
   }
