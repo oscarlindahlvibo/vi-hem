@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { TimeCategoriesProvider } from './contexts/TimeCategoriesContext';
+import { WorkOrderCategoriesProvider } from './contexts/WorkOrderCategoriesContext';
 import { Layout } from './components/Layout';
 import { LoginPage } from './components/LoginPage';
 import { ResetPasswordPage } from './components/ResetPasswordPage';
@@ -693,7 +694,9 @@ export default function App() {
     <AppErrorBoundary>
       <AuthProvider>
         <TimeCategoriesProvider>
-          <AppInner />
+          <WorkOrderCategoriesProvider>
+            <AppInner />
+          </WorkOrderCategoriesProvider>
         </TimeCategoriesProvider>
       </AuthProvider>
     </AppErrorBoundary>

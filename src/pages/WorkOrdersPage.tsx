@@ -55,9 +55,11 @@ import {
   Trash2,
   CheckCircle2,
   RotateCcw,
+  Tag,
 } from 'lucide-react';
 import { TIME_CATEGORY_LABELS } from '../lib/utils';
 import { useTimeCategories } from '../contexts/TimeCategoriesContext';
+import { useWorkOrderCategories, type WorkOrderCategoryOption } from '../contexts/WorkOrderCategoriesContext';
 import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
 import type { TimeCategory } from '../types';
 import { WorkOrderOperationsPanel } from '../components/WorkOrderOperationsPanel';
@@ -162,9 +164,104 @@ function isWorkOrderOverdue(order: Pick<WorkOrder, 'status' | 'due_date' | 'sche
   return Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
 }
 
+function WorkOrderCategoryManagerModal({ open, onClose, organisationId, userId }: {
+  open: boolean; onClose: () => void; organisationId: string | null; userId: string;
+}) {
+  const { refresh } = useWorkOrderCategories();
+  const [allCategories, setAllCategories] = useState<WorkOrderCategoryOption[]>([]);
+  const [newLabel, setNewLabel] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function loadAll() {
+    if (!organisationId) return;
+    const { data } = await supabase
+      .from('vihem_work_order_categories')
+      .select('id, key, label, active, sort_order, is_builtin')
+      .eq('organisation_id', organisationId)
+      .order('sort_order', { ascending: true });
+    setAllCategories((data || []) as WorkOrderCategoryOption[]);
+  }
+
+  useEffect(() => { if (open) loadAll(); }, [open, organisationId]);
+
+  function slugify(label: string) {
+    const base = label
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return base || `kategori_${Date.now()}`;
+  }
+
+  async function handleAdd() {
+    if (!organisationId || !newLabel.trim()) return;
+    setSaving(true);
+    setError('');
+    try {
+      let key = slugify(newLabel);
+      if (allCategories.some(c => c.key === key)) key = `${key}_${Date.now().toString(36)}`;
+      const { error: insertError } = await supabase.from('vihem_work_order_categories').insert({
+        organisation_id: organisationId,
+        key,
+        label: newLabel.trim(),
+        sort_order: allCategories.length + 1,
+        is_builtin: false,
+        created_by: userId,
+      });
+      if (insertError) throw insertError;
+      setNewLabel('');
+      await loadAll();
+      await refresh();
+    } catch (err: any) {
+      setError(err.message || 'Kunde inte lägga till kategorin.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleToggleActive(id: string, active: boolean) {
+    await supabase.from('vihem_work_order_categories').update({ active }).eq('id', id);
+    await loadAll();
+    await refresh();
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Kategorier för arbetsordrar">
+      <div className="space-y-4">
+        <p className="text-sm text-slate-500">
+          Kategorierna visas när en arbetsorder skapas eller redigeras. Grundkategorierna kan inte tas bort, men egna kategorier går att lägga till och inaktivera.
+        </p>
+        <div className="space-y-2">
+          {allCategories.map(c => (
+            <div key={c.id} className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${c.active ? 'border-slate-200' : 'border-slate-100 bg-slate-50'}`}>
+              <span className={`text-sm ${c.active ? 'text-slate-800' : 'text-slate-400 line-through'}`}>
+                {c.label}{c.is_builtin && <span className="ml-2 text-xs text-slate-400 no-underline">Grundkategori</span>}
+              </span>
+              {!c.is_builtin && (
+                <Button variant="ghost" size="sm" onClick={() => handleToggleActive(c.id, !c.active)}>
+                  {c.active ? 'Inaktivera' : 'Aktivera'}
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 pt-2 border-t border-slate-100">
+          <Input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="Ny kategori, t.ex. Larm" className="flex-1" />
+          <Button variant="primary" onClick={handleAdd} loading={saving} disabled={!newLabel.trim()}>
+            <Plus className="w-4 h-4" /> Lägg till
+          </Button>
+        </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+      </div>
+    </Modal>
+  );
+}
+
 export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: { onNavigate: (page: string) => void; initialWorkOrderId?: string }) {
   const { user, loading: authLoading } = useAuth();
   const { categories: timeCategories } = useTimeCategories();
+  const { categories: woCategories } = useWorkOrderCategories();
   const [workOrders, setWorkOrders] = useState<WOWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -222,6 +319,11 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   const [activeTimeEntry, setActiveTimeEntry] = useState<{ id: string; work_order_id: string | null } | null>(null);
 
   const isStaff = user?.role === 'staff' || user?.role === 'admin' || user?.role === 'superadmin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [newChecklistItemText, setNewChecklistItemText] = useState('');
+  const [savingChecklist, setSavingChecklist] = useState(false);
+  const categoryOptions = (woCategories.length > 0 ? woCategories.map(c => c.label) : WO_CATEGORIES).map(label => ({ value: label, label }));
 
   // Fetch work orders
   useEffect(() => {
@@ -657,6 +759,40 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     }
   }
 
+  async function updateChecklist(nextChecklist: import('../types').ChecklistItem[]) {
+    if (!selectedWorkOrder) return;
+    setSavingChecklist(true);
+    try {
+      const { error } = await supabase
+        .from('vihem_work_orders')
+        .update({ checklist: nextChecklist })
+        .eq('id', selectedWorkOrder.id);
+      if (error) throw error;
+      setSelectedWorkOrder({ ...selectedWorkOrder, checklist: nextChecklist });
+      setWorkOrders(orders => orders.map(order => order.id === selectedWorkOrder.id ? { ...order, checklist: nextChecklist } : order));
+    } catch (err) {
+      console.error('Error updating checklist:', err);
+    } finally {
+      setSavingChecklist(false);
+    }
+  }
+
+  function toggleChecklistItem(itemId: string) {
+    if (!selectedWorkOrder) return;
+    updateChecklist(selectedWorkOrder.checklist.map(item => item.id === itemId ? { ...item, done: !item.done } : item));
+  }
+
+  function removeSavedChecklistItem(itemId: string) {
+    if (!selectedWorkOrder) return;
+    updateChecklist(selectedWorkOrder.checklist.filter(item => item.id !== itemId));
+  }
+
+  function addChecklistItem() {
+    if (!selectedWorkOrder || !newChecklistItemText.trim()) return;
+    updateChecklist([...selectedWorkOrder.checklist, { id: createClientId(), text: newChecklistItemText.trim(), done: false }]);
+    setNewChecklistItemText('');
+  }
+
   function openEditModal() {
     if (!selectedWorkOrder) return;
     setEditForm({
@@ -943,12 +1079,27 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         subtitle={`${filtered.length} arbetsordrar`}
         action={
           isStaff ? (
-            <Button onClick={() => setShowCreateModal(true)} size="sm">
-              <Plus className="w-4 h-4" />
-              Ny arbetsorder
-            </Button>
+            <div className="flex items-center gap-2">
+              {isAdmin && (
+                <Button variant="secondary" size="sm" onClick={() => setShowCategoryManager(true)}>
+                  <Tag className="w-4 h-4" />
+                  Kategorier
+                </Button>
+              )}
+              <Button onClick={() => setShowCreateModal(true)} size="sm">
+                <Plus className="w-4 h-4" />
+                Ny arbetsorder
+              </Button>
+            </div>
           ) : null
         }
+      />
+
+      <WorkOrderCategoryManagerModal
+        open={showCategoryManager}
+        onClose={() => setShowCategoryManager(false)}
+        organisationId={user?.organisation_id || null}
+        userId={user?.id || ''}
       />
 
       <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-1">
@@ -1497,7 +1648,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
 
             <Select
               label="Kategori"
-              options={WO_CATEGORIES.map((cat) => ({ value: cat, label: cat }))}
+              options={categoryOptions}
               value={createForm.category}
               onChange={(e) => setCreateForm({ ...createForm, category: e.target.value })}
             />
@@ -1696,7 +1847,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
 
             <Select
               label="Kategori"
-              options={WO_CATEGORIES.map((cat) => ({ value: cat, label: cat }))}
+              options={categoryOptions}
               value={editForm.category}
               onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
             />
@@ -1936,16 +2087,41 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
               </div>
             )}
 
-            {selectedWorkOrder.checklist?.length > 0 && (
+            {isStaff && (
               <div>
                 <p className="mb-2 text-xs font-medium uppercase text-slate-500">Checklista</p>
                 <div className="space-y-2">
-                  {selectedWorkOrder.checklist.map((item) => (
+                  {selectedWorkOrder.checklist?.map((item) => (
                     <div key={item.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                      <CheckSquare className={`h-4 w-4 ${item.done ? 'text-green-600' : 'text-slate-400'}`} />
-                      <span>{item.text}</span>
+                      <button type="button" onClick={() => toggleChecklistItem(item.id)} disabled={savingChecklist} className="flex-shrink-0">
+                        <CheckSquare className={`h-4 w-4 ${item.done ? 'text-green-600' : 'text-slate-400'}`} />
+                      </button>
+                      <span className={`flex-1 ${item.done ? 'text-slate-400 line-through' : ''}`}>{item.text}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeSavedChecklistItem(item.id)}
+                        disabled={savingChecklist}
+                        className="flex-shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                   ))}
+                  {!selectedWorkOrder.checklist?.length && (
+                    <p className="text-sm text-slate-400">Ingen checklista ännu.</p>
+                  )}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <Input
+                    value={newChecklistItemText}
+                    onChange={(e) => setNewChecklistItemText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addChecklistItem(); } }}
+                    placeholder="Lägg till en rad..."
+                    className="flex-1"
+                  />
+                  <Button variant="secondary" size="sm" onClick={addChecklistItem} loading={savingChecklist} disabled={!newChecklistItemText.trim()}>
+                    <Plus className="h-4 w-4" /> Lägg till
+                  </Button>
                 </div>
               </div>
             )}
