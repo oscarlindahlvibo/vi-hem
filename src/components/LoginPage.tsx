@@ -8,6 +8,12 @@ import { passwordResetRedirectUrl } from '../lib/authUrls';
 import { initiateBankIDAuth } from '../lib/bankid';
 import { useBankIdFlow } from '../hooks/useBankIdFlow';
 
+// The hook itself auto-detects a phone and always uses the same-device
+// app-switch flow there -- this is only to decide whether to additionally
+// offer that same choice to a desktop visitor, who may have the BankID
+// security program installed locally too.
+const isMobileBrowser = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 export function LoginPage() {
   const { signIn, bankIDAvailable } = useAuth();
   const [email, setEmail] = useState('');
@@ -28,9 +34,9 @@ export function LoginPage() {
     setLoading(false);
   }
 
-  function handleBankIDLogin() {
+  function handleBankIDLogin(sameDevice?: boolean) {
     setError('');
-    bankId.start(() => initiateBankIDAuth({ environment: 'test', edgeFunctionUrl: '' }, ''));
+    bankId.start(() => initiateBankIDAuth({ environment: 'test', edgeFunctionUrl: '' }, ''), sameDevice !== undefined ? { sameDevice } : undefined);
   }
 
   // The hook only gets the user through BankID approval + a magic link --
@@ -104,7 +110,7 @@ export function LoginPage() {
               <>
                 <button
                   type="button"
-                  onClick={handleBankIDLogin}
+                  onClick={() => handleBankIDLogin()}
                   className={`w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl font-semibold text-sm transition-all border-2 ${
                     bankIDAvailable
                       ? 'bg-[#193E4F] hover:bg-[#122e3c] text-white border-[#193E4F] hover:border-[#122e3c] cursor-pointer'
@@ -124,6 +130,15 @@ export function LoginPage() {
                   <p className="text-xs text-slate-400 text-center mt-2">
                     BankID-inloggning aktiveras när integrationen är konfigurerad.
                   </p>
+                )}
+                {bankIDAvailable && !isMobileBrowser() && (
+                  <button
+                    type="button"
+                    onClick={() => handleBankIDLogin(true)}
+                    className="w-full text-center text-xs text-slate-500 hover:text-slate-700 mt-2"
+                  >
+                    Har du BankID på den här enheten? Logga in utan att skanna QR-kod
+                  </button>
                 )}
               </>
             )}

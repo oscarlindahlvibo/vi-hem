@@ -49,7 +49,11 @@ export interface BankIdFlowState {
   message: string;
   error: string;
   result: BankIDCollectResult | null;
-  start: (starter: () => Promise<BankIDAuthOrder>) => Promise<void>;
+  /** `sameDevice` defaults to auto-detecting a phone (isMobileDevice()) --
+   * pass it explicitly to let a desktop user opt into the same-device
+   * app-switch flow too (they may have the BankID security program
+   * installed locally), or to force QR on a phone. */
+  start: (starter: () => Promise<BankIDAuthOrder>, options?: { sameDevice?: boolean }) => Promise<void>;
   reset: () => void;
 }
 
@@ -124,10 +128,10 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
     }, POLL_MS);
   }, [finish, signingToken]);
 
-  const beginFromOrder = useCallback((order: BankIDAuthOrder) => {
+  const beginFromOrder = useCallback((order: BankIDAuthOrder, sameDevice: boolean) => {
     setStatus('pending');
     setError('');
-    if (isMobileDevice()) {
+    if (sameDevice) {
       const launchUrl = bankIDLaunchUrl(order);
       if (launchUrl) {
         try { window.localStorage.setItem(storageKey, JSON.stringify({ orderRef: order.orderRef, startedAt: Date.now() })); } catch { /* best effort */ }
@@ -150,7 +154,7 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
     poll(order.orderRef, 0);
   }, [poll, storageKey]);
 
-  const start = useCallback(async (starter: () => Promise<BankIDAuthOrder>) => {
+  const start = useCallback(async (starter: () => Promise<BankIDAuthOrder>, options?: { sameDevice?: boolean }) => {
     cancelled.current = false;
     stopTimers();
     setStatus('starting');
@@ -159,7 +163,7 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
     setQrImage(null);
     try {
       const order = await starter();
-      beginFromOrder(order);
+      beginFromOrder(order, options?.sameDevice ?? isMobileDevice());
     } catch (err) {
       finish('failed', undefined, err instanceof BankIDError ? err.message : (err instanceof Error ? err.message : 'BankID-anropet misslyckades.'));
     }
