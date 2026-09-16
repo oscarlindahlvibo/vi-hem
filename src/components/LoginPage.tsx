@@ -7,12 +7,7 @@ import { Button } from './ui';
 import { passwordResetRedirectUrl } from '../lib/authUrls';
 import { initiateBankIDAuth } from '../lib/bankid';
 import { useBankIdFlow } from '../hooks/useBankIdFlow';
-
-// The hook itself auto-detects a phone and always uses the same-device
-// app-switch flow there -- this is only to decide whether to additionally
-// offer that same choice to a desktop visitor, who may have the BankID
-// security program installed locally too.
-const isMobileBrowser = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+import { isMobileBrowser } from '../lib/utils';
 
 export function LoginPage() {
   const { signIn, bankIDAvailable } = useAuth();

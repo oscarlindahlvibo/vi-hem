@@ -4,6 +4,14 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import type { MRCategory, MRPriority, MRStatus, WOPriority, WOStatus, TimeCategory, TimeEntryType, Role } from '../types';
 
+// Same phone check useBankIdFlow uses internally to auto-pick the
+// same-device app-switch flow -- shared here so any UI offering that
+// choice explicitly (LoginPage, Layout's "Koppla BankID") only shows it
+// where it isn't already the default.
+export function isMobileBrowser(): boolean {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 export function createClientId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();

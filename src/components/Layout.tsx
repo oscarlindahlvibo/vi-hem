@@ -7,7 +7,7 @@ import { OfflineStatus } from './OfflineStatus';
 import { Button, Input, Modal } from './ui';
 import { useBankIdFlow } from '../hooks/useBankIdFlow';
 import { initiateBankIDLink, formatPersonalNumber } from '../lib/bankid';
-import { useScrollLock } from '../lib/utils';
+import { useScrollLock, isMobileBrowser } from '../lib/utils';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
@@ -58,6 +58,11 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
   const [bankIdLinkedNotice, setBankIdLinkedNotice] = useState(false);
   const bankIdLink = useBankIdFlow('link');
   const bankIdBusy = bankIdLink.status === 'starting' || bankIdLink.status === 'redirecting' || bankIdLink.status === 'pending';
+
+  function startBankIdLink(sameDevice?: boolean) {
+    setBankIdLinkedNotice(false);
+    bankIdLink.start(() => initiateBankIDLink({ environment: 'test', edgeFunctionUrl: '' }, ''), sameDevice !== undefined ? { sameDevice } : undefined);
+  }
 
   const navGroups: NavGroup[] = [
     { label: 'Hem', icon: <Home className="w-5 h-5" />, items: [
@@ -507,11 +512,20 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
               <Button
                 variant="primary"
                 className="w-full justify-center gap-2"
-                onClick={() => { setBankIdLinkedNotice(false); bankIdLink.start(() => initiateBankIDLink({ environment: 'test', edgeFunctionUrl: '' }, '')); }}
+                onClick={() => startBankIdLink()}
               >
                 <ShieldCheck className="h-4 w-4" />
                 {user?.bankid_personal_number ? 'Koppla om BankID' : 'Starta BankID'}
               </Button>
+              {!isMobileBrowser() && (
+                <button
+                  type="button"
+                  onClick={() => startBankIdLink(true)}
+                  className="w-full text-center text-xs text-slate-500 hover:text-slate-700"
+                >
+                  Har du BankID på den här enheten? Logga in utan att skanna QR-kod
+                </button>
+              )}
             </>
           )}
         </div>
