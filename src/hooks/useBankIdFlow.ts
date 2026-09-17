@@ -28,6 +28,18 @@
 //     so it survives the same-device round trip. (This is why cross-device
 //     QR login always worked: it never navigates away, so this boundary
 //     never comes up.)
+//  3. The same-device launch used to fire via `window.location.href =
+//     launchUrl` automatically, straight out of the async callback that
+//     created the order -- i.e. *not* as the direct result of the user's
+//     click, but one network round-trip later. A documented Chrome/Android
+//     bug in another BankID integration (ActiveLogin.Authentication#251)
+//     shows this exact pattern -- start the order via an async call, then
+//     programmatically navigate -- makes Chrome on Android lose the
+//     "direct user interaction" context, breaking the app hand-off. Now
+//     the order is created ahead of time and `launchUrl` is exposed so the
+//     caller can render a real `<a href={launchUrl}>` -- clicking an actual
+//     anchor is the most gesture-preserving navigation there is, no JS
+//     `location.href` involved in the critical hop at all.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { bankIDLaunchUrl, BankIDError, collectBankIDOrder, type BankIDAuthOrder, type BankIDCollectResult } from '../lib/bankid';
 
@@ -49,11 +61,21 @@ export interface BankIdFlowState {
   message: string;
   error: string;
   result: BankIDCollectResult | null;
+  /** Set once a same-device order is ready. Render a real `<a
+   * href={launchUrl}>` and let the browser's own anchor navigation open
+   * it -- don't `window.location.href = launchUrl` this from JS, see the
+   * module header (point 3) for why. */
+  launchUrl: string | null;
   /** `sameDevice` defaults to auto-detecting a phone (isMobileDevice()) --
    * pass it explicitly to let a desktop user opt into the same-device
    * app-switch flow too (they may have the BankID security program
    * installed locally), or to force QR on a phone. */
   start: (starter: () => Promise<BankIDAuthOrder>, options?: { sameDevice?: boolean }) => Promise<void>;
+  /** Call once the user actually clicks the `<a href={launchUrl}>` -- marks
+   * the order pending and starts polling. The anchor's own default
+   * behavior handles the navigation; this just starts collect() so the
+   * page is already listening when BankID redirects back. */
+  confirmLaunched: () => void;
   reset: () => void;
 }
 
@@ -71,11 +93,13 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [result, setResult] = useState<BankIDCollectResult | null>(null);
+  const [launchUrl, setLaunchUrl] = useState<string | null>(null);
 
   const pollTimer = useRef<number | null>(null);
   const qrTimer = useRef<number | null>(null);
   const qrBaseUrl = useRef<string | null>(null);
   const cancelled = useRef(false);
+  const pendingOrderRef = useRef<string | null>(null);
 
   const stopTimers = useCallback(() => {
     if (pollTimer.current) window.clearTimeout(pollTimer.current);
@@ -93,6 +117,7 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
     stopTimers();
     setStatus(finalStatus);
     setQrImage(null);
+    setLaunchUrl(null);
     if (r) setResult(r);
     if (errMsg) setError(errMsg);
     clearPending();
@@ -132,13 +157,17 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
     setStatus('pending');
     setError('');
     if (sameDevice) {
-      const launchUrl = bankIDLaunchUrl(order);
-      if (launchUrl) {
+      const url = bankIDLaunchUrl(order);
+      if (url) {
+        // Stash the pending order now, before the user has even clicked the
+        // link -- if they do click and get redirected away, the resume
+        // effect below needs this already in place to pick polling back up.
         try { window.localStorage.setItem(storageKey, JSON.stringify({ orderRef: order.orderRef, startedAt: Date.now() })); } catch { /* best effort */ }
+        pendingOrderRef.current = order.orderRef;
         setStatus('redirecting');
-        setMessage('Öppnar BankID-appen...');
-        window.location.href = launchUrl;
-        return; // page is navigating away -- nothing left to do here
+        setMessage('Tryck på knappen för att öppna BankID-appen.');
+        setLaunchUrl(url);
+        return; // waiting for confirmLaunched() -- see the anchor click below
       }
     }
     if (order.qrImage) {
@@ -161,6 +190,7 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
     setError('');
     setResult(null);
     setQrImage(null);
+    setLaunchUrl(null);
     try {
       const order = await starter();
       beginFromOrder(order, options?.sameDevice ?? isMobileDevice());
@@ -169,12 +199,25 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
     }
   }, [beginFromOrder, finish, stopTimers]);
 
+  // Called from the anchor's onClick, right as the browser is about to
+  // follow href -- the click itself does the navigation, this just starts
+  // polling so the page is already listening for BankID's redirect back.
+  const confirmLaunched = useCallback(() => {
+    if (!pendingOrderRef.current) return;
+    setStatus('pending');
+    setMessage('Öppnar BankID-appen...');
+    setLaunchUrl(null);
+    poll(pendingOrderRef.current, 0);
+  }, [poll]);
+
   const reset = useCallback(() => {
     cancelled.current = true;
     stopTimers();
     clearPending();
+    pendingOrderRef.current = null;
     setStatus('idle');
     setQrImage(null);
+    setLaunchUrl(null);
     setMessage('');
     setError('');
     setResult(null);
@@ -206,5 +249,5 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
 
   useEffect(() => () => { cancelled.current = true; stopTimers(); }, [stopTimers]);
 
-  return { status, qrImage, message, error, result, start, reset };
+  return { status, qrImage, message, error, result, launchUrl, start, confirmLaunched, reset };
 }

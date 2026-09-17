@@ -765,7 +765,17 @@ Signeringsmetod: Handskriven signatur`,
                   Du omdirigeras till BankID-appen för att signera avtalet med din elektroniska ID-handling.
                   Signaturen är rättsligt bindande.
                 </p>
-                {bankId.message && <p className="text-xs font-semibold text-blue-700">{bankId.message}</p>}
+                {bankId.launchUrl ? (
+                  <a
+                    href={bankId.launchUrl}
+                    onClick={() => bankId.confirmLaunched()}
+                    className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#193E4F] px-4 py-3 text-sm font-semibold text-white hover:bg-[#122e3c]"
+                  >
+                    <ShieldCheck className="h-4 w-4" /> Öppna BankID-appen
+                  </a>
+                ) : (
+                  bankId.message && <p className="text-xs font-semibold text-blue-700">{bankId.message}</p>
+                )}
                 {bankId.qrImage && <img src={bankId.qrImage} alt="QR-kod för BankID" className="mx-auto h-40 w-40 rounded-lg border border-slate-200 bg-white p-2" />}
                 {!BANKID_ENABLED && (
                   <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">

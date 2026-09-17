@@ -99,7 +99,17 @@ export function LoginPage() {
                 {bankId.qrImage && (
                   <img src={bankId.qrImage} alt="QR-kod för BankID" className="mx-auto mb-3 h-44 w-44 rounded-lg border border-slate-200 bg-white p-2" />
                 )}
-                <p className="text-sm text-slate-600">{bankId.message || 'Startar BankID...'}</p>
+                {bankId.launchUrl ? (
+                  <a
+                    href={bankId.launchUrl}
+                    onClick={() => bankId.confirmLaunched()}
+                    className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#193E4F] px-4 py-3 text-sm font-semibold text-white hover:bg-[#122e3c]"
+                  >
+                    <BankIDIcon className="h-5 w-5 flex-shrink-0" /> Öppna BankID-appen
+                  </a>
+                ) : (
+                  <p className="text-sm text-slate-600">{bankId.message || 'Startar BankID...'}</p>
+                )}
               </div>
             ) : (
               <>
