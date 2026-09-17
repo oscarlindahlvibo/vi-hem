@@ -61,19 +61,29 @@ export function collectBankIDOrder(_config: BankIDConfig, orderRef: string, sign
 export function cancelBankIDOrder(_config: BankIDConfig, orderRef: string) { return invoke<void>({ action: 'cancel', order_ref: orderRef }); }
 export function generateBankIDQRContent(_qrStartToken: string, _qrStartSecret: string, _elapsedSeconds: number) { return ''; }
 
-export function bankIDLaunchUrl(order: BankIDAuthOrder) {
+/** `redirectOverride`: omit for the normal web behavior (redirect back to
+ * this origin, carrying orderRef -- see below). Pass `null` explicitly for
+ * the native-app path (see useBankIdFlow.ts's Capacitor branch): there,
+ * BankID is opened in an in-app browser overlay that never unloads our own
+ * JS, so completion is detected by our own continuous collect() polling
+ * instead of a redirect-triggered page reload -- redirect=null is BankID's
+ * own documented recommendation for exactly this case ("use redirect=null
+ * when it is possible"; "the calling application will be in focus"). */
+export function bankIDLaunchUrl(order: BankIDAuthOrder, redirectOverride?: string | null) {
   const providerUrl = typeof order.autoStartUrl === 'string' ? order.autoStartUrl.trim() : '';
-  if (providerUrl) return providerUrl;
+  if (providerUrl && redirectOverride === undefined) return providerUrl;
+  if (!order.autoStartToken) return '';
   // BankSignering's own integration instructions (onboarding email):
   // "Sätt er app + orderRef som redirecturl" -- the redirect must carry the
   // orderRef, not just the bare origin, so this was previously
-  // non-compliant with their documented integration pattern. The app
-  // itself still resumes via the orderRef stashed in localStorage (see
+  // non-compliant with their documented integration pattern. The web app
+  // resumes via the orderRef stashed in localStorage (see
   // useBankIdFlow.ts), not by parsing this query param -- it's included
   // purely to match what BankSignering's backend expects to see.
-  return order.autoStartToken
-    ? `https://app.bankid.com/?autostarttoken=${encodeURIComponent(order.autoStartToken)}&redirect=${encodeURIComponent(`${window.location.origin}/?bankid_order_ref=${order.orderRef}`)}`
-    : '';
+  const redirect = redirectOverride !== undefined
+    ? (redirectOverride ?? 'null')
+    : `${window.location.origin}/?bankid_order_ref=${order.orderRef}`;
+  return `https://app.bankid.com/?autostarttoken=${encodeURIComponent(order.autoStartToken)}&redirect=${encodeURIComponent(redirect)}`;
 }
 /** Normalizes an admin-typed personnummer (10 or 12 digits, with or
  * without a dash) into the 12-digit, no-separator form BankID's
