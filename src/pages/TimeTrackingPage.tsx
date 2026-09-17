@@ -88,6 +88,22 @@ function localDateKey(value: string | Date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+const MIN_COMMENT_LENGTH = 4;
+
+// Byt jobb / stämpla ut ska bara kräva en kommentar när det faktiskt finns
+// något att motivera -- en arbetsorder eller ett kundprojekt har redan sin
+// egen dokumentation (arbetsordern/projektet), så bara ren tidsbokföring
+// utan ett sånt objekt (Administration, Allmänt fastighetsunderhåll, Jour,
+// osv) kräver en fritextkommentar. ÄTA-tid är undantaget undantaget: det är
+// tekniskt sett en customer_project-post, men utanför offert och därför
+// alltid värt att motivera precis som övrig ospecificerad tid.
+function isCommentRequiredForEntry(entry: Pick<TimeEntry, 'category' | 'project_billing_scope'> | null): boolean {
+  if (!entry) return true;
+  if (entry.category === 'work_order') return false;
+  if (entry.category === 'customer_project') return entry.project_billing_scope === 'outside_quote';
+  return true;
+}
+
 const STATUS_LABEL: Record<TimeStatus, string> = {
   draft: 'Utkast',
   submitted: 'Inskickad',
@@ -1092,13 +1108,14 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
         customerProjects={customerProjects}
         title={stampMode === 'switch' ? 'Byt jobb' : 'Stämpla in'}
         submitLabel={stampMode === 'switch' ? 'Byt jobb' : 'Stämpla in'}
-        commentRequired={stampMode === 'switch'}
+        commentRequired={stampMode === 'switch' && isCommentRequiredForEntry(currentEntry)}
       />
 
       <EndDayModal
         open={showEndDayModal}
         onClose={() => setShowEndDayModal(false)}
         defaultComment={dailySummaries[localDateKey(new Date())]?.comment || ''}
+        commentRequired={isCommentRequiredForEntry(currentEntry)}
         onSubmit={(comment) => handleStampOut(comment)}
       />
 
@@ -1337,9 +1354,11 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
   customerProjects: CustomerProjectSummary[];
   title?: string;
   submitLabel?: string;
-  /** Byt jobb ska alltid motiveras med en kommentar (vad man gick från/till)
-   * -- vanlig stämpla-in har inget att motivera mot ännu, så där är den
-   * fortsatt valfri. */
+  /** Byt jobb ska motiveras med en kommentar (minst 4 tecken) om det man
+   * lämnar inte är en arbetsorder eller kundprojekt (utom ÄTA-tid, som
+   * fortsatt kräver kommentar) -- se isCommentRequiredForEntry. Vanlig
+   * stämpla-in har inget att motivera mot ännu, så där är den alltid
+   * valfri (caller skickar aldrig true för den). */
   commentRequired?: boolean;
 }) {
   const { categories } = useTimeCategories();
@@ -1355,7 +1374,7 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
   function reset() { setCategory('general'); setWorkOrderId(''); setCustomerProjectId(''); setProjectBillingScope('included_in_quote'); setChangeOrderId(''); setComment(''); setCommentError(''); }
 
   function submit() {
-    if (commentRequired && !comment.trim()) { setCommentError('Skriv en kommentar om vad du byter till.'); return; }
+    if (commentRequired && comment.trim().length < MIN_COMMENT_LENGTH) { setCommentError(`Skriv en kommentar om vad du byter till (minst ${MIN_COMMENT_LENGTH} tecken).`); return; }
     onSubmit(category, workOrderId || undefined, comment, selectedProject?.customer_name || '', customerProjectId || undefined, projectBillingScope, changeOrderId || undefined);
     reset();
   }
@@ -1661,11 +1680,14 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
   );
 }
 
-function EndDayModal({ open, onClose, onSubmit, defaultComment }: {
+function EndDayModal({ open, onClose, onSubmit, defaultComment, commentRequired = true }: {
   open: boolean;
   onClose: () => void;
   onSubmit: (comment: string) => void;
   defaultComment: string;
+  /** Bara krävd om det man var instämplad på inte redan är dokumenterat av
+   * sig själv -- se isCommentRequiredForEntry. */
+  commentRequired?: boolean;
 }) {
   const [comment, setComment] = useState(defaultComment);
   const [error, setError] = useState('');
@@ -1675,7 +1697,7 @@ function EndDayModal({ open, onClose, onSubmit, defaultComment }: {
   }, [open, defaultComment]);
 
   function submit() {
-    if (!comment.trim()) { setError('Skriv en kommentar om vad som gjorts innan du stämplar ut.'); return; }
+    if (commentRequired && comment.trim().length < MIN_COMMENT_LENGTH) { setError(`Skriv en kommentar om vad som gjorts innan du stämplar ut (minst ${MIN_COMMENT_LENGTH} tecken).`); return; }
     onSubmit(comment);
   }
 
@@ -1683,7 +1705,7 @@ function EndDayModal({ open, onClose, onSubmit, defaultComment }: {
     <Modal open={open} onClose={onClose} title="Stämpla ut för dagen">
       <div className="space-y-4">
         <Textarea
-          label="Vad har utförts idag?"
+          label={commentRequired ? 'Vad har utförts idag?' : 'Vad har utförts idag? (valfritt)'}
           value={comment}
           onChange={e => { setComment(e.target.value); if (error) setError(''); }}
           rows={4}
