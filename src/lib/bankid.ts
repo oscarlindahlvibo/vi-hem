@@ -62,13 +62,13 @@ export function cancelBankIDOrder(_config: BankIDConfig, orderRef: string) { ret
 export function generateBankIDQRContent(_qrStartToken: string, _qrStartSecret: string, _elapsedSeconds: number) { return ''; }
 
 /** `redirectOverride`: omit for the normal web behavior (redirect back to
- * this origin, carrying orderRef -- see below). Pass `null` explicitly for
- * the native-app path (see useBankIdFlow.ts's Capacitor branch), together
- * with `useCustomScheme: true` -- see that constant's own doc comment for
- * why. redirect=null is BankID's own documented recommendation for a
- * native-app hand-off ("use redirect=null when it is possible"; "the
- * calling application will be in focus"), since there's nothing to
- * navigate back to. */
+ * this origin, carrying orderRef -- see below). Pass VI-HEM's own
+ * `vihem://` URL scheme for the native-app path (see useBankIdFlow.ts's
+ * Capacitor branch, `NATIVE_RETURN_URL`), together with `useCustomScheme:
+ * true` -- so the OS hands control back to VI-HEM once BankID finishes,
+ * see that hook's module header (point 4) for why `redirect=null` isn't
+ * enough on its own despite being BankID's documented recommendation for
+ * a native-app hand-off. */
 export function bankIDLaunchUrl(order: BankIDAuthOrder, redirectOverride?: string | null, useCustomScheme = false) {
   const providerUrl = typeof order.autoStartUrl === 'string' ? order.autoStartUrl.trim() : '';
   if (providerUrl && redirectOverride === undefined && !useCustomScheme) return providerUrl;

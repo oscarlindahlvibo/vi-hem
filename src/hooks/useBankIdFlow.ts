@@ -58,14 +58,32 @@
 //     tap restrictions, and WKWebView hands off non-http(s) navigations to
 //     iOS directly without ever loading a page, so the app's own JS (and
 //     its collect() polling) never unloads -- same as tapping a mailto:
-//     link. redirect=null is used since nothing needs to navigate anywhere
-//     for this to work -- BankID's own docs recommend redirect=null "when
-//     it is possible", and for a native app hand-off it genuinely is.
+//     link. redirect=null (BankID's documented recommendation for a
+//     native-app hand-off, "the calling application will be in focus") was
+//     tried first, but doesn't actually bring VI-HEM back to the
+//     foreground in this webview-launched setup -- the user stayed
+//     stranded in the BankID app after completing. iOS/Android don't let
+//     any app silently steal focus back; the only reliable way is for
+//     BankID's app to itself call a URL scheme VI-HEM owns, which the OS
+//     then routes straight to VI-HEM (same mechanism as VI-HEM opening
+//     BankID, in reverse). So native redirects to `vihem://bankid-return`
+//     instead -- see CFBundleURLTypes in ios/App/App/Info.plist and the
+//     `vihem` intent-filter in android/app/src/main/AndroidManifest.xml.
+//     Nothing needs to read that URL's contents: the poll below is already
+//     running (or resumes the instant the OS un-suspends VI-HEM's JS), so
+//     completion is picked up on its own -- the scheme only needs to exist
+//     so the OS has somewhere of ours to hand control back to.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { bankIDLaunchUrl, BankIDError, collectBankIDOrder, type BankIDAuthOrder, type BankIDCollectResult } from '../lib/bankid';
 
 const STORAGE_PREFIX = 'vihem_bankid_pending_';
+// A URL scheme VI-HEM itself owns (see CFBundleURLTypes in
+// ios/App/App/Info.plist and the `vihem` intent-filter in
+// android/app/src/main/AndroidManifest.xml) -- passed as BankID's redirect
+// for the native same-device flow so the OS brings VI-HEM back to the
+// foreground once signing completes, see module header point 4.
+const NATIVE_RETURN_URL = 'vihem://bankid-return';
 const QR_REFRESH_MS = 5000;
 const POLL_MS = 2000;
 const MAX_POLL_ATTEMPTS = 90; // ~3 minutes, matching the BankID order's own server-side expiry window
@@ -180,10 +198,10 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
     setError('');
     if (sameDevice) {
       // See module header, point 4 for why native uses the bankid:///
-      // custom scheme with redirect=null instead of the https Universal
-      // Link the web flow below uses.
+      // custom scheme, redirecting to VI-HEM's own URL scheme, instead of
+      // the https Universal Link the web flow below uses.
       const native = Capacitor.isNativePlatform();
-      const url = native ? bankIDLaunchUrl(order, null, true) : bankIDLaunchUrl(order);
+      const url = native ? bankIDLaunchUrl(order, NATIVE_RETURN_URL, true) : bankIDLaunchUrl(order);
       if (url) {
         if (!native) {
           // Stash the pending order now, before the user has even clicked
