@@ -63,15 +63,15 @@ export function generateBankIDQRContent(_qrStartToken: string, _qrStartSecret: s
 
 /** `redirectOverride`: omit for the normal web behavior (redirect back to
  * this origin, carrying orderRef -- see below). Pass `null` explicitly for
- * the native-app path (see useBankIdFlow.ts's Capacitor branch): there,
- * BankID is opened in an in-app browser overlay that never unloads our own
- * JS, so completion is detected by our own continuous collect() polling
- * instead of a redirect-triggered page reload -- redirect=null is BankID's
- * own documented recommendation for exactly this case ("use redirect=null
- * when it is possible"; "the calling application will be in focus"). */
-export function bankIDLaunchUrl(order: BankIDAuthOrder, redirectOverride?: string | null) {
+ * the native-app path (see useBankIdFlow.ts's Capacitor branch), together
+ * with `useCustomScheme: true` -- see that constant's own doc comment for
+ * why. redirect=null is BankID's own documented recommendation for a
+ * native-app hand-off ("use redirect=null when it is possible"; "the
+ * calling application will be in focus"), since there's nothing to
+ * navigate back to. */
+export function bankIDLaunchUrl(order: BankIDAuthOrder, redirectOverride?: string | null, useCustomScheme = false) {
   const providerUrl = typeof order.autoStartUrl === 'string' ? order.autoStartUrl.trim() : '';
-  if (providerUrl && redirectOverride === undefined) return providerUrl;
+  if (providerUrl && redirectOverride === undefined && !useCustomScheme) return providerUrl;
   if (!order.autoStartToken) return '';
   // BankSignering's own integration instructions (onboarding email):
   // "Sätt er app + orderRef som redirecturl" -- the redirect must carry the
@@ -83,7 +83,20 @@ export function bankIDLaunchUrl(order: BankIDAuthOrder, redirectOverride?: strin
   const redirect = redirectOverride !== undefined
     ? (redirectOverride ?? 'null')
     : `${window.location.origin}/?bankid_order_ref=${order.orderRef}`;
-  return `https://app.bankid.com/?autostarttoken=${encodeURIComponent(order.autoStartToken)}&redirect=${encodeURIComponent(redirect)}`;
+  // `bankid:///` (custom URL scheme) vs `https://app.bankid.com/`
+  // (Universal Link): iOS only ever hands a Universal Link to the
+  // installed app when the navigation to it was a genuine user tap on a
+  // link already on screen -- never on a *first* load, which is exactly
+  // what opening it via @capacitor/browser's SFSafariViewController
+  // overlay is, so that overlay just showed BankID's own web fallback
+  // page instead of launching the app. The custom scheme has no such
+  // restriction (per BankID's own RP guidelines, this is the documented
+  // native-app launch form) and WKWebView hands off non-http(s)
+  // navigations to iOS directly without ever loading a page, so a plain
+  // `<a href>` tap inside the app's own webview launches the app exactly
+  // like a native openURL call would.
+  const base = useCustomScheme ? 'bankid:///' : 'https://app.bankid.com/';
+  return `${base}?autostarttoken=${encodeURIComponent(order.autoStartToken)}&redirect=${encodeURIComponent(redirect)}`;
 }
 /** Normalizes an admin-typed personnummer (10 or 12 digits, with or
  * without a dash) into the 12-digit, no-separator form BankID's

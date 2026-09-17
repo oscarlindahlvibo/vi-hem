@@ -41,23 +41,28 @@
 //     anchor is the most gesture-preserving navigation there is, no JS
 //     `location.href` involved in the critical hop at all. (This is web
 //     only -- see point 4 for the native app.)
-//  4. In the native iOS/Android app, a plain `<a href>` click navigates the
-//     app's own WKWebView/WebView itself to https://app.bankid.com -- a
-//     real top-level navigation that destroys the app's JS the same way it
-//     does on web, but with no way back in: the app has no Associated
-//     Domains/App Links configured, so BankID's own redirect back to
-//     https://app.vi-hem.se just opens Safari instead of returning to the
-//     app. Native instead opens the same-device link in an in-app browser
-//     overlay (@capacitor/browser, SFSafariViewController/Custom Tabs) --
-//     that's a *separate* native surface layered on top, so the app's own
-//     JS (and its collect() polling) keeps running underneath the whole
-//     time, same as the QR flow always has. redirect=null is used since
-//     nothing needs to navigate anywhere for this to work -- BankID's own
-//     docs recommend redirect=null "when it is possible", and for the
-//     native app it now genuinely is.
+//  4. In the native iOS/Android app, a plain `<a href="https://app.bankid.com/...">`
+//     tap relies on iOS treating it as a Universal Link -- which it only
+//     does when the tap happens directly in our own WKWebView (same as a
+//     regular website). An earlier version of this routed the same-device
+//     launch through @capacitor/browser's in-app SFSafariViewController
+//     overlay instead, to avoid the app's own webview navigating away with
+//     no Associated Domains/App Links to get back -- but iOS never honors
+//     a Universal Link on the *first* URL a browser surface is asked to
+//     load, only on a tap of a link already on screen, so that overlay
+//     just showed BankID's own web fallback page instead of ever launching
+//     the app. Fixed by going back to a plain in-webview anchor tap, but
+//     to the `bankid:///` custom URL scheme instead of the https Universal
+//     Link -- BankID's own RP guidelines document this as the native-app
+//     launch form specifically because it has none of the Universal Link
+//     tap restrictions, and WKWebView hands off non-http(s) navigations to
+//     iOS directly without ever loading a page, so the app's own JS (and
+//     its collect() polling) never unloads -- same as tapping a mailto:
+//     link. redirect=null is used since nothing needs to navigate anywhere
+//     for this to work -- BankID's own docs recommend redirect=null "when
+//     it is possible", and for a native app hand-off it genuinely is.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Browser } from '@capacitor/browser';
 import { bankIDLaunchUrl, BankIDError, collectBankIDOrder, type BankIDAuthOrder, type BankIDCollectResult } from '../lib/bankid';
 
 const STORAGE_PREFIX = 'vihem_bankid_pending_';
@@ -138,10 +143,6 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
     if (r) setResult(r);
     if (errMsg) setError(errMsg);
     clearPending();
-    // Dismiss the in-app browser overlay opened for the native same-device
-    // flow (see module header, point 4) -- a no-op if it's already closed
-    // or was never opened (QR/web flows).
-    if (Capacitor.isNativePlatform()) Browser.close().catch(() => {});
   }, [stopTimers, clearPending]);
 
   const poll = useCallback((orderRef: string, attempt: number) => {
@@ -177,26 +178,22 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
   const beginFromOrder = useCallback((order: BankIDAuthOrder, sameDevice: boolean) => {
     setStatus('pending');
     setError('');
-    if (sameDevice && Capacitor.isNativePlatform()) {
-      // See module header, point 4: an in-app browser overlay, not a
-      // webview navigation -- our own JS (and its poll below) keeps
-      // running the whole time, so there's nothing to resume-on-return.
-      const url = bankIDLaunchUrl(order, null);
+    if (sameDevice) {
+      // See module header, point 4 for why native uses the bankid:///
+      // custom scheme with redirect=null instead of the https Universal
+      // Link the web flow below uses.
+      const native = Capacitor.isNativePlatform();
+      const url = native ? bankIDLaunchUrl(order, null, true) : bankIDLaunchUrl(order);
       if (url) {
-        setMessage('Öppnar BankID-appen...');
-        Browser.open({ url }).catch(() => {
-          if (!cancelled.current) finish('failed', undefined, 'Kunde inte öppna BankID-appen.');
-        });
-        poll(order.orderRef, 0);
-        return;
-      }
-    } else if (sameDevice) {
-      const url = bankIDLaunchUrl(order);
-      if (url) {
-        // Stash the pending order now, before the user has even clicked the
-        // link -- if they do click and get redirected away, the resume
-        // effect below needs this already in place to pick polling back up.
-        try { window.localStorage.setItem(storageKey, JSON.stringify({ orderRef: order.orderRef, startedAt: Date.now() })); } catch { /* best effort */ }
+        if (!native) {
+          // Stash the pending order now, before the user has even clicked
+          // the link -- if they do click and get redirected away, the
+          // resume effect below needs this already in place to pick
+          // polling back up. Native never navigates away (the custom
+          // scheme hand-off leaves our webview in place), so there's
+          // nothing to resume there.
+          try { window.localStorage.setItem(storageKey, JSON.stringify({ orderRef: order.orderRef, startedAt: Date.now() })); } catch { /* best effort */ }
+        }
         pendingOrderRef.current = order.orderRef;
         setStatus('redirecting');
         setMessage('Tryck på knappen för att öppna BankID-appen.');
@@ -255,7 +252,6 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
     setMessage('');
     setError('');
     setResult(null);
-    if (Capacitor.isNativePlatform()) Browser.close().catch(() => {});
   }, [stopTimers, clearPending]);
 
   // Resume a mobile order automatically when BankID's app redirects the
