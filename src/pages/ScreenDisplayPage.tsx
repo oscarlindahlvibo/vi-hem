@@ -35,6 +35,11 @@ const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
 const SCREEN_SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const SCREEN_SESSION_REFRESH_MARGIN_SECONDS = 15 * 60;
 const SCREEN_DEVICE_SESSION_KEY = 'vihem.screen.device-session';
+// Set once by a `?screen_token=...` link (see ScreenSettingsPage.tsx) and
+// then kept so the device can silently redo the exchange later -- e.g. if
+// the underlying Supabase session's refresh token is ever invalidated --
+// without a human needing to re-type the shared screen login on the TV.
+const SCREEN_TOKEN_STORAGE_KEY = 'vihem.screen.access-token';
 
 const addDays = (date: Date, days: number) => {
   const next = new Date(date);
@@ -147,6 +152,8 @@ export function ScreenDisplayPage() {
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loggingIn, setLoggingIn] = useState(false);
+  const [tokenLoginBusy, setTokenLoginBusy] = useState(false);
+  const triedTokenLoginRef = useRef(false);
   const [selectedScreenKey, setSelectedScreenKey] = useState(readStoredScreenKey);
   const [screenConfigs, setScreenConfigs] = useState<ScreenConfig[]>(() => [defaultScreenConfig(1)]);
   const [view, setView] = useState<ScreenView>(readStoredScreenView);
@@ -220,6 +227,42 @@ export function ScreenDisplayPage() {
     }, 250);
 
     return () => window.clearTimeout(recoverSession);
+  }, [loading, user]);
+
+  // A `?screen_token=...` link (or one saved from an earlier visit) logs
+  // the TV in without anyone typing the shared screen account's
+  // email/password on the device -- see vihem-screen-session and
+  // ScreenSettingsPage.tsx's "Länkar till TV-skärmar" card. Only tried
+  // once per page load, and only when there's genuinely no session yet.
+  useEffect(() => {
+    if (loading || user || triedTokenLoginRef.current) return;
+    const url = new URL(window.location.href);
+    const urlToken = url.searchParams.get('screen_token');
+    const storedToken = urlToken || localStorage.getItem(SCREEN_TOKEN_STORAGE_KEY);
+    if (!storedToken) return;
+    triedTokenLoginRef.current = true;
+    setTokenLoginBusy(true);
+    (async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('vihem-screen-session', { body: { token: storedToken } });
+        if (error || !data?.token_hash) throw new Error(await getFunctionErrorMessage(error));
+        const { error: verifyError } = await supabase.auth.verifyOtp({ token_hash: data.token_hash, type: 'magiclink' });
+        if (verifyError) throw verifyError;
+        localStorage.setItem(SCREEN_TOKEN_STORAGE_KEY, storedToken);
+        localStorage.setItem(SCREEN_DEVICE_SESSION_KEY, 'true');
+        if (urlToken) {
+          url.searchParams.delete('screen_token');
+          window.history.replaceState({}, '', url.toString());
+        }
+      } catch (err) {
+        // A revoked/invalid token shouldn't keep retrying forever -- fall
+        // back to the manual email/password form below.
+        localStorage.removeItem(SCREEN_TOKEN_STORAGE_KEY);
+        setLoginError(err instanceof Error ? err.message : 'Länken kunde inte användas. Logga in manuellt eller be admin om en ny länk.');
+      } finally {
+        setTokenLoginBusy(false);
+      }
+    })();
   }, [loading, user]);
 
   async function ensureScreenSession() {
@@ -635,7 +678,7 @@ export function ScreenDisplayPage() {
     setDataLoading(false);
   }
 
-  if (loading) return <LoadingPage />;
+  if (loading || tokenLoginBusy) return <LoadingPage />;
 
   if (!user) {
     return (
@@ -824,6 +867,15 @@ export function ScreenDisplayPage() {
       )}
     </div>
   );
+}
+
+async function getFunctionErrorMessage(error: unknown) {
+  const context = (error as { context?: Response })?.context;
+  if (context) {
+    const payload = await context.clone().json().catch(() => null);
+    if (payload?.error) return String(payload.error);
+  }
+  return (error as Error)?.message || 'Länken kunde inte användas.';
 }
 
 function ScreenHeaderClock() {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Monitor, Plus, Save, Settings, Trash2 } from 'lucide-react';
+import { Copy, Link2, Monitor, Plus, Power, Save, Settings, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Button, Card, EmptyState, Input, LoadingPage, PageHeader, Select } from '../components/ui';
@@ -24,6 +24,12 @@ import {
 interface ScreenSettingsPageProps {
   onNavigate: (page: string) => void;
 }
+
+// A screen access link (vihem_screen_tokens) lets a TV log in as an
+// existing role='screen' account without typing its password on the
+// device -- see vihem-screen-session and ScreenDisplayPage.tsx.
+type ScreenAccessToken = { id: string; profile_id: string; token: string; label: string; active: boolean; last_used_at: string | null; created_at: string };
+type ScreenProfile = { id: string; name: string; email: string };
 
 const panelOptions: Array<{ key: keyof PresentationSettings; label: string; description: string }> = [
   { key: 'showNews', label: 'Nyheter', description: 'Visar publicerade nyheter i presentationsvyn.' },
@@ -51,6 +57,11 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
   const [organisationSettings, setOrganisationSettings] = useState<Record<string, unknown>>({});
   const [laundryRooms, setLaundryRooms] = useState<LaundryRoom[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [screenProfiles, setScreenProfiles] = useState<ScreenProfile[]>([]);
+  const [screenTokens, setScreenTokens] = useState<ScreenAccessToken[]>([]);
+  const [newTokenProfileId, setNewTokenProfileId] = useState('');
+  const [newTokenLabel, setNewTokenLabel] = useState('');
+  const [creatingToken, setCreatingToken] = useState(false);
 
   const canManage = user?.role === 'admin' || user?.role === 'superadmin';
   const selectedScreen = screens.find(screen => screen.screenKey === selectedScreenKey) || screens[0] || defaultScreenConfig(1);
@@ -59,7 +70,96 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
 
   useEffect(() => {
     fetchSettings();
+    fetchScreenAccess();
   }, [user?.organisation_id]);
+
+  async function fetchScreenAccess() {
+    if (!user?.organisation_id) return;
+    const [profilesResult, tokensResult] = await Promise.all([
+      supabase.from('vihem_profiles').select('id,name,email').eq('organisation_id', user.organisation_id).eq('role', 'screen').order('name'),
+      supabase.from('vihem_screen_tokens').select('id,profile_id,token,label,active,last_used_at,created_at').eq('organisation_id', user.organisation_id).order('created_at', { ascending: false }),
+    ]);
+    if (!profilesResult.error) setScreenProfiles((profilesResult.data || []) as ScreenProfile[]);
+    if (!tokensResult.error) setScreenTokens((tokensResult.data || []) as ScreenAccessToken[]);
+  }
+
+  function screenTokenUrl(tokenRow: Pick<ScreenAccessToken, 'token'>) {
+    return `${window.location.origin}/screen?screen_token=${encodeURIComponent(tokenRow.token)}`;
+  }
+
+  async function copyScreenTokenLink(tokenRow: ScreenAccessToken) {
+    try {
+      await navigator.clipboard.writeText(screenTokenUrl(tokenRow));
+      setSuccess('Länken kopierades.');
+      setTimeout(() => setSuccess(''), 2000);
+    } catch {
+      setError('Kunde inte kopiera länken. Kopiera den manuellt istället.');
+    }
+  }
+
+  async function createScreenToken() {
+    if (!user?.organisation_id) return;
+    const profileId = newTokenProfileId || screenProfiles[0]?.id;
+    if (!profileId) return;
+
+    setCreatingToken(true);
+    setError('');
+    setSuccess('');
+
+    const { data, error: insertError } = await supabase
+      .from('vihem_screen_tokens')
+      .insert({
+        organisation_id: user.organisation_id,
+        profile_id: profileId,
+        label: newTokenLabel.trim(),
+        created_by: user.id,
+      })
+      .select('id,profile_id,token,label,active,last_used_at,created_at')
+      .single();
+
+    setCreatingToken(false);
+
+    if (insertError) {
+      setError(insertError.message);
+      return;
+    }
+
+    const created = data as ScreenAccessToken;
+    setScreenTokens(current => [created, ...current]);
+    setNewTokenLabel('');
+    await copyScreenTokenLink(created);
+  }
+
+  async function toggleScreenToken(tokenRow: ScreenAccessToken) {
+    setError('');
+    const { data, error: updateError } = await supabase
+      .from('vihem_screen_tokens')
+      .update({ active: !tokenRow.active })
+      .eq('id', tokenRow.id)
+      .select('id,profile_id,token,label,active,last_used_at,created_at')
+      .single();
+
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    setScreenTokens(current => current.map(item => item.id === tokenRow.id ? (data as ScreenAccessToken) : item));
+  }
+
+  async function deleteScreenToken(tokenRow: ScreenAccessToken) {
+    const confirmed = window.confirm(`Ta bort länken${tokenRow.label ? ` "${tokenRow.label}"` : ''}? Skärmen som använder den slutar fungera nästa gång den behöver logga in igen.`);
+    if (!confirmed) return;
+
+    setError('');
+    const { error: deleteError } = await supabase.from('vihem_screen_tokens').delete().eq('id', tokenRow.id);
+    if (deleteError) {
+      setError(deleteError.message);
+      return;
+    }
+
+    setScreenTokens(current => current.filter(item => item.id !== tokenRow.id));
+  }
 
   async function fetchSettings() {
     if (!user?.organisation_id) {
@@ -514,6 +614,79 @@ export function ScreenSettingsPage({ onNavigate: _onNavigate }: ScreenSettingsPa
           </Card>
         </div>
       </div>
+
+      <Card className="mt-5 p-5">
+        <div className="mb-1 flex items-center gap-2">
+          <Link2 className="h-5 w-5 text-blue-600" />
+          <h2 className="text-lg font-black text-slate-950">Länkar till TV-skärmar</h2>
+        </div>
+        <p className="mb-4 text-sm leading-6 text-slate-500">
+          Ge en TV en egen länk istället för att skriva in skärmkontots lösenord på plats. Länken loggar in TV:n automatiskt och kan återkallas när som helst, utan att lösenordet behöver bytas.
+        </p>
+
+        {screenProfiles.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-500">
+            Det finns inget skärmkonto ännu. Skapa ett under Personal med rollen "Skärm" innan du kan skapa en länk.
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              {screenProfiles.length > 1 && (
+                <Select
+                  label="Skärmkonto"
+                  value={newTokenProfileId || screenProfiles[0].id}
+                  onChange={(event) => setNewTokenProfileId(event.target.value)}
+                  options={screenProfiles.map(profile => ({ value: profile.id, label: profile.name || profile.email }))}
+                />
+              )}
+              <Input
+                label="Namn på länken (valfritt)"
+                value={newTokenLabel}
+                onChange={(event) => setNewTokenLabel(event.target.value)}
+                placeholder="Ex. TV i tvättstugan"
+                className="flex-1"
+              />
+              <Button type="button" onClick={createScreenToken} loading={creatingToken}>
+                <Plus className="h-4 w-4" />
+                Skapa länk
+              </Button>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {screenTokens.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-500">
+                  Inga länkar skapade ännu.
+                </div>
+              ) : (
+                screenTokens.map(tokenRow => (
+                  <div key={tokenRow.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="truncate font-black text-slate-900">{tokenRow.label || 'Namnlös länk'}</p>
+                      <p className="mt-1 text-xs font-semibold text-slate-500">
+                        {tokenRow.active ? 'Aktiv' : 'Inaktiverad'} · Skapad {new Date(tokenRow.created_at).toLocaleDateString('sv-SE')}
+                        {tokenRow.last_used_at ? ` · Senast använd ${new Date(tokenRow.last_used_at).toLocaleDateString('sv-SE')}` : ' · Aldrig använd'}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button type="button" variant="secondary" size="sm" onClick={() => copyScreenTokenLink(tokenRow)}>
+                        <Copy className="h-4 w-4" />
+                        Kopiera länk
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => toggleScreenToken(tokenRow)}>
+                        <Power className="h-4 w-4" />
+                        {tokenRow.active ? 'Inaktivera' : 'Aktivera'}
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => deleteScreenToken(tokenRow)} aria-label="Ta bort länk">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
+      </Card>
     </div>
   );
 }
