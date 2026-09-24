@@ -787,7 +787,17 @@ export function ScreenDisplayPage() {
             ))}
           </div>
 
-          <div className="mt-6 flex justify-end">
+          <div className="mt-6 flex items-center justify-between">
+            <Button
+              variant="outline"
+              onClick={() => {
+                localStorage.removeItem(SCREEN_DEVICE_SESSION_KEY);
+                localStorage.removeItem(SCREEN_TOKEN_STORAGE_KEY);
+                void signOut();
+              }}
+            >
+              Logga ut
+            </Button>
             <Button variant="secondary" onClick={() => setShowViewChooser(false)}>
               Tillbaka
             </Button>
