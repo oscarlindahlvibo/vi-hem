@@ -190,7 +190,16 @@ export function ScreenDisplayPage() {
   const allowed = user && ['screen', 'admin', 'staff'].includes(user.role);
   const selectedScreenConfig = screenConfigs.find(screen => screen.screenKey === selectedScreenKey) || screenConfigs[0] || defaultScreenConfig(1);
   const dayCount = screenSize.width < 1400 ? 8 : screenSize.width < 1700 ? 9 : 10;
-  const days = useMemo(() => Array.from({ length: dayCount }, (_, index) => dateKey(addDays(today(), index))), [dayCount]);
+  // A TV can stay open for days without a reload (see checkScreenVersion
+  // below, which only reloads on a new deploy) -- `days` was memoized on
+  // `dayCount` alone, so the visible date range stayed pinned to whatever
+  // "today" was on the last actual mount/resize instead of ever shifting
+  // forward. fetchScreenData's own 60s poll already re-renders this
+  // component regularly, so recomputing this key each render and keying
+  // the memo on it is enough to pick up a real day change without a
+  // dedicated timer.
+  const todayDateKey = dateKey(today());
+  const days = useMemo(() => Array.from({ length: dayCount }, (_, index) => dateKey(addDays(today(), index))), [dayCount, todayDateKey]);
 
   // Fredagsmöte: a leader can flip this named screen to show a meeting
   // segment from the control view (vihem_meeting_screen_overrides) --
