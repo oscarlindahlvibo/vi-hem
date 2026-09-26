@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
 import { Button, LoadingPage } from '../components/ui';
-import type { CalendarEvent, CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, MaintenanceRequest, Meeting, MeetingActionItem, MeetingAgendaItem, MeetingDecision, News, Profile, ShortStayBooking, ShortStayUnit, StaffAbsenceRequest, TimeEntry, WorkOrder } from '../types';
+import type { CalendarEvent, CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, MaintenanceRequest, Meeting, MeetingActionItem, MeetingAgendaItem, MeetingDecision, News, Profile, ShortStayBooking, ShortStayUnit, TimeEntry, WorkOrder } from '../types';
 import { formatDate, formatDateTime, MR_PRIORITY_LABELS, MR_STATUS_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS, entryKindLabel, clockTone } from '../lib/utils';
 import { useTimeCategories } from '../contexts/TimeCategoriesContext';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
@@ -121,14 +121,11 @@ function workOrderAssigneeLabel(order: WorkOrder, staffMembers: Pick<Profile, 'i
   return `${ids.length} tilldelade`;
 }
 
-const ABSENCE_TYPE_LABELS: Record<string, string> = {
-  sick: 'Sjuk',
-  vab: 'VAB',
-  vacation: 'Semester',
-  leave: 'Ledig',
-  unpaid_leave: 'Tjänstledig',
-  parental_leave: 'Föräldraledig',
-};
+// vihem_staff_absence_requests RLS deliberately keeps the absence reason
+// (absence_type/comment) hidden from anyone but the requester and admins,
+// so the screen fetches only approved date ranges via the narrow
+// vihem_schedule_absence_overlaps RPC and must never show the type.
+type AbsenceOverlap = { user_id: string; start_date: string; end_date: string };
 
 const PROJECT_STATUS_LABELS: Record<string, string> = {
   draft: 'Utkast',
@@ -172,7 +169,7 @@ export function ScreenDisplayPage() {
   const [meetingActionItems, setMeetingActionItems] = useState<MeetingActionItem[]>([]);
   const [meetingAiSummary, setMeetingAiSummary] = useState<string>('');
   const [customerProjects, setCustomerProjects] = useState<CustomerProject[]>([]);
-  const [absenceRequests, setAbsenceRequests] = useState<StaffAbsenceRequest[]>([]);
+  const [absenceRequests, setAbsenceRequests] = useState<AbsenceOverlap[]>([]);
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [laundryRooms, setLaundryRooms] = useState<LaundryRoom[]>([]);
@@ -518,14 +515,7 @@ export function ScreenDisplayPage() {
         .order('planned_end_date', { ascending: true, nullsFirst: false })
         .order('updated_at', { ascending: false })
         .limit(12),
-      supabase
-        .from('vihem_staff_absence_requests')
-        .select('*, user:user_id(id, name)')
-        .eq('organisation_id', user.organisation_id)
-        .in('status', ['submitted', 'approved'])
-        .lte('start_date', absenceEnd)
-        .gte('end_date', todayStart)
-        .order('start_date'),
+      supabase.rpc('vihem_schedule_absence_overlaps', { p_from: todayStart, p_to: absenceEnd }),
       supabase
         .from('vihem_maintenance_requests')
         .select('*, property:vihem_properties(name), apartment:vihem_apartments(apartment_number), assigned:vihem_profiles!assigned_to(name)')
@@ -642,7 +632,7 @@ export function ScreenDisplayPage() {
       setWorkOrders((workOrdersResult.data || []) as WorkOrder[]);
       setNews((newsResult.data || []) as News[]);
       setCustomerProjects(customerProjectsResult.error ? [] : (customerProjectsResult.data || []) as CustomerProject[]);
-      setAbsenceRequests(absenceRequestsResult.error ? [] : (absenceRequestsResult.data || []) as StaffAbsenceRequest[]);
+      setAbsenceRequests(absenceRequestsResult.error ? [] : (absenceRequestsResult.data || []) as AbsenceOverlap[]);
       setMaintenanceRequests((maintenanceRequestsResult.data || []) as MaintenanceRequest[]);
       setCalendarEvents((calendarEventsResult.data || []) as CalendarEvent[]);
       setLaundryRooms(loadedLaundryRooms);
@@ -1064,7 +1054,7 @@ function MeetingScreen({
   aiSummary: string;
   workOrders: WorkOrder[];
   customerProjects: CustomerProject[];
-  absenceRequests: StaffAbsenceRequest[];
+  absenceRequests: AbsenceOverlap[];
   maintenanceRequests: MaintenanceRequest[];
   calendarEvents: CalendarEvent[];
   staffMembers: Pick<Profile, 'id' | 'name'>[];
@@ -1473,7 +1463,7 @@ function PresentationScreen({
   news: News[];
   workOrders: WorkOrder[];
   clockedInEntries: TimeEntry[];
-  absenceRequests: StaffAbsenceRequest[];
+  absenceRequests: AbsenceOverlap[];
   meetings: Meeting[];
   bookings: ShortStayBooking[];
   organisationName: string;
@@ -1709,9 +1699,9 @@ function PresentationScreen({
                         );
                       })}
                       {absentToday.slice(0, 6).map(request => (
-                        <div key={request.id} className="grid grid-cols-[minmax(76px,0.85fr)_minmax(92px,1.15fr)_auto] items-center gap-1.5 rounded-md bg-rose-400/10 px-2 py-1 ring-1 ring-rose-300/20">
-                          <p className="truncate font-black" style={{ fontSize: 11.5 }}>{request.user?.name || 'Personal'}</p>
-                          <p className="truncate font-semibold text-rose-100" style={{ fontSize: 10.5 }}>{ABSENCE_TYPE_LABELS[request.absence_type] || request.absence_type}</p>
+                        <div key={`${request.user_id}-${request.start_date}`} className="grid grid-cols-[minmax(76px,0.85fr)_minmax(92px,1.15fr)_auto] items-center gap-1.5 rounded-md bg-rose-400/10 px-2 py-1 ring-1 ring-rose-300/20">
+                          <p className="truncate font-black" style={{ fontSize: 11.5 }}>{staffMembers.find(staff => staff.id === request.user_id)?.name || 'Personal'}</p>
+                          <p className="truncate font-semibold text-rose-100" style={{ fontSize: 10.5 }}>Frånvarande</p>
                           <p className="whitespace-nowrap font-bold text-rose-200/70" style={{ fontSize: 9.5 }}>Borta</p>
                         </div>
                       ))}
