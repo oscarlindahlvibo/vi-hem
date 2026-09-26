@@ -28,6 +28,7 @@ import { AdminPropertiesPage } from './pages/AdminPropertiesPage';
 import { AdminTenantsPage } from './pages/AdminTenantsPage';
 import { AdminImportPage } from './pages/AdminImportPage';
 import { AdminStaffPage } from './pages/AdminStaffPage';
+import { StaffSchedulePage } from './pages/StaffSchedulePage';
 import { AdminPayrollPage } from './pages/AdminPayrollPage';
 import { AdminTerminationsPage } from './pages/AdminTerminationsPage';
 import { ApartmentPage } from './pages/ApartmentPage';
@@ -569,6 +570,10 @@ function AppInner() {
       case 'admin-staff':
         if (!isAdmin) return renderDashboard();
         return <AdminStaffPage onNavigate={navigate} />;
+
+      case 'staff-schedule':
+        if (!isStaff) return renderDashboard();
+        return <StaffSchedulePage onNavigate={navigate} />;
 
       case 'screen-settings':
         if (!isAdmin) return renderDashboard();

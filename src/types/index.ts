@@ -1017,6 +1017,23 @@ export interface StaffAbsenceRequest {
   user?: Profile;
 }
 
+export type ScheduleEntryType = 'work_order' | 'maintenance_request' | 'customer_project' | 'note';
+
+export interface ScheduleEntry {
+  id: string;
+  organisation_id: string;
+  user_id: string;
+  entry_type: ScheduleEntryType;
+  reference_id: string | null;
+  title: string;
+  subtitle: string;
+  start_date: string;
+  end_date: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface StaffWorkSchedule {
   id: string;
   organisation_id: string | null;
