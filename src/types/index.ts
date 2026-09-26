@@ -1029,6 +1029,7 @@ export interface ScheduleEntry {
   subtitle: string;
   start_date: string;
   end_date: string;
+  visit_time: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

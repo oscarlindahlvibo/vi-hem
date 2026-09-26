@@ -20,6 +20,16 @@ const ENTRY_TYPE_META: Record<ScheduleEntryType, { label: string; icon: typeof C
 
 const ABSENCE_CLASS = 'bg-rose-400/80 text-white';
 
+/** Full, chunky filled blocks (à la Timetjek's schedule grid) rather than
+ * thin pills -- each lane gets enough height for a small caps type/time
+ * line plus a bold title line. */
+const LANE_HEIGHT = 50;
+const CHIP_HEIGHT = 42;
+
+function formatVisitTime(value: string | null) {
+  return value ? value.slice(0, 5) : '';
+}
+
 function toDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
@@ -94,6 +104,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
   const [subtitle, setSubtitle] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [visitTime, setVisitTime] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -170,6 +181,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
     setSubtitle('');
     setStartDate(dateKeyValue);
     setEndDate(dateKeyValue);
+    setVisitTime('');
     setFormError('');
   }
 
@@ -183,6 +195,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
     setSubtitle(entry.subtitle);
     setStartDate(entry.start_date);
     setEndDate(entry.end_date);
+    setVisitTime(entry.visit_time ? entry.visit_time.slice(0, 5) : '');
     setFormError('');
   }
 
@@ -214,6 +227,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
       subtitle: subtitle.trim(),
       start_date: startDate,
       end_date: endDate,
+      visit_time: visitTime || null,
       created_by: user.id,
     };
 
@@ -290,7 +304,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
               ...absences.filter(a => a.user_id === staffMember.id).map((absence): Band => ({ kind: 'absence', start_date: absence.start_date, end_date: absence.end_date, userId: absence.user_id })),
             ];
             const lanes = packLanes(bands);
-            const rowHeight = Math.max(1, lanes.length) * 30 + 12;
+            const rowHeight = Math.max(1, lanes.length) * LANE_HEIGHT + 12;
 
             return (
               <div key={staffMember.id} className="grid border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: '200px 1fr' }}>
@@ -322,28 +336,38 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
                             return (
                               <div
                                 key={`absence-${bandIndex}`}
-                                className={`pointer-events-auto absolute flex items-center gap-1 truncate rounded-lg px-2 py-1 text-xs font-bold ${ABSENCE_CLASS}`}
-                                style={{ left: `${left}%`, width: `${width}%`, top: laneIndex * 30 + 6 }}
+                                className={`pointer-events-auto absolute flex flex-col justify-center gap-0.5 overflow-hidden rounded-xl px-2.5 py-1.5 shadow-sm ${ABSENCE_CLASS}`}
+                                style={{ left: `${left}%`, width: `${width}%`, top: laneIndex * LANE_HEIGHT + 4, height: CHIP_HEIGHT }}
                               >
-                                <UserX className="h-3 w-3 shrink-0" />
-                                Frånvarande
+                                <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide opacity-90">
+                                  <UserX className="h-3 w-3 shrink-0" />
+                                  Frånvaro
+                                </span>
+                                <span className="truncate text-xs font-bold">Frånvarande</span>
                               </div>
                             );
                           }
                           const meta = ENTRY_TYPE_META[band.entry.entry_type];
                           const Icon = meta.icon;
+                          const time = formatVisitTime(band.entry.visit_time);
                           return (
                             <button
                               key={band.entry.id}
                               type="button"
                               disabled={!canManage}
                               onClick={() => canManage && openEditModal(band.entry, staffMember)}
-                              className={`pointer-events-auto absolute flex items-center gap-1 truncate rounded-lg px-2 py-1 text-left text-xs font-bold shadow-sm ${meta.className} ${canManage ? 'cursor-pointer hover:brightness-110' : 'cursor-default'}`}
-                              style={{ left: `${left}%`, width: `${width}%`, top: laneIndex * 30 + 6 }}
-                              title={`${meta.label}: ${band.entry.title}${band.entry.subtitle ? ' · ' + band.entry.subtitle : ''}`}
+                              className={`pointer-events-auto absolute flex flex-col justify-center gap-0.5 overflow-hidden rounded-xl px-2.5 py-1.5 text-left shadow-sm ${meta.className} ${canManage ? 'cursor-pointer hover:brightness-110' : 'cursor-default'}`}
+                              style={{ left: `${left}%`, width: `${width}%`, top: laneIndex * LANE_HEIGHT + 4, height: CHIP_HEIGHT }}
+                              title={`${meta.label}${time ? ' · ' + time : ''}: ${band.entry.title}${band.entry.subtitle ? ' · ' + band.entry.subtitle : ''}`}
                             >
-                              <Icon className="h-3 w-3 shrink-0" />
-                              <span className="truncate">{band.entry.title}</span>
+                              <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide opacity-90">
+                                <Icon className="h-3 w-3 shrink-0" />
+                                {/* A single day-column is too narrow for icon + type label + time
+                                    all at once -- the time is the more specific, useful detail
+                                    when it's set (color/icon already carry the type), so it wins. */}
+                                <span className="min-w-0 truncate">{time || meta.label}</span>
+                              </span>
+                              <span className="truncate text-xs font-bold">{band.entry.title}</span>
                             </button>
                           );
                         })}
@@ -403,9 +427,10 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <Input type="date" label="Startdatum" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
             <Input type="date" label="Slutdatum" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+            <Input type="time" label="Klockslag (valfritt)" value={visitTime} onChange={(event) => setVisitTime(event.target.value)} hint="Ex. besök hos kund" />
           </div>
 
           <Textarea label="Notering (valfritt)" rows={2} value={subtitle} onChange={(event) => setSubtitle(event.target.value)} placeholder="Ex. fastighet, extra info..." />
