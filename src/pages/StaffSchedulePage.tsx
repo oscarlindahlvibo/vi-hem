@@ -96,10 +96,17 @@ type DragKind = 'move' | 'resize-start' | 'resize-end';
 
 interface DragState {
   kind: DragKind;
-  entryId: string;
+  entry: ScheduleEntry;
   pointerId: number;
   startClientX: number;
   startClientY: number;
+  currentClientX: number;
+  currentClientY: number;
+  /** Pointer position relative to the chip's own top-left at drag start --
+   * needed so the floating ghost (see render) tracks the cursor without
+   * snapping the chip's corner to it. Only meaningful for kind 'move'. */
+  offsetX: number;
+  offsetY: number;
   dayColumnWidth: number;
   originStartDate: string;
   originEndDate: string;
@@ -299,25 +306,46 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
     return fallback;
   }
 
+  /** A move in progress renders as a floating ghost instead of in the
+   * grid (see render), so the dragged entry is simply absent from every
+   * row's own bands/lane packing while it's being moved -- resizing still
+   * repositions in place, it never changes which row it's in. */
+  /** A resize repositions its chip in place as the preview updates. A move
+   * deliberately does NOT -- the real chip stays mounted at its exact
+   * original row/dates for the whole gesture (dimmed, see render) and a
+   * separate floating ghost shows the live preview instead. Pulling the
+   * chip out of the grid (e.g. to "show" it at the preview position/row)
+   * would unmount that DOM node mid-drag, which silently releases the
+   * pointer capture it's holding -- move/up events then start hitting
+   * whatever else is under the cursor by ordinary hit-testing instead,
+   * which is exactly what made the whole board feel like it was jumping
+   * around. */
   function effectiveUserId(entry: ScheduleEntry) {
-    return drag && drag.entryId === entry.id ? drag.previewUserId : entry.user_id;
+    if (!drag || drag.entry.id !== entry.id || drag.kind === 'move') return entry.user_id;
+    return drag.previewUserId;
   }
 
   function effectiveDates(entry: ScheduleEntry) {
-    if (drag && drag.entryId === entry.id) return { start: drag.previewStartDate, end: drag.previewEndDate };
-    return { start: entry.start_date, end: entry.end_date };
+    if (!drag || drag.entry.id !== entry.id || drag.kind === 'move') return { start: entry.start_date, end: entry.end_date };
+    return { start: drag.previewStartDate, end: drag.previewEndDate };
   }
 
   function beginDrag(event: React.PointerEvent<HTMLElement>, entry: ScheduleEntry, kind: DragKind) {
     if (!canManage) return;
+    event.preventDefault();
     event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
     event.currentTarget.setPointerCapture(event.pointerId);
     setDrag({
       kind,
-      entryId: entry.id,
+      entry,
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
+      currentClientX: event.clientX,
+      currentClientY: event.clientY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
       dayColumnWidth: measureDayColumnWidth(),
       originStartDate: entry.start_date,
       originEndDate: entry.end_date,
@@ -331,6 +359,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
 
   function handleDragMove(event: React.PointerEvent<HTMLElement>) {
     if (!drag || event.pointerId !== drag.pointerId) return;
+    event.preventDefault();
     const dxClientX = event.clientX - drag.startClientX;
     const dxClientY = event.clientY - drag.startClientY;
     const moved = drag.moved || Math.abs(dxClientX) > DRAG_THRESHOLD_PX || Math.abs(dxClientY) > DRAG_THRESHOLD_PX;
@@ -341,6 +370,8 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
       setDrag({
         ...drag,
         moved,
+        currentClientX: event.clientX,
+        currentClientY: event.clientY,
         previewStartDate: addDaysToKey(drag.originStartDate, dxDays),
         previewEndDate: addDaysToKey(drag.originEndDate, dxDays),
         previewUserId: targetUserId,
@@ -354,13 +385,21 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
     }
   }
 
-  async function handleDragEnd(event: React.PointerEvent<HTMLElement>, entry: ScheduleEntry, staffMember: Profile) {
-    if (!drag || event.pointerId !== drag.pointerId) return;
+  /** Self-contained (reads everything from `drag` + `staff`) so it can be
+   * called both from the dragged element's own onPointerUp AND from the
+   * window-level fallback below -- pointer capture should route pointerup
+   * back to the element that called setPointerCapture regardless of where
+   * the cursor ends up, but relying on that alone left the drag "stuck"
+   * (a floating ghost forever) whenever it didn't for some reason, so
+   * there's always a second, coarser way out. */
+  async function endDrag() {
+    if (!drag) return;
     const snapshot = drag;
     setDrag(null);
 
     if (!snapshot.moved) {
-      openEditModal(entry, staffMember);
+      const owner = staff.find(member => member.id === snapshot.originUserId);
+      if (owner) openEditModal(snapshot.entry, owner);
       return;
     }
 
@@ -372,7 +411,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
     const { error: updateError } = await supabase
       .from('vihem_schedule_entries')
       .update({ start_date: snapshot.previewStartDate, end_date: snapshot.previewEndDate, user_id: snapshot.previewUserId })
-      .eq('id', snapshot.entryId);
+      .eq('id', snapshot.entry.id);
     if (updateError) { setError(updateError.message); return; }
     await fetchWeek();
   }
@@ -380,6 +419,19 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
   function cancelDrag() {
     setDrag(null);
   }
+
+  useEffect(() => {
+    if (!drag) return;
+    const onWindowPointerUp = () => { void endDrag(); };
+    const onWindowPointerCancel = () => cancelDrag();
+    window.addEventListener('pointerup', onWindowPointerUp);
+    window.addEventListener('pointercancel', onWindowPointerCancel);
+    return () => {
+      window.removeEventListener('pointerup', onWindowPointerUp);
+      window.removeEventListener('pointercancel', onWindowPointerCancel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag]);
 
   if (loading) return <LoadingPage />;
 
@@ -415,7 +467,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
       {staff.length === 0 ? (
         <EmptyState icon={CalendarDays} title="Ingen personal hittades" description="Lägg till personal under Personal-sidan först." />
       ) : (
-        <div ref={tableRef} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div ref={tableRef} className={`overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ${drag ? 'select-none' : ''}`}>
           <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `${LABEL_WIDTH}px repeat(7, 1fr)` }}>
             <div className="px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-500">Personal</div>
             {weekDayKeys.map((dayKey, index) => (
@@ -437,12 +489,14 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
             const lanes = packLanes(bands);
             const rowHeight = Math.max(1, lanes.length) * LANE_HEIGHT + 12;
 
+            const isMoveTarget = drag?.kind === 'move' && drag.moved && drag.previewUserId === staffMember.id;
+
             return (
               <div key={staffMember.id} className="grid border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: `${LABEL_WIDTH}px 1fr` }}>
                 <div className="flex items-center px-4 py-2 text-sm font-black text-slate-900">{staffMember.name}</div>
                 <div
                   ref={(el) => { if (el) rowRefs.current.set(staffMember.id, el); else rowRefs.current.delete(staffMember.id); }}
-                  className="relative"
+                  className={`relative transition-colors ${isMoveTarget ? 'bg-blue-50' : ''}`}
                   style={{ height: rowHeight }}
                 >
                   <div className="absolute inset-0 grid" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
@@ -485,19 +539,20 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
                           const meta = ENTRY_TYPE_META[band.entry.entry_type];
                           const Icon = meta.icon;
                           const time = formatVisitTime(band.entry.visit_time);
-                          const isDragging = drag?.entryId === band.entry.id;
+                          const isDragging = drag?.entry.id === band.entry.id;
+                          const isMoving = isDragging && drag?.kind === 'move' && drag.moved;
                           return (
                             <div
                               key={band.entry.id}
                               role="button"
                               tabIndex={canManage ? 0 : -1}
                               aria-label={`${meta.label}: ${band.entry.title}`}
-                              className={`pointer-events-auto absolute flex select-none flex-col justify-center gap-0.5 overflow-hidden rounded-xl px-2.5 py-1.5 text-left shadow-sm ${meta.className} ${canManage ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isDragging ? 'z-10 opacity-90 ring-2 ring-white' : ''}`}
+                              className={`pointer-events-auto absolute flex select-none flex-col justify-center gap-0.5 overflow-hidden rounded-xl px-2.5 py-1.5 text-left shadow-sm ${meta.className} ${canManage ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isMoving ? 'opacity-30' : isDragging ? 'z-10 opacity-90 ring-2 ring-white' : ''}`}
                               style={{ left: `${left}%`, width: `${width}%`, top: laneIndex * LANE_HEIGHT + 4, height: CHIP_HEIGHT, touchAction: 'none' }}
                               title={`${meta.label}${time ? ' · ' + time : ''}: ${band.entry.title}${band.entry.subtitle ? ' · ' + band.entry.subtitle : ''}`}
                               onPointerDown={(event) => beginDrag(event, band.entry, 'move')}
                               onPointerMove={handleDragMove}
-                              onPointerUp={(event) => handleDragEnd(event, band.entry, staffMember)}
+                              onPointerUp={() => endDrag()}
                               onPointerCancel={cancelDrag}
                               onKeyDown={(event) => {
                                 if (canManage && (event.key === 'Enter' || event.key === ' ')) openEditModal(band.entry, staffMember);
@@ -518,7 +573,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
                                     style={{ touchAction: 'none' }}
                                     onPointerDown={(event) => beginDrag(event, band.entry, 'resize-start')}
                                     onPointerMove={handleDragMove}
-                                    onPointerUp={(event) => handleDragEnd(event, band.entry, staffMember)}
+                                    onPointerUp={() => endDrag()}
                                     onPointerCancel={cancelDrag}
                                   />
                                   <span
@@ -526,7 +581,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
                                     style={{ touchAction: 'none' }}
                                     onPointerDown={(event) => beginDrag(event, band.entry, 'resize-end')}
                                     onPointerMove={handleDragMove}
-                                    onPointerUp={(event) => handleDragEnd(event, band.entry, staffMember)}
+                                    onPointerUp={() => endDrag()}
                                     onPointerCancel={cancelDrag}
                                   />
                                 </>
@@ -543,6 +598,30 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
           })}
         </div>
       )}
+
+      {drag?.kind === 'move' && drag.moved && (() => {
+        const meta = ENTRY_TYPE_META[drag.entry.entry_type];
+        const Icon = meta.icon;
+        const time = formatVisitTime(drag.entry.visit_time);
+        const spanDays = dayIndexClamped(drag.previewEndDate, weekStartKey) - dayIndexClamped(drag.previewStartDate, weekStartKey) + 1;
+        return (
+          <div
+            className={`pointer-events-none fixed z-50 flex flex-col justify-center gap-0.5 overflow-hidden rounded-xl px-2.5 py-1.5 text-left shadow-lg ${meta.className}`}
+            style={{
+              left: drag.currentClientX - drag.offsetX,
+              top: drag.currentClientY - drag.offsetY,
+              width: drag.dayColumnWidth * spanDays,
+              height: CHIP_HEIGHT,
+            }}
+          >
+            <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide opacity-90">
+              <Icon className="h-3 w-3 shrink-0" />
+              <span className="min-w-0 truncate">{time || meta.label}</span>
+            </span>
+            <span className="truncate text-xs font-bold">{drag.entry.title}</span>
+          </div>
+        );
+      })()}
 
       <Modal open={modal.open} onClose={closeModal} title={modal.editing ? 'Redigera schemarad' : `Lägg till för ${modal.userName}`} size="lg">
         <div className="grid gap-4">
