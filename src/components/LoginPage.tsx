@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Mail, Lock, Eye, EyeOff, ShieldCheck, X } from 'lucide-react';
@@ -18,6 +18,8 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [forgotMode, setForgotMode] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [bankIdSigningIn, setBankIdSigningIn] = useState(false);
+  const verifiedBankIdTokenRef = useRef<string | null>(null);
   const bankId = useBankIdFlow('auth');
 
   async function handleSubmit(e: React.FormEvent) {
@@ -34,23 +36,51 @@ export function LoginPage() {
     bankId.start(() => initiateBankIDAuth({ environment: 'test', edgeFunctionUrl: '' }, ''), sameDevice !== undefined ? { sameDevice } : undefined);
   }
 
-  // The hook only gets the user through BankID approval + a magic link --
-  // actually finishing the sign-in (navigating to it) is this page's job,
-  // same as any other post-auth redirect.
+  // Finish the BankID login inside this Supabase client. Navigating to the
+  // generated magic-link URL makes iOS open/log in the public website,
+  // leaving the installed Capacitor app without a session. verifyOtp()
+  // stores the normal refreshable session in this app's localStorage and
+  // AuthContext's onAuthStateChange then takes the user to the app itself.
   useEffect(() => {
     if (bankId.status !== 'complete') return;
-    if (bankId.result?.magic_link) {
-      window.location.assign(bankId.result.magic_link);
-    } else {
-      setError('BankID godkändes, men kontot saknar en användbar e-postadress.');
+    let tokenHash = bankId.result?.token_hash || '';
+
+    // Backwards compatibility while an older vihem-bankid Edge Function is
+    // still deployed: Supabase's generated action_link contains the same
+    // hashed one-time token in its `token` query parameter.
+    if (!tokenHash && bankId.result?.magic_link) {
+      try { tokenHash = new URL(bankId.result.magic_link).searchParams.get('token') || ''; } catch { tokenHash = ''; }
     }
+
+    if (!tokenHash) {
+      setError('BankID godkändes, men kontot saknar en användbar e-postadress.');
+      return;
+    }
+
+    if (verifiedBankIdTokenRef.current === tokenHash) return;
+    verifiedBankIdTokenRef.current = tokenHash;
+    setBankIdSigningIn(true);
+    setError('');
+
+    void (async () => {
+      try {
+        const { error: verifyError } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'magiclink' });
+        if (verifyError) throw verifyError;
+      } catch (verifyError) {
+        verifiedBankIdTokenRef.current = null;
+        const message = verifyError instanceof Error ? verifyError.message : 'Okänt fel';
+        setError(`BankID godkändes, men appinloggningen misslyckades: ${message}`);
+      } finally {
+        setBankIdSigningIn(false);
+      }
+    })();
   }, [bankId.status, bankId.result]);
 
   useEffect(() => {
     if (bankId.error) setError(bankId.error);
   }, [bankId.error]);
 
-  const bankIdBusy = bankId.status === 'starting' || bankId.status === 'redirecting' || bankId.status === 'pending';
+  const bankIdBusy = bankIdSigningIn || bankId.status === 'starting' || bankId.status === 'redirecting' || bankId.status === 'pending';
 
   async function handleForgotPassword(e: React.FormEvent) {
     e.preventDefault();

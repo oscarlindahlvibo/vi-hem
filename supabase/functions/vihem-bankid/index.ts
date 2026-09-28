@@ -195,7 +195,18 @@ Deno.serve(async (req) => {
       if (!target?.email) return json({ ...result, login_ready: false, error: "Inget VI-HEM-konto är kopplat till detta BankID. Be en administratör lägga till ditt personnummer på ditt konto." });
       await db.from("vihem_profiles").update({ bankid_linked_at: new Date().toISOString(), auth_method: "both" }).eq("id", target.id);
       const link = await db.auth.admin.generateLink({ type: "magiclink", email: target.email, options: { redirectTo: Deno.env.get("VIHEM_PUBLIC_APP_URL") || "https://app.vi-hem.se" } });
-      return json({ ...result, login_ready: true, magic_link: link.data?.properties?.action_link || null });
+      if (link.error || !link.data?.properties?.hashed_token) {
+        console.error("vihem-bankid generateLink", link.error);
+        return json({ ...result, login_ready: false, error: "BankID godkändes, men VI-HEM kunde inte skapa en appsession." }, 500);
+      }
+      return json({
+        ...result,
+        login_ready: true,
+        token_hash: link.data.properties.hashed_token,
+        // Kept temporarily so already released web clients continue to work
+        // while native clients move to in-app verifyOtp(token_hash).
+        magic_link: link.data.properties.action_link || null,
+      });
     }
     if (action === "cancel") { await db.from("vihem_bankid_orders").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("order_ref", String(body.order_ref || "")); return json({ ok: true }); }
     return json({ error: "Okänd BankID-åtgärd." }, 400);

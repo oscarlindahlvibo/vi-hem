@@ -3,7 +3,7 @@ import { supabase } from './supabase';
 export type BankIDEnvironment = 'test' | 'production';
 export interface BankIDConfig { environment: BankIDEnvironment; edgeFunctionUrl: string; }
 export interface BankIDAuthOrder { orderRef: string; autoStartToken: string; autoStartUrl?: string | null; qrImage?: string | null; }
-export interface BankIDCollectResult { orderRef: string; status: 'pending' | 'failed' | 'complete'; hintCode?: string; error?: string; login_ready?: boolean; magic_link?: string | null; signed?: boolean; linked?: boolean; completionData?: { user: { personalNumber: string; name: string; givenName: string; surname: string }; signature: string; ocspResponse: string }; }
+export interface BankIDCollectResult { orderRef: string; status: 'pending' | 'failed' | 'complete'; hintCode?: string; error?: string; login_ready?: boolean; token_hash?: string | null; magic_link?: string | null; signed?: boolean; linked?: boolean; completionData?: { user: { personalNumber: string; name: string; givenName: string; surname: string }; signature: string; ocspResponse: string }; }
 export interface BankIDSignOrder extends BankIDAuthOrder { userVisibleData: string; }
 export interface BankIDResult { personalNumber: string; name: string; signature: string; autoStartToken: string; }
 
