@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Briefcase, CalendarDays, ChevronLeft, ChevronRight, ClipboardList, Plus, StickyNote, Trash2, UserX, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -25,6 +25,11 @@ const ABSENCE_CLASS = 'bg-rose-400/80 text-white';
  * line plus a bold title line. */
 const LANE_HEIGHT = 50;
 const CHIP_HEIGHT = 42;
+const LABEL_WIDTH = 200;
+/** A plain click has to still open the edit modal, so a drag only
+ * "counts" once the pointer has actually moved past a small threshold --
+ * same click-vs-drag distinction SwipeableCleaningCard uses (ShortStayPage.tsx). */
+const DRAG_THRESHOLD_PX = 4;
 
 function formatVisitTime(value: string | null) {
   return value ? value.slice(0, 5) : '';
@@ -38,6 +43,10 @@ function addDays(date: Date, days: number) {
   const next = new Date(date);
   next.setDate(next.getDate() + days);
   return next;
+}
+
+function addDaysToKey(dateKey: string, days: number) {
+  return toDateKey(addDays(new Date(`${dateKey}T12:00:00`), days));
 }
 
 function startOfWeekMonday(date: Date) {
@@ -83,6 +92,24 @@ interface ModalState {
   editing?: ScheduleEntry;
 }
 
+type DragKind = 'move' | 'resize-start' | 'resize-end';
+
+interface DragState {
+  kind: DragKind;
+  entryId: string;
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  dayColumnWidth: number;
+  originStartDate: string;
+  originEndDate: string;
+  originUserId: string;
+  previewStartDate: string;
+  previewEndDate: string;
+  previewUserId: string;
+  moved: boolean;
+}
+
 export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePageProps) {
   const { user } = useAuth();
   const canManage = user?.role === 'admin' || user?.role === 'superadmin';
@@ -107,6 +134,9 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
   const [visitTime, setVisitTime] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
+  const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const weekDayKeys = useMemo(() => Array.from({ length: 7 }, (_, i) => toDateKey(addDays(weekStart, i))), [weekStart]);
   const weekStartKey = weekDayKeys[0];
@@ -253,6 +283,104 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
     await fetchWeek();
   }
 
+  function measureDayColumnWidth() {
+    const width = tableRef.current?.getBoundingClientRect().width;
+    return width ? (width - LABEL_WIDTH) / 7 : 100;
+  }
+
+  /** Which staff row's vertical band currently contains this pointer Y --
+   * used while dragging a whole entry so it can be dropped on a different
+   * person, not just a different day. */
+  function hitTestUserId(clientY: number, fallback: string) {
+    for (const [userId, el] of rowRefs.current) {
+      const rect = el.getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom) return userId;
+    }
+    return fallback;
+  }
+
+  function effectiveUserId(entry: ScheduleEntry) {
+    return drag && drag.entryId === entry.id ? drag.previewUserId : entry.user_id;
+  }
+
+  function effectiveDates(entry: ScheduleEntry) {
+    if (drag && drag.entryId === entry.id) return { start: drag.previewStartDate, end: drag.previewEndDate };
+    return { start: entry.start_date, end: entry.end_date };
+  }
+
+  function beginDrag(event: React.PointerEvent<HTMLElement>, entry: ScheduleEntry, kind: DragKind) {
+    if (!canManage) return;
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDrag({
+      kind,
+      entryId: entry.id,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      dayColumnWidth: measureDayColumnWidth(),
+      originStartDate: entry.start_date,
+      originEndDate: entry.end_date,
+      originUserId: entry.user_id,
+      previewStartDate: entry.start_date,
+      previewEndDate: entry.end_date,
+      previewUserId: entry.user_id,
+      moved: false,
+    });
+  }
+
+  function handleDragMove(event: React.PointerEvent<HTMLElement>) {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const dxClientX = event.clientX - drag.startClientX;
+    const dxClientY = event.clientY - drag.startClientY;
+    const moved = drag.moved || Math.abs(dxClientX) > DRAG_THRESHOLD_PX || Math.abs(dxClientY) > DRAG_THRESHOLD_PX;
+    const dxDays = Math.round(dxClientX / drag.dayColumnWidth);
+
+    if (drag.kind === 'move') {
+      const targetUserId = hitTestUserId(event.clientY, drag.previewUserId);
+      setDrag({
+        ...drag,
+        moved,
+        previewStartDate: addDaysToKey(drag.originStartDate, dxDays),
+        previewEndDate: addDaysToKey(drag.originEndDate, dxDays),
+        previewUserId: targetUserId,
+      });
+    } else if (drag.kind === 'resize-end') {
+      const nextEnd = addDaysToKey(drag.originEndDate, dxDays);
+      setDrag({ ...drag, moved, previewEndDate: nextEnd < drag.originStartDate ? drag.originStartDate : nextEnd });
+    } else {
+      const nextStart = addDaysToKey(drag.originStartDate, dxDays);
+      setDrag({ ...drag, moved, previewStartDate: nextStart > drag.originEndDate ? drag.originEndDate : nextStart });
+    }
+  }
+
+  async function handleDragEnd(event: React.PointerEvent<HTMLElement>, entry: ScheduleEntry, staffMember: Profile) {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const snapshot = drag;
+    setDrag(null);
+
+    if (!snapshot.moved) {
+      openEditModal(entry, staffMember);
+      return;
+    }
+
+    const changed = snapshot.previewStartDate !== snapshot.originStartDate
+      || snapshot.previewEndDate !== snapshot.originEndDate
+      || snapshot.previewUserId !== snapshot.originUserId;
+    if (!changed) return;
+
+    const { error: updateError } = await supabase
+      .from('vihem_schedule_entries')
+      .update({ start_date: snapshot.previewStartDate, end_date: snapshot.previewEndDate, user_id: snapshot.previewUserId })
+      .eq('id', snapshot.entryId);
+    if (updateError) { setError(updateError.message); return; }
+    await fetchWeek();
+  }
+
+  function cancelDrag() {
+    setDrag(null);
+  }
+
   if (loading) return <LoadingPage />;
 
   return (
@@ -287,8 +415,8 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
       {staff.length === 0 ? (
         <EmptyState icon={CalendarDays} title="Ingen personal hittades" description="Lägg till personal under Personal-sidan först." />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: '200px repeat(7, 1fr)' }}>
+        <div ref={tableRef} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `${LABEL_WIDTH}px repeat(7, 1fr)` }}>
             <div className="px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-500">Personal</div>
             {weekDayKeys.map((dayKey, index) => (
               <div key={dayKey} className={`border-l border-slate-200 px-2 py-3 text-center text-xs font-black uppercase tracking-wide ${dayKey === todayKeyValue ? 'bg-blue-50 text-blue-700' : 'text-slate-500'}`}>
@@ -300,16 +428,23 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
 
           {staff.map(staffMember => {
             const bands: Band[] = [
-              ...entries.filter(e => e.user_id === staffMember.id).map((entry): Band => ({ kind: 'entry', start_date: entry.start_date, end_date: entry.end_date, entry })),
+              ...entries.filter(e => effectiveUserId(e) === staffMember.id).map((entry): Band => {
+                const eff = effectiveDates(entry);
+                return { kind: 'entry', start_date: eff.start, end_date: eff.end, entry };
+              }),
               ...absences.filter(a => a.user_id === staffMember.id).map((absence): Band => ({ kind: 'absence', start_date: absence.start_date, end_date: absence.end_date, userId: absence.user_id })),
             ];
             const lanes = packLanes(bands);
             const rowHeight = Math.max(1, lanes.length) * LANE_HEIGHT + 12;
 
             return (
-              <div key={staffMember.id} className="grid border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: '200px 1fr' }}>
+              <div key={staffMember.id} className="grid border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: `${LABEL_WIDTH}px 1fr` }}>
                 <div className="flex items-center px-4 py-2 text-sm font-black text-slate-900">{staffMember.name}</div>
-                <div className="relative" style={{ height: rowHeight }}>
+                <div
+                  ref={(el) => { if (el) rowRefs.current.set(staffMember.id, el); else rowRefs.current.delete(staffMember.id); }}
+                  className="relative"
+                  style={{ height: rowHeight }}
+                >
                   <div className="absolute inset-0 grid" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
                     {weekDayKeys.map(dayKey => (
                       <button
@@ -350,15 +485,23 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
                           const meta = ENTRY_TYPE_META[band.entry.entry_type];
                           const Icon = meta.icon;
                           const time = formatVisitTime(band.entry.visit_time);
+                          const isDragging = drag?.entryId === band.entry.id;
                           return (
-                            <button
+                            <div
                               key={band.entry.id}
-                              type="button"
-                              disabled={!canManage}
-                              onClick={() => canManage && openEditModal(band.entry, staffMember)}
-                              className={`pointer-events-auto absolute flex flex-col justify-center gap-0.5 overflow-hidden rounded-xl px-2.5 py-1.5 text-left shadow-sm ${meta.className} ${canManage ? 'cursor-pointer hover:brightness-110' : 'cursor-default'}`}
-                              style={{ left: `${left}%`, width: `${width}%`, top: laneIndex * LANE_HEIGHT + 4, height: CHIP_HEIGHT }}
+                              role="button"
+                              tabIndex={canManage ? 0 : -1}
+                              aria-label={`${meta.label}: ${band.entry.title}`}
+                              className={`pointer-events-auto absolute flex select-none flex-col justify-center gap-0.5 overflow-hidden rounded-xl px-2.5 py-1.5 text-left shadow-sm ${meta.className} ${canManage ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isDragging ? 'z-10 opacity-90 ring-2 ring-white' : ''}`}
+                              style={{ left: `${left}%`, width: `${width}%`, top: laneIndex * LANE_HEIGHT + 4, height: CHIP_HEIGHT, touchAction: 'none' }}
                               title={`${meta.label}${time ? ' · ' + time : ''}: ${band.entry.title}${band.entry.subtitle ? ' · ' + band.entry.subtitle : ''}`}
+                              onPointerDown={(event) => beginDrag(event, band.entry, 'move')}
+                              onPointerMove={handleDragMove}
+                              onPointerUp={(event) => handleDragEnd(event, band.entry, staffMember)}
+                              onPointerCancel={cancelDrag}
+                              onKeyDown={(event) => {
+                                if (canManage && (event.key === 'Enter' || event.key === ' ')) openEditModal(band.entry, staffMember);
+                              }}
                             >
                               <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide opacity-90">
                                 <Icon className="h-3 w-3 shrink-0" />
@@ -368,7 +511,27 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
                                 <span className="min-w-0 truncate">{time || meta.label}</span>
                               </span>
                               <span className="truncate text-xs font-bold">{band.entry.title}</span>
-                            </button>
+                              {canManage && (
+                                <>
+                                  <span
+                                    className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize"
+                                    style={{ touchAction: 'none' }}
+                                    onPointerDown={(event) => beginDrag(event, band.entry, 'resize-start')}
+                                    onPointerMove={handleDragMove}
+                                    onPointerUp={(event) => handleDragEnd(event, band.entry, staffMember)}
+                                    onPointerCancel={cancelDrag}
+                                  />
+                                  <span
+                                    className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize"
+                                    style={{ touchAction: 'none' }}
+                                    onPointerDown={(event) => beginDrag(event, band.entry, 'resize-end')}
+                                    onPointerMove={handleDragMove}
+                                    onPointerUp={(event) => handleDragEnd(event, band.entry, staffMember)}
+                                    onPointerCancel={cancelDrag}
+                                  />
+                                </>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
