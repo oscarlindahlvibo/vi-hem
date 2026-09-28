@@ -73,17 +73,18 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12">
+      <DuskTownscape />
+      <div className="relative w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex w-16 h-16 rounded-2xl mb-4 shadow-lg overflow-hidden">
+          <div className="inline-flex w-16 h-16 rounded-2xl mb-4 shadow-lg shadow-black/30 overflow-hidden">
             <AppLogo className="w-full h-full" />
           </div>
-          <h1 className="text-3xl font-bold text-white">VI-HEM</h1>
-          <p className="text-slate-400 mt-2">Fastighetsportalen – logga in för att fortsätta</p>
+          <h1 className="text-3xl font-bold text-white drop-shadow-sm">Välkommen hem</h1>
+          <p className="text-slate-200/90 mt-2">VI-HEM Fastighetsportalen – logga in för att fortsätta</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-2xl p-8">
+        <div className="bg-white rounded-2xl shadow-2xl shadow-black/40 p-8">
           {/* BankID login */}
           <div className="mb-6">
             {bankIdBusy ? (
@@ -262,6 +263,80 @@ export function LoginPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Dusk skyline behind the login card -- an inline SVG rather than a
+ * photo so it stays crisp at any size, loads instantly, and works fully
+ * offline in the native app (no image request, no licensing to track).
+ * Two rows of building silhouettes with a scatter of warm lit windows,
+ * meant to read as "coming home in the evening" for a property portal
+ * tenants and staff both land on. */
+function DuskTownscape() {
+  const back: Array<{ x: number; w: number; h: number }> = [
+    { x: -20, w: 110, h: 170 }, { x: 95, w: 80, h: 130 }, { x: 190, w: 120, h: 210 },
+    { x: 320, w: 70, h: 150 }, { x: 400, w: 130, h: 190 }, { x: 540, w: 90, h: 140 },
+    { x: 640, w: 110, h: 220 }, { x: 760, w: 80, h: 160 }, { x: 850, w: 140, h: 200 },
+    { x: 1000, w: 95, h: 150 }, { x: 1105, w: 115, h: 230 }, { x: 1230, w: 85, h: 170 },
+    { x: 1325, w: 110, h: 190 },
+  ];
+  const front: Array<{ x: number; w: number; h: number }> = [
+    { x: -10, w: 130, h: 110 }, { x: 115, w: 95, h: 150 }, { x: 205, w: 140, h: 90 },
+    { x: 340, w: 100, h: 130 }, { x: 435, w: 150, h: 100 }, { x: 580, w: 110, h: 160 },
+    { x: 685, w: 90, h: 110 }, { x: 770, w: 150, h: 140 }, { x: 915, w: 105, h: 95 },
+    { x: 1015, w: 130, h: 150 }, { x: 1140, w: 95, h: 115 }, { x: 1230, w: 150, h: 100 },
+    { x: 1375, w: 100, h: 135 },
+  ];
+
+  function windows(b: { x: number; w: number; h: number }, seed: number) {
+    const cols = Math.max(2, Math.floor(b.w / 24));
+    const rows = Math.max(2, Math.floor(b.h / 26));
+    const marginX = (b.w - (cols - 1) * 22) / 2;
+    const marginY = 16;
+    const cells: React.ReactNode[] = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const lit = (row * cols + col + seed) % 5 < 2;
+        if (!lit) continue;
+        cells.push(
+          <rect
+            key={`${row}-${col}`}
+            x={b.x + marginX + col * 22}
+            y={400 - b.h + marginY + row * 24}
+            width={10}
+            height={13}
+            rx={1.5}
+            fill="#fcd34d"
+            opacity={0.35 + ((row + col + seed) % 3) * 0.15}
+          />
+        );
+      }
+    }
+    return cells;
+  }
+
+  return (
+    <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+      <div className="absolute inset-0 bg-gradient-to-b from-[#0b1224] via-[#16233f] to-[#4a2f22]" />
+      <div className="absolute -top-24 right-[8%] h-64 w-64 rounded-full bg-amber-200/20 blur-3xl" />
+      <div className="absolute -top-10 right-[12%] h-28 w-28 rounded-full bg-amber-100/40 blur-2xl" />
+      <svg
+        className="absolute bottom-0 left-0 h-[46vh] min-h-[260px] w-full"
+        viewBox="0 0 1440 400"
+        preserveAspectRatio="xMidYMax slice"
+      >
+        {back.map((b, i) => (
+          <rect key={`back-${i}`} x={b.x} y={400 - b.h} width={b.w} height={b.h} fill="#0f172a" opacity={0.55} />
+        ))}
+        {front.map((b, i) => (
+          <g key={`front-${i}`}>
+            <rect x={b.x} y={400 - b.h} width={b.w} height={b.h} fill="#0a1120" />
+            {windows(b, i)}
+          </g>
+        ))}
+      </svg>
+      <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-black/10" />
     </div>
   );
 }
