@@ -73,8 +73,8 @@ export function LoginPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12">
-      <DuskTownscape />
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-4 py-12">
+      <LoginBackground />
       <div className="relative w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex w-16 h-16 rounded-2xl mb-4 shadow-lg shadow-black/30 overflow-hidden">
@@ -91,7 +91,7 @@ export function LoginPage() {
               <div className="rounded-xl border-2 border-[#193E4F]/20 bg-slate-50 p-5 text-center">
                 <div className="mb-3 flex items-center justify-between">
                   <span className="flex items-center gap-2 text-sm font-semibold text-[#193E4F]">
-                    <BankIDIcon className="h-5 w-5 flex-shrink-0" /> BankID
+                    <BankIDLogo className="h-5 w-auto flex-shrink-0" /> BankID
                   </span>
                   <button type="button" onClick={bankId.reset} className="text-slate-400 hover:text-slate-600" title="Avbryt">
                     <X className="h-4 w-4" />
@@ -106,7 +106,7 @@ export function LoginPage() {
                     onClick={() => bankId.confirmLaunched()}
                     className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#193E4F] px-4 py-3 text-sm font-semibold text-white hover:bg-[#122e3c]"
                   >
-                    <BankIDIcon className="h-5 w-5 flex-shrink-0" /> Öppna BankID-appen
+                    <BankIDLogo variant="white" className="h-5 w-auto flex-shrink-0" /> Öppna BankID-appen
                   </a>
                 ) : (
                   <p className="text-sm text-slate-600">{bankId.message || 'Startar BankID...'}</p>
@@ -124,7 +124,7 @@ export function LoginPage() {
                   }`}
                   title={bankIDAvailable ? 'Logga in med BankID' : 'BankID-integration är inte aktiverad ännu'}
                 >
-                  <BankIDIcon className="w-6 h-6 flex-shrink-0" />
+                  <BankIDLogo variant={bankIDAvailable ? 'white' : 'default'} className="h-7 w-auto flex-shrink-0" />
                   <span>Logga in med BankID</span>
                   {!bankIDAvailable && (
                     <span className="ml-auto text-xs bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full font-normal">
@@ -267,104 +267,29 @@ export function LoginPage() {
   );
 }
 
-/** Dusk skyline behind the login card -- an inline SVG rather than a
- * photo so it stays crisp at any size, loads instantly, and works fully
- * offline in the native app (no image request, no licensing to track).
- * Two rows of building silhouettes with a scatter of warm lit windows,
- * meant to read as "coming home in the evening" for a property portal
- * tenants and staff both land on. */
-function DuskTownscape() {
-  const back: Array<{ x: number; w: number; h: number }> = [
-    { x: -20, w: 110, h: 170 }, { x: 95, w: 80, h: 130 }, { x: 190, w: 120, h: 210 },
-    { x: 320, w: 70, h: 150 }, { x: 400, w: 130, h: 190 }, { x: 540, w: 90, h: 140 },
-    { x: 640, w: 110, h: 220 }, { x: 760, w: 80, h: 160 }, { x: 850, w: 140, h: 200 },
-    { x: 1000, w: 95, h: 150 }, { x: 1105, w: 115, h: 230 }, { x: 1230, w: 85, h: 170 },
-    { x: 1325, w: 110, h: 190 },
-  ];
-  const front: Array<{ x: number; w: number; h: number }> = [
-    { x: -10, w: 130, h: 110 }, { x: 115, w: 95, h: 150 }, { x: 205, w: 140, h: 90 },
-    { x: 340, w: 100, h: 130 }, { x: 435, w: 150, h: 100 }, { x: 580, w: 110, h: 160 },
-    { x: 685, w: 90, h: 110 }, { x: 770, w: 150, h: 140 }, { x: 915, w: 105, h: 95 },
-    { x: 1015, w: 130, h: 150 }, { x: 1140, w: 95, h: 115 }, { x: 1230, w: 150, h: 100 },
-    { x: 1375, w: 100, h: 135 },
-  ];
-
-  function windows(b: { x: number; w: number; h: number }, seed: number) {
-    const cols = Math.max(2, Math.floor(b.w / 24));
-    const rows = Math.max(2, Math.floor(b.h / 26));
-    const marginX = (b.w - (cols - 1) * 22) / 2;
-    const marginY = 16;
-    const cells: React.ReactNode[] = [];
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        const lit = (row * cols + col + seed) % 5 < 2;
-        if (!lit) continue;
-        cells.push(
-          <rect
-            key={`${row}-${col}`}
-            x={b.x + marginX + col * 22}
-            y={400 - b.h + marginY + row * 24}
-            width={10}
-            height={13}
-            rx={1.5}
-            fill="#fcd34d"
-            opacity={0.35 + ((row + col + seed) % 3) * 0.15}
-          />
-        );
-      }
-    }
-    return cells;
-  }
-
+function LoginBackground() {
   return (
     <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-      <div className="absolute inset-0 bg-gradient-to-b from-[#0b1224] via-[#16233f] to-[#4a2f22]" />
-      <div className="absolute -top-24 right-[8%] h-64 w-64 rounded-full bg-amber-200/20 blur-3xl" />
-      <div className="absolute -top-10 right-[12%] h-28 w-28 rounded-full bg-amber-100/40 blur-2xl" />
-      <svg
-        className="absolute bottom-0 left-0 h-[46vh] min-h-[260px] w-full"
-        viewBox="0 0 1440 400"
-        preserveAspectRatio="xMidYMax slice"
-      >
-        {back.map((b, i) => (
-          <rect key={`back-${i}`} x={b.x} y={400 - b.h} width={b.w} height={b.h} fill="#0f172a" opacity={0.55} />
-        ))}
-        {front.map((b, i) => (
-          <g key={`front-${i}`}>
-            <rect x={b.x} y={400 - b.h} width={b.w} height={b.h} fill="#0a1120" />
-            {windows(b, i)}
-          </g>
-        ))}
-      </svg>
-      <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-black/10" />
+      <img
+        src="/images/login-property-bg.jpg"
+        alt=""
+        className="absolute inset-0 h-full w-full object-cover"
+        draggable={false}
+      />
+      <div className="absolute inset-0 bg-slate-950/45" />
+      <div className="absolute inset-0 bg-gradient-to-br from-slate-950/70 via-slate-900/25 to-amber-900/30" />
+      <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-slate-950/65 to-transparent" />
     </div>
   );
 }
 
-/** BankID logotype as inline SVG — uses the official BankID color palette */
-function BankIDIcon({ className }: { className?: string }) {
+function BankIDLogo({ className, variant = 'default' }: { className?: string; variant?: 'default' | 'white' }) {
   return (
-    <svg
+    <img
+      src={variant === 'white' ? '/icons/bankid-logo-white.svg' : '/icons/bankid-logo.svg'}
+      alt="BankID"
       className={className}
-      viewBox="0 0 40 40"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-label="BankID"
-    >
-      {/* Simplified BankID-style shield icon */}
-      <rect width="40" height="40" rx="8" fill="#193E4F" />
-      <path
-        d="M20 6L8 11v10c0 7.18 5.18 13.89 12 15.56C27.82 34.89 33 28.18 33 21V11L20 6z"
-        fill="#71BE00"
-        opacity="0.9"
-      />
-      <path
-        d="M16 20.5l3 3 6-6"
-        stroke="white"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+      draggable={false}
+    />
   );
 }
