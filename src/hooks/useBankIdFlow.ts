@@ -87,6 +87,7 @@ const NATIVE_RETURN_URL = 'vihem://bankid-return';
 const QR_REFRESH_MS = 5000;
 const POLL_MS = 2000;
 const MAX_POLL_ATTEMPTS = 90; // ~3 minutes, matching the BankID order's own server-side expiry window
+const MAX_CONSECUTIVE_REQUEST_FAILURES = 15; // tolerate ~30 s of connectivity recovery after the native app switch
 const RESUME_WINDOW_MS = 3 * 60 * 1000;
 
 function isMobileDevice(): boolean {
@@ -163,11 +164,23 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
     clearPending();
   }, [stopTimers, clearPending]);
 
-  const poll = useCallback((orderRef: string, attempt: number) => {
+  const poll = useCallback((orderRef: string, attempt: number, consecutiveRequestFailures = 0) => {
     if (cancelled.current) return;
     pollTimer.current = window.setTimeout(async () => {
       if (cancelled.current) return;
       if (attempt >= MAX_POLL_ATTEMPTS) { finish('failed', undefined, 'BankID-sessionen tog för lång tid. Försök igen.'); return; }
+
+      // Opening BankID backgrounds the native Capacitor app. A request that
+      // starts while iOS is suspending the WKWebView commonly rejects with
+      // "Failed to send a request to the Edge Function" even though both
+      // BankID and the function are healthy. Do not spend poll attempts (or
+      // fail the order) until our webview is active again.
+      if (document.visibilityState === 'hidden') {
+        setMessage('Väntar på att du återgår från BankID-appen...');
+        poll(orderRef, attempt, consecutiveRequestFailures);
+        return;
+      }
+
       try {
         const r = await collectBankIDOrder({ environment: 'test', edgeFunctionUrl: '' }, orderRef, signingToken);
         if (cancelled.current) return;
@@ -185,9 +198,28 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
           return;
         }
         setMessage('Väntar på godkännande i BankID-appen...');
-        poll(orderRef, attempt + 1);
+        poll(orderRef, attempt + 1, 0);
       } catch (err) {
         if (cancelled.current) return;
+
+        // A network-level FunctionsFetchError during an app switch is
+        // transient. Keep the BankID order alive and retry after the native
+        // webview has regained connectivity. Real provider/server errors
+        // have their own hint code and still fail immediately.
+        if (
+          err instanceof BankIDError
+          && err.hintCode === 'requestFailed'
+          && consecutiveRequestFailures < MAX_CONSECUTIVE_REQUEST_FAILURES
+        ) {
+          setMessage('Återansluter till VI-HEM efter BankID...');
+          poll(orderRef, attempt + 1, consecutiveRequestFailures + 1);
+          return;
+        }
+
+        if (err instanceof BankIDError && err.hintCode === 'requestFailed') {
+          finish('failed', undefined, 'Kunde inte nå VI-HEM efter återgången från BankID. Kontrollera anslutningen och försök igen.');
+          return;
+        }
         finish('failed', undefined, err instanceof BankIDError ? err.message : (err instanceof Error ? err.message : 'BankID-anropet misslyckades.'));
       }
     }, POLL_MS);
@@ -203,15 +235,11 @@ export function useBankIdFlow(intent: 'auth' | 'sign' | 'link', signingToken?: s
       const native = Capacitor.isNativePlatform();
       const url = native ? bankIDLaunchUrl(order, NATIVE_RETURN_URL, true) : bankIDLaunchUrl(order);
       if (url) {
-        if (!native) {
-          // Stash the pending order now, before the user has even clicked
-          // the link -- if they do click and get redirected away, the
-          // resume effect below needs this already in place to pick
-          // polling back up. Native never navigates away (the custom
-          // scheme hand-off leaves our webview in place), so there's
-          // nothing to resume there.
-          try { window.localStorage.setItem(storageKey, JSON.stringify({ orderRef: order.orderRef, startedAt: Date.now() })); } catch { /* best effort */ }
-        }
+        // Stash the pending order before the user leaves for BankID. The web
+        // flow can return in a new tab, while iOS may purge and recreate the
+        // Capacitor webview while it is backgrounded. localStorage lets both
+        // paths resume the same order instead of landing on a fresh login.
+        try { window.localStorage.setItem(storageKey, JSON.stringify({ orderRef: order.orderRef, startedAt: Date.now() })); } catch { /* best effort */ }
         pendingOrderRef.current = order.orderRef;
         setStatus('redirecting');
         setMessage('Tryck på knappen för att öppna BankID-appen.');
