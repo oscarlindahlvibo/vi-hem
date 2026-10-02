@@ -77,6 +77,13 @@ function localDateKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+function workOrderDueLabel(dueDate: string, today = localDateKey()) {
+  const dueDateKey = dueDate.slice(0, 10);
+  if (dueDateKey < today) return 'Förfallet';
+  if (dueDateKey === today) return 'Förfaller idag';
+  return 'Deadline';
+}
+
 export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashboardProps) {
   const { user } = useAuth();
   const { labelFor } = useTimeCategories();
@@ -825,7 +832,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
                     {wo.due_date ? (
                       <div>
                         <p className="font-medium text-slate-700">{formatDate(wo.due_date)}</p>
-                        <p className="text-xs text-slate-500">Förfallet</p>
+                        <p className="text-xs text-slate-500">{workOrderDueLabel(wo.due_date)}</p>
                       </div>
                     ) : (
                       <p className="text-xs text-slate-400">Inget datum</p>
@@ -871,7 +878,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
                     {wo.due_date ? (
                       <div>
                         <p className="font-medium text-slate-700">{formatDate(wo.due_date)}</p>
-                        <p className="text-xs text-slate-500">Förfallet</p>
+                        <p className="text-xs text-slate-500">{workOrderDueLabel(wo.due_date)}</p>
                       </div>
                     ) : (
                       <p className="text-xs text-slate-400">Inget datum</p>
