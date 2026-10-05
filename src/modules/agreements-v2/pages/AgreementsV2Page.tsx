@@ -168,10 +168,7 @@ export function AgreementsV2Page({ initialPrefill }: { initialPrefill?: Agreemen
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900">
-          Avtal & offerter
-          <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">BETA</span>
-        </h1>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Avtal & offerter</h1>
         <p className="mt-1 text-sm text-slate-500">Ett centralt arkiv för avtal, offerter och andra dokument — kopplade eller fristående.</p>
       </div>
 
