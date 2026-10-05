@@ -97,8 +97,13 @@ const MIN_COMMENT_LENGTH = 4;
 // osv) kräver en fritextkommentar. ÄTA-tid är undantaget undantaget: det är
 // tekniskt sett en customer_project-post, men utanför offert och därför
 // alltid värt att motivera precis som övrig ospecificerad tid.
-function isCommentRequiredForEntry(entry: Pick<TimeEntry, 'category' | 'project_billing_scope'> | null): boolean {
+//
+// Kommentaren gäller alltid det pass som AVSLUTAS (det man faktiskt har
+// arbetat med), inte det man byter till -- se handleSwitchJob/handleStampOut.
+// En rast/lunch har inget arbete att kommentera.
+function isCommentRequiredForEntry(entry: Pick<TimeEntry, 'category' | 'project_billing_scope' | 'entry_type'> | null): boolean {
   if (!entry) return true;
+  if (isBreakLike(entry.entry_type)) return false;
   if (entry.category === 'work_order') return false;
   if (entry.category === 'customer_project') return entry.project_billing_scope === 'outside_quote';
   return true;
@@ -467,8 +472,16 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     }
   }
 
-  async function finishOpenEntries() {
+  /** `closingComment` är kommentaren om det pass som avslutas (det man faktiskt
+   * har arbetat med) -- den sparas på just det passet, aldrig på det nya man
+   * byter till. Ignoreras för rast/lunch. */
+  async function finishOpenEntries(closingComment?: string) {
     const end = new Date().toISOString();
+    const closing = closingComment?.trim() || '';
+    const withClosingComment = (entry: Pick<TimeEntry, 'entry_type' | 'comment'>) => {
+      if (!closing || isBreakLike(entry.entry_type)) return {};
+      return { comment: entry.comment?.trim() ? `${entry.comment.trim()}\n${closing}` : closing };
+    };
     // Closed purely by the stämpelklocka (start_time set by handleStampIn/
     // handleSwitchJob/etc at the moment of clocking in, end_time set here
     // at the moment of clocking out) -- nothing about it was typed in by
@@ -479,7 +492,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       const breakMinutes = isBreakLike(currentEntry.entry_type) ? 0 : currentEntry.break_minutes;
       await queueOfflineMutation('time_entry_update', {
         id: currentEntry.id,
-        data: { end_time: end, total_minutes: calcMinutes(currentEntry.start_time, end, breakMinutes), status: 'approved', approved_by: null, approved_at: end },
+        data: { end_time: end, total_minutes: calcMinutes(currentEntry.start_time, end, breakMinutes), status: 'approved', approved_by: null, approved_at: end, ...withClosingComment(currentEntry) },
       }, `time-entry:${currentEntry.id}`);
       return;
     }
@@ -501,6 +514,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
         status: 'approved',
         approved_by: null,
         approved_at: end,
+        ...withClosingComment(entry),
       }).eq('id', entry.id);
       if (updateError) throw updateError;
     }));
@@ -513,6 +527,11 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       comment,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id,work_date' });
+  }
+
+  function entryDescription(entry: TimeEntry) {
+    const project = timeEntryProjectLabel(entry);
+    return `${labelFor(entry.category)}${entry.category === 'customer_project' && entry.project_billing_scope === 'outside_quote' ? ' (ÄTA)' : ''}${project ? ` · ${project}` : ''}`;
   }
 
   function getCustomerProject(projectId?: string | null) {
@@ -545,7 +564,9 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
   async function handleSwitchJob(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope: TimeEntry['project_billing_scope'] = 'included_in_quote', changeOrderId?: string) {
     if (!currentEntry) return;
     const project = getCustomerProject(customerProjectId);
-    await finishOpenEntries();
+    // Kommentaren beskriver det man precis arbetat med -- den hör till passet
+    // som avslutas här, inte till det nya.
+    await finishOpenEntries(comment);
     const payload = {
       user_id: user.id,
       organisation_id: user.organisation_id || null,
@@ -560,7 +581,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       end_time: null,
       break_minutes: 0,
       total_minutes: 0,
-      comment: comment || '',
+      comment: '',
       status: 'draft',
     };
     if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', payload, `time-entry-open:${user.id}`);
@@ -600,7 +621,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
 
     const { data: previousEntries, error } = await supabase
       .from('vihem_time_entries')
-      .select('category, work_order_id, customer_project_id, customer_name, project_billing_scope, comment')
+      .select('category, work_order_id, customer_project_id, customer_name, project_billing_scope')
       .eq('user_id', user.id)
       .eq('entry_type', 'work')
       .lte('end_time', currentEntry.start_time)
@@ -630,7 +651,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       end_time: null,
       break_minutes: 0,
       total_minutes: 0,
-      comment: previous.comment || '',
+      comment: '',
       status: 'draft',
     };
     if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', payload, `time-entry-open:${user.id}`);
@@ -643,9 +664,16 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
 
   async function handleStampOut(dayComment?: string) {
     if (!currentEntry) return;
-    await finishOpenEntries();
+    // Kommentaren gäller passet man stämplar ut från; dagssammanfattningen
+    // får den som tillägg (inte ersättning) så tidigare utstämplingar samma
+    // dag inte skrivs över.
+    await finishOpenEntries(dayComment);
     const comment = dayComment?.trim();
-    if (comment) await saveDayComment(localDateKey(new Date()), comment);
+    if (comment) {
+      const today = localDateKey(new Date());
+      const existing = dailySummaries[today]?.comment?.trim();
+      await saveDayComment(today, existing ? `${existing}\n${comment}` : comment);
+    }
     setCurrentEntry(null);
     setShowEndDayModal(false);
     fetchData();
@@ -1109,12 +1137,14 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
         title={stampMode === 'switch' ? 'Byt jobb' : 'Stämpla in'}
         submitLabel={stampMode === 'switch' ? 'Byt jobb' : 'Stämpla in'}
         commentRequired={stampMode === 'switch' && isCommentRequiredForEntry(currentEntry)}
+        commentMode={stampMode !== 'switch' ? 'new' : currentEntry && isBreakLike(currentEntry.entry_type) ? 'none' : 'leaving'}
+        leavingLabel={currentEntry ? entryDescription(currentEntry) : undefined}
       />
 
       <EndDayModal
         open={showEndDayModal}
         onClose={() => setShowEndDayModal(false)}
-        defaultComment={dailySummaries[localDateKey(new Date())]?.comment || ''}
+        leavingLabel={currentEntry && !isBreakLike(currentEntry.entry_type) ? entryDescription(currentEntry) : undefined}
         commentRequired={isCommentRequiredForEntry(currentEntry)}
         onSubmit={(comment) => handleStampOut(comment)}
       />
@@ -1347,7 +1377,7 @@ function timeEntryProjectLabel(entry: Pick<TimeEntry, 'customer_name'> & { custo
   return entry.customer_name || '';
 }
 
-function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, title = 'Stämpla in', submitLabel = 'Stämpla in', commentRequired = false }: {
+function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, title = 'Stämpla in', submitLabel = 'Stämpla in', commentRequired = false, commentMode = 'new', leavingLabel }: {
   open: boolean; onClose: () => void;
   onSubmit: (cat: TimeCategory, woId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope?: TimeEntry['project_billing_scope'], changeOrderId?: string) => void;
   workOrders: WorkOrderSummary[];
@@ -1360,6 +1390,13 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
    * stämpla-in har inget att motivera mot ännu, så där är den alltid
    * valfri (caller skickar aldrig true för den). */
   commentRequired?: boolean;
+  /** Vems kommentar fältet är: 'leaving' = om passet man lämnar (byt jobb --
+   * visas överst, sparas på det avslutade passet), 'new' = valfri notering
+   * på det nya passet (vanlig stämpla in), 'none' = inget fält (man lämnar en
+   * rast). */
+  commentMode?: 'new' | 'leaving' | 'none';
+  /** Beskriver passet man lämnar, för frågan i 'leaving'-läget. */
+  leavingLabel?: string;
 }) {
   const { categories } = useTimeCategories();
   const [category, setCategory] = useState<TimeCategory>('general');
@@ -1374,8 +1411,8 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
   function reset() { setCategory('general'); setWorkOrderId(''); setCustomerProjectId(''); setProjectBillingScope('included_in_quote'); setChangeOrderId(''); setComment(''); setCommentError(''); }
 
   function submit() {
-    if (commentRequired && comment.trim().length < MIN_COMMENT_LENGTH) { setCommentError(`Skriv en kommentar om vad du byter till (minst ${MIN_COMMENT_LENGTH} tecken).`); return; }
-    onSubmit(category, workOrderId || undefined, comment, selectedProject?.customer_name || '', customerProjectId || undefined, projectBillingScope, changeOrderId || undefined);
+    if (commentMode !== 'none' && commentRequired && comment.trim().length < MIN_COMMENT_LENGTH) { setCommentError(`Skriv en kommentar om vad du har gjort (minst ${MIN_COMMENT_LENGTH} tecken).`); return; }
+    onSubmit(category, workOrderId || undefined, commentMode === 'none' ? '' : comment, selectedProject?.customer_name || '', customerProjectId || undefined, projectBillingScope, changeOrderId || undefined);
     reset();
   }
 
@@ -1397,7 +1434,20 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
   return (
     <Modal open={open} onClose={() => { onClose(); reset(); }} title={title}>
       <div className="space-y-4">
-        <Select label="Kategori" value={category} onChange={e => setCategory(e.target.value as TimeCategory)}
+        {commentMode === 'leaving' && (
+          <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+            <Textarea
+              label={`${leavingLabel ? `Vad har du gjort på ${leavingLabel}?` : 'Vad har du gjort?'}${commentRequired ? '' : ' (valfritt)'}`}
+              value={comment}
+              onChange={e => { setComment(e.target.value); if (commentError) setCommentError(''); }}
+              rows={2}
+              placeholder="Kommentaren sparas på det pass du avslutar"
+              error={commentError}
+            />
+            <p className="mt-2 text-xs font-semibold text-slate-500">Välj sedan vad du byter till nedan.</p>
+          </div>
+        )}
+        <Select label={commentMode === 'leaving' ? 'Byt till (kategori)' : 'Kategori'} value={category} onChange={e => setCategory(e.target.value as TimeCategory)}
           options={categories.length > 0 ? categories.map(c => ({ value: c.key, label: c.label })) : Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))} />
         <Select label="Arbetsorder (valfritt)" value={workOrderId} onChange={e => {
           const id = e.target.value;
@@ -1442,13 +1492,15 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
             )}
           </>
         )}
-        <Textarea
-          label={commentRequired ? 'Kommentar' : 'Kommentar (valfritt)'}
-          value={comment}
-          onChange={e => { setComment(e.target.value); if (commentError) setCommentError(''); }}
-          rows={2}
-          error={commentError}
-        />
+        {commentMode === 'new' && (
+          <Textarea
+            label="Kommentar (valfritt)"
+            value={comment}
+            onChange={e => { setComment(e.target.value); if (commentError) setCommentError(''); }}
+            rows={2}
+            error={commentError}
+          />
+        )}
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={() => { onClose(); reset(); }} className="flex-1">Avbryt</Button>
           <Button
@@ -1680,24 +1732,25 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
   );
 }
 
-function EndDayModal({ open, onClose, onSubmit, defaultComment, commentRequired = true }: {
+function EndDayModal({ open, onClose, onSubmit, leavingLabel, commentRequired = true }: {
   open: boolean;
   onClose: () => void;
   onSubmit: (comment: string) => void;
-  defaultComment: string;
+  /** Passet man stämplar ut från -- kommentaren hör till det. */
+  leavingLabel?: string;
   /** Bara krävd om det man var instämplad på inte redan är dokumenterat av
    * sig själv -- se isCommentRequiredForEntry. */
   commentRequired?: boolean;
 }) {
-  const [comment, setComment] = useState(defaultComment);
+  const [comment, setComment] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (open) { setComment(defaultComment); setError(''); }
-  }, [open, defaultComment]);
+    if (open) { setComment(''); setError(''); }
+  }, [open]);
 
   function submit() {
-    if (commentRequired && comment.trim().length < MIN_COMMENT_LENGTH) { setError(`Skriv en kommentar om vad som gjorts innan du stämplar ut (minst ${MIN_COMMENT_LENGTH} tecken).`); return; }
+    if (commentRequired && comment.trim().length < MIN_COMMENT_LENGTH) { setError(`Skriv en kommentar om vad du har gjort innan du stämplar ut (minst ${MIN_COMMENT_LENGTH} tecken).`); return; }
     onSubmit(comment);
   }
 
@@ -1705,11 +1758,11 @@ function EndDayModal({ open, onClose, onSubmit, defaultComment, commentRequired 
     <Modal open={open} onClose={onClose} title="Stämpla ut för dagen">
       <div className="space-y-4">
         <Textarea
-          label={commentRequired ? 'Vad har utförts idag?' : 'Vad har utförts idag? (valfritt)'}
+          label={`${leavingLabel ? `Vad har du gjort på ${leavingLabel}?` : 'Vad har du gjort?'}${commentRequired ? '' : ' (valfritt)'}`}
           value={comment}
           onChange={e => { setComment(e.target.value); if (error) setError(''); }}
           rows={4}
-          placeholder="Sammanfatta dagens arbete..."
+          placeholder="Kommentaren sparas på det pass du stämplar ut från"
           error={error}
         />
         <div className="flex gap-3 pt-2">
