@@ -321,6 +321,9 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
   const [tab, setTab] = useState<StaffTab>('list');
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [currentEntry, setCurrentEntry] = useState<TimeEntry | null>(null);
+  // Passet man var på INNAN en pågående rast/lunch. Byter man jobb eller
+  // stämplar ut direkt från rasten är det det passet kommentaren gäller.
+  const [workBeforeBreak, setWorkBeforeBreak] = useState<TimeEntry | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [loading, setLoading] = useState(false);
   const [workOrders, setWorkOrders] = useState<WorkOrderSummary[]>([]);
@@ -520,6 +523,34 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     }));
   }
 
+  useEffect(() => {
+    if (!currentEntry || !isBreakLike(currentEntry.entry_type)) { setWorkBeforeBreak(null); return; }
+    let cancelled = false;
+    supabase
+      .from('vihem_time_entries')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('entry_type', 'work')
+      .lte('end_time', currentEntry.start_time)
+      .order('end_time', { ascending: false })
+      .limit(1)
+      .then(({ data }) => { if (!cancelled) setWorkBeforeBreak((data?.[0] as TimeEntry | undefined) || null); });
+    return () => { cancelled = true; };
+  }, [currentEntry?.id, currentEntry?.entry_type]);
+
+  /** Kommentar från en rast: gäller passet före rasten, inte rasten själv. */
+  async function commentOnWorkBeforeBreak(comment?: string) {
+    const text = comment?.trim();
+    if (!text || !workBeforeBreak) return;
+    const merged = workBeforeBreak.comment?.trim() ? `${workBeforeBreak.comment.trim()}\n${text}` : text;
+    if (!navigator.onLine) {
+      await queueOfflineMutation('time_entry_update', { id: workBeforeBreak.id, data: { comment: merged } }, `time-entry:${workBeforeBreak.id}`);
+      return;
+    }
+    const { error } = await supabase.from('vihem_time_entries').update({ comment: merged }).eq('id', workBeforeBreak.id);
+    if (error) throw error;
+  }
+
   async function saveDayComment(workDate: string, comment: string) {
     await supabase.from('vihem_daily_work_summaries').upsert({
       user_id: user.id,
@@ -528,6 +559,10 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id,work_date' });
   }
+
+  // Passet en kommentar vid byte/utstämpling faktiskt gäller: pågående pass,
+  // eller passet före rasten om man är på rast (null = inget att kommentera).
+  const commentSubject: TimeEntry | null = currentEntry && isBreakLike(currentEntry.entry_type) ? workBeforeBreak : currentEntry;
 
   function entryDescription(entry: TimeEntry) {
     const project = timeEntryProjectLabel(entry);
@@ -565,8 +600,10 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     if (!currentEntry) return;
     const project = getCustomerProject(customerProjectId);
     // Kommentaren beskriver det man precis arbetat med -- den hör till passet
-    // som avslutas här, inte till det nya.
-    await finishOpenEntries(comment);
+    // som avslutas här, inte till det nya. Byter man från en rast är det
+    // passet före rasten.
+    if (isBreakLike(currentEntry.entry_type)) await commentOnWorkBeforeBreak(comment);
+    await finishOpenEntries(isBreakLike(currentEntry.entry_type) ? undefined : comment);
     const payload = {
       user_id: user.id,
       organisation_id: user.organisation_id || null,
@@ -667,7 +704,8 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     // Kommentaren gäller passet man stämplar ut från; dagssammanfattningen
     // får den som tillägg (inte ersättning) så tidigare utstämplingar samma
     // dag inte skrivs över.
-    await finishOpenEntries(dayComment);
+    if (isBreakLike(currentEntry.entry_type)) await commentOnWorkBeforeBreak(dayComment);
+    await finishOpenEntries(isBreakLike(currentEntry.entry_type) ? undefined : dayComment);
     const comment = dayComment?.trim();
     if (comment) {
       const today = localDateKey(new Date());
@@ -1136,16 +1174,16 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
         customerProjects={customerProjects}
         title={stampMode === 'switch' ? 'Byt jobb' : 'Stämpla in'}
         submitLabel={stampMode === 'switch' ? 'Byt jobb' : 'Stämpla in'}
-        commentRequired={stampMode === 'switch' && isCommentRequiredForEntry(currentEntry)}
-        commentMode={stampMode !== 'switch' ? 'new' : currentEntry && isBreakLike(currentEntry.entry_type) ? 'none' : 'leaving'}
-        leavingLabel={currentEntry ? entryDescription(currentEntry) : undefined}
+        commentRequired={stampMode === 'switch' && isCommentRequiredForEntry(commentSubject)}
+        commentMode={stampMode !== 'switch' ? 'new' : commentSubject ? 'leaving' : 'none'}
+        leavingLabel={commentSubject ? entryDescription(commentSubject) : undefined}
       />
 
       <EndDayModal
         open={showEndDayModal}
         onClose={() => setShowEndDayModal(false)}
-        leavingLabel={currentEntry && !isBreakLike(currentEntry.entry_type) ? entryDescription(currentEntry) : undefined}
-        commentRequired={isCommentRequiredForEntry(currentEntry)}
+        leavingLabel={commentSubject ? entryDescription(commentSubject) : undefined}
+        commentRequired={!!commentSubject && isCommentRequiredForEntry(commentSubject)}
         onSubmit={(comment) => handleStampOut(comment)}
       />
 
