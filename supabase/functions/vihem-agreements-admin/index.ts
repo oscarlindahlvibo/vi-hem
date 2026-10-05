@@ -88,7 +88,7 @@ Deno.serve(async (req: Request) => {
           db.from("vihem_agreement_signers").select("*").eq("agreement_id", agreementId).order("created_at"),
           db.from("vihem_agreement_attachments").select("*").eq("agreement_id", agreementId).order("position"),
           db.from("vihem_agreement_entity_links").select("*").eq("agreement_id", agreementId),
-          db.from("vihem_agreement_versions").select("id, version_number, content_hash, frozen_at").eq("agreement_id", agreementId).order("version_number", { ascending: false }),
+          db.from("vihem_agreement_versions").select("id, version_number, content_hash, frozen_at, blocks").eq("agreement_id", agreementId).order("version_number", { ascending: false }),
           db.from("vihem_agreement_audit_events").select("*").eq("agreement_id", agreementId).order("created_at", { ascending: false }).limit(100),
           // Signature evidence (method, IP, user-agent, BankID reference) --
           // same data the final PDF's verification section renders, surfaced

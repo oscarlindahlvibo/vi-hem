@@ -606,6 +606,7 @@ function AgreementEditor({ agreementId, organisationId, initialStep, onBack }: {
           signers={signers}
           attachments={detail.attachments}
           editable={editable}
+          frozenBlocks={!editable ? detail.versions?.[0]?.blocks : undefined}
           onSaved={(m) => { setMessage(m); setSavedBlocks(blocks); }}
           onError={setError}
           onAttachmentsChanged={refreshDetail}
@@ -781,12 +782,18 @@ function ContentStep({
   signers,
   attachments,
   editable,
+  frozenBlocks,
   onSaved,
   onError,
   onAttachmentsChanged,
 }: {
   agreementId: string;
   organisationId: string;
+  /** For a document that's already been sent: the version actually frozen
+   * for signing (fields already resolved at that moment). Previewed as-is
+   * instead of re-resolving the draft blocks against today's data, so what
+   * staff see is exactly what the signer got. */
+  frozenBlocks?: AgreementBlock[];
   blocks: AgreementBlock[];
   onBlocksChange: (blocks: AgreementBlock[]) => void;
   parties: AgreementParty[];
@@ -798,20 +805,22 @@ function ContentStep({
   onAttachmentsChanged: () => void;
 }) {
   const [saving, setSaving] = useState(false);
-  const [mode, setMode] = useState<'edit' | 'preview'>('edit');
+  const [mode, setMode] = useState<'edit' | 'preview'>(frozenBlocks ? 'preview' : 'edit');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   // {{tenant.name}} etc. resolved against the agreement's saved links, same
   // as the send action will -- refetched each time the preview is opened so
   // a link changed on the parties step is picked up.
   const [previewContext, setPreviewContext] = useState<DynamicFieldContext>({});
+  const [previewContextError, setPreviewContextError] = useState('');
   useEffect(() => {
-    if (mode !== 'preview') return;
+    if (mode !== 'preview' || frozenBlocks) return;
     let cancelled = false;
+    setPreviewContextError('');
     getPreviewContext(agreementId)
       .then((ctx) => { if (!cancelled) setPreviewContext(ctx); })
-      .catch(() => { /* preview just shows unresolved-as-empty, same as an unlinked agreement */ });
+      .catch((err) => { if (!cancelled) setPreviewContextError(describeError(err)); });
     return () => { cancelled = true; };
-  }, [mode, agreementId]);
+  }, [mode, agreementId, frozenBlocks]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -892,7 +901,8 @@ function ContentStep({
           </button>
         )}
       </div>
-      {!editable && <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-700">Dokumentet är skickat och kan inte längre redigeras direkt.</p>}
+      {!editable && <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-700">Dokumentet är skickat och kan inte längre redigeras direkt.{frozenBlocks && mode === 'preview' ? ' Förhandsgranskningen visar exakt den version som skickades för signering.' : ''}</p>}
+      {previewContextError && mode === 'preview' && <p className="border-b border-red-100 bg-red-50 px-4 py-2 text-xs text-red-700">Kunde inte hämta värden till fälten ({previewContextError}). Fälten visas tomma tills det fungerar.</p>}
 
       <div className="flex" style={{ minHeight: 480 }}>
         {mode === 'edit' && editable && (
@@ -961,7 +971,7 @@ function ContentStep({
                 </div>
               )
             ) : (
-              <BlockRenderer blocks={resolveBlocksForPreview(blocks, previewContext)} parties={parties} signers={signers} attachments={attachments} resolveAttachmentUrl={resolveAttachmentUrl} />
+              <BlockRenderer blocks={frozenBlocks ?? resolveBlocksForPreview(blocks, previewContext)} parties={parties} signers={signers} attachments={attachments} resolveAttachmentUrl={resolveAttachmentUrl} />
             )}
           </div>
         </div>
