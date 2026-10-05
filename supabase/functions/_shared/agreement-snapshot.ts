@@ -118,3 +118,159 @@ export async function sha256Hex(input: string): Promise<string> {
 export async function hashBlocks(blocks: AgreementBlock[]): Promise<string> {
   return sha256Hex(canonicalJson(blocks));
 }
+
+// Shared by the send action (freeze) and the editor's live preview
+// (vihem-agreements-admin get_preview_context) so a preview can never
+// resolve differently from what the signer is actually sent.
+export async function mergeLinkedEntity(db: any, context: DynamicFieldContext, entityType: string, entityId: string): Promise<DynamicFieldContext> {
+  try {
+    switch (entityType) {
+      case "tenant": {
+        // vihem_profiles has no general personal_number column (only
+        // bankid_personal_number, populated post-login, not a reliable
+        // general-purpose field) -- selecting it here would error. Caught
+        // by re-checking the actual schema while building the party
+        // picker below, not by the earlier end-to-end test (which never
+        // exercised a 'tenant' entity link).
+        const { data } = await db.from("vihem_profiles").select("name, email, phone").eq("id", entityId).maybeSingle();
+        return data ? mergeEntityContext(context, "tenant", data) : context;
+      }
+      case "apartment": {
+        // address lives on the parent property, not the apartment row
+        // itself (vihem_apartments has no address column) -- joined here
+        // so {{apartment.address}} still resolves per the brief's example
+        // token list.
+        const { data } = await db
+          .from("vihem_apartments")
+          .select("apartment_number, size, rooms, property:property_id(address)")
+          .eq("id", entityId)
+          .maybeSingle();
+        if (!data) return context;
+        const property = data.property as { address?: string } | { address?: string }[] | null;
+        const address = Array.isArray(property) ? property[0]?.address : property?.address;
+        return mergeEntityContext(context, "apartment", { apartment_number: data.apartment_number, size: data.size, rooms: data.rooms, address: address || "" });
+      }
+      case "property": {
+        const { data } = await db.from("vihem_properties").select("name, address").eq("id", entityId).maybeSingle();
+        return data ? mergeEntityContext(context, "property", data) : context;
+      }
+      case "finance_customer": {
+        const { data } = await db.from("vihem_finance_customers").select("name, email, phone, organisation_number").eq("id", entityId).maybeSingle();
+        return data ? mergeEntityContext(context, "customer", data) : context;
+      }
+      case "customer_project": {
+        // vihem_customer_projects has no "title" column (only name +
+        // customer_name) -- another mismatch caught by re-checking the
+        // actual schema rather than trusting the earlier assumption.
+        const { data } = await db.from("vihem_customer_projects").select("name, customer_name").eq("id", entityId).maybeSingle();
+        return data ? mergeEntityContext(context, "project", { name: data.name || "", customer_name: data.customer_name || "" }) : context;
+      }
+      default:
+        return context;
+    }
+  } catch {
+    return context;
+  }
+}
+
+async function sendSigningEmail(
+  db: any,
+  organisationId: string,
+  orgName: string,
+  signer: { name: string; email: string },
+  agreement: { title: string; document_number: string },
+  signUrl: string,
+  isReminder = false,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const subject = isReminder
+      ? `Påminnelse: ${agreement.title || agreement.document_number} väntar på din signatur`
+      : `Du har fått ett dokument från ${orgName}`;
+    const text = [
+      isReminder ? `Påminnelse: du har ett dokument som väntar på din signatur.` : `Du har fått ett dokument från ${orgName}.`,
+      "",
+      `${agreement.title || agreement.document_number} (${agreement.document_number})`,
+      "",
+      `Öppna och signera: ${signUrl}`,
+      "",
+      "Länken är personlig och ska inte delas vidare.",
+    ].join("\n");
+    // SENDER_EMAIL is fixed rather than read per-organisation -- see the
+    // same note in _shared/agreement-completion.ts.
+    await sendGmailMessage(db, organisationId, { fromEmail: SENDER_EMAIL, fromName: SENDER_NAME, toEmail: signer.email, toName: signer.name, subject, text });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: googleMailerFriendlyMessage(googleMailerErrorCode(err)) };
+  }
+}
+
+// Must be called with the ORIGINAL caller's user-JWT client (auth.userClient
+// from vihem-auth.ts), never the service-role client: vihem-send-sms
+// authenticates via supabase.auth.getUser(token) against a real user
+// session and checks that user's own vihem_profiles role -- a service-role
+// key has no associated user, so calling it with the admin client would
+// always be rejected with 403.
+async function sendSigningSms(
+  userClient: any,
+  organisationId: string,
+  signer: { name: string; phone: string },
+  orgName: string,
+  signUrl: string,
+  isReminder = false,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    // Kept deliberately short: the token itself is already the largest
+    // component of signUrl (see _shared/agreement-tokens.ts -- base64url,
+    // not hex, specifically to keep this under a single SMS's length),
+    // and every extra word here eats into that budget further.
+    const message = isReminder
+      ? `Paminnelse: dokument fran ${orgName} vantar pa signatur: ${signUrl}`
+      : `Dokument fran ${orgName} att signera: ${signUrl}`;
+    const { data, error } = await userClient.functions.invoke("vihem-send-sms", {
+      body: { organisation_id: organisationId, recipient: signer.phone, message, related_type: "agreement_signing", related_id: null },
+    });
+    if (error) return { ok: false, error: error.message || "SMS-utskick misslyckades." };
+    if (data?.error) return { ok: false, error: String(data.error) };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function writeAudit(
+  db: any,
+  agreementId: string,
+  signerId: string | null,
+  eventType: string,
+  actorType: "staff" | "signer" | "system",
+  actorId: string | null,
+  metadata: Record<string, unknown> = {},
+  versionId: string | null = null,
+  documentHash: string | null = null,
+  channel: "email" | "sms" | null = null,
+) {
+  await db.from("vihem_agreement_audit_events").insert({
+    agreement_id: agreementId,
+    signer_id: signerId,
+    event_type: eventType,
+    actor_type: actorType,
+    actor_id: actorId,
+    agreement_version_id: versionId,
+    document_hash: documentHash,
+    channel,
+    metadata,
+  });
+}
+
+/** Base (today/organisation) context + one namespace per linked entity. */
+export async function buildContextFromLinks(
+  db: any,
+  organisationId: string,
+  links: Array<{ entity_type: string; entity_id: string }>,
+): Promise<DynamicFieldContext> {
+  let context = await buildDynamicFieldContext(db, organisationId);
+  for (const link of links) {
+    context = await mergeLinkedEntity(db, context, link.entity_type, link.entity_id);
+  }
+  return context;
+}

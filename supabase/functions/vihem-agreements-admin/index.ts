@@ -12,6 +12,7 @@
 // -- this function never creates a version or a signature request.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, corsHeaders, errorJson, isAuthContext, json } from "../_shared/vihem-auth.ts";
+import { buildContextFromLinks } from "../_shared/agreement-snapshot.ts";
 
 const STAFF_ROLES = ["staff", "admin", "superadmin"];
 const ADMIN_ROLES = ["admin", "superadmin"];
@@ -376,6 +377,22 @@ Deno.serve(async (req: Request) => {
           if (insErr) return errorJson("INTERNAL_ERROR", insErr.message, 500);
         }
         return json({ data: { ok: true } });
+      }
+
+      // Resolved {{namespace.field}} values for the editor's live preview --
+      // built from the SAVED entity links by the exact same code the send
+      // action freezes with, so the preview matches what the signer gets.
+      // Deliberately ignores any client-supplied links: this runs with the
+      // service role, so entity ids must come from rows already saved (and
+      // org-checked) rather than from the request.
+      case "get_preview_context": {
+        const agreementId = String(body?.agreement_id || "");
+        const agreement = await assertAgreementInOrg(agreementId);
+        if (agreement instanceof Response) return agreement;
+        const { data: links, error: linkErr } = await db.from("vihem_agreement_entity_links").select("entity_type, entity_id").eq("agreement_id", agreementId);
+        if (linkErr) return errorJson("INTERNAL_ERROR", linkErr.message, 500);
+        const context = await buildContextFromLinks(db, agreement.organisation_id, links || []);
+        return json({ data: { context } });
       }
 
       case "list_entity_agreements": {

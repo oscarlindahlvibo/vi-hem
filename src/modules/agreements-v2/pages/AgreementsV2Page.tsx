@@ -30,8 +30,9 @@ import {
   updateTemplate,
   uploadAttachment,
   AgreementApiError,
+  getPreviewContext,
 } from '../api';
-import type { AgreementPrefillContext, ExistingEntityLinkOption } from '../api';
+import type { AgreementPrefillContext, DynamicFieldContext, ExistingEntityLinkOption } from '../api';
 import type {
   Agreement,
   AgreementAttachment,
@@ -53,6 +54,7 @@ import { BlockEditor, BlockRow } from '../components/BlockEditor';
 import { BlockRenderer } from '../components/BlockRenderer';
 import { blockTypeDef, createBlock } from '../blocks/blockTypes';
 import { BLOCK_CATEGORIES } from '../blocks/blockCategories';
+import { resolveBlocksForPreview } from '../blocks/dynamicFields';
 import { Modal } from '../../../components/ui';
 import { useScrollLock } from '../../../lib/utils';
 import { ArchiveIcon, ArrowLeft, Bell, ChevronDown, Download, Edit3, FileSignature, FileText, Fingerprint, Globe, Link2, MoreHorizontal, Paperclip, PenLine, Plus, RefreshCw, Send, Trash2, Users, XCircle } from 'lucide-react';
@@ -798,6 +800,18 @@ function ContentStep({
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  // {{tenant.name}} etc. resolved against the agreement's saved links, same
+  // as the send action will -- refetched each time the preview is opened so
+  // a link changed on the parties step is picked up.
+  const [previewContext, setPreviewContext] = useState<DynamicFieldContext>({});
+  useEffect(() => {
+    if (mode !== 'preview') return;
+    let cancelled = false;
+    getPreviewContext(agreementId)
+      .then((ctx) => { if (!cancelled) setPreviewContext(ctx); })
+      .catch(() => { /* preview just shows unresolved-as-empty, same as an unlinked agreement */ });
+    return () => { cancelled = true; };
+  }, [mode, agreementId]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -947,7 +961,7 @@ function ContentStep({
                 </div>
               )
             ) : (
-              <BlockRenderer blocks={blocks} parties={parties} signers={signers} attachments={attachments} resolveAttachmentUrl={resolveAttachmentUrl} />
+              <BlockRenderer blocks={resolveBlocksForPreview(blocks, previewContext)} parties={parties} signers={signers} attachments={attachments} resolveAttachmentUrl={resolveAttachmentUrl} />
             )}
           </div>
         </div>

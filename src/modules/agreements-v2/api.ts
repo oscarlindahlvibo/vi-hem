@@ -93,6 +93,12 @@ export function saveSigners(agreementId: string, signers: AgreementSigner[]): Pr
 export function saveEntityLinks(agreementId: string, links: AgreementEntityLink[]): Promise<{ ok: boolean }> {
   return invokeAdmin('save_entity_links', { agreement_id: agreementId, links });
 }
+export type DynamicFieldContext = Record<string, Record<string, string>>;
+/** Resolved {{ns.field}} values for the editor preview, from the agreement's SAVED entity links. */
+export async function getPreviewContext(agreementId: string): Promise<DynamicFieldContext> {
+  const res = await invokeAdmin<{ context: DynamicFieldContext }>('get_preview_context', { agreement_id: agreementId });
+  return res.context || {};
+}
 export function listEntityAgreements(entityType: AgreementEntityType, entityId: string): Promise<AgreementListItem[]> {
   return invokeAdmin('list_entity_agreements', { entity_type: entityType, entity_id: entityId });
 }
