@@ -1,8 +1,8 @@
 # Manuell driftsättning: Vibo och delad Supabase
 
 Utgångspunkt: Vi-hem `origin/main` på commit `8300a2f`, inklusive Claudes senaste
-ändringar för signerade avtal och hyresförhållanden. Ingen databasoperation har utförts
-mot den delade Supabase-instansen. SQL har verifierats i en isolerad lokal PostgreSQL-modell.
+ändringar för signerade avtal och hyresförhållanden. Skrivskyddade kontroller har utförts mot den delade Supabase-instansen via ZeroTier.
+Inga produktionsskrivningar har gjorts. SQL har verifierats i en isolerad lokal PostgreSQL-modell.
 
 ## 1. Granska och bygg koden
 
