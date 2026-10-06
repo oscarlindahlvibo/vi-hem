@@ -93,6 +93,14 @@ export function saveSigners(agreementId: string, signers: AgreementSigner[]): Pr
 export function saveEntityLinks(agreementId: string, links: AgreementEntityLink[]): Promise<{ ok: boolean }> {
   return invokeAdmin('save_entity_links', { agreement_id: agreementId, links });
 }
+export type TenancyFromAgreementResult =
+  | { status: 'created'; tenancy_id: string; monthly_rent: number; start_date: string; apartment_rent_updated: boolean }
+  | { status: 'exists'; tenancy_id: string }
+  | { status: 'skipped' | 'conflict'; reason: string };
+export function createTenancyFromAgreement(agreementId: string): Promise<TenancyFromAgreementResult> {
+  return invokeAdmin('create_tenancy_from_agreement', { agreement_id: agreementId });
+}
+
 export type DynamicFieldContext = Record<string, Record<string, string>>;
 /** Resolved {{ns.field}} values for the editor preview, from the agreement's SAVED entity links. */
 export async function getPreviewContext(agreementId: string): Promise<DynamicFieldContext> {

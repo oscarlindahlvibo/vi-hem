@@ -253,6 +253,8 @@ export interface AgreementDetail {
   attachments: AgreementAttachment[];
   entity_links: AgreementEntityLink[];
   versions: AgreementVersion[];
+  /** Signed lease with tenant + apartment links: has it become a tenancy yet? */
+  tenancy?: { state: 'none' | 'missing' | 'linked'; tenancy_id?: string };
   audit_events: AgreementAuditEvent[];
   signatures: AgreementSignature[];
 }

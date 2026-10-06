@@ -13,6 +13,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, corsHeaders, errorJson, isAuthContext, json } from "../_shared/vihem-auth.ts";
 import { buildContextFromLinks } from "../_shared/agreement-snapshot.ts";
+import { createTenancyFromAgreement } from "../_shared/agreement-tenancy.ts";
 
 const STAFF_ROLES = ["staff", "admin", "superadmin"];
 const ADMIN_ROLES = ["admin", "superadmin"];
@@ -95,7 +96,17 @@ Deno.serve(async (req: Request) => {
           // to staff in-app. Never exposed on the public/signer-facing side.
           db.from("vihem_agreement_signatures").select("id, signer_id, method, signature_name, bankid_personal_number, bankid_reference, ip_address, user_agent, signed_at").eq("agreement_id", agreementId),
         ]);
-        return json({ data: { agreement: full, blocks, parties, signers, attachments, entity_links: links, versions, audit_events: auditEvents, signatures } });
+        // For a signed lease linked to a tenant + apartment: has that pair
+        // actually become a tenancy yet? Drives the "Skapa hyresförhållande"
+        // prompt in the editor.
+        let tenancy: { state: "none" | "missing" | "linked"; tenancy_id?: string } = { state: "none" };
+        const tenantLink = (links || []).find((l: any) => l.entity_type === "tenant");
+        const apartmentLink = (links || []).find((l: any) => l.entity_type === "apartment");
+        if (full?.status === "signed" && full?.document_type === "agreement" && tenantLink && apartmentLink) {
+          const { data: existing } = await db.from("vihem_tenancies").select("id").eq("tenant_id", tenantLink.entity_id).eq("apartment_id", apartmentLink.entity_id).eq("status", "active").maybeSingle();
+          tenancy = existing ? { state: "linked", tenancy_id: existing.id } : { state: "missing" };
+        }
+        return json({ data: { agreement: full, blocks, parties, signers, attachments, entity_links: links, versions, audit_events: auditEvents, signatures, tenancy } });
       }
 
       case "create_agreement": {
@@ -393,6 +404,17 @@ Deno.serve(async (req: Request) => {
         if (linkErr) return errorJson("INTERNAL_ERROR", linkErr.message, 500);
         const context = await buildContextFromLinks(db, agreement.organisation_id, links || []);
         return json({ data: { context } });
+      }
+
+      // Manual trigger of the same step that runs automatically when a lease
+      // is fully signed -- for leases signed before that existed, or where
+      // the links were added afterwards.
+      case "create_tenancy_from_agreement": {
+        const agreementId = String(body?.agreement_id || "");
+        const agreement = await assertAgreementInOrg(agreementId);
+        if (agreement instanceof Response) return agreement;
+        const result = await createTenancyFromAgreement(db, agreementId, auth.callerId);
+        return json({ data: result });
       }
 
       case "list_entity_agreements": {

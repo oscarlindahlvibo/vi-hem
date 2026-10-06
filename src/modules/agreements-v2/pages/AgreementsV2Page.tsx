@@ -31,6 +31,7 @@ import {
   uploadAttachment,
   AgreementApiError,
   getPreviewContext,
+  createTenancyFromAgreement,
 } from '../api';
 import type { AgreementPrefillContext, DynamicFieldContext, ExistingEntityLinkOption } from '../api';
 import type {
@@ -416,6 +417,7 @@ type EditorStep = 'content' | 'parties' | 'signing' | 'attachments' | 'history';
 
 function AgreementEditor({ agreementId, organisationId, initialStep, onBack }: { agreementId: string; organisationId: string; initialStep?: EditorStep; onBack: () => void }) {
   const [detail, setDetail] = useState<AgreementDetail | null>(null);
+  const [creatingTenancy, setCreatingTenancy] = useState(false);
   const [step, setStep] = useState<EditorStep>(initialStep || 'content');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -574,6 +576,43 @@ function AgreementEditor({ agreementId, organisationId, initialStep, onBack }: {
       />
 
       {message && <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p>}
+
+      {detail.tenancy?.state === 'missing' && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm text-amber-900">
+            Avtalet är signerat men hyresgästen är ännu inte kopplad till lägenheten. Hyra och startdatum hämtas från det signerade avtalet.
+          </p>
+          <button
+            type="button"
+            disabled={creatingTenancy}
+            onClick={async () => {
+              setCreatingTenancy(true);
+              setError('');
+              try {
+                const result = await createTenancyFromAgreement(agreement.id);
+                if (result.status === 'created') {
+                  setMessage(`Hyresförhållande skapat (${result.monthly_rent.toLocaleString('sv-SE')} kr/mån från ${result.start_date})${result.apartment_rent_updated ? ' och lägenhetens hyra uppdaterad' : ''}.`);
+                  await load();
+                } else if (result.status === 'exists') {
+                  await load();
+                } else {
+                  setError(result.reason);
+                }
+              } catch (err) {
+                setError(describeError(err));
+              } finally {
+                setCreatingTenancy(false);
+              }
+            }}
+            className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50"
+          >
+            {creatingTenancy ? 'Skapar...' : 'Koppla hyresgäst och lägenhet'}
+          </button>
+        </div>
+      )}
+      {detail.tenancy?.state === 'linked' && (
+        <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Hyresgästen är kopplad till lägenheten (aktivt hyresförhållande).</p>
+      )}
 
       <div className="flex gap-1 overflow-x-auto border-b border-slate-200">
         {([

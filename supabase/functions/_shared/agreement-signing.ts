@@ -9,6 +9,7 @@
 // bookkeeping (signer status transition rules + audit trail + completion
 // trigger), not small pure arithmetic safe to fork.
 import { generateAndDeliverFinalPdf } from "./agreement-completion.ts";
+import { createTenancyFromAgreement } from "./agreement-tenancy.ts";
 
 export async function writeAgreementAudit(
   db: any,
@@ -62,6 +63,13 @@ export async function maybeCompleteAgreement(db: any, agreementId: string) {
     const pdfResult = await generateAndDeliverFinalPdf(db, agreementId);
     if (pdfResult.ok && pdfResult.storagePath) {
       await linkFinalPdfToTenantDocuments(db, agreementId, pdfResult.storagePath);
+    }
+
+    // Signed lease linked to a tenant + apartment -> make them actual
+    // tenant and apartment (tenancy, rented, rent as signed). Best-effort
+    // like the PDF above: the signature is already safely recorded.
+    if (agreement?.document_type === "agreement") {
+      try { await createTenancyFromAgreement(db, agreementId, null); } catch (err) { console.error("createTenancyFromAgreement", err); }
     }
   } else if (anySigned) {
     await db.from("vihem_agreements").update({ status: "partially_signed" }).eq("id", agreementId).in("status", ["sent", "viewed", "partially_signed"]);
