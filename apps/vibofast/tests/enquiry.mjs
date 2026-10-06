@@ -1,0 +1,26 @@
+import ts from 'typescript';
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+let handler; let saved; let backendError=null;
+globalThis.Deno={env:{get:key=>({VIBOFAST_RATE_LIMIT_SECRET:'local-test-only-secret',SUPABASE_URL:'https://example.test',SUPABASE_SERVICE_ROLE_KEY:'local-test-only'})[key]},serve:fn=>{handler=fn;}};
+globalThis.testClient=()=>({rpc:async(name,payload)=>{saved={name,payload};return {error:backendError};}});
+const localSource=new URL('../supabase/functions/vihem-vibofast-enquiry/index.ts',import.meta.url);
+let source=fs.readFileSync(fs.existsSync(localSource) ? localSource : new URL('../../../supabase/functions/vihem-vibofast-enquiry/index.ts',import.meta.url),'utf8');
+source=source.replace(/import \{ createClient \} from .*?;/,'const createClient = globalThis.testClient;');
+const result=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext},reportDiagnostics:true});
+assert.equal(result.diagnostics.length,0);
+await import('data:text/javascript;base64,'+Buffer.from(result.outputText).toString('base64'));
+function send(body,origin='https://vibofast.se',method='POST') { return handler(new Request('https://functions.example.test',{method,headers:{origin,'content-type':'application/json'},...(method==='POST'?{body:typeof body==='string'?body:JSON.stringify(body)}:{})})); }
+assert.equal((await send({},'https://other-site.test')).status,403);
+assert.equal((await send({},'https://vibofast.se','OPTIONS')).status,204);
+assert.equal((await send('bad json')).status,400);
+assert.equal((await send({kind:'other',payload:{}})).status,400);
+assert.equal((await send({kind:'contact',payload:{name:'Test',email:'invalid',message:'Hej'}})).status,400);
+assert.equal((await send({kind:'contact',payload:{name:'Test',email:'test@example.test',message:'x'.repeat(4001)}})).status,400);
+assert.equal((await send({kind:'contact',payload:{name:'Test',email:'test@example.test',message:'Hej',role:'admin',internal_notes:'discard'}})).status,201);
+assert.equal(saved.name,'vihem_vibofast_store_enquiry');assert.equal(saved.payload.p_payload.role,undefined);assert.equal(saved.payload.p_payload.internal_notes,undefined);
+assert.equal(saved.payload.p_fingerprint.length,64);assert.ok(!saved.payload.p_fingerprint.includes('test@example'));
+backendError={message:'Rate limit'};assert.equal((await send({kind:'interest',payload:{name:'Test',email:'test@example.test'}})).status,429);
+backendError={message:'Database failure'};assert.equal((await send({kind:'interest',payload:{name:'Test',email:'test@example.test'}})).status,503);
+console.log('PASS: Edge Function request validation, origin checks, field projection, hashed rate key, success/error/rate-limit responses (mocked local database client).');
+delete globalThis.Deno;delete globalThis.testClient;

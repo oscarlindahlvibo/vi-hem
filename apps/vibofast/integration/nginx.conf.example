@@ -1,0 +1,11 @@
+# Add to your existing HTTPS server for vibofast.se; configure TLS with your hosting provider.
+server {
+    listen 80;
+    server_name vibofast.se www.vibofast.se;
+    return 301 https://vibofast.se$request_uri;
+}
+# Inside the existing TLS server block:
+# root /var/www/vibofast/dist;
+# location / { try_files $uri $uri/ /index.html; }
+# location /assets/ { add_header Cache-Control "public, max-age=31536000, immutable"; }
+# location = /index.html { add_header Cache-Control "no-cache"; }

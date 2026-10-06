@@ -1,3 +1,4 @@
+import { WebsiteAdmin } from './modules/vibofast/WebsiteAdmin';
 import React, { useCallback, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { TimeCategoriesProvider } from './contexts/TimeCategoriesContext';
@@ -554,6 +555,10 @@ function AppInner() {
 
       case 'notifications':
         return <NotificationsPage onNavigate={navigate} />;
+
+      case 'vibofast-website':
+        if (!isAdmin) return renderDashboard();
+        return <WebsiteAdmin client={supabase} />;
 
       case 'admin-properties':
         if (!isAdmin) return renderDashboard();
