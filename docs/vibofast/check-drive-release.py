@@ -19,6 +19,9 @@ if hashlib.sha256(live.read_bytes()).hexdigest() not in (*manifest['expected_pre
 for name in ['index.ts','core.ts','google.ts']:
  installed=Path('/home/vibo/atm-personal-supabase/volumes/functions/vihem-vibofast-drive')/name
  if hashlib.sha256(installed.read_bytes()).hexdigest()!=manifest['files']['function/'+name]:raise SystemExit('Installed Drive function changed: '+name)
+if 'document-function/index.ts' in manifest['files']:
+ installed=Path('/home/vibo/atm-personal-supabase/volumes/functions/vihem-google-drive-storage/index.ts')
+ if hashlib.sha256(installed.read_bytes()).hexdigest()!=manifest['files']['document-function/index.ts']:raise SystemExit('Installed document Drive function changed; review first')
 if '--live' in sys.argv:
  body=urllib.request.urlopen('https://app.vi-hem.se/?vibo_interest_release='+manifest['source_commit'],timeout=20).read()
  if hashlib.sha256(body).hexdigest()!=new:raise SystemExit('HTTP does not serve the new frontend')

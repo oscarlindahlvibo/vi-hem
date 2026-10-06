@@ -28,22 +28,15 @@ Migration: 20261006160000_vihem_vibofast_drive_images.sql. Kör endast denna nya
 
 ## Vald huvudmapp och generell Vi-hem-lagring
 
-Användaren har valt `1kBmSjNNLb9WQYFUZZALXrvm-XHsb3sT1` som huvudmapp för både hemsidebilder och Vi-hems övriga filer. Den är registrerad för Vibogruppen AB, men båda lagringskopplingarna är avstängda tills Google-åtkomst är verifierad.
+Aktiverad huvudmapp: [Vi-Hem server](https://drive.google.com/drive/folders/1kBmSjNNLb9WQYFUZZALXrvm-XHsb3sT1), i delad enhet 0AMOC4dHEz6J8Uk9PVA.
 
-Befintliga Vi-hem-moduler använder organisationsmappen `Vibogruppen-AB__38fe702d`, med bland annat Dokument, Ekonomi/Underlag, Ekonomi/Avbetalningsplaner, Besiktningar/Foton, Arbetsorder, Lager/Artiklar, Uthyrning och Fleet. Endast mappar för hemsidebilder används som källa till den publika webbplatsen.
+Hemsidans bilder: [Vibo Fastigheter – hemsidebilder](https://drive.google.com/drive/folders/17uo7hkOSn55mdfQktUL5uIZry_U4z0c9).
+Övriga filer: [Vibogruppen-AB__38fe702d](https://drive.google.com/drive/folders/1sQ2TBDXM4DPBahnazPQme3NC0qE0opGp).
 
-Servicekonto: `vihem-415@vibofast-1755590962277.iam.gserviceaccount.com`.
-OAuth-klient-ID för befintlig Workspace-delegering: `104498284662860825839`.
+Alla 7 fastigheter och 64 lägenheter har bildmappar. För övriga filer finns bland annat Dokument, Ekonomi/Underlag, Ekonomi/Avbetalningsplaner, Avtal, Besiktningar/Foton, Arbetsorder, Lager/Artiklar, Uthyrning och Fleet. Befintliga moduler skapar fler undermappar vid behov. Bara mappar för hemsidebilder är bildkälla till den publika webbplatsen.
 
-Om huvudmappen ligger i en delad enhet: ge servicekontot rätt att skapa och ladda upp i den aktuella enheten/mappen. Servicekonton saknar egen Drive-lagringskvot och ska inte användas som filägare i Min enhet. Om huvudmappen ligger i Min enhet: Google Workspace-administratören behöver lägga till följande två scopes för det befintliga klient-ID:t och behålla samtliga befintliga e-postscopes:
+Servicekontot vihem-415@vibofast-1755590962277.iam.gserviceaccount.com har skrivåtkomst till den valda mappen. Workspace-delegering används inte. Vi-hems inställningar för både hemsidebilder och generell dokumentlagring är aktiverade för Vibogruppen AB. Andra organisationers konfigurationer och OAuth-scopes är bevarade.
 
-```
-https://www.googleapis.com/auth/drive.file
-https://www.googleapis.com/auth/drive.readonly
-```
-
-Efteråt kan `oscar@vibogruppen.se` anges som delegerad Workspace-användare om kontot har åtkomst till huvudmappen. Google-åtkomst ska först testas, sedan ska mappar skapas och båda Vi-hem-inställningarna aktiveras. För befintliga data gäller fortsatt Supabase-lagring tills någon uttryckligen beställer en separat migrering.
-
-Aktuellt åtkomsttest: direkt servicekonto returnerar 404 för huvudmappen; delegering av de nya Drive-scopen returnerar unauthorized_client. Ingen mapp eller fil har skapats via Google API.
+Ett fel i den gemensamma frontendhjälparen är rättat: den läser nu enabled från settings.settings enligt backendkontraktet, så att exempelvis arbetsordrar och besiktningar faktiskt använder Drive-arkiveringen när den är aktiverad. Serverfunktionen stöder servicekonto utan felaktig användardelegering och skickar supportsAllDrives vid mappskapande. För Vibo begärs även drive.readonly för att nå den huvudmapp som användaren skapat; andra organisationer behåller sina tidigare scopes.
 
 [Googles krav för servicekonton och mappar](https://developers.google.com/workspace/drive/api/guides/folder).
