@@ -1,9 +1,10 @@
-import { CmsText } from '@/lib/site-content';
+import { CmsText, CmsValue, useContent } from '@/lib/site-content';
 import { Phone, Mail, MapPin, ExternalLink } from 'lucide-react';
 import { Link } from '@/lib/router';
 import { company } from '@/data/company';
 
 export function Footer() {
+  const content = useContent();
   return (
     <footer className="mt-20 bg-forest-950 text-sand-100">
       <div className="container-page py-16">
@@ -11,7 +12,7 @@ export function Footer() {
           <div className="lg:col-span-1">
             <Link to="/" className="flex items-center">
               <img
-                src="/Vit_logo_vibofast.png"
+                src={content['image./Vit_logo_vibofast.png'] ?? '/Vit_logo_vibofast.png'}
                 alt="Vibo Fastigheter"
                 className="h-9 w-auto"
               />

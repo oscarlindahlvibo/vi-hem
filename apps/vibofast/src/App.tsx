@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase, demoMode } from '@/lib/supabase';
 import { demoProperties, setProperties } from '@/data/properties';
-import { setCompany } from '@/data/company';
+import { company, setCompany } from '@/data/company';
 import { setFaqCategories } from '@/data/faq';
 import { ContentContext } from '@/lib/site-content';
 import { ListingContext } from '@/components/ListingState';
@@ -51,6 +51,11 @@ function App() {
     return () => { cancelled = true; clearInterval(interval); window.removeEventListener('focus', onFocus); };
   }, []);
   const { route } = useRouter();
+  useEffect(() => {
+    document.title = content['meta.title'] ?? `${company.name} – ${company.tagline}`;
+    document.querySelector('meta[name="description"]')?.setAttribute('content',content['meta.description'] ?? company.description);
+    document.querySelector('link[rel="canonical"]')?.setAttribute('href','https://vibofast.se' + route.path);
+  }, [content, route.path, state]);
   const segs = route.segments;
 
   let page: React.ReactNode;
