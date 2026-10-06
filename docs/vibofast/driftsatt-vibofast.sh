@@ -91,6 +91,7 @@ if [[ "$mode" == --install-backend ]]; then
   done
   [[ "$passed" == true ]]
   trap - ERR
+  python3 "$package/record-installed-migrations.py"
   printf 'Backend installed. Backup: %s\n' "$backup"
   exit 0
 fi
