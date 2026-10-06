@@ -23,7 +23,7 @@ export async function uploadFileToGoogleDrive(file: File, folder: string): Promi
   const { data: settings, error: settingsError } = await supabase.functions.invoke('vihem-google-drive-storage', {
     body: { action: 'settings' },
   });
-  if (settingsError || !settings?.enabled) return null;
+  if (settingsError || !settings?.settings?.enabled) return null;
 
   const { data, error } = await supabase.functions.invoke('vihem-google-drive-storage', {
     body: {

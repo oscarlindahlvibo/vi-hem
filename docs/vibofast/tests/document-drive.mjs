@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {transform} from 'esbuild';
+let requests=[];let enabled=true;
+globalThis.__viboDriveClient={functions:{invoke:async(_function,{body})=>{requests.push(body);return {data:body.action==='settings'?{ok:true,settings:{enabled}}:{ok:true,id:'created',folder_id:'docs'},error:null};}}};
+const source=(await readFile(new URL('../../../src/lib/googleDriveStorage.ts',import.meta.url),'utf8')).replace("import { supabase } from './supabase';",'const supabase=globalThis.__viboDriveClient;');
+const {code}=await transform(source,{loader:'ts',format:'esm'});
+const {uploadFileToGoogleDrive}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
+const uploaded=await uploadFileToGoogleDrive(new File(['document content'],'test.txt',{type:'text/plain'}),'Dokument');
+assert.equal(uploaded.id,'created');assert.equal(requests[1].folder,'Dokument');assert.equal(Buffer.from(requests[1].content_base64,'base64').toString(),'document content');
+enabled=false;requests=[];
+assert.equal(await uploadFileToGoogleDrive(new File(['test'],'test.txt'),'Dokument'),null);assert.equal(requests.length,1);
+console.log('PASS: enabled document Drive uploads use the actual nested settings response; disabled storage leaves existing Supabase uploads alone.');

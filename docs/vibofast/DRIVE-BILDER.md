@@ -25,3 +25,25 @@ Google-tokenen använder `drive.file` för att skapa de egna mapparna och `drive
 Google-dokumentation: [Shared drives](https://developers.google.com/workspace/drive/api/guides/enable-shareddrives), [files.list](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list), [scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
 
 Migration: 20261006160000_vihem_vibofast_drive_images.sql. Kör endast denna nya migration på en redan installerad instans. Privat databasbackup och registrering av exakt checksumma i befintlig deployhistorik krävs vid manuell installation. Cron är inaktiv i praktiken tills Drive aktiveras; huvudmappen får aldrig gissas.
+
+## Vald huvudmapp och generell Vi-hem-lagring
+
+Användaren har valt `1kBmSjNNLb9WQYFUZZALXrvm-XHsb3sT1` som huvudmapp för både hemsidebilder och Vi-hems övriga filer. Den är registrerad för Vibogruppen AB, men båda lagringskopplingarna är avstängda tills Google-åtkomst är verifierad.
+
+Befintliga Vi-hem-moduler använder organisationsmappen `Vibogruppen-AB__38fe702d`, med bland annat Dokument, Ekonomi/Underlag, Ekonomi/Avbetalningsplaner, Besiktningar/Foton, Arbetsorder, Lager/Artiklar, Uthyrning och Fleet. Endast mappar för hemsidebilder används som källa till den publika webbplatsen.
+
+Servicekonto: `vihem-415@vibofast-1755590962277.iam.gserviceaccount.com`.
+OAuth-klient-ID för befintlig Workspace-delegering: `104498284662860825839`.
+
+Om huvudmappen ligger i en delad enhet: ge servicekontot rätt att skapa och ladda upp i den aktuella enheten/mappen. Servicekonton saknar egen Drive-lagringskvot och ska inte användas som filägare i Min enhet. Om huvudmappen ligger i Min enhet: Google Workspace-administratören behöver lägga till följande två scopes för det befintliga klient-ID:t och behålla samtliga befintliga e-postscopes:
+
+```
+https://www.googleapis.com/auth/drive.file
+https://www.googleapis.com/auth/drive.readonly
+```
+
+Efteråt kan `oscar@vibogruppen.se` anges som delegerad Workspace-användare om kontot har åtkomst till huvudmappen. Google-åtkomst ska först testas, sedan ska mappar skapas och båda Vi-hem-inställningarna aktiveras. För befintliga data gäller fortsatt Supabase-lagring tills någon uttryckligen beställer en separat migrering.
+
+Aktuellt åtkomsttest: direkt servicekonto returnerar 404 för huvudmappen; delegering av de nya Drive-scopen returnerar unauthorized_client. Ingen mapp eller fil har skapats via Google API.
+
+[Googles krav för servicekonton och mappar](https://developers.google.com/workspace/drive/api/guides/folder).
