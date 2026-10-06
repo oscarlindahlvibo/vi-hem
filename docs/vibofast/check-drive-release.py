@@ -10,6 +10,8 @@ if main!=manifest['base_main_commit']:raise SystemExit('GitHub main changed; rev
 key='vi-hem/20261006160000_vihem_vibofast_drive_images.sql'
 ledger=Path('/home/vibo/atm-personal-supabase/volumes/deploy-state/applied-migrations.tsv').read_text().splitlines()
 if key+'\t'+manifest['files']['drive-images.sql'] not in ledger:raise SystemExit('Expected installed Drive migration not registered')
+restart_key='vi-hem/20261006170000_vihem_vibofast_drive_manual_restart.sql'
+if 'drive-manual-restart.sql' in manifest['files'] and restart_key+'\t'+manifest['files']['drive-manual-restart.sql'] not in ledger:raise SystemExit('Manual Drive sync migration not registered')
 query="SELECT to_regprocedure('public.vihem_vibofast_drive_state()') IS NOT NULL AND to_regprocedure('public.vihem_vibofast_interests(integer,uuid)') IS NOT NULL AND EXISTS(SELECT 1 FROM cron.job WHERE jobname='vihem-vibofast-drive-images' AND active);"
 result=subprocess.check_output(['docker','exec','-e','PGOPTIONS=-c default_transaction_read_only=on','supabase-db','psql','-X','-At','-v','ON_ERROR_STOP=1','-U','postgres','-d','postgres','-c',query],text=True).strip()
 if result!='t':raise SystemExit('Drive backend not ready')

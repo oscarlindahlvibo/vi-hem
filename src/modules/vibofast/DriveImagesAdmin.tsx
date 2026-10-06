@@ -35,9 +35,9 @@ export function DriveImagesAdmin({client,apartmentId}:{client:SupabaseClient;apa
    const properties=propertyId?state.properties.filter(p=>p.id===propertyId):state.properties;
    for(const property of properties){
     setMessage(`Skapar mappar och synkar ${property.address}…`);
-    let result;
+    let result;let restart=true;
     do{
-    result=await invoke({action:'sync',property_id:property.id});
+    result=await invoke({action:'sync',property_id:property.id,restart});restart=false;
     if(result.status==='busy')throw new Error('En synkning pågår redan. Försök igen när den är klar.');
     if(result.status==='disabled')throw new Error('Aktivera Drive-kopplingen först.');
     if(result.errors?.length)throw new Error(result.errors.join('\n'));

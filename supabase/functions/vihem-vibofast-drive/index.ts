@@ -48,7 +48,7 @@ Deno.serve(async req=>{
    return json({ok:true},200,origin);
   }
   if(body.action!=='sync')return json({error:'Unknown action'},400,origin);
-  const context=await rpc('claim',body.property_id?{property_id:body.property_id}:{});
+  const context=await rpc('claim',{...(body.property_id?{property_id:body.property_id}:{}),restart:body.restart===true});
   if(context.status!=='claimed')return json({ok:true,status:context.status},200,origin);
   lease=context.lease;
   const write=(action:string,data:Record<string,unknown>={})=>rpc(action,{...data,lease});

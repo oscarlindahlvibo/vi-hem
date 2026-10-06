@@ -18,13 +18,13 @@ Endast JPG, PNG och WebP i respektive bildmapp kopieras till den separata publik
 
 Drive-originalen och deras delningsbehörigheter ändras aldrig av synkningen. När bilder ändras får cachekopian ny adress. När bilder flyttas eller tas bort uppdateras hemsidans lista efter nästa lyckade fullständiga läsning av den bildmappen. Vid läs-/nedladdningsfel behålls den tidigare listan. Annons utan bilder publiceras inte. Uthyrningsstatus och annonsernas publiceringsval styr fortsatt om annonsen visas.
 
-Cron kör varje minut och behandlar högst sex lägenheter åt gången, med en lease som hindrar samtidiga manuella körningar. Varje fastighet uppdateras normalt inom ungefär 15 minuter för nuvarande sju fastigheter och 64 lägenheter. Knappen Skapa mappar och synka alla kör alla steg direkt. Nya lägenheter/fastigheter tas med automatiskt. Senaste synkning och fel visas i Vi-hem.
+Cron kör varje minut och behandlar högst sex lägenheter åt gången, med en lease som hindrar samtidiga manuella körningar. Varje fastighet uppdateras normalt inom ungefär 15 minuter för nuvarande sju fastigheter och 64 lägenheter. Knappen Skapa mappar och synka alla startar alltid från första lägenheten och kör alla steg direkt, även om en schemalagd körning redan hunnit behandla delar av fastigheten. Nya lägenheter/fastigheter tas med automatiskt. Senaste synkning och fel visas i Vi-hem.
 
 Google-tokenen använder `drive.file` för att skapa de egna mapparna och `drive.readonly` för att läsa även bilder som användare lagt dit manuellt. Servicekontot behöver åtkomst till den valda mappen/enheten. Om Workspace-delegering används anges användaradressen i inställningen och dessa scopes måste vara godkända i Google Admin. Inga Google-nycklar eller access-token exponeras i frontend.
 
 Google-dokumentation: [Shared drives](https://developers.google.com/workspace/drive/api/guides/enable-shareddrives), [files.list](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list), [scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
 
-Migration: 20261006160000_vihem_vibofast_drive_images.sql. Kör endast denna nya migration på en redan installerad instans. Privat databasbackup och registrering av exakt checksumma i befintlig deployhistorik krävs vid manuell installation. Cron är inaktiv i praktiken tills Drive aktiveras; huvudmappen får aldrig gissas.
+Migrationer: 20261006160000_vihem_vibofast_drive_images.sql samt 20261006170000_vihem_vibofast_drive_manual_restart.sql. Kör endast nya migrationer på en redan installerad instans. Privat databasbackup och registrering av exakt checksumma i befintlig deployhistorik krävs vid manuell installation. Cron är inaktiv i praktiken tills Drive aktiveras; huvudmappen får aldrig gissas.
 
 ## Vald huvudmapp och generell Vi-hem-lagring
 
