@@ -4,6 +4,10 @@ set -eu
 stage="repository setup"
 trap 'status=$?; if [ "$status" -ne 0 ]; then printf "\nVI-HEM preparation failed at: %s (exit %s). Read this script log before the later Swift package errors.\n" "$stage" "$status" >&2; fi' 0
 
+if [ -z "${CI_PRIMARY_REPOSITORY_PATH:-}" ]; then
+  echo "CI_PRIMARY_REPOSITORY_PATH is missing; run this hook through Xcode Cloud or set the repository path." >&2
+  exit 1
+fi
 cd "$CI_PRIMARY_REPOSITORY_PATH"
 
 echo "=== VI-HEM Xcode Cloud: preparing web + Capacitor ==="
