@@ -221,7 +221,19 @@ export function createAccountedClient(config: AccountedClientConfig) {
     getBinary: requestBinary,
     async healthCheck(companyId: string): Promise<{ ok: boolean; error?: AccountedErrorShape }> {
       try {
-        await request(`/api/v1/companies/${encodeURIComponent(companyId)}`, { method: "GET" });
+        // Accounted has no GET /companies/{id}; list what the key can see
+        // and check the linked company is among them.
+        const companies = await request<Array<{ id: string }>>("/api/v1/companies", { method: "GET" });
+        if (Array.isArray(companies) && !companies.some((c) => c.id === companyId)) {
+          return {
+            ok: false,
+            error: {
+              code: "ACCOUNTED_COMPANY_NOT_FOUND",
+              message: "API-nyckeln har inte åtkomst till det angivna bolags-id:t.",
+              http_status: 404,
+            },
+          };
+        }
         return { ok: true };
       } catch (err) {
         if (err instanceof AccountedApiError) {

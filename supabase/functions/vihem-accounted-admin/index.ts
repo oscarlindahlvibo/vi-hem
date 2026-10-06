@@ -8,7 +8,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, type AuthContext, corsHeaders, errorJson, isAuthContext, json, requireCompanyAccess } from "../_shared/vihem-auth.ts";
 import { encryptAccountedSecret, hintFor } from "../_shared/accounted-crypto.ts";
-import { createAccountedClient } from "../_shared/accounted-rest-client.ts";
+import { AccountedApiError, createAccountedClient } from "../_shared/accounted-rest-client.ts";
 import { AccountedContextError, loadAccountedCompanyContext, runAccountedHealthCheck } from "../_shared/accounted-company-context.ts";
 
 // Accounted only accepts one event_type per webhook subscription (see
@@ -182,7 +182,12 @@ async function handleRegisterWebhooks(auth: AuthContext, companyId: string) {
     }
 
     const callbackUrl = `${webhookBaseUrl}?link=${encodeURIComponent(link.id)}&event=${encodeURIComponent(eventType)}`;
-    const idempotencyKey = `vihem-webhook-${link.id}-${eventType}`;
+    // The callback URL is part of the key: Accounted rejects a reused key
+    // with a different body (IDEMPOTENCY_KEY_REUSE), which is what happens
+    // when the public URL changes after an earlier attempt.
+    const urlDigest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(callbackUrl))))
+      .slice(0, 6).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const idempotencyKey = `vihem-webhook-${link.id}-${eventType}-${urlDigest}`;
 
     try {
       const created = await client.post<{ id: string; secret: string }>(
@@ -225,6 +230,7 @@ async function handleRegisterWebhooks(auth: AuthContext, companyId: string) {
 
       results[eventType] = { ok: true };
     } catch (err) {
+      console.error("register_webhooks failed", eventType, err instanceof AccountedApiError ? JSON.stringify({ code: err.code, message: err.message, details: err.details, http_status: err.httpStatus }) : String(err));
       results[eventType] = { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }

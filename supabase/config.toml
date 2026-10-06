@@ -400,6 +400,10 @@ verify_jwt = false
 [functions.vihem-accounted-healthcheck]
 verify_jwt = false
 
+# Hourly invoice status poll (pg_cron, shared secret header).
+[functions.vihem-accounted-status-sync]
+verify_jwt = false
+
 # The AFTER INSERT trigger on vihem_notifications calls this with a shared
 # secret header (see supabase/migrations/*_push_notification_dispatch.sql
 # and supabase/functions/vihem-send-push/index.ts), never a Supabase JWT.
