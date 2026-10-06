@@ -2,7 +2,8 @@
 
 Paketet innehåller färdigbyggda Vite-appar för Vi-hem och vibofast.se, den enda nya
 formulärfunktionen, Nginx-konfiguration samt installation med backup och kontroller.
-Det körs manuellt. Inget hämtas eller mergas automatiskt från GitHub.
+Det körs manuellt. Skriptet använder uttryckligen serverns rootless Docker-socket
+`/run/user/1000/docker.sock`, även under sudo. Inget hämtas eller mergas automatiskt från GitHub.
 
 Packa upp paketet på servern och kör först från dess katalog:
 

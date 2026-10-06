@@ -5,6 +5,10 @@ mode="${1:---check}"
 package="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 stack=/home/vibo/atm-personal-supabase
 web_root=/var/www/app.vi-hem.se/html
+# This host uses vibo's rootless Docker daemon. sudo otherwise selects root's
+# default /var/run/docker.sock, which has no daemon. All Python helpers inherit this.
+export DOCKER_HOST=unix:///run/user/1000/docker.sock
+[[ -S /run/user/1000/docker.sock ]] || { echo 'Expected rootless Docker socket not found' >&2; exit 1; }
 [[ "$mode" == --check || "$mode" == --install-backend || "$mode" == --publish-admin || "$mode" == --publish-site ]] || { echo 'Unknown mode' >&2; exit 2; }
 for executable in docker python3 git rsync gzip; do command -v "$executable" >/dev/null; done
 [[ -f "$package/install-vibofast.sql" && -f "$package/installation-digest.txt" && -f "$package/release.json" ]] || { echo 'Incomplete deployment package' >&2; exit 1; }
