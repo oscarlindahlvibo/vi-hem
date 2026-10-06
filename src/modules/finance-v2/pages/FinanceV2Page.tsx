@@ -400,6 +400,7 @@ function RentBillingTab({ companyId, companyLink }: { companyId: string; company
   const [loadingRun, setLoadingRun] = useState(false);
   const [creatingInvoices, setCreatingInvoices] = useState(false);
   const [combineByCustomer, setCombineByCustomer] = useState(false);
+  const [sendAfterCreate, setSendAfterCreate] = useState(false);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -430,14 +431,19 @@ function RentBillingTab({ companyId, companyLink }: { companyId: string; company
     setMessage('');
     setErrorMessage('');
     try {
-      const outcome = await createRentBillingInvoices({ companyId, runId: run.id, dryRun, combineByCustomer });
+      const outcome = await createRentBillingInvoices({ companyId, runId: run.id, dryRun, combineByCustomer, send: sendAfterCreate && !dryRun });
       const byItem: Record<string, RentBillingItemResult> = {};
       outcome.results.forEach((r) => { byItem[r.item_id] = r; });
       setItemResults(byItem);
       if (dryRun) {
         setMessage(`Förhandsgranskning klar: ${outcome.summary.succeeded} av ${outcome.summary.total} rader kan faktureras.`);
       } else {
-        setMessage(`${outcome.summary.succeeded} av ${outcome.summary.total} fakturor skapade i Accounted.`);
+        const sentCount = outcome.results.filter((r) => r.sent).length;
+        const sendFailed = outcome.results.filter((r) => r.send_error).length;
+        setMessage(
+          `${outcome.summary.succeeded} av ${outcome.summary.total} fakturor skapade i Accounted.` +
+            (sendAfterCreate ? ` ${sentCount} skickade till hyresgäst${sendFailed ? `, ${sendFailed} kunde inte skickas (se Resultat)` : ''}.` : ''),
+        );
         await loadItems(run.id);
       }
     } catch (err) {
@@ -472,6 +478,15 @@ function RentBillingTab({ companyId, companyLink }: { companyId: string; company
                   onChange={(e) => setCombineByCustomer(e.target.checked)}
                 />
                 Slå ihop flera hyresrader per kund till en faktura
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-blue-600"
+                  checked={sendAfterCreate}
+                  onChange={(e) => setSendAfterCreate(e.target.checked)}
+                />
+                Skicka fakturorna direkt till hyresgästerna
               </label>
               <Button
                 variant="secondary"
@@ -533,7 +548,8 @@ function RentBillingTab({ companyId, companyLink }: { companyId: string; company
                         </td>
                         <td className="py-2 pr-4 text-xs">
                           {result?.ok && result.dry_run && <span className="text-blue-700">Kan faktureras</span>}
-                          {result?.ok && !result.dry_run && <span className="text-green-700">Skapad</span>}
+                          {result?.ok && !result.dry_run && <span className="text-green-700">{result.sent ? 'Skapad och skickad' : 'Skapad'}</span>}
+                          {result?.send_error && <span className="block text-red-700">Ej skickad: {result.send_error.message}</span>}
                           {result && !result.ok && <span className="text-red-700">{result.error?.message}</span>}
                         </td>
                       </tr>

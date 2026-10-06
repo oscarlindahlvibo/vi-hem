@@ -141,6 +141,8 @@ export interface RentBillingItemResult {
   dry_run?: boolean;
   already_invoiced?: boolean;
   accounted_invoice_id?: string;
+  sent?: boolean;
+  send_error?: { code: string; message: string };
   error?: { code: string; message: string };
 }
 

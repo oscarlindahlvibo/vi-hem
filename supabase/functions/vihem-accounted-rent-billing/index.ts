@@ -30,7 +30,7 @@ import {
   createAccountedInvoiceForSource,
   type AccountedInvoiceItemInput,
 } from "../_shared/accounted-invoice-creator.ts";
-import { AccountedApiError } from "../_shared/accounted-rest-client.ts";
+import { AccountedApiError, createAccountedClient, deriveIdempotencyKey } from "../_shared/accounted-rest-client.ts";
 import {
   type BillingAdjustmentRow,
   buildAdjustmentLineItems,
@@ -58,6 +58,8 @@ interface ItemResult {
   already_invoiced?: boolean;
   accounted_invoice_id?: string;
   adjustments_applied?: number;
+  sent?: boolean;
+  send_error?: { code: string; message: string };
   error?: { code: string; message: string };
 }
 
@@ -82,6 +84,11 @@ Deno.serve(async (req: Request) => {
   const runId = String(body?.run_id || "");
   const dryRun = Boolean(body?.dry_run);
   const combineByCustomer = Boolean(body?.combine_by_customer);
+  // send: after creating (or finding already-created but still draft)
+  // invoices for this run, have Accounted issue + email them to the tenant
+  // (POST .../invoices/{id}/send: allocates the invoice number, books it,
+  // emails the PDF). Never combined with dry_run -- a send is irreversible.
+  const sendAfterCreate = Boolean(body?.send) && !dryRun;
   if (!companyId) return errorJson("VALIDATION_ERROR", "company_id krävs.", 400);
   if (!runId) return errorJson("VALIDATION_ERROR", "run_id krävs.", 400);
 
@@ -433,6 +440,64 @@ Deno.serve(async (req: Request) => {
         results.push(await invoiceSingleItem(groupItems[0]));
       } else {
         results.push(...(await invoiceGroupForCustomer(financeCustomerId, groupItems)));
+      }
+    }
+  }
+
+  if (sendAfterCreate) {
+    const client = createAccountedClient({ baseUrl: context.link.accounted_base_url, apiKey: context.apiKey });
+    // Every item of this run that has an Accounted invoice still in draft:
+    // covers the ones created just now AND ones left unsent by an earlier
+    // run (e.g. a send that failed on a missing customer email).
+    const { data: runItems } = await auth.adminClient
+      .from("vihem_rent_billing_items")
+      .select("id, accounted_invoice_link_id")
+      .eq("run_id", runId)
+      .not("accounted_invoice_link_id", "is", null);
+    const linkIds = (runItems ?? []).map((r: any) => r.accounted_invoice_link_id as string);
+    const { data: links } = linkIds.length
+      ? await auth.adminClient
+        .from("vihem_accounted_invoice_links")
+        .select("id, accounted_invoice_id, status")
+        .in("id", linkIds)
+      : { data: [] as any[] };
+    const byInvoice = new Map<string, { itemIds: string[]; linkIds: string[] }>();
+    for (const link of links ?? []) {
+      if (link.status !== "draft") continue;
+      const entry = byInvoice.get(link.accounted_invoice_id) ?? { itemIds: [], linkIds: [] };
+      entry.linkIds.push(link.id);
+      for (const ri of runItems ?? []) if ((ri as any).accounted_invoice_link_id === link.id) entry.itemIds.push((ri as any).id);
+      byInvoice.set(link.accounted_invoice_id, entry);
+    }
+    for (const [invoiceId, entry] of byInvoice) {
+      let outcome: { sent: boolean; send_error?: { code: string; message: string } };
+      try {
+        const key = await deriveIdempotencyKey(["invoice-send", context.link.id, invoiceId]);
+        const sent = await client.post<any>(
+          `/api/v1/companies/${encodeURIComponent(context.link.accounted_company_id)}/invoices/${encodeURIComponent(invoiceId)}/send`,
+          {},
+          { idempotencyKey: key },
+        );
+        await auth.adminClient
+          .from("vihem_accounted_invoice_links")
+          .update({
+            status: sent?.status || "sent",
+            accounted_invoice_number: sent?.invoice_number ?? undefined,
+            last_sync_source: "send",
+            last_synced_at: new Date().toISOString(),
+          })
+          .in("id", entry.linkIds);
+        outcome = { sent: true };
+      } catch (err) {
+        const e = err instanceof AccountedApiError
+          ? { code: err.code, message: err.message }
+          : { code: "INTERNAL_ERROR", message: err instanceof Error ? err.message : String(err) };
+        outcome = { sent: false, send_error: e };
+      }
+      for (const itemId of entry.itemIds) {
+        const existing = results.find((r) => r.item_id === itemId);
+        if (existing) Object.assign(existing, outcome);
+        else results.push({ item_id: itemId, ok: outcome.sent, accounted_invoice_id: invoiceId, ...outcome });
       }
     }
   }
