@@ -182,7 +182,12 @@ async function handleRegisterWebhooks(auth: AuthContext, companyId: string) {
     }
 
     const callbackUrl = `${webhookBaseUrl}?link=${encodeURIComponent(link.id)}&event=${encodeURIComponent(eventType)}`;
-    const idempotencyKey = `vihem-webhook-${link.id}-${eventType}`;
+    // The callback URL is part of the key: Accounted rejects a reused key
+    // with a different body (IDEMPOTENCY_KEY_REUSE), which is what happens
+    // when the public URL changes after an earlier attempt.
+    const urlDigest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(callbackUrl))))
+      .slice(0, 6).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const idempotencyKey = `vihem-webhook-${link.id}-${eventType}-${urlDigest}`;
 
     try {
       const created = await client.post<{ id: string; secret: string }>(
