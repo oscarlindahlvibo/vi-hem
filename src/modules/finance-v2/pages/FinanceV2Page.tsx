@@ -315,7 +315,7 @@ function CompanyLinkTab({
       if (failed.length === 0) {
         setMessage('Webhook-prenumerationerna är registrerade.');
       } else {
-        setErrorMessage(`Vissa webhooks kunde inte registreras: ${failed.map(([k]) => k).join(', ')}`);
+        setErrorMessage(`Vissa webhooks kunde inte registreras: ${failed.map(([k, r]) => `${k}${r.error ? ` (${r.error})` : ''}`).join(', ')}`);
       }
     } catch (err) {
       setErrorMessage(describeError(err));

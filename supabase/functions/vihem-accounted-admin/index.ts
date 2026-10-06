@@ -8,7 +8,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, type AuthContext, corsHeaders, errorJson, isAuthContext, json, requireCompanyAccess } from "../_shared/vihem-auth.ts";
 import { encryptAccountedSecret, hintFor } from "../_shared/accounted-crypto.ts";
-import { createAccountedClient } from "../_shared/accounted-rest-client.ts";
+import { AccountedApiError, createAccountedClient } from "../_shared/accounted-rest-client.ts";
 import { AccountedContextError, loadAccountedCompanyContext, runAccountedHealthCheck } from "../_shared/accounted-company-context.ts";
 
 // Accounted only accepts one event_type per webhook subscription (see
@@ -225,6 +225,7 @@ async function handleRegisterWebhooks(auth: AuthContext, companyId: string) {
 
       results[eventType] = { ok: true };
     } catch (err) {
+      console.error("register_webhooks failed", eventType, err instanceof AccountedApiError ? JSON.stringify({ code: err.code, message: err.message, details: err.details, http_status: err.httpStatus }) : String(err));
       results[eventType] = { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
