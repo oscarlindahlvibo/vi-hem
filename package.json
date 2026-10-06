@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build --config vite.config.ts",
     "lint": "eslint .",
     "test:rental": "node scripts/rental-pricing-check.mjs",
     "test:inventory": "node scripts/inventory-invariants-check.mjs",
@@ -19,7 +19,9 @@
     "mobile:android": "npx cap open android",
     "viborent:dev": "vite --config apps/viborent/vite.config.ts",
     "viborent:build": "vite build --config apps/viborent/vite.config.ts",
-    "viborent:preview": "vite preview --config apps/viborent/vite.config.ts"
+    "viborent:preview": "vite preview --config apps/viborent/vite.config.ts",
+    "test:mobile-bundle": "node scripts/check-mobile-web-build.mjs",
+    "vibofast:build": "npm --prefix apps/vibofast run build"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

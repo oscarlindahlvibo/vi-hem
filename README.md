@@ -71,3 +71,11 @@ För lokal Supabase CLI kan motsvarande SMTP läggas i `supabase/config.toml` un
 supabase stop
 supabase start
 ```
+
+## Separata byggen för Vi-hem och vibofast.se
+
+`npm run build` bygger endast Vi-hem till `dist/`. Xcode Cloud kör detta bygge och `cap sync ios`. Administrationen för Vibo ligger i `src/modules/vibofast/` och ingår, tillsammans med intresseanmälningar och Drive-bilder. Bygget avbryts om kod från den publika hemsidan importeras i Vi-hem.
+
+Den publika hemsidan ligger i `apps/vibofast/` och byggs separat med `npm run vibofast:build` efter `npm --prefix apps/vibofast ci`. Dess resultat ligger i `apps/vibofast/dist/` och kopieras aldrig till Capacitor. Hemsidans egna npm-paket och miljövariabler behövs inte för Xcode Cloud.
+
+`npm run test:mobile-bundle` kontrollerar den verkliga byggda moduluppsättningen: administrationsvyerna ska finnas med och den publika hemsidan ska saknas.
