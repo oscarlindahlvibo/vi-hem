@@ -4,6 +4,10 @@ Utgångspunkt: Vi-hem `origin/main` på commit `8300a2f`, inklusive Claudes sena
 ändringar för signerade avtal och hyresförhållanden. Skrivskyddade kontroller har utförts mot den delade Supabase-instansen via ZeroTier.
 Inga produktionsskrivningar har gjorts. SQL har verifierats i en isolerad lokal PostgreSQL-modell.
 
+Ett färdigbyggt paket med avgränsade manuella steg finns också. Se `PAKET.md` i
+repo-förslaget eller `LAS-MIG.md` i driftsättningspaketet. Paketets SQL-installer
+ersätter körning av de separata migrationsfilerna och innehållsfilen nedan; kör inte båda vägarna.
+
 ## 1. Granska och bygg koden
 
 Vibo-sidan finns i `apps/vibofast` i Vi-hem-förslaget, som ett separat Vite-projekt
