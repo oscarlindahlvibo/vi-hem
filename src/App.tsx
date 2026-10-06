@@ -1,4 +1,5 @@
 import { WebsiteAdmin } from './modules/vibofast/WebsiteAdmin';
+import { InterestsAdmin } from './modules/vibofast/InterestsAdmin';
 import React, { useCallback, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { TimeCategoriesProvider } from './contexts/TimeCategoriesContext';
@@ -438,6 +439,11 @@ function AppInner() {
 
     if (isScreen) {
       return <ScreenDisplayPage />;
+    }
+
+    if (currentPage === 'vibofast-interests' || currentPage.startsWith('vibofast-interests/')) {
+      if (!isAdmin) return renderDashboard();
+      return <InterestsAdmin key={currentPage} client={supabase} initialId={currentPage.split('/')[1]} onNavigate={navigate} />;
     }
 
     if (currentPage.startsWith('timetracking')) {

@@ -71,7 +71,7 @@ export function WebsiteAdmin({ client }: { client: SupabaseClient }) {
     <label>Ladda upp bild <input disabled={busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={e => { const f = e.target.files?.[0]; if(f) void upload(f); }} /></label>
     <button disabled={busy || !snapshot} onClick={() => void save()}>{busy ? 'Arbetar…' : 'Spara'}</button>
     <p role="status">{message}</p>
-    <details><summary>Inkomna meddelanden och intresseanmälningar</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(snapshot?.enquiries ?? [], null, 2)}</pre></details>
+    <details><summary>Inkomna kontaktmeddelanden</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify((snapshot?.enquiries ?? []).filter(e => (e as {kind:string}).kind === 'contact'), null, 2)}</pre></details>
   </section>;
 }
 
