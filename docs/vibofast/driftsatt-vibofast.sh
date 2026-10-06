@@ -38,12 +38,23 @@ if [[ "$mode" == --check ]]; then
   echo 'Run the three manual phases in order: --install-backend, --publish-admin, --publish-site.'
   exit 0
 fi
-[[ "$EUID" -eq 0 ]] || { echo 'Run installation/publication with sudo' >&2; exit 1; }
+if [[ "$mode" != --install-backend && "$EUID" -ne 0 ]]; then
+  echo 'Frontend publication requires sudo; backend can run as the stack owner.' >&2
+  exit 1
+fi
 if [[ "$mode" == --install-backend ]]; then
   stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-  backup="/var/backups/vibofast/backend-$stamp"
+  if [[ "$EUID" -eq 0 ]]; then
+    backup_root=/var/backups/vibofast
+  else
+    [[ -w "$stack/.env" && -w "$stack/docker-compose.yml" && -w "$stack/volumes/functions" ]] || { echo 'Stack owner permissions required' >&2; exit 1; }
+    backup_root="$stack/volumes/vibofast-backups"
+  fi
+  install -d -m 700 "$backup_root"
+  backup="$backup_root/backend-$stamp"
   install -d -m 700 "$backup"
   (umask 077; docker exec supabase-db pg_dump -U postgres -d postgres --no-owner | gzip > "$backup/postgres.sql.gz")
+  gzip -t "$backup/postgres.sql.gz"
   [[ -s "$backup/postgres.sql.gz" ]] || { echo 'Database backup failed' >&2; exit 1; }
   cp -p -- "$stack/.env" "$backup/supabase.env"
   cp -p -- "$stack/docker-compose.yml" "$backup/docker-compose.yml"

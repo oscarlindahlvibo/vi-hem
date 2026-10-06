@@ -18,7 +18,9 @@ sudo bash driftsatt-vibofast.sh --install-backend
 sudo bash driftsatt-vibofast.sh --publish-admin
 ```
 
-Backendsteget tar backup av PostgreSQL till `/var/backups/vibofast/`, installerar
+Backendsteget kan köras av stackägaren vibo utan sudo. Det tar backup till
+`/home/vibo/atm-personal-supabase/volumes/vibofast-backups/` (privat katalog, 0700),
+eller `/var/backups/vibofast/` vid körning som root. Därefter installerar det
 profilskydd och hemsidetillägg atomiskt, binder Vibogruppen AB och lägger in initialt
 sidinnehåll. Alla aktiva administratörer i organisationen får åtkomst automatiskt.
 Det installerar bara `vihem-vibofast-enquiry` och skapar dess egen anropshemlighet.
