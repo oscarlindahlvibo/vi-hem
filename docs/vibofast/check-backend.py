@@ -22,5 +22,23 @@ try:
 except HTTPError as error:
     body=json.load(error)
     if error.code!=400 or body.get('message')!='Invalid request': raise SystemExit('Unexpected enquiry function response')
-    if error.headers.get('Access-Control-Allow-Origin')!='https://vibofast.se': raise SystemExit('Incorrect form CORS')
-print('Public site RPC and deployed enquiry route respond correctly. No enquiry submitted.')
+    allowed=error.headers.get_all('Access-Control-Allow-Origin') or []
+    if len(allowed)!=1 or allowed[0] not in {'https://vibofast.se','*'}: raise SystemExit('Incorrect form CORS')
+requested={'authorization','apikey','content-type','x-client-info'}
+preflight=Request(url+'/functions/v1/vihem-vibofast-enquiry',method='OPTIONS',headers={
+    'Origin':'https://vibofast.se','Access-Control-Request-Method':'POST',
+    'Access-Control-Request-Headers':','.join(sorted(requested)),
+})
+with urlopen(preflight,timeout=30) as response:
+    origins=response.headers.get_all('Access-Control-Allow-Origin') or []
+    allowed_headers={v.strip().lower() for v in response.headers.get('Access-Control-Allow-Headers','').split(',')}
+    allowed_methods={v.strip().upper() for v in response.headers.get('Access-Control-Allow-Methods','').split(',')}
+    if len(origins)!=1 or origins[0] not in {'https://vibofast.se','*'} or not requested.issubset(allowed_headers) or 'POST' not in allowed_methods:
+        raise SystemExit('Browser preflight failed')
+blocked_headers=dict(headers);blocked_headers['Origin']='https://not-vibo.invalid'
+try:
+    urlopen(Request(url+'/functions/v1/vihem-vibofast-enquiry',data=b'{"kind":"invalid","payload":{}}',headers=blocked_headers),timeout=30)
+    raise SystemExit('Unapproved form origin was not rejected')
+except HTTPError as error:
+    if error.code!=403 or json.load(error).get('message')!='Forbidden': raise SystemExit('Unexpected origin rejection')
+print('PASS: public site RPC, deployed form route, browser CORS preflight and rejected foreign origin. No enquiry submitted.')
