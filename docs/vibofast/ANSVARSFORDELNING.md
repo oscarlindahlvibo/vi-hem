@@ -4,7 +4,8 @@ Codex förbereder och kontrollerar koden, databasinstallationen, initialt inneh�
 redaktörsbehörighet, formulärfunktionen, byggen, Nginx-konfiguration och återställning.
 Server, domänkonfiguration och befintliga certifikatsökvägar är identifierade.
 
-Oscar behöver ange verifierat redaktörskonto, kontrollera verksamhetsuppgifter och
+Alla aktiva administratörer i Vibogruppen AB får åtkomst automatiskt.
+Oscar behöver kontrollera verksamhetsuppgifter och
 annonsunderlag som inte finns i Vi-hem, samt utföra den manuella driftsättningen som
 han uttryckligen reserverat. Bilder och annonstexter som redan finns kan förberedas
 av Codex; nya underlag behöver komma från verksamheten.
@@ -18,7 +19,7 @@ eller omladdning misslyckas. Skriptet har syntaxkontrollerats lokalt; --apply ä
 kört eller verifierat på produktionsservern.
 
 Detta är inte ännu ett komplett driftsättningsskript för backend. Före publicering
-behöver databasens tillägg, redaktör, Vi-hem-administration och formulärfunktion
+behöver databasens tillägg och profilskydd, Vi-hem-administration och formulärfunktion
 installeras och kontrolleras. Det gemensamma deployskriptet ska inte köras för att
 bara publicera hemsidan eftersom det hanterar flera andra appar och migrationer.
 

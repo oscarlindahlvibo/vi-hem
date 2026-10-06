@@ -21,7 +21,7 @@ npm test
 npm run build
 ```
 
-## 2. Installera bara tilläggets migration
+## 2. Installera de två nya migrationerna
 
 Ta en aktuell backup och kör först mot din staging-kopia av den delade databasen.
 Kontrollera att `vihem_organisations`, `vihem_profiles`, `vihem_properties`,
@@ -30,17 +30,32 @@ kolumnerna som migrationen refererar till. Även `vihem_agreements`,
 `vihem_agreement_versions` och `vihem_agreement_entity_links` används för framtida signerade avtal. Organisation, behörighet och Avtal V2:s
 koppling till hyresförhållanden måste motsvara aktuell Vi-hem-version.
 
-Kör endast `supabase/migrations/20261006120000_vihem_vibofast_website.sql` i Vi-hem-förslaget.
-I den fristående Vibo-leveransen heter samma fil `202610060001_vibo_website.sql`.
-**Kör en av dem, aldrig båda.** Migrationen omsluts av en transaktion.
+Kör endast dessa två nya migrationer, i denna ordning:
 
-Använd inte `db reset`, inte historiska/demo-migrationer och inte generell `db push`
+1. `supabase/migrations/20261006113000_vihem_profile_authority_guard.sql`
+2. `supabase/migrations/20261006120000_vihem_vibofast_website.sql`
+
+I den fristående leveransen har hemsidemigrationen namnet
+`202610060001_vibo_website.sql`; profilskyddet har samma namn som ovan.
+Kör varje fil en gång, aldrig båda kopiorna av hemsidemigrationen.
+Varje migration omsluts av en transaktion.
+
+Använd inte `db reset`, historiska/demo-migrationer eller generell `db push`
 på den delade installationen för denna leverans.
 
-Migrationen skapar ett separat privat schema, egna RPC-funktioner och en bildbucket.
-Den läser befintliga Vi-hem-tabeller och ändrar inte deras data, RLS eller definitioner.
-Den lägger bara till bucketavgränsade storage-policyer och en ny bucket utan att ändra andra buckets.
-Det finns inga demoanvändare, ändringar av auth.users eller global policyändring.
+Hemsidemigrationen skapar ett separat privat schema, egna RPC-funktioner och en
+bildbucket. Den läser befintliga Vi-hem-tabeller utan att ändra deras data eller RLS.
+
+Profilskyddet är ett separat tillägg: en INSERT/UPDATE-trigger på `public.vihem_profiles`.
+Den blockerar oauktoriserade ändringar av roll, organisation, aktiv status och
+konto-ID. Vanlig profilredigering fortsätter fungera. Aktiva organisationsadmin kan
+hantera roller/aktivering inom sin organisation, men inte befordra till superadmin
+eller byta konto-ID. Aktiva superadmin kan hantera roll och organisation; befintliga
+serveranrop med service_role och databasoperatörer fortsätter fungera.
+Kontoskapande via befintlig service_role fortsätter fungera. Direkta INSERT kräver
+aktiv admin inom rätt organisation eller aktiv superadmin. Befintliga policies,
+användardata och andra appars tabeller lämnas kvar.
+Verifiera särskilt kontohantering och organisationsbyte i staging innan driftsättning.
 
 ## 3. Bind rätt organisation och lägg in initialt innehåll
 
@@ -60,22 +75,14 @@ innehåll till den nya tabellen och skriver aldrig över befintligt hemsideinneh
 Innehållet är hämtat från Bolt-utkastet: kontrollera telefon, policyer och kunskapsbank före lansering.
 Lägenhetsannonser importeras inte från utkastets exempel. Fyll i och aktivera rätt annonser i Vi-hem.
 
-Lägg därefter till en uttryckligen verifierad hemsideredaktör som databasoperatör:
+Alla aktiva profiler med rollen `admin` i den bundna organisationen Vibogruppen AB
+får automatiskt administrera hemsidan. Ingen separat redaktörslista eller manuell
+registrering av konton används. Åtkomsten försvinner direkt när rollen, organisationen
+eller aktiv status ändras. Rollen `superadmin` ger inte hemsideåtkomst i sig.
 
-```sql
-INSERT INTO vihem_vibofast_private.editors (profile_id)
-SELECT id FROM public.vihem_profiles
-WHERE id = 'VERIFIERAD_REDAKTORS_UUID'::uuid
-  AND organisation_id = '38fe702d-e72c-49a2-9750-5e0b6934959b'::uuid
-  AND role = 'admin' AND active
-ON CONFLICT DO NOTHING;
-```
-
-Använd ID för det verifierade inloggningskontot, aldrig alla profiler med rollen admin.
-Hemsidans åtkomst kräver denna separata lista, rätt organisation och aktiv adminprofil.
 Kontrollen av produktion visade självredigerbara roller/organisationer i befintlig
-Vi-hem-RLS. Dessa befintliga regler ändras inte av hemsidemigrationen och behöver
-utredas separat. Hemsidans privata redaktörslista kan inte ändras av inloggade användare.
+Vi-hem-RLS. Därför måste det nya profilskyddet installeras innan hemsideadministration
+aktiveras. Profilskyddet ändrar inte de befintliga RLS-reglerna.
 RPC:erna har låst search_path och explicita execute-behörigheter; det privata schemat
 ska inte läggas till PostgREST:s exponerade schema-lista.
 
@@ -110,8 +117,10 @@ HTTPS samt DNS för vibofast.se. Inga DNS-/serverändringar har gjorts av Codex.
 
 Kontrollera med riktiga staging-konton att:
 
-- Vibo-admin kan redigera annonser, bilder, sidinnehåll och läsa anmälningar.
-- Hyresgäster och andra organisationers admin saknar denna åtkomst.
+- Alla aktiva Vibo-admin kan redigera annonser, bilder, sidinnehåll och läsa anmälningar.
+- Hyresgäster, personal, inaktiva konton och andra organisationers admin saknar åtkomst.
+- Ny adminroll ger automatiskt åtkomst; nedgradering eller organisationsbyte tar bort åtkomst.
+- Vanliga användare kan inte befordra sig själva eller byta organisation via profiluppdatering.
 - Endast aktiverade och fullständiga annonser visas offentligt.
 - Avtalslut 2027-01-31 visar inflyttning 2027-02-01.
 - Godkänd uppsägning fungerar även när tidigare flöde lämnat tenancy.end_date tomt.

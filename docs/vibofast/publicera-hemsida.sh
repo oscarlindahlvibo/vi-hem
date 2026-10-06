@@ -16,7 +16,7 @@ config="/etc/nginx/sites-enabled/vibofast.se.conf"
 # A deployment must be preceded by addon installation and an end-to-end check.
 if [[ "$mode" == --check ]]; then
   echo "Build, configuration and certificate paths exist. No changes made."
-  echo "Before --apply: install website DB addon, enrol verified editor, deploy enquiry function and Vi-hem admin, verify gateway and website build."
+  echo "Before --apply: install website DB addon and profile guard, deploy enquiry function and Vi-hem admin, verify gateway and website build."
   exit 0
 fi
 [[ "$EUID" -eq 0 ]] || { echo "Run --apply with sudo" >&2; exit 1; }
