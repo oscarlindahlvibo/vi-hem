@@ -27,7 +27,8 @@ await db.exec(`insert into vihem_organisations values('${org}'),('${other}');
 insert into vihem_vibofast_private.site_content(id,organisation_id) values(true,'${org}');
 insert into vihem_properties values('${prop}','${org}','Gatan 1','Virserum','57772',true);
 insert into vihem_apartments values('${apt}','${prop}','${org}','vacant',6500,75,3,'1001','apartment');
-insert into vihem_profiles values('${admin}','${org}','admin',true);`);
+insert into vihem_profiles values('${admin}','${org}','admin',true);
+insert into vihem_vibofast_private.editors values('${admin}');`);
 async function available(){return (await db.query(`select vihem_vibofast_private.available_from('${apt}','2026-10-06')::text as date`)).rows[0].date;}
 assert.equal(await available(),'2026-10-06');
 await db.exec(`insert into vihem_tenancies values('${tenant}','${apt}','${org}','2026-01-01',null,'active');`);
@@ -66,6 +67,12 @@ await assert.rejects(db.query('select public.vihem_vibofast_admin_site()'),/perm
 await assert.rejects(db.query('select * from vihem_vibofast_private.adverts'),/permission denied/);
 await db.exec('reset role;');await db.query(`select set_config('request.jwt.claim.sub',$1,false)`,[tenant]);
 await assert.rejects(db.query('select public.vihem_vibofast_admin_site()'),/Forbidden/);
+// Reproduce production's self-editable profile: forged admin/org still grants no website access.
+await db.exec(`insert into vihem_profiles values('${tenant}','${other}','tenant',true); update vihem_profiles set organisation_id='${org}',role='admin' where id='${tenant}'; set role authenticated;`);
+assert.equal((await db.query('select public.vihem_vibofast_is_editor() as allowed')).rows[0].allowed,false);
+await assert.rejects(db.query('select public.vihem_vibofast_admin_site()'),/Forbidden/);
+await assert.rejects(db.query(`insert into vihem_vibofast_private.editors values('${tenant}')`),/permission denied/);
+await db.exec('reset role;');
 for(let i=0;i<5;i++)await db.query(`select public.vihem_vibofast_store_enquiry('contact','{}','test')`);
 await assert.rejects(db.query(`select public.vihem_vibofast_store_enquiry('contact','{}','test')`),/Rate limit/);
 console.log('PASS: real PostgreSQL migration, vacancy, notice, dates, new tenancy, blocking, organisation scope, public field projection, concurrent edits, permissions, rate limiting.');

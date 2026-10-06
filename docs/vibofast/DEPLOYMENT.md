@@ -44,13 +44,14 @@ Det finns inga demoanvändare, ändringar av auth.users eller global policyändr
 
 ## 3. Bind rätt organisation och lägg in initialt innehåll
 
-Identifiera Vibo Fastigheters riktiga organisations-ID via Vi-hems administrationsvy
-eller ett läsanrop till `vihem_organisations`. Anta aldrig ett ID från demo/seeddata.
+Verifierat via skrivskyddad ZeroTier/SSH-kontroll 2026-10-06: Vi-hem använder
+containern `supabase-db`. Organisationen är Vibogruppen AB med ID
+`38fe702d-e72c-49a2-9750-5e0b6934959b`. Kontrollera samma ID i staging innan körning.
 
 I samma SQL-session som innehållsfilen körs:
 
 ```sql
-SET vihem_vibofast.organisation_id = 'VIBOS_VERIFIERADE_ORGANISATIONS_UUID';
+SET vihem_vibofast.organisation_id = '38fe702d-e72c-49a2-9750-5e0b6934959b';
 ```
 
 Kör därefter `docs/vibofast/initial-content.sql` i Vi-hem-förslaget, eller
@@ -59,8 +60,22 @@ innehåll till den nya tabellen och skriver aldrig över befintligt hemsideinneh
 Innehållet är hämtat från Bolt-utkastet: kontrollera telefon, policyer och kunskapsbank före lansering.
 Lägenhetsannonser importeras inte från utkastets exempel. Fyll i och aktivera rätt annonser i Vi-hem.
 
-Säkerhetsgränsen bygger på Vi-hems befintliga autentisering och skydd av profilens
-`role`, `active` och `organisation_id`. Verifiera den befintliga skyddsnivån i staging.
+Lägg därefter till en uttryckligen verifierad hemsideredaktör som databasoperatör:
+
+```sql
+INSERT INTO vihem_vibofast_private.editors (profile_id)
+SELECT id FROM public.vihem_profiles
+WHERE id = 'VERIFIERAD_REDAKTORS_UUID'::uuid
+  AND organisation_id = '38fe702d-e72c-49a2-9750-5e0b6934959b'::uuid
+  AND role = 'admin' AND active
+ON CONFLICT DO NOTHING;
+```
+
+Använd ID för det verifierade inloggningskontot, aldrig alla profiler med rollen admin.
+Hemsidans åtkomst kräver denna separata lista, rätt organisation och aktiv adminprofil.
+Kontrollen av produktion visade självredigerbara roller/organisationer i befintlig
+Vi-hem-RLS. Dessa befintliga regler ändras inte av hemsidemigrationen och behöver
+utredas separat. Hemsidans privata redaktörslista kan inte ändras av inloggade användare.
 RPC:erna har låst search_path och explicita execute-behörigheter; det privata schemat
 ska inte läggas till PostgREST:s exponerade schema-lista.
 

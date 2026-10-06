@@ -11,7 +11,14 @@ create table vihem_vibofast_private.site_content (
   revision bigint not null default 1,
   updated_at timestamptz not null default now()
 );
--- No organisation is guessed or seeded. Bind Vibo explicitly during manual deployment.
+-- Only a database operator may enrol verified website editors. Profile roles alone
+-- are not trusted: existing Vi-hem policies may permit users to change their role.
+create table vihem_vibofast_private.editors (
+  profile_id uuid primary key references public.vihem_profiles(id) on delete cascade
+);
+alter table vihem_vibofast_private.editors enable row level security;
+revoke all on vihem_vibofast_private.editors from public, anon, authenticated;
+-- No organisation or editor is guessed or seeded. Bind explicitly during deployment.
 create table vihem_vibofast_private.adverts (
   source_id uuid primary key references public.vihem_apartments(id) on delete cascade,
   ready_from date,
@@ -45,6 +52,7 @@ alter table vihem_vibofast_private.enquiries enable row level security;
 create function public.vihem_vibofast_is_editor() returns boolean language sql stable security definer
 set search_path = '' as $$
   select exists(select 1 from public.vihem_profiles p
+ join vihem_vibofast_private.editors e on e.profile_id = p.id
  join vihem_vibofast_private.site_content c on c.organisation_id = p.organisation_id
  where p.id = (select auth.uid()) and p.active and p.role = 'admin');
 $$;
