@@ -47,6 +47,10 @@ fortsätter fungera via en begränsad bildrutt; nya bilder hanteras i Vi-hem/Sup
 HTTPS använder befintliga certifikat. Nginx-test körs före omladdning och fel återställer
 konfiguration och tidigare release automatiskt.
 
+Kontrollen jämför även inspelade serverfiler och funktionscontainerns miljö mot
+sparad Compose-konfiguration, utan att visa hemliga värden. Direktändringar på
+servern stoppar installationen tills paketet uppdaterats.
+
 GitHub main måste motsvara paketets basversion. Om Claude eller någon annan har
 pushat nya ändringar stoppar skriptet; Codex ska då bygga ett nytt paket med senaste
 ändringarna. Att senare köra den vanliga Vi-hem-deployen från en main-gren utan detta

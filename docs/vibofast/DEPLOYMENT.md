@@ -1,7 +1,7 @@
 # Manuell driftsättning: Vibo och delad Supabase
 
-Utgångspunkt: Vi-hem `origin/main` på commit `73a5b6e`, inklusive de senaste
-ändringarna för Accounted, signerade avtal och hyresförhållanden. Skrivskyddade kontroller har utförts mot den delade Supabase-instansen via ZeroTier.
+Utgångspunkt: Vi-hem `origin/main` på commit `7263f05`, inklusive de senaste
+ändringarna för Accounted, hyresdebitering under uppsägningstid och signerade avtal. Skrivskyddade kontroller har utförts mot den delade Supabase-instansen via ZeroTier.
 Inga produktionsskrivningar har gjorts. SQL har verifierats i en isolerad lokal PostgreSQL-modell.
 
 Ett färdigbyggt paket med avgränsade manuella steg finns också. Se `PAKET.md` i

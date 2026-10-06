@@ -21,6 +21,14 @@ current_main="$("${git_command[@]}" -C /home/vibo/vi-hem ls-remote origin refs/h
 readonly_sql() { docker exec -i -e PGOPTIONS='-c default_transaction_read_only=on' supabase-db psql -X -At -v ON_ERROR_STOP=1 -U postgres -d postgres; }
 organisation="$(printf '%s\n' "SELECT name FROM public.vihem_organisations WHERE id='38fe702d-e72c-49a2-9750-5e0b6934959b';" | readonly_sql)"
 [[ "$organisation" == 'Vibogruppen AB' ]] || { echo 'Wrong database/organisation' >&2; exit 1; }
+installation_present="$(printf '%s\n' "SELECT to_regclass('vihem_vibofast_private.installation') IS NOT NULL;" | readonly_sql)"
+if [[ "$installation_present" == t ]]; then
+  installed_digest="$(printf '%s\n' 'SELECT source_digest FROM vihem_vibofast_private.installation WHERE id;' | readonly_sql)"
+  [[ "$installed_digest" == "$(cat "$package/installation-digest.txt")" ]] || { echo 'Different backend installation found' >&2; exit 1; }
+  python3 "$package/check-server-state.py" --after-install
+else
+  python3 "$package/check-server-state.py"
+fi
 if [[ "$mode" == --check ]]; then
   echo 'Package integrity, current GitHub main, server paths and Vibo organisation verified. No changes made.'
   echo 'Run the three manual phases in order: --install-backend, --publish-admin, --publish-site.'
