@@ -1,0 +1,35 @@
+DO $$
+DECLARE editor uuid;tenant uuid;apartment uuid;property uuid;other uuid;claim jsonb;token text;payload jsonb;result jsonb;
+BEGIN
+ SELECT p.id INTO editor FROM public.vihem_profiles p JOIN vihem_vibofast_private.site_content c USING(organisation_id) WHERE p.active AND p.role='admin' LIMIT 1;
+ SELECT id INTO tenant FROM public.vihem_profiles WHERE role='tenant' LIMIT 1;
+ SELECT a.id,a.property_id INTO apartment,property FROM public.vihem_apartments a JOIN vihem_vibofast_private.site_content c USING(organisation_id) WHERE a.size>0 AND vihem_vibofast_private.available_from(a.id,current_date) IS NOT NULL LIMIT 1;
+ IF apartment IS NULL THEN RAISE EXCEPTION 'No available test apartment'; END IF;
+ IF public.vihem_vibofast_drive_worker('claim')->>'status'<>'disabled' THEN RAISE EXCEPTION 'Unconfigured sync is not disabled'; END IF;
+ PERFORM set_config('request.jwt.claim.sub',tenant::text,true);
+ BEGIN PERFORM public.vihem_vibofast_drive_state();RAISE EXCEPTION 'Tenant read accepted';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+ PERFORM set_config('request.jwt.claim.sub',editor::text,true);
+ PERFORM public.vihem_vibofast_drive_configure('test_root','test_site','test_drive','',true,1);
+ claim:=public.vihem_vibofast_drive_worker('claim',jsonb_build_object('property_id',property));token:=claim->>'lease';
+ IF claim->>'status'<>'claimed' THEN RAISE EXCEPTION 'Lease failed';END IF;
+ IF public.vihem_vibofast_drive_worker('claim')->>'status'<>'busy' THEN RAISE EXCEPTION 'Concurrent sync accepted';END IF;
+ BEGIN PERFORM public.vihem_vibofast_drive_worker('heartbeat');RAISE EXCEPTION 'Missing lease accepted';EXCEPTION WHEN raise_exception THEN IF SQLERRM='Missing lease accepted' THEN RAISE;END IF;END;
+ PERFORM public.vihem_vibofast_drive_worker('folder',jsonb_build_object('lease',token,'kind','apartment','entity_id',apartment,'folder_id','test_apartment'));
+ PERFORM public.vihem_vibofast_drive_worker('folder',jsonb_build_object('lease',token,'kind','property','entity_id',property,'folder_id','test_common'));
+ PERFORM public.vihem_vibofast_drive_worker('images',jsonb_build_object('lease',token,'kind','apartment','entity_id',apartment,'images',jsonb_build_array(jsonb_build_object('file_id','one','name','01.jpg','version','1','storage_path','apartment/'||apartment||'/one.jpg'))));
+ PERFORM public.vihem_vibofast_drive_worker('images',jsonb_build_object('lease',token,'kind','property','entity_id',property,'images',jsonb_build_array(jsonb_build_object('file_id','common','name','common.jpg','version','1','storage_path','property/'||property||'/common.jpg'))));
+ result:=vihem_vibofast_private.effective_images(apartment,'[]');
+ IF jsonb_array_length(result)<>2 OR result->>0 NOT LIKE '%/apartment/%' OR result->>1 NOT LIKE '%/property/%' THEN RAISE EXCEPTION 'Wrong inherited image order';END IF;
+ payload:=jsonb_build_object('title','Test','slug','test-drive-publication','listingType','apartment','leaseType','tillsvidare','rentType','warmhyra','description','Test','features','[]'::jsonb,'utilities','{}'::jsonb,'images','[]'::jsonb);
+ INSERT INTO vihem_vibofast_private.adverts(source_id,payload,published) VALUES(apartment,payload,true) ON CONFLICT(source_id) DO UPDATE SET payload=excluded.payload,published=true;
+ IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(public.vihem_vibofast_public_site()->'listings') l WHERE l->>'id'=apartment::text AND jsonb_array_length(l->'images')=2) THEN RAISE EXCEPTION 'Drive images did not reach public listing';END IF;
+ PERFORM public.vihem_vibofast_drive_worker('images',jsonb_build_object('lease',token,'kind','apartment','entity_id',apartment,'images','[]'::jsonb));
+ IF jsonb_array_length(vihem_vibofast_private.effective_images(apartment,'[]'))<>1 THEN RAISE EXCEPTION 'Removed image remained advertised';END IF;
+ PERFORM public.vihem_vibofast_drive_worker('images',jsonb_build_object('lease',token,'kind','property','entity_id',property,'images','[]'::jsonb));
+ IF EXISTS(SELECT 1 FROM jsonb_array_elements(public.vihem_vibofast_public_site()->'listings') l WHERE l->>'id'=apartment::text) THEN RAISE EXCEPTION 'Image-less advert published';END IF;
+ BEGIN PERFORM public.vihem_vibofast_save_advert(apartment,payload,true,1);RAISE EXCEPTION 'Image-less save accepted';EXCEPTION WHEN raise_exception THEN IF SQLERRM='Image-less save accepted' THEN RAISE;END IF;END;
+ PERFORM public.vihem_vibofast_drive_worker('finish',jsonb_build_object('lease',token));
+ IF (public.vihem_vibofast_drive_state()->'settings')?'lease' THEN RAISE EXCEPTION 'Worker token exposed to browser';END IF;
+ IF has_function_privilege('authenticated','public.vihem_vibofast_drive_worker(text,jsonb)','EXECUTE') OR has_function_privilege('anon','public.vihem_vibofast_drive_state()','EXECUTE') THEN RAISE EXCEPTION 'Worker exposed';END IF;
+ RAISE NOTICE 'PASS: tenant rejection, private worker, leases, inherited order, public images, deletion and image-less publication suppression. Rollback follows.';
+END $$;

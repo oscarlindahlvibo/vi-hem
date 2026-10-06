@@ -1,5 +1,6 @@
 /** Mount inside Vi-hem using its authenticated Supabase client. Requires a Vibo editor membership. */
 import { useEffect, useState, type ReactNode } from 'react';
+import { DriveImagesAdmin } from './DriveImagesAdmin';
 import type { SupabaseClient } from '@supabase/supabase-js';
 interface Advert { source_id: string; payload: Record<string, unknown>; published: boolean; revision: number; lifecycle: string; ready_from: string | null; available_from: string | null; rent: number; area: number; rooms: number; }
 interface Snapshot { content: { content: Record<string, unknown>; revision: number }; adverts: Advert[]; enquiries: unknown[]; }
@@ -59,6 +60,7 @@ export function WebsiteAdmin({ client }: { client: SupabaseClient }) {
   return <section style={{ maxWidth: 1000, margin: 'auto', padding: 24 }}>
     <h1>Vibo Fastigheter – hemsida</h1>
     <p>Annonsuppgifter, bilder, texter, kontaktuppgifter och kunskapsbank. Avtalsstatus kommer från Vi-hem.</p>
+    <DriveImagesAdmin client={client} apartmentId={selected==='content'?undefined:selected} />
     <label>Välj innehåll <select disabled={busy} value={selected} onChange={e => choose(e.target.value)}>
       <option value="content">Hemsidans innehåll</option>
       {snapshot?.adverts.map(a => <option key={a.source_id} value={a.source_id}>{String(a.payload.title ?? a.source_id)} ({a.lifecycle})</option>)}
