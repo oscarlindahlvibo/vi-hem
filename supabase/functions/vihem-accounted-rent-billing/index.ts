@@ -88,7 +88,10 @@ Deno.serve(async (req: Request) => {
   // invoices for this run, have Accounted issue + email them to the tenant
   // (POST .../invoices/{id}/send: allocates the invoice number, books it,
   // emails the PDF). Never combined with dry_run -- a send is irreversible.
-  const sendAfterCreate = Boolean(body?.send) && !dryRun;
+  // send_only: don't create anything, just issue + email the draft invoices
+  // this run already created (the "Skicka fakturor" step in the Hyror module).
+  const sendOnly = Boolean(body?.send_only) && !dryRun;
+  const sendAfterCreate = (Boolean(body?.send) || sendOnly) && !dryRun;
   if (!companyId) return errorJson("VALIDATION_ERROR", "company_id krävs.", 400);
   if (!runId) return errorJson("VALIDATION_ERROR", "run_id krävs.", 400);
 
@@ -125,7 +128,7 @@ Deno.serve(async (req: Request) => {
     .order("created_at", { ascending: true });
   if (itemsErr) return errorJson("INTERNAL_ERROR", "Kunde inte läsa hyresraderna.", 500, { details: itemsErr.message });
 
-  const rows = (items ?? []) as unknown as RentBillingItemRow[];
+  const rows = sendOnly ? [] : ((items ?? []) as unknown as RentBillingItemRow[]);
 
   async function invoiceSingleItem(item: RentBillingItemRow): Promise<ItemResult> {
     try {

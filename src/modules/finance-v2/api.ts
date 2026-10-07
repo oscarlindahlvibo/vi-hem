@@ -254,6 +254,7 @@ export async function createRentBillingInvoices(params: {
   dryRun?: boolean;
   combineByCustomer?: boolean;
   send?: boolean;
+  sendOnly?: boolean;
 }): Promise<{ results: RentBillingItemResult[]; summary: { total: number; succeeded: number; failed: number } }> {
   return invoke('vihem-accounted-rent-billing', {
     company_id: params.companyId,
@@ -261,6 +262,7 @@ export async function createRentBillingInvoices(params: {
     dry_run: params.dryRun ?? false,
     combine_by_customer: params.combineByCustomer ?? false,
     send: params.send ?? false,
+    send_only: params.sendOnly ?? false,
   }).then((res: any) => res.data);
 }
 

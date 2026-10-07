@@ -39,6 +39,7 @@ export function RentModulePage({ initialTab = 'billing', onNavigate }: { initial
   const [changeModal, setChangeModal] = useState(false);
   const [endChange, setEndChange] = useState<{ change: RentChange; origin: 'rent' | 'billing' } | null>(null);
   const [createModal, setCreateModal] = useState(false);
+  const [sendModal, setSendModal] = useState(false);
   const [companyChecked, setCompanyChecked] = useState(false);
   const [combine, setCombine] = useState(false);
   const [tenancyId, setTenancyId] = useState('');
@@ -86,7 +87,7 @@ export function RentModulePage({ initialTab = 'billing', onNavigate }: { initial
   }, [companyId, month]);
   // The counter invalidates async requests, rather than referring to a DOM node.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setData(null); setCustomerKey(''); setCompanyChecked(false); setMessage(''); setCreateModal(false); setChangeModal(false); setEndChange(null); void load(); return () => { request.current++; }; }, [load]);
+  useEffect(() => { setData(null); setCustomerKey(''); setCompanyChecked(false); setMessage(''); setCreateModal(false); setSendModal(false); setChangeModal(false); setEndChange(null); void load(); return () => { request.current++; }; }, [load]);
   const current = data?.companyId === companyId && data.period === `${month}-01` ? data : null;
   const customers = useMemo(() => current ? buildRentCustomers(current, invoiceCustomerIds) : [], [current, invoiceCustomerIds]);
   const selectedCustomer = customers.find(c => c.key === customerKey);
@@ -94,6 +95,23 @@ export function RentModulePage({ initialTab = 'billing', onNavigate }: { initial
   const issues = pending.filter(r => r.warnings.length);
   const total = pending.reduce((sum, r) => sum + r.total, 0);
   const run = current?.runs[0];
+  // Drafts created in Accounted for this month but not yet issued/emailed.
+  const unsent = (() => {
+    if (!current) return [] as { invoiceId: string; number: string | null; total: number; names: string[]; emails: string[] }[];
+    const links = new Map(current.accountedInvoices.map(l => [l.id, l]));
+    const byInvoice = new Map<string, { invoiceId: string; number: string | null; total: number; names: string[]; emails: string[] }>();
+    for (const item of current.items.filter(i => i.rent_period === `${month}-01` && i.accounted_invoice_link_id)) {
+      const link = links.get(item.accounted_invoice_link_id as string);
+      if (!link || link.status !== 'draft') continue;
+      const tenant = current.tenancies.find(t => t.id === item.tenancy_id)?.tenant;
+      const entry = byInvoice.get(link.accounted_invoice_id) || { invoiceId: link.accounted_invoice_id, number: link.accounted_invoice_number, total: Number(link.total) || 0, names: [], emails: [] };
+      if (tenant?.name && !entry.names.includes(tenant.name)) entry.names.push(tenant.name);
+      if (tenant?.email && !entry.emails.includes(tenant.email)) entry.emails.push(tenant.email);
+      byInvoice.set(link.accounted_invoice_id, entry);
+    }
+    return [...byInvoice.values()];
+  })();
+  const unsentTotal = unsent.reduce((sum, u) => sum + u.total, 0);
   const dueDate = /^\d{4}-\d{2}$/.test(month) ? new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 0).toLocaleDateString('sv-SE') : '';
   const tenancyLabel = (id: string) => { const t = current?.tenancies.find(t => t.id === id); return t ? `${t.tenant?.name || 'Hyresgäst'} · ${t.property?.name || ''} ${t.apartment?.apartment_number || ''}` : 'Tidigare hyresförhållande'; };
   const ready = Boolean(current && !loading && !saving);
@@ -156,7 +174,7 @@ export function RentModulePage({ initialTab = 'billing', onNavigate }: { initial
     try {
       if (current?.companyLink?.enabled) {
         const result = await createRentBillingInvoices({ companyId, runId: run.id, combineByCustomer: combine, send: false });
-        setMessage(`${result.summary.succeeded} hyresrader behandlade. ${result.summary.failed} misslyckades. Inga fakturor har skickats.`);
+        setMessage(`${result.summary.succeeded} hyresrader behandlade. ${result.summary.failed} misslyckades. Inga fakturor har skickats – använd Skicka fakturor när utkasten är kontrollerade.`);
         const failures = result.results.filter(r => !r.ok).map(r => r.error?.message || 'Okänt faktureringsfel');
         if (failures.length) setInvoiceWarning(failures.join(' '));
       } else {
@@ -165,6 +183,18 @@ export function RentModulePage({ initialTab = 'billing', onNavigate }: { initial
         setMessage('Fakturautkasten är skapade i Vi-hem. Inga fakturor har skickats.');
       }
       setCreateModal(false); await load();
+    } catch (err) { setError(errorText(err)); } finally { setSaving(false); }
+  };
+  const sendInvoices = async () => {
+    if (!ready || !canWrite || !run || !unsent.length) return;
+    setSaving(true); setError(''); setMessage(''); setInvoiceWarning('');
+    try {
+      const result = await createRentBillingInvoices({ companyId, runId: run.id, sendOnly: true });
+      const sent = result.results.filter(r => r.sent).length;
+      const failed = result.results.filter(r => r.send_error);
+      setMessage(`${sent} fakturor skickades via Accounted.${failed.length ? ` ${failed.length} kunde inte skickas.` : ''}`);
+      if (failed.length) setInvoiceWarning([...new Set(failed.map(r => r.send_error?.message || 'Okänt fel'))].join(' '));
+      setSendModal(false); await load();
     } catch (err) { setError(errorText(err)); } finally { setSaving(false); }
   };
   const showChangeForm = (target?: string) => { setTenancyId(target || current?.tenancies.find(t => ['active', 'terminated'].includes(t.status))?.id || ''); setStartMonth(month); setEndMonth(''); setError(''); setChangeModal(true); };
@@ -206,9 +236,11 @@ export function RentModulePage({ initialTab = 'billing', onNavigate }: { initial
         {issues.length > 0 && <p className="text-sm text-amber-800">{issues.length} rader behöver granskas före fakturering.</p>}
         {run && <Button onClick={() => setCreateModal(true)} disabled={!canWrite || !ready || !pending.length || pending.some(r => r.state === 'unprepared') || issues.some(r => r.warnings.some(w => !w.startsWith('Hyresförhållandet och lägenheten saknar bolagskoppling'))) || (issues.some(r => r.company_missing) && !companyChecked)}>Skapa fakturautkast</Button>}
       </Card>
+      {current.companyLink?.enabled && unsent.length > 0 && <Card className="space-y-3 border-blue-200 bg-blue-50 p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-bold">{unsent.length} fakturautkast väntar på utskick</h2><p className="mt-1 text-sm text-slate-600">Totalt {formatCurrency(unsentTotal)}. Utkasten är skapade i Accounted men har inte skickats till hyresgästerna.</p></div><Button onClick={() => setSendModal(true)} disabled={!canWrite || !ready}>Skicka fakturor</Button></div></Card>}
       <div className="space-y-3">{current.preview.map(r => <Card key={r.tenancy_id} className="space-y-3 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><button type="button" onClick={() => { const c = customers.find(c => c.tenantIds.includes(r.tenant_id)); setCustomerKey(c?.key || ''); setTab('customers'); onNavigate('rent-customers'); }} className="font-bold text-blue-700 hover:underline">{r.name}</button><p className="text-sm text-slate-500">{r.property} · {r.apartment}</p><Badge className="mt-2 bg-slate-100 text-slate-700">{statusText[r.state] || r.state}</Badge></div><p className="text-xl font-bold">{r.state === 'invoiced' ? 'Fakturerad' : formatCurrency(r.total)}</p></div>{['draft', 'unprepared'].includes(r.state) && <><div className="space-y-2 border-t border-slate-100 pt-3 text-sm"><div className="flex justify-between gap-3"><span>Grundhyra</span><span>{formatCurrency(r.base)}</span></div>{r.lines.map(line => <div key={`${line.origin}:${line.id}`} className="flex justify-between gap-3"><span className="min-w-0 break-words">{line.description || (line.amount < 0 ? 'Avdrag' : 'Tillägg')}</span><span className="shrink-0">{formatCurrency(line.amount)}</span></div>)}{r.vat !== 0 && <div className="flex justify-between"><span>Moms</span><span>{formatCurrency(r.vat)}</span></div>}</div>{r.warnings.filter(w => !companyChecked || !w.startsWith('Hyresförhållandet och lägenheten saknar bolagskoppling')).map(w => <p key={w} className="text-sm text-amber-800">{w}</p>)}{canWrite && <Button size="sm" variant="ghost" onClick={() => showChangeForm(r.tenancy_id)}>Lägg till avdrag / tillägg</Button>}</>}</Card>)}</div>
       {!current.preview.length && <Card className="p-5"><EmptyState title="Inga hyror för vald månad" description="Ingen aktiv eller uppsagd hyresperiod matchar månaden. Ett tillträde efter månadens första dag behöver hanteras separat enligt nuvarande körningsregler." /></Card>}
     </>}
+    <Modal open={sendModal} onClose={() => { if (!saving) setSendModal(false); }} title="Skicka hyresfakturor"><div className="space-y-3"><p className="text-sm text-slate-600">Accounted tilldelar fakturanummer, bokför fakturorna och mejlar dem till hyresgästerna. Det går inte att ångra.</p><p className="text-sm font-semibold">{unsent.length} fakturor · {formatCurrency(unsentTotal)}</p>{unsent.some(u => !u.emails.length) && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Någon hyresgäst saknar e-postadress. Den fakturan kan inte skickas förrän adressen finns.</p>}<ul className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-3 text-sm">{unsent.map(u => <li key={u.invoiceId} className="flex justify-between gap-3"><span className="min-w-0 break-words">{u.names.join(', ') || 'Okänd kund'} · {u.emails.join(', ') || <span className="text-red-700">e-post saknas</span>}</span><span className="shrink-0 font-medium">{formatCurrency(u.total)}</span></li>)}</ul><Button onClick={() => void sendInvoices()} loading={saving}>Skicka {unsent.length} fakturor nu</Button></div></Modal>
     <Modal open={changeModal} onClose={() => { if (!saving) setChangeModal(false); }} title="Nytt avdrag eller tillägg"><form className="space-y-4" onSubmit={e => void handleSaveChange(e)}><Select label="Hyresförhållande" value={tenancyId} disabled={saving} onChange={e => setTenancyId(e.target.value)} options={(current?.tenancies || []).filter(t => ['active', 'terminated'].includes(t.status)).map(t => ({ value: t.id, label: tenancyLabel(t.id) }))} /><div className="grid gap-3 sm:grid-cols-2"><Select label="Typ" value={direction} disabled={saving} onChange={e => setDirection(e.target.value)} options={[{ value: 'deduction', label: 'Avdrag (minskar hyran)' }, { value: 'addition', label: 'Tillägg (ökar hyran)' }]} /><Select label="Varaktighet" value={kind} disabled={saving} onChange={e => setKind(e.target.value as typeof kind)} options={[{ value: 'one_time', label: 'Engångsbelopp för vald månad' }, { value: 'recurring', label: 'Återkommande / permanent' }]} /></div><Input label="Belopp i kronor" inputMode="decimal" placeholder="Exempelvis 350" value={amount} required disabled={saving} onChange={e => setAmount(e.target.value)} /><Input label="Beskrivning på fakturaunderlaget" value={description} required disabled={saving} onChange={e => setDescription(e.target.value)} /><Input label={kind === 'one_time' ? 'Hyresmånad' : 'Från hyresmånad'} type="month" value={startMonth} required disabled={saving} onChange={e => setStartMonth(e.target.value)} />{kind === 'recurring' && <Input label="Till och med (valfritt)" type="month" value={endMonth} min={startMonth} disabled={saving} hint="Lämna tomt för permanent justering tills den avslutas." onChange={e => setEndMonth(e.target.value)} />}<p className="text-sm text-slate-500">Justeringen följer hyrans moms och påverkar bara hyresunderlag som ännu inte har fakturerats.</p>{error && <p role="alert" className="text-sm text-red-700">{error}</p>}<Button type="submit" loading={saving} disabled={!tenancyId || !canWrite}>Spara justering</Button></form></Modal>
     <Modal open={Boolean(endChange)} onClose={() => { if (!saving) setEndChange(null); }} title="Avsluta justering"><p className="mb-4 text-sm text-slate-600">{endChange?.change.description} tas bort från kommande ofakturerade hyror. Befintliga fakturor ändras inte.</p><Button onClick={() => void handleEndChange()} loading={saving}>Avsluta justering</Button></Modal>
     <Modal open={createModal} onClose={() => { if (!saving) setCreateModal(false); }} title="Skapa fakturautkast"><p className="text-sm text-slate-600">{pending.length} hyresrader för {month}, totalt {formatCurrency(total)}. Utkasten skapas i {current?.companyLink?.enabled ? 'Accounted' : 'Vi-hem'}. Inga fakturor skickas från detta steg.</p>{current?.companyLink?.enabled && <label className="my-4 flex items-center gap-2 text-sm"><input type="checkbox" checked={combine} disabled={saving} onChange={e => setCombine(e.target.checked)} />Samlingsfaktura per kund med flera lägenheter</label>}<Button className="mt-4" onClick={() => void createInvoices()} loading={saving}>Skapa {pending.length} hyresrader som fakturautkast</Button></Modal>
