@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import ts from 'typescript';
+async function actualModule(path) {
+  const text = await readFile(new URL(path, import.meta.url), 'utf8');
+  const { outputText } = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } });
+  return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+}
+const { previewRent, rentChangeEligible } = await actualModule('../supabase/functions/_shared/rent-overview.ts');
+const { rentMoney } = await actualModule('../src/modules/rent/money.ts');
+assert.ok(rentMoney(-500.5).includes('500,50'));
+const { buildRentCustomers } = await actualModule('../src/modules/rent/customers.ts');
+const tenant = { id: 'lease', tenant_id: 'tenant', company_id: 'company', start_date: '2026-01-01', end_date: null, status: 'active', monthly_rent: 8550, rent_vat_rate: 0, tenant: { id: 'tenant', name: 'Exempel', email: 'tenant@example.test' }, apartment: { apartment_number: '1004', company_id: 'company', rent: 8550 }, property: { name: 'Fastighet' } };
+const base = { companyId: 'company', period: '2026-12-01', tenancies: [tenant], items: [], rentChanges: [], billingChanges: [], accountedEnabled: true };
+const rentChange = { id: 'change', company_id: 'company', tenancy_id: 'lease', adjustment_type: 'recurring', amount: 350, status: 'active', start_period: '2026-12-01', end_period: null, description: 'Internet', vat_rate: 0 };
+const billingChange = { ...rentChange, id: 'v2', tenancy_id: undefined, target_type: 'tenancy', target_id: 'lease', adjustment_type: 'one_time', amount: -500, max_occurrences: 1, applied_count: 0, last_applied_period: null };
+const input = { ...base, rentChanges: [rentChange, { ...rentChange, id: 'washer', amount: 500 }, { ...rentChange, id: 'tv', amount: 250 }], billingChanges: [billingChange] };
+const unchanged = JSON.stringify(input);
+const projected = previewRent(input)[0];
+assert.equal(projected.base, 8550); assert.equal(projected.additions, 1100); assert.equal(projected.deductions, -500); assert.equal(projected.total, 9150);
+assert.equal(JSON.stringify(input), unchanged, 'Preview consumed or mutated input');
+assert.equal(previewRent({ ...base, tenancies: [{ ...tenant, status: 'terminated', end_date: '2026-12-31' }] }).length, 1);
+assert.equal(previewRent({ ...base, tenancies: [{ ...tenant, status: 'terminated', end_date: '2026-11-30' }] }).length, 0);
+assert.equal(previewRent({ ...base, tenancies: [{ ...tenant, start_date: '2026-12-14' }] }).length, 0);
+assert.equal(previewRent({ ...base, tenancies: [{ ...tenant, company_id: 'other' }] }).length, 0);
+assert.equal(previewRent({ ...base, tenancies: [{ ...tenant, company_id: null, apartment: { ...tenant.apartment, company_id: null } }] })[0].company_missing, true);
+for (const change of [{ ...billingChange, status: 'completed' }, { ...billingChange, status: 'paused' }, { ...billingChange, last_applied_period: '2026-12-01' }, { ...billingChange, applied_count: 1 }, { ...billingChange, start_period: '2027-01-01' }, { ...billingChange, end_period: '2026-11-01' }]) assert.equal(rentChangeEligible(change, base.period, 'billing'), false);
+assert.equal(rentChangeEligible({ ...rentChange, adjustment_type: 'one_time', rent_period: '2026-11-01' }, base.period, 'rent'), false);
+const noAccounted = previewRent({ ...input, accountedEnabled: false })[0]; assert.equal(noAccounted.total, 9650); assert.ok(noAccounted.warnings.some(w => w.includes('Accounted')));
+const item = { id: 'item', tenancy_id: 'lease', tenant_id: 'tenant', finance_customer_id: 'customer', run_id: 'run', rent_period: base.period, status: 'draft', base_rent_amount: 8550, adjustment_amount: 0, amount: 8550, vat_rate: 0, total_amount: 8550, invoice_id: null, accounted_invoice_link_id: null };
+const stale = previewRent({ ...base, items: [item], rentChanges: [rentChange] })[0]; assert.equal(stale.total, 8550); assert.ok(stale.warnings.length);
+const billed = previewRent({ ...input, items: [{ ...item, status: 'invoiced', accounted_invoice_link_id: 'invoice' }] })[0]; assert.equal(billed.state, 'invoiced'); assert.equal(billed.lines.length, 0);
+const negativeVat = previewRent({ ...base, billingChanges: [{ ...billingChange, amount: -0.02, vat_rate: 25 }] })[0]; assert.equal(negativeVat.vat, -0.01);
+const snapshot = { ...input, customers: [{ id: 'customer', company_id: 'company', customer_type: 'private', name: 'Exempel', email: tenant.tenant.email }, { id: 'project-only', company_id: 'company', name: 'Annan kund', email: '', customer_type: 'company' }], tenancies: [tenant, { ...tenant, id: 'lease2', apartment: { ...tenant.apartment, apartment_number: '1005' } }], items: [item, { ...item, id: 'item2', tenancy_id: 'lease2' }], invoices: [{ id: 'legacy', customer_id: 'customer' }], accountedInvoices: [{ id: 'link1', accounted_invoice_id: 'collection', source_id: 'item' }, { id: 'link2', accounted_invoice_id: 'collection', source_id: 'item2' }, { id: 'manual', accounted_invoice_id: 'manual-invoice', source_id: 'manual-source' }], customerLinks: [{ source_type: 'finance_customer', source_id: 'customer', accounted_customer_id: 'acc-customer' }] };
+const rows = buildRentCustomers(snapshot, { manual: 'acc-customer' });
+assert.equal(rows.length, 2); assert.equal(rows.find(r => r.key === 'customer').tenancies.length, 2); assert.equal(rows.find(r => r.key === 'customer').accountedInvoices.length, 2); assert.equal(rows.find(r => r.key === 'customer').invoices.length, 1);
+console.log('Rent module checks passed: both adjustment sources, read-only preview, notice/end dates, future starts, company scope, consumption, saved snapshots, VAT rounding, all customers and collection invoice deduplication.');

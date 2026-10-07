@@ -47,6 +47,7 @@ import { ScreenSettingsPage } from './pages/ScreenSettingsPage';
 import { GuestLaundryPage } from './pages/GuestLaundryPage';
 import { FinancePage } from './pages/FinancePage';
 import { FinanceV2Page } from './modules/finance-v2/pages/FinanceV2Page';
+import { RentModulePage } from './modules/rent/RentModulePage';
 import { InstallmentPlansPage } from './pages/InstallmentPlansPage';
 import { AgreementsV2Page } from './modules/agreements-v2/pages/AgreementsV2Page';
 import { PublicAgreementSignPage } from './modules/agreements-v2/pages/PublicAgreementSignPage';
@@ -640,6 +641,12 @@ function AppInner() {
         // 'finance': staff module grant + the org's finance module enabled.
         if (!isStaff || !enabledModules.finance) return renderDashboard();
         return <FinanceV2Page />;
+
+      case 'rent-customers':
+      case 'rent-adjustments':
+      case 'rent-billing':
+        if (!isStaff || !enabledModules.finance) return renderDashboard();
+        return <RentModulePage initialTab={currentPage === 'rent-customers' ? 'customers' : currentPage === 'rent-adjustments' ? 'adjustments' : 'billing'} onNavigate={navigate} />;
 
       case 'installment-plans':
         if (!isStaff || !enabledModules.finance) return renderDashboard();

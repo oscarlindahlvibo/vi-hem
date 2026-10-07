@@ -16,4 +16,7 @@ assert(!normalised.some(id => id.includes('/apps/vibofast/')), 'Public website i
 for (const page of ['WebsiteAdmin', 'DriveImagesAdmin', 'InterestsAdmin']) {
   assert(normalised.includes(`${root}src/modules/vibofast/${page}.tsx`), `Missing admin page: ${page}`);
 }
-console.log('PASS: mobile build contains Vibo administration, Drive images and interests; no public vibofast.se modules.');
+assert(normalised.includes(`${root}src/modules/rent/RentModulePage.tsx`), 'Missing rent module in mobile build');
+assert(normalised.includes(`${root}src/pages/FinancePage.tsx`), 'Missing legacy finance page');
+assert(normalised.includes(`${root}src/modules/finance-v2/pages/FinanceV2Page.tsx`), 'Missing finance V2 page');
+console.log('PASS: mobile build contains the rent module, both finance pages, Vibo administration, Drive images and interests; no public vibofast.se modules.');

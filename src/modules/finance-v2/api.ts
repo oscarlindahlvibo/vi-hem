@@ -45,7 +45,7 @@ export class AccountedIntegrationError extends Error {
   }
 }
 
-async function invoke<T>(functionName: string, body: Record<string, unknown>): Promise<T> {
+export async function invoke<T>(functionName: string, body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke(functionName, { body });
   if (error) {
     // supabase-js exposes the raw Response on `error.context` for non-2xx

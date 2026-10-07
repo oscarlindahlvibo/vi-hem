@@ -116,6 +116,11 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     { label: 'Scanna underlag', icon: <ScanLine className="w-5 h-5" />, items: [
       { label: 'Scanna underlag', icon: <ScanLine className="w-5 h-5" />, page: 'document-scanner', roles: ['staff', 'admin'], module: 'finance' },
     ] },
+    { label: 'Hyror', icon: <Building2 className="w-5 h-5" />, items: [
+      { label: 'Kunder & fakturor', icon: <Users className="w-5 h-5" />, page: 'rent-customers', roles: ['staff', 'admin'], module: 'finance' },
+      { label: 'Avdrag & tillägg', icon: <SlidersHorizontal className="w-5 h-5" />, page: 'rent-adjustments', roles: ['staff', 'admin'], module: 'finance' },
+      { label: 'Nästa hyreskörning', icon: <CalendarDays className="w-5 h-5" />, page: 'rent-billing', roles: ['staff', 'admin'], module: 'finance' },
+    ] },
     { label: 'Ekonomi', icon: <Landmark className="w-5 h-5" />, items: [
       { label: 'Ekonomi', icon: <Landmark className="w-5 h-5" />, page: 'finance', roles: ['staff', 'admin'], module: 'finance' },
       { label: 'Ekonomi V2 (beta)', icon: <Landmark className="w-5 h-5" />, page: 'finance-v2', roles: ['staff', 'admin'], module: 'finance' },
