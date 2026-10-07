@@ -8,10 +8,11 @@ const corsHeaders = {
 };
 
 const BEDS24_BASE_URL = "https://api.beds24.com/v2";
-// How many days ahead to push. Kept modest (not a full year) so a single
-// sync stays well under Beds24's rolling 5-minute credit limit and any one
-// mistake in the price rules only misprices the near future, not months out.
-const SYNC_DAYS = 120;
+// How many days ahead to push. A full year: Booking.com/Expedia want prices
+// up to 12 months out (Beds24 warns "less than 12 months available"
+// otherwise). Prices are sent as merged date ranges, so this is still only a
+// handful of calendar entries per room.
+const SYNC_DAYS = 365;
 
 type Season = { id: string; name: string; start_date: string; end_date: string; priority: number };
 type Rate = { unit_id: string; season_id: string | null; price_per_night: number };
