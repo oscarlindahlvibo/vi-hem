@@ -46,7 +46,7 @@ export function WebsiteAdmin({ client }: { client: SupabaseClient }) {
       if (result.error) throw result.error;
       try {
         choose(selected, await load());
-        setMessage(selected === 'content' || published ? 'Sparat. Hemsidan hämtar ändringarna inom en minut.' : 'Utkast sparat. Annonsen publiceras när publicering aktiveras och den är komplett.');
+        setMessage(selected === 'content' || published ? 'Sparat. Hemsidan hämtar ändringarna inom en minut. Lägenhetsannonser visas när avtalsstatusen tillåter det och bilder finns.' : 'Utkast sparat. Annonsen publiceras när publicering aktiveras och den är komplett.');
       } catch (error) {
         setMessage('Uppgifterna sparades, men vyn kunde inte uppdateras. Ladda om innan du gör fler ändringar. ' + websiteErrorMessage(error, ''));
       }
@@ -78,7 +78,7 @@ export function WebsiteAdmin({ client }: { client: SupabaseClient }) {
       {snapshot?.adverts.map(a => <option key={a.source_id} value={a.source_id}>{String(a.payload.title ?? a.source_id)} ({a.lifecycle})</option>)}
     </select></label>
     {selected !== 'content' && <label><input type="checkbox" checked={published} onChange={e => setPublished(e.target.checked)} /> Publicera när lägenheten är ledig eller uppsagd</label>}
-    {selected !== 'content' && <p>Du kan spara uppgifterna som utkast utan att publicera. För publicering behövs rubrik, annonsadress, annonsbeskrivning och minst en lägenhetsbild eller gemensam fastighetsbild.</p>}
+    {selected !== 'content' && <p>Du kan spara uppgifterna som utkast utan att publicera. För publicering behövs rubrik, annonsadress och annonsbeskrivning. Bilder kan läggas till senare; annonsen visas på hemsidan först när minst en lägenhetsbild eller gemensam fastighetsbild finns.</p>}
     {selected === 'content' ? <>
       <div style={{display:'flex',gap:8,margin:'20px 0'}}>{Object.entries({company:'Företag & kontakt',faq:'Kunskapsbank',text:'Sidtexter',images:'Sidbilder'}).map(([key,label])=><button key={key} onClick={()=>setActiveContentTab(key)} disabled={activeContentTab===key}>{label}</button>)}</div>
       <ContentFields draft={draft} setDraft={setDraft} tab={activeContentTab} />
