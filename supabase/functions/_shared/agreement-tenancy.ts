@@ -38,19 +38,28 @@ function extractRent(blocks: any[]): { rent: number | null; vat: number } {
 }
 
 function extractStartDate(blocks: any[]): string | null {
+  const dates = new Set<string>();
   for (const block of blocks) {
     if (block?.block_type !== "date") continue;
     if (!/tillträd|inflytt|start/i.test(String(block.content?.label || ""))) continue;
-    const value = String(block.content?.value || "");
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    // A signed date may include a note about a different temporary apartment.
+    // Only the leading date belongs to this linked tenancy; never scan the note.
+    const value = String(block.content?.value || "").trim();
+    const match = /^(\d{4}-\d{2}-\d{2})(?=$|\s|\()/.exec(value);
+    if (!match) return null;
+    const date = match[1];
+    const parsed = new Date(`${date}T00:00:00Z`);
+    if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return null;
+    dates.add(date);
   }
-  return null;
+  // Missing, invalid or conflicting dates need staff review, never today's date.
+  return dates.size === 1 ? [...dates][0] : null;
 }
 
 export async function createTenancyFromAgreement(db: any, agreementId: string, actorId: string | null): Promise<TenancyFromAgreementResult> {
   const { data: agreement } = await db
     .from("vihem_agreements")
-    .select("id, organisation_id, status, document_type, document_number")
+    .select("id, organisation_id, status, document_type, document_number, current_version_id")
     .eq("id", agreementId)
     .maybeSingle();
   if (!agreement) return { status: "skipped", reason: "Dokumentet hittades inte." };
@@ -75,10 +84,13 @@ export async function createTenancyFromAgreement(db: any, agreementId: string, a
   if (same) return { status: "exists", tenancy_id: same.id };
   if ((active || []).length > 0) return { status: "conflict", reason: "Lägenheten har redan en annan aktiv hyresgäst." };
 
-  const { data: version } = await db.from("vihem_agreement_versions").select("blocks").eq("agreement_id", agreementId).order("version_number", { ascending: false }).limit(1).maybeSingle();
-  const blocks: any[] = version?.blocks || [];
+  if (!agreement.current_version_id) return { status: "skipped", reason: "Avtalet saknar en fryst version. Hyresförhållandet behöver granskas." };
+  const { data: version } = await db.from("vihem_agreement_versions").select("blocks").eq("id", agreement.current_version_id).eq("agreement_id", agreementId).maybeSingle();
+  if (!version || !Array.isArray(version.blocks)) return { status: "skipped", reason: "Den signerade avtalsversionen kunde inte läsas." };
+  const blocks: any[] = version.blocks;
   const { rent, vat } = extractRent(blocks);
-  const startDate = extractStartDate(blocks) || new Date().toISOString().slice(0, 10);
+  const startDate = extractStartDate(blocks);
+  if (!startDate) return { status: "skipped", reason: "Tillträdesdatumet i det signerade avtalet saknas eller är otydligt. Hyresförhållandet behöver granskas innan det skapas." };
   const monthlyRent = rent ?? Number(apartment.rent) ?? 0;
 
   const { data: tenancy, error } = await db.from("vihem_tenancies").insert({
