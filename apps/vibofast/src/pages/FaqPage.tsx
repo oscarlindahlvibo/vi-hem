@@ -37,7 +37,7 @@ export function FaqPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Sök i kunskapsbanken..."
-                className="w-full rounded-full border border-forest-700 bg-forest-900 py-3 pl-12 pr-4 text-sm text-sand-50 placeholder:text-forest-400 focus:border-accent-500 focus:outline-none"
+                className="w-full rounded-full border border-forest-700 bg-forest-900 py-3 pl-12 pr-4 text-base text-sand-50 placeholder:text-forest-400 focus:border-accent-500 focus:outline-none"
               />
             </div>
           </div>

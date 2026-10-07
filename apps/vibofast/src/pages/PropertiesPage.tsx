@@ -87,7 +87,7 @@ export function PropertiesPage() {
               <select
                 value={filterCity}
                 onChange={(e) => setFilterCity(e.target.value)}
-                className="rounded-full border border-sand-300 bg-white px-4 py-1.5 text-sm font-medium text-forest-700 focus:border-forest-500 focus:outline-none"
+                className="rounded-full border border-sand-300 bg-white px-4 py-1.5 text-base font-medium text-forest-700 focus:border-forest-500 focus:outline-none"
               >
                 <option value="all"><CmsText id="PropertiesPage.6eb6f6024e" fallback="Alla orter" /></option>
                 {cities.map((city) => (
@@ -100,7 +100,7 @@ export function PropertiesPage() {
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-                className="rounded-full border border-sand-300 bg-white px-4 py-1.5 text-sm font-medium text-forest-700 focus:border-forest-500 focus:outline-none"
+                className="rounded-full border border-sand-300 bg-white px-4 py-1.5 text-base font-medium text-forest-700 focus:border-forest-500 focus:outline-none"
               >
                 <option value="rent-asc"><CmsText id="PropertiesPage.2819160c3a" fallback="Lägst hyra" /></option>
                 <option value="rent-desc"><CmsText id="PropertiesPage.f7575e96dd" fallback="Högst hyra" /></option>

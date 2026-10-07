@@ -25,7 +25,7 @@ export function HomePage() {
   return (
     <div className="animate-fade-in">
       {/* Hero */}
-      <section className="relative min-h-[90vh] overflow-hidden">
+      <section className="relative overflow-hidden">
         <div className="absolute inset-0">
           <PropertyImage
             src="https://vibofast.se/wp-content/uploads/2025/08/IMG_6075-2-1240x720.jpeg"
@@ -35,28 +35,28 @@ export function HomePage() {
           <div className="absolute inset-0 bg-gradient-to-r from-forest-950/80 via-forest-950/50 to-forest-950/20" />
         </div>
 
-        <div className="container-page relative flex min-h-[90vh] items-center">
-          <div className="max-w-2xl py-32">
+        <div className="container-page relative flex min-h-[65svh] items-center sm:min-h-[70vh]">
+          <div className="min-w-0 w-full max-w-2xl pb-12 pt-28 sm:pb-16 sm:pt-36">
             <p className="section-eyebrow text-sand-200">
               {company.tagline}
             </p>
             <h1 className="mt-4 font-serif text-4xl font-semibold text-sand-50 text-balance sm:text-5xl lg:text-6xl"><CmsText id="HomePage.afb8b334a4" fallback="Hitta ditt drömhem hos oss" /></h1>
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-sand-100"><CmsText id="HomePage.7f2c3a5f63" fallback="Vi hyr ut lägenheter, lokaler och förråd i Virserum och omnejd. Låt oss hjälpa dig i jakten på ditt drömboende." /></p>
-            <div className="mt-8 flex flex-wrap gap-4">
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-4">
               <button
                 onClick={() => navigate('/lediga-objekt')}
-                className="inline-flex items-center gap-2 rounded-full bg-sand-50 px-6 py-3 text-sm font-semibold text-forest-900 transition-all hover:bg-white hover:shadow-xl active:scale-95"
+                className="inline-flex justify-center items-center gap-2 rounded-full bg-sand-50 px-6 py-3 text-sm font-semibold text-forest-900 transition-all hover:bg-white hover:shadow-xl active:scale-95"
               ><CmsText id="HomePage.15e66f68f7" fallback="Se lediga objekt" /><ArrowRight className="h-4 w-4" />
               </button>
               <button
                 onClick={() => navigate('/intresseanmalan')}
-                className="inline-flex items-center gap-2 rounded-full border border-sand-200/40 bg-transparent px-6 py-3 text-sm font-semibold text-sand-50 transition-all hover:bg-forest-800/50 active:scale-95"
+                className="inline-flex justify-center items-center gap-2 rounded-full border border-sand-200/40 bg-transparent px-6 py-3 text-sm font-semibold text-sand-50 transition-all hover:bg-forest-800/50 active:scale-95"
               ><CmsText id="HomePage.1bfd74a74b" fallback="Intresseanmälan" /></button>
             </div>
           </div>
         </div>
 
-        <div className="absolute bottom-0 left-0 right-0 border-t border-forest-800/30 bg-forest-950/40 backdrop-blur-sm">
+        <div className="relative border-t border-forest-800/30 bg-forest-950/40 backdrop-blur-sm">
           <div className="container-page grid grid-cols-2 divide-x divide-forest-800/30 lg:grid-cols-4">
             {[
               { label: 'Lägenheter & lokaler', value: 'I Virserum' },
@@ -64,7 +64,7 @@ export function HomePage() {
               { label: 'Hyresgästportal', value: 'app.vi-hem.se' },
               { label: 'Rökfritt', value: 'Alla lägenheter' },
             ].map((stat, i) => (
-              <div key={i} className="px-4 py-5 text-center sm:px-6">
+              <div key={i} className="min-w-0 break-words px-3 py-4 text-center sm:px-6 sm:py-5">
                 <p className="font-serif text-lg font-semibold text-sand-50">
                   <CmsValue fallback={stat.value} />
                 </p>

@@ -5,6 +5,8 @@
 @layer base {
   html {
     scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
   body {
     @apply bg-sand-50 text-forest-950 font-sans antialiased;
@@ -31,7 +33,7 @@
     @apply rounded-2xl bg-white shadow-sm ring-1 ring-sand-200 transition-all hover:shadow-lg;
   }
   .input-field {
-    @apply w-full rounded-xl border border-sand-300 bg-white px-4 py-3 text-sm text-forest-950 placeholder:text-forest-400 focus:border-forest-500 focus:outline-none focus:ring-2 focus:ring-forest-500/20 transition-all;
+    @apply w-full rounded-xl border border-sand-300 bg-white px-4 py-3 text-base text-forest-950 placeholder:text-forest-400 focus:border-forest-500 focus:outline-none focus:ring-2 focus:ring-forest-500/20 transition-all;
   }
   .section-eyebrow {
     @apply text-sm font-semibold uppercase tracking-widest text-accent-600;

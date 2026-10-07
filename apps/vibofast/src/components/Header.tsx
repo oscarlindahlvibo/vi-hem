@@ -38,7 +38,7 @@ export function Header() {
   };
 
   const isHome = route.path === '/';
-  const isTransparent = isHome && !scrolled;
+  const isTransparent = isHome && !scrolled && !open;
 
   return (
     <header
@@ -110,10 +110,12 @@ export function Header() {
 
           <button
             onClick={() => setOpen(!open)}
-            className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg transition-colors ${
               isTransparent ? 'text-sand-50' : 'text-forest-900'
             } lg:hidden`}
-            aria-label="Meny"
+            aria-label={open ? 'Stäng meny' : 'Öppna meny'}
+            aria-expanded={open}
+            aria-controls="mobile-navigation"
           >
             {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
           </button>
@@ -121,8 +123,8 @@ export function Header() {
       </div>
 
       {open && (
-        <div className="border-t border-sand-200 bg-sand-50 lg:hidden">
-          <nav className="container-page flex flex-col py-4">
+        <div className="max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-sand-200 bg-sand-50 lg:hidden">
+          <nav id="mobile-navigation" className="container-page flex flex-col py-4">
             {navLinks.map((link) => (
               <Link
                 key={link.to}
