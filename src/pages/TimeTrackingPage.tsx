@@ -1,3 +1,4 @@
+import { useTimeWorkOrders } from '../hooks/useTimeWorkOrders';
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { queueOfflineMutation } from '../lib/offlineQueue';
@@ -326,7 +327,6 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
   const [workBeforeBreak, setWorkBeforeBreak] = useState<TimeEntry | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [workOrders, setWorkOrders] = useState<WorkOrderSummary[]>([]);
   const [customerProjects, setCustomerProjects] = useState<CustomerProjectSummary[]>([]);
   const [dailySummaries, setDailySummaries] = useState<Record<string, DailyWorkSummary>>({});
   const [absenceRequests, setAbsenceRequests] = useState<StaffAbsenceRequest[]>([]);
@@ -355,6 +355,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
   const [selectedDayEntries, setSelectedDayEntries] = useState<TimeEntry[] | null>(null);
   const [selectedDay, setSelectedDay] = useState('');
 
+  const { workOrders, error: workOrderOptionsError } = useTimeWorkOrders(user.organisation_id, `${showStampModal}:${showManualModal}:${showEditModal}`);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const initialActionHandledRef = useRef(false);
 
@@ -444,11 +445,6 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
         acc[summary.work_date] = summary as DailyWorkSummary;
         return acc;
       }, {} as Record<string, DailyWorkSummary>));
-
-      const { data: wos } = await supabase
-        .from('vihem_work_orders').select('id, title, status, customer_project_id')
-        .in('status', ['new', 'assigned', 'started', 'paused']);
-      setWorkOrders(wos || []);
 
       const { data: projectsData } = await supabase
         .from('vihem_customer_projects')
@@ -886,6 +882,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
         }
       />
 
+      {workOrderOptionsError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{workOrderOptionsError}</p>}
       {/* Active clock */}
       {currentEntry ? (() => {
         const tone = clockTone(currentEntry.entry_type, elapsedSeconds);
@@ -2000,7 +1997,6 @@ function AdminTimeView({ user }: { user: Profile }) {
   const [staffEntries, setStaffEntries] = useState<TimeEntry[]>([]);
   const [staffModalOpen, setStaffModalOpen] = useState(false);
   const [adminTab, setAdminTab] = useState<'list' | 'calendar'>('list');
-  const [workOrders, setWorkOrders] = useState<WorkOrderSummary[]>([]);
   const [customerProjects, setCustomerProjects] = useState<CustomerProjectSummary[]>([]);
   const [absenceRequests, setAbsenceRequests] = useState<StaffAbsenceRequest[]>([]);
   const [adminEditingEntry, setAdminEditingEntry] = useState<TimeEntry | null>(null);
@@ -2018,6 +2014,7 @@ function AdminTimeView({ user }: { user: Profile }) {
   const [calYear, setCalYear] = useState(now.getFullYear());
   const [calMonth, setCalMonth] = useState(now.getMonth());
 
+  const { workOrders, error: workOrderOptionsError } = useTimeWorkOrders(user.organisation_id, String(adminEditModalOpen));
   useEffect(() => { fetchStaff(); fetchAdminOptions(); fetchAllPending(); }, []);
   useEffect(() => { if (staffMembers.length > 0) { fetchSummary(); fetchTodayEntries(); } }, [monthFilter, todayFilter, staffMembers]);
   useEffect(() => {
@@ -2043,11 +2040,7 @@ function AdminTimeView({ user }: { user: Profile }) {
   }
 
   async function fetchAdminOptions() {
-    const [{ data: wos }, { data: projectsData }] = await Promise.all([
-      supabase.from('vihem_work_orders').select('id, title, status, customer_project_id').in('status', ['new', 'assigned', 'started', 'paused']),
-      supabase.from('vihem_customer_projects').select('id, title, name, customer_name, status').not('status', 'in', '(archived,completed,cancelled)').order('updated_at', { ascending: false }),
-    ]);
-    setWorkOrders(wos || []);
+    const { data: projectsData } = await supabase.from('vihem_customer_projects').select('id, title, name, customer_name, status').not('status', 'in', '(archived,completed,cancelled)').order('updated_at', { ascending: false });
     setCustomerProjects(projectsData || []);
   }
 
@@ -2456,6 +2449,7 @@ function AdminTimeView({ user }: { user: Profile }) {
 
   return (
     <div className="space-y-6 min-h-screen bg-slate-50 -m-4 lg:-m-6 p-4 lg:p-6">
+      {workOrderOptionsError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{workOrderOptionsError}</p>}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="flex border-b border-slate-100">
           <button
