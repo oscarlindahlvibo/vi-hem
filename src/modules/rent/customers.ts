@@ -1,4 +1,5 @@
 import type { RentOverview, RentInvoice, RentTenancy } from './types';
+import { filterRentInvoices } from '../../../supabase/functions/_shared/rent-overview';
 import type { AccountedInvoiceLink } from '../finance-v2/types';
 export interface CustomerRow {
   key: string; name: string; email: string; phone: string; customerIds: string[];
@@ -26,13 +27,14 @@ export function buildRentCustomers(data: RentOverview, invoiceCustomerIds: Recor
   }
   for (const row of rows) {
     const tenancyIds = row.tenancies.map(t => t.id);
-    row.invoices = data.invoices.filter(i => (i.customer_id && row.customerIds.includes(i.customer_id)) || (i.tenancy_id && tenancyIds.includes(i.tenancy_id)));
+    row.invoices = filterRentInvoices(data.invoices).filter(i => (i.customer_id && row.customerIds.includes(i.customer_id)) || (i.tenancy_id && tenancyIds.includes(i.tenancy_id)));
     const accountedCustomerIds = data.customerLinks.filter(l => (l.source_type === 'finance_customer' && row.customerIds.includes(l.source_id)) || (l.source_type === 'tenant' && row.tenantIds.includes(l.source_id))).map(l => l.accounted_customer_id);
     const matching = data.accountedInvoices.filter(i => {
+      if (i.source_type !== 'rental_billing') return false;
       if (invoiceCustomerIds[i.id] && accountedCustomerIds.includes(invoiceCustomerIds[i.id])) return true;
       return data.items.some(item => (item.id === i.source_id || item.accounted_invoice_link_id === i.id) && (tenancyIds.includes(item.tenancy_id) || (item.finance_customer_id && row.customerIds.includes(item.finance_customer_id))));
     });
     row.accountedInvoices = [...new Map(matching.map(i => [i.accounted_invoice_id, i])).values()];
   }
-  return rows.sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+  return rows.filter(r => r.tenancies.length > 0 || r.invoices.length > 0 || r.accountedInvoices.length > 0).sort((a, b) => a.name.localeCompare(b.name, 'sv'));
 }

@@ -72,3 +72,29 @@ export function previewRent(params: { companyId: string; period: string; tenanci
     return { tenancy_id: t.id, tenant_id: t.tenant_id, name: t.tenant?.name || 'Hyresgäst', apartment: t.apartment?.apartment_number || '', property: t.property?.name || '', start_date: t.start_date, end_date: t.end_date, company_missing: companyMissing, item_id: item?.id || null, run_id: item?.run_id || null, state, base, deductions: money(lines.filter(l => l.amount < 0).reduce((sum, l) => sum + l.amount, 0)), additions: money(lines.filter(l => l.amount > 0).reduce((sum, l) => sum + l.amount, 0)), vat: money(baseVat + extraVat), total, lines, warnings };
   }).sort((a, b) => a.name.localeCompare(b.name, 'sv'));
 }
+
+export interface RentInvoiceSource {
+  id: string; source_type: string; source_id?: string | null;
+  tenancy_id?: string | null; original_invoice_id?: string | null;
+}
+// A shared customer table does not make every document a rent invoice.
+// Installment documents describe repayment of an existing debt; hostel
+// documents belong to short-stay. Keep actual original rent invoices even
+// when they have subsequently been attached to a repayment plan.
+export function filterRentInvoices<T extends RentInvoiceSource>(invoices: T[]): T[] {
+  const excluded = new Set(['installment_plan', 'short_stay']);
+  const ids = new Set(invoices.filter(i => !excluded.has(i.source_type) && i.source_type !== 'credit_invoice' && (
+    ['rent_billing', 'rental_billing'].includes(i.source_type) || Boolean(i.tenancy_id)
+  )).map(i => i.id));
+  // Credits inherit the original document's source, never the customer's
+  // identity. This also supports credit chains without classifying a hostel
+  // credit as rent just because its customer later becomes a tenant.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const i of invoices) {
+      if (i.source_type === 'credit_invoice' && ids.has(i.original_invoice_id || i.source_id || '') && !ids.has(i.id)) { ids.add(i.id); changed = true; }
+    }
+  }
+  return invoices.filter(i => ids.has(i.id));
+}
