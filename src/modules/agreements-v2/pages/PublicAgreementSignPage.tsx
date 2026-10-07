@@ -25,6 +25,8 @@ export function PublicAgreementSignPage() {
   const [signatureName, setSignatureName] = useState('');
   const [saving, setSaving] = useState(false);
   const [packageSelection, setPackageSelection] = useState<Record<string, boolean>>({});
+  const [consentSelection, setConsentSelection] = useState<Record<string, boolean>>({});
+  const allConsentsAccepted = (view?.version.blocks ?? []).filter(block => block.block_type === 'checkbox_consent').every(block => consentSelection[block.id]);
   const bankId = useBankIdFlow('sign', token);
   const bankIdBusy = bankId.status === 'starting' || bankId.status === 'redirecting' || bankId.status === 'pending';
 
@@ -76,7 +78,14 @@ export function PublicAgreementSignPage() {
     });
   }, [token]);
 
+  const checkConsent = () => {
+    if (allConsentsAccepted) return true;
+    setError('Kryssa i att du har läst och godkänner avtalsvillkoren innan du signerar.');
+    return false;
+  };
+
   const handleSign = async () => {
+    if (!checkConsent()) return;
     if (!signatureImage) { setError('Skriv din namnteckning innan du signerar.'); return; }
     if (!signatureName.trim()) { setError('Ange ditt namn.'); return; }
     setSaving(true);
@@ -170,6 +179,8 @@ export function PublicAgreementSignPage() {
                     resolveAttachmentUrl={resolveAttachmentUrl}
                     packageSelection={packageSelection}
                     onTogglePackage={handleTogglePackage}
+                    consentSelection={consentSelection}
+                    onToggleConsent={saving || bankIdBusy ? undefined : (id, accepted) => setConsentSelection(previous => ({ ...previous, [id]: accepted }))}
                   />
                 </div>
 
@@ -187,13 +198,15 @@ export function PublicAgreementSignPage() {
                   </div>
                 )}
 
+                {!allConsentsAccepted && <p className="mb-4 text-sm text-slate-600">Kryssa i godkännandet i avtalet innan du går vidare till signering.</p>}
+
                 {mode === 'read' && (
                   <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white p-4 shadow-lg">
                     <div className="mx-auto flex max-w-2xl gap-3">
                       <button onClick={handleDecline} disabled={saving} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50">
                         Avböj
                       </button>
-                      <button onClick={() => setMode('sign')} className="flex-[2] rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700">
+                      <button onClick={() => { if (checkConsent()) setMode('sign'); }} disabled={!allConsentsAccepted} className="flex-[2] rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
                         {view.signer.signing_method === 'bankid' ? 'Granska & signera med BankID' : 'Granska & signera'}
                       </button>
                     </div>
@@ -222,7 +235,8 @@ export function PublicAgreementSignPage() {
                       </div>
                     ) : (
                       <button
-                        onClick={() => bankId.start(() => initiateBankIDAgreementSign(token))}
+                        onClick={() => { if (checkConsent()) void bankId.start(() => initiateBankIDAgreementSign(token)); }}
+                        disabled={!allConsentsAccepted}
                         className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#193E4F] py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#122e3c]"
                       >
                         <ShieldCheck className="h-4 w-4" /> Starta BankID
@@ -253,7 +267,7 @@ export function PublicAgreementSignPage() {
                       <button onClick={() => setMode('read')} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50">
                         Tillbaka
                       </button>
-                      <button onClick={handleSign} disabled={saving} className="flex-[2] rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
+                      <button onClick={handleSign} disabled={saving || !allConsentsAccepted} className="flex-[2] rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
                         {saving ? 'Signerar...' : 'Signera dokumentet'}
                       </button>
                     </div>

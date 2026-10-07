@@ -22,6 +22,8 @@ export function BlockRenderer({
   resolveAttachmentUrl,
   packageSelection,
   onTogglePackage,
+  consentSelection,
+  onToggleConsent,
 }: {
   blocks: AgreementBlock[];
   parties?: Pick<AgreementParty, 'display_name' | 'party_type'>[];
@@ -40,6 +42,8 @@ export function BlockRenderer({
    * where nothing needs to survive a re-render. */
   packageSelection?: Record<string, boolean>;
   onTogglePackage?: (blockId: string, selected: boolean) => void;
+  consentSelection?: Record<string, boolean>;
+  onToggleConsent?: (blockId: string, accepted: boolean) => void;
 }) {
   const [internalSelection, setInternalSelection] = useState<Record<string, boolean>>({});
 
@@ -71,6 +75,8 @@ export function BlockRenderer({
           resolveAttachmentUrl={resolveAttachmentUrl}
           packageSelected={block.block_type === 'package_option' ? isSelected(block) : false}
           onTogglePackage={() => toggle(block)}
+          consentAccepted={Boolean(consentSelection?.[block.id])}
+          onToggleConsent={onToggleConsent ? (accepted) => onToggleConsent(block.id, accepted) : undefined}
         />
       ))}
       {totals.hasPricing && <DocumentTotalsFooter totals={totals} />}
@@ -106,6 +112,8 @@ function BlockView({
   resolveAttachmentUrl,
   packageSelected,
   onTogglePackage,
+  consentAccepted,
+  onToggleConsent,
 }: {
   block: AgreementBlock;
   parties: Pick<AgreementParty, 'display_name' | 'party_type'>[];
@@ -114,6 +122,8 @@ function BlockView({
   resolveAttachmentUrl?: (attachmentId: string) => Promise<string>;
   packageSelected: boolean;
   onTogglePackage: () => void;
+  consentAccepted: boolean;
+  onToggleConsent?: (accepted: boolean) => void;
 }) {
   const c = block.content || {};
   switch (block.block_type) {
@@ -273,7 +283,7 @@ function BlockView({
     case 'checkbox_consent':
       return (
         <label className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2">
-          <input type="checkbox" disabled className="mt-1 h-4 w-4" />
+          <input type="checkbox" checked={consentAccepted} disabled={!onToggleConsent} onChange={(event) => onToggleConsent?.(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 cursor-pointer disabled:cursor-default" />
           <span>{c.text || ''}</span>
         </label>
       );
