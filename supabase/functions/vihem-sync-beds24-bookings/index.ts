@@ -177,10 +177,32 @@ async function syncOrganisation(serviceClient: any, organisationId: string, opti
         .map((booking: any) => normalizeBooking(booking, unit, organisationId))
         .filter(Boolean);
 
-      if (rows.length > 0) {
+      // Bookings made in VI-HEM and pushed to Beds24 (channel 'VI-HEM', see
+      // vihem-beds24-push-booking) are authoritative locally -- a full upsert
+      // would reset their payment/price/cleaning data to what Beds24 knows.
+      // Only follow date/time changes made on the Beds24 side.
+      const localRows = rows.filter((row: any) => row.channel_name === "VI-HEM");
+      const importRows = rows.filter((row: any) => row.channel_name !== "VI-HEM");
+      for (const row of localRows as any[]) {
+        const { error: localError } = await serviceClient
+          .from("vihem_short_stay_bookings")
+          .update({
+            start_date: row.start_date,
+            end_date: row.end_date,
+            arrival_time: row.arrival_time,
+            departure_time: row.departure_time,
+            beds24_status: row.beds24_status,
+            updated_at: row.updated_at,
+          })
+          .eq("unit_id", unit.id)
+          .eq("external_uid", row.external_uid);
+        if (localError) throw localError;
+      }
+
+      if (importRows.length > 0) {
         const { error: upsertError } = await serviceClient
           .from("vihem_short_stay_bookings")
-          .upsert(rows, { onConflict: "unit_id,external_uid" });
+          .upsert(importRows, { onConflict: "unit_id,external_uid" });
         if (upsertError) throw upsertError;
       }
 

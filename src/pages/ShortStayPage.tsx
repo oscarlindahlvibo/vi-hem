@@ -1101,14 +1101,20 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     };
 
     const result = editingBooking
-      ? await supabase.from('vihem_short_stay_bookings').update(payload).eq('id', editingBooking.id)
-      : await supabase.from('vihem_short_stay_bookings').insert(payload);
+      ? await supabase.from('vihem_short_stay_bookings').update(payload).eq('id', editingBooking.id).select('id').single()
+      : await supabase.from('vihem_short_stay_bookings').insert(payload).select('id').single();
 
-    setSaving(false);
     if (result.error) {
+      setSaving(false);
       setFormError(result.error.message);
       return;
     }
+
+    // Keep Beds24 in sync so the dates are blocked on every channel. The
+    // booking is saved locally either way; a failed push is only warned about.
+    const pushError = await pushBookingToBeds24(result.data.id, 'upsert');
+    setSaving(false);
+    if (pushError) setError(pushError);
 
     setBookingModalOpen(false);
     if (organisationId) {
@@ -1406,9 +1412,34 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     await fetchData();
   }
 
+  async function pushBookingToBeds24(bookingId: string, action: 'upsert' | 'cancel'): Promise<string> {
+    const { data, error: pushError } = await supabase.functions.invoke('vihem-beds24-push-booking', {
+      body: { booking_id: bookingId, action },
+    });
+    if (pushError) {
+      let message = pushError.message;
+      const context = (pushError as { context?: Response }).context;
+      if (context) {
+        try {
+          const parsed = await context.clone().json();
+          message = parsed?.error?.message || parsed?.error || message;
+        } catch { /* keep generic message */ }
+      }
+      return `Bokningen sparades, men kunde inte skickas till Beds24: ${message}`;
+    }
+    void data;
+    return '';
+  }
+
   async function deleteBooking() {
     if (!editingBooking) return;
     setSaving(true);
+    const cancelError = await pushBookingToBeds24(editingBooking.id, 'cancel');
+    if (cancelError) {
+      setSaving(false);
+      setFormError(cancelError.replace('Bokningen sparades, men kunde', 'Bokningen kunde'));
+      return;
+    }
     const { error: deleteError } = await supabase
       .from('vihem_short_stay_bookings')
       .delete()
