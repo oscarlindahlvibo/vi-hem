@@ -1,6 +1,7 @@
 /** Mount inside Vi-hem using its authenticated Supabase client. Requires a Vibo editor membership. */
 import { useEffect, useState, type ReactNode } from 'react';
 import { DriveImagesAdmin } from './DriveImagesAdmin';
+import { websiteErrorMessage } from './errors';
 import type { SupabaseClient } from '@supabase/supabase-js';
 interface Advert { source_id: string; payload: Record<string, unknown>; published: boolean; revision: number; lifecycle: string; ready_from: string | null; available_from: string | null; rent: number; area: number; rooms: number; }
 interface Snapshot { content: { content: Record<string, unknown>; revision: number }; adverts: Advert[]; enquiries: unknown[]; }
@@ -26,19 +27,30 @@ export function WebsiteAdmin({ client }: { client: SupabaseClient }) {
     setPublished(advert?.published ?? false);
     setReadyFrom(advert?.ready_from ?? '');
   }
-  useEffect(() => { void load().then(data => choose('content', data)).catch(e => setMessage(e.message)); }, [client]);
+  useEffect(() => { void load().then(data => choose('content', data)).catch(e => setMessage(websiteErrorMessage(e, 'Kunde inte läsa hemsidans inställningar.'))); }, [client]);
   async function save() {
     if (!snapshot || busy) return;
     setBusy(true);setMessage('');
     try {
       const value = JSON.parse(draft);
       const advert = snapshot.adverts.find(a => a.source_id === selected);
+      if (selected !== 'content' && !advert) throw new Error('Lägenheten kunde inte hittas. Välj lägenheten igen.');
+      if (selected !== 'content' && published) {
+        const required = { title: 'Rubrik', slug: 'Annonsens adress (slug)', description: 'Annonsbeskrivning' };
+        const missing = Object.entries(required).filter(([key]) => typeof value[key] !== 'string' || !value[key].trim()).map(([, label]) => label);
+        if (missing.length) throw new Error('Fyll i ' + missing.join(', ') + ' för publicering. Avmarkera publicering om du vill spara ett utkast.');
+      }
       const result = selected === 'content'
         ? await client.rpc('vihem_vibofast_save_content', { p_content: value, p_revision: snapshot.content.revision })
         : await client.rpc('vihem_vibofast_save_advert', { p_source_id: selected, p_payload: value, p_published: published, p_revision: advert!.revision, p_ready_from: readyFrom || null });
       if (result.error) throw result.error;
-      choose(selected, await load()); setMessage('Sparat. Hemsidan hämtar ändringarna inom en minut.');
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Kunde inte spara.'); }
+      try {
+        choose(selected, await load());
+        setMessage(selected === 'content' || published ? 'Sparat. Hemsidan hämtar ändringarna inom en minut.' : 'Utkast sparat. Annonsen publiceras när publicering aktiveras och den är komplett.');
+      } catch (error) {
+        setMessage('Uppgifterna sparades, men vyn kunde inte uppdateras. Ladda om innan du gör fler ändringar. ' + websiteErrorMessage(error, ''));
+      }
+    } catch (e) { setMessage(websiteErrorMessage(e, 'Kunde inte spara. Försök igen.')); }
     finally { setBusy(false); }
   }
   async function upload(file: File) {
@@ -54,7 +66,7 @@ export function WebsiteAdmin({ client }: { client: SupabaseClient }) {
       if (selected === 'content') { value.text ??= {}; value.text['image.' + path] = url; }
       else { value.images = [...(value.images ?? []), url]; }
       setDraft(JSON.stringify(value, null, 2)); setMessage('Bilden är uppladdad. Spara för att använda den i annonsen. För sidbilder: lägg URL:en på rätt bildnyckel i text.');
-    } catch(e) { setMessage(e instanceof Error ? e.message : 'Uppladdning misslyckades.'); }
+    } catch(e) { setMessage(websiteErrorMessage(e, 'Uppladdning misslyckades.')); }
     finally { setBusy(false); }
   }
   return <section style={{ maxWidth: 1000, margin: 'auto', padding: 24 }}>
@@ -66,6 +78,7 @@ export function WebsiteAdmin({ client }: { client: SupabaseClient }) {
       {snapshot?.adverts.map(a => <option key={a.source_id} value={a.source_id}>{String(a.payload.title ?? a.source_id)} ({a.lifecycle})</option>)}
     </select></label>
     {selected !== 'content' && <label><input type="checkbox" checked={published} onChange={e => setPublished(e.target.checked)} /> Publicera när lägenheten är ledig eller uppsagd</label>}
+    {selected !== 'content' && <p>Du kan spara uppgifterna som utkast utan att publicera. För publicering behövs rubrik, annonsadress, annonsbeskrivning och minst en lägenhetsbild eller gemensam fastighetsbild.</p>}
     {selected === 'content' ? <>
       <div style={{display:'flex',gap:8,margin:'20px 0'}}>{Object.entries({company:'Företag & kontakt',faq:'Kunskapsbank',text:'Sidtexter',images:'Sidbilder'}).map(([key,label])=><button key={key} onClick={()=>setActiveContentTab(key)} disabled={activeContentTab===key}>{label}</button>)}</div>
       <ContentFields draft={draft} setDraft={setDraft} tab={activeContentTab} />
