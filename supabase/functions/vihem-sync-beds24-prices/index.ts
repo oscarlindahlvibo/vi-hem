@@ -251,7 +251,11 @@ async function ensureLevelRules(token: string, propertyId: number, roomId: numbe
       const code = codes.find((c) => c.level === lv.level && c.channel === channel);
       if (code) channels[channel] = { enable: true, rateCode: code.rate_code };
     }
-    return { id: lv.level, name: lv.name, offer: lv.level, minimumStay: lv.minNights, maximumStay: 365, priceFor, channels };
+    // Daily Price IDs and Offers are separate in Beds24. Offers 2-4 may be
+    // disabled, which excludes these rules from channel exports even with a
+    // mapped rate code. Use the active standard offer; the explicit rate code
+    // and minimum stay distinguish each channel's length-of-stay plan.
+    return { id: lv.level, name: lv.name, offer: 1, minimumStay: lv.minNights, maximumStay: 365, priceFor, channels };
   });
 
   const response = await fetch(`${BEDS24_BASE_URL}/properties`, {
