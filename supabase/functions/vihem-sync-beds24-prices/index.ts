@@ -38,6 +38,12 @@ Deno.serve(async (req: Request) => {
     const organisationId = profile.organisation_id;
     if (!organisationId) return json({ error: "Användaren saknar organisation." }, 400);
 
+    // Length-of-stay discounts become Beds24 "fixed prices", which only the
+    // Beds24 booking page honours -- Booking.com/Expedia/Airbnb get theirs from
+    // their own rate plans/campaigns. Opt-in only until that is verified.
+    const body = await req.json().catch(() => ({}));
+    const includeDiscounts = body?.include_discounts === true;
+
     const { data: connection } = await serviceClient.from("vihem_beds24_connections").select("*").eq("organisation_id", organisationId).maybeSingle();
     if (!connection?.enabled || !connection?.refresh_token) return json({ error: "Beds24 är inte anslutet eller aktiverat." }, 400);
 
@@ -82,7 +88,7 @@ Deno.serve(async (req: Request) => {
         if (!response.ok) throw new Error(readBeds24Error(safeJson(text), response.status, "Beds24 avvisade prisuppdateringen."));
         const daysSynced = ranges.reduce((sum, r) => sum + (dayDiff(r.from, r.to) + 1), 0);
 
-        const unitDiscounts = ((discounts || []) as LosDiscount[]).filter(d => d.unit_id === unit.id);
+        const unitDiscounts = includeDiscounts ? ((discounts || []) as LosDiscount[]).filter(d => d.unit_id === unit.id) : [];
         let discountRulesSynced = 0;
         const discountErrors: string[] = [];
         for (const discount of unitDiscounts) {
