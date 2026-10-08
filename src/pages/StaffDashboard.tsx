@@ -349,7 +349,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
   ];
 
   return (
-    <div className="min-w-0 max-w-full space-y-3 overflow-hidden sm:space-y-6">
+    <div className="grid min-w-0 max-w-full grid-cols-1 items-start gap-3 overflow-hidden sm:gap-6 lg:grid-cols-2 [&>*]:min-w-0">
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-slate-50/80 px-4 py-4 sm:px-6">
           <div className="flex items-center justify-between gap-4">
@@ -437,7 +437,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
                 </p>
                 <p className="mt-1 text-xs font-medium opacity-80">Startad {formatDateTime(activeTimeEntry.start_time)}</p>
               </div>
-              <div className={`grid grid-cols-1 gap-2 ${isBreakLike(activeTimeEntry.entry_type) ? 'sm:grid-cols-3' : 'sm:grid-cols-4'}`}>
+              <div className={`grid grid-cols-1 gap-2 ${isBreakLike(activeTimeEntry.entry_type) ? 'sm:grid-cols-3 lg:grid-cols-2' : 'sm:grid-cols-4 lg:grid-cols-2'}`}>
                 <button
                   onClick={() => onNavigate('timetracking/clockout')}
                   className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100"
@@ -585,7 +585,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
                   {todayCheckIns.length} incheckning{todayCheckIns.length === 1 ? '' : 'ar'} · {todayCheckOuts.length} utcheckning{todayCheckOuts.length === 1 ? '' : 'ar'}
                 </span>
                 {shortStayEvents.length > 0 && (
-                  <span className="mt-3 grid max-h-40 gap-1.5 overflow-y-auto rounded-2xl bg-slate-50 p-2 pr-1 sm:max-h-48 sm:grid-cols-2 lg:grid-cols-3">
+                  <span className="mt-3 grid max-h-40 gap-1.5 overflow-y-auto rounded-2xl bg-slate-50 p-2 pr-1 sm:max-h-48 sm:grid-cols-2">
                     {shortStayEvents.map(({ booking, type }) => (
                       <span
                         key={`${booking.id}-${type}`}
@@ -691,7 +691,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
         </div>
       </section>
 
-      <div className="hidden grid-cols-1 gap-4 sm:grid sm:grid-cols-2 lg:grid-cols-4">
+      <div className="hidden grid-cols-1 gap-4 sm:grid sm:grid-cols-2 lg:col-span-2 lg:grid-cols-4">
         <StatCard label="Nya felanmälningar" value={newMRCount} icon={<AlertCircle className="w-6 h-6" />} color="text-red-600 bg-red-50" onClick={() => onNavigate('maintenance')} />
         <StatCard label="Akuta ärenden" value={urgentMRCount} icon={<Wrench className="w-6 h-6" />} color="text-orange-600 bg-orange-50" />
         <StatCard label="Mina arbetsordrar" value={myWorkOrdersCount} icon={<ClipboardList className="w-6 h-6" />} color="text-blue-600 bg-blue-50" onClick={() => onNavigate('workorders')} />
@@ -699,7 +699,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
       </div>
 
       {user?.role === 'admin' && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:col-span-2 lg:grid-cols-2">
           <Card className="overflow-hidden border-emerald-200 bg-emerald-50">
             <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <div className="flex min-w-0 items-start gap-3">
@@ -819,7 +819,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <h3 className="font-medium text-slate-800 truncate">{wo.title}</h3>
-                    <div className="flex items-center gap-2 mt-2">
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
                       <Badge className={getWOPriorityColor(wo.priority)}>
                         {WO_PRIORITY_LABELS[wo.priority]}
                       </Badge>
@@ -865,7 +865,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <h3 className="font-medium text-slate-800 truncate">{wo.title}</h3>
-                    <div className="flex items-center gap-2 mt-2">
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
                       <Badge className={getWOPriorityColor(wo.priority)}>
                         {WO_PRIORITY_LABELS[wo.priority]}
                       </Badge>
@@ -892,7 +892,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
       </Card>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:col-span-2">
         <button
           onClick={() => onNavigate('workorders')}
           className="p-4 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-colors text-left"
