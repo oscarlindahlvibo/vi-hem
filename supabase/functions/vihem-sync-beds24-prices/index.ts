@@ -252,6 +252,13 @@ async function ensureLevelRules(token: string, propertyId: number, roomId: numbe
   const rules = LEVELS.map((lv) => {
     const channels: Record<string, { enable: boolean; rateCode?: string }> = {};
     for (const key of channelKeys) channels[key] = { enable: false };
+    // Airbnb LOS pricing uses the daily rules directly, without rate codes.
+    // Preserve an explicit Beds24 opt-in (the listing must use Per Occupancy
+    // Pricing) instead of disabling its seasonal discounts on every sync.
+    const existingRule = (room.priceRules ?? []).find((r: any) => r.id === lv.level);
+    if (base?.channels?.airbnb?.enable && existingRule?.channels?.airbnb?.enable) {
+      channels.airbnb = { enable: true };
+    }
     for (const channel of LEVEL_CHANNELS) {
       const code = codes.find((c) => c.level === lv.level && c.channel === channel);
       if (code) channels[channel] = { enable: true, rateCode: code.rate_code };
