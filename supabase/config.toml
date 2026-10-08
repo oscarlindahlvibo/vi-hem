@@ -460,3 +460,7 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # access internally (including the read-only invoice PDF proxy).
 [functions.vihem-rent-overview]
 verify_jwt = false
+
+# Daily re-check of saved vehicle info pages (pg_cron, shared secret header) + on-demand from the vehicle page.
+[functions.vihem-fleet-recheck-sources]
+verify_jwt = false

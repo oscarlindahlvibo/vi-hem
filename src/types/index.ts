@@ -2286,6 +2286,25 @@ export interface FleetServiceRecord {
   created_at: string;
 }
 
+export interface FleetVehicleSource {
+  id: string;
+  organisation_id: string;
+  vehicle_id: string;
+  url: string;
+  label: string;
+  auto_check: boolean;
+  extracted: Record<string, unknown>;
+  last_inspection_date: string | null;
+  next_inspection_date: string | null;
+  last_checked_at: string | null;
+  last_status: 'pending' | 'ok' | 'error';
+  last_error: string;
+  last_change_summary: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface FleetInspection {
   id: string;
   organisation_id: string;

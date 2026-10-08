@@ -7,12 +7,12 @@
 // tillagd), vihem_notifications (create_notification/notification_enabled,
 // samma mönster som Jour), och samma storage-uppladdningsmönster som
 // WorkOrdersPage/InventoryPage (bucket + valfri Google Drive-arkivering).
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   Activity, AlertTriangle, ArrowLeft, Banknote, Calendar, Camera, Car, Check, CheckSquare,
   ChevronRight, Circle, ClipboardList, FileText, Gauge, History,
-  Plus, QrCode, Radio, Search, Settings, Trash2, Upload, Wrench, X,
+  ExternalLink, Pencil, Plus, QrCode, Radio, RefreshCw, Search, Settings, Trash2, Upload, Wrench, X,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -22,7 +22,7 @@ import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader,
 import type {
   AttachmentItem, FleetAssetType, FleetChecklistRun, FleetChecklistRunItem, FleetChecklistTemplate, FleetChecklistTemplateItem,
   FleetCost, FleetCostType, FleetDamageReport, FleetDamageSeverity, FleetEvent, FleetInspection, FleetMeterReading,
-  FleetServiceRecord, FleetServiceSchedule, FleetTelematicsDevice, FleetTire, FleetVehicle, FleetVehicleStatus,
+  FleetServiceRecord, FleetServiceSchedule, FleetVehicleSource, FleetTelematicsDevice, FleetTire, FleetVehicle, FleetVehicleStatus,
   Profile, WorkOrder,
 } from '../types';
 
@@ -174,7 +174,9 @@ export function FleetPage({ onNavigate, initialVehicleId }: { onNavigate: (page:
     const vehicle = vehicles.find((v) => v.id === selectedVehicleId);
     if (!vehicle) { setView('list'); return null; }
     return (
+      <>
       <VehicleDetail
+        onEdit={() => { setEditingVehicle(vehicle); setVehicleModal(true); }}
         vehicle={vehicle}
         isAdmin={isAdmin}
         userId={user.id}
@@ -187,6 +189,20 @@ export function FleetPage({ onNavigate, initialVehicleId }: { onNavigate: (page:
         onChanged={load}
         onNavigate={onNavigate}
       />
+      {isAdmin && (
+        <VehicleFormModal
+          open={vehicleModal}
+          onClose={() => setVehicleModal(false)}
+          vehicle={editingVehicle}
+          organisationId={user.organisation_id}
+          userId={user.id}
+          companies={companies}
+          properties={properties}
+          profiles={profiles}
+          onSaved={() => { setVehicleModal(false); load(); }}
+        />
+      )}
+      </>
     );
   }
 
@@ -420,7 +436,10 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
   const [lookupNote, setLookupNote] = useState('');
   const [lookupLastInspection, setLookupLastInspection] = useState('');
   const [lookupNextInspection, setLookupNextInspection] = useState('');
+  const [lookupSourceUrl, setLookupSourceUrl] = useState('');
+  const [saveSource, setSaveSource] = useState(true);
 
+  const lookupExtracted = useRef<Record<string, unknown>>({});
   const str = (v: unknown) => (typeof v === 'string' && v ? v : '');
   const num = (v: unknown) => (typeof v === 'number' ? String(v) : '');
 
@@ -440,6 +459,8 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
       }
       if (data?.error) throw new Error(data.error);
       const found = (data?.data || {}) as Record<string, unknown>;
+      setLookupSourceUrl(typeof data?.source_url === 'string' ? data.source_url : '');
+      lookupExtracted.current = found;
       const foundSpecs = Array.isArray(found.technical_specs)
         ? (found.technical_specs as unknown[]).filter((s): s is { label: string; value: string } => !!s && typeof s === 'object' && typeof (s as any).label === 'string' && typeof (s as any).value === 'string')
         : [];
@@ -485,7 +506,7 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
 
   useEffect(() => {
     if (!open) return;
-    setLookupMode('url'); setLookupUrl(''); setLookupText(''); setLookupError(''); setLookupNote(''); setLookupLastInspection(''); setLookupNextInspection('');
+    setLookupMode('url'); setLookupUrl(''); setLookupText(''); setLookupError(''); setLookupNote(''); setLookupLastInspection(''); setLookupNextInspection(''); setLookupSourceUrl(''); setSaveSource(true);
     if (vehicle) {
       setForm({
         asset_type: vehicle.asset_type, registration_number: vehicle.registration_number, internal_number: vehicle.internal_number, name: vehicle.name,
@@ -556,6 +577,14 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
           await supabase.from('vihem_fleet_inspections').insert({ organisation_id: organisationId, vehicle_id: vehicleId, inspection_type: 'Kontrollbesiktning', ...inspectionPayload, created_by: userId });
         }
       }
+      if (vehicleId && lookupSourceUrl && saveSource) {
+        const iso = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+        await supabase.from('vihem_fleet_vehicle_sources').upsert({
+          organisation_id: organisationId, vehicle_id: vehicleId, url: lookupSourceUrl, extracted: lookupExtracted.current,
+          last_inspection_date: iso(lookupLastInspection), next_inspection_date: iso(lookupNextInspection),
+          last_checked_at: new Date().toISOString(), last_status: 'ok', created_by: userId,
+        }, { onConflict: 'vehicle_id,url' });
+      }
       onSaved();
     } catch (err) {
       setError(describeError(err));
@@ -591,6 +620,9 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
           </p>
           {lookupError && <p className="mt-1.5 text-xs text-red-600">{lookupError}</p>}
           {lookupNote && <p className="mt-1.5 text-xs text-emerald-700">{lookupNote}</p>}
+          {lookupSourceUrl && (
+            <label className="mt-1.5 flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={saveSource} onChange={(e) => setSaveSource(e.target.checked)} /> Spara länken och kontrollera den automatiskt (besiktning m.m.)</label>
+          )}
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
           <Select label="Typ" value={form.asset_type} onChange={(e) => setForm({ ...form, asset_type: e.target.value as FleetAssetType })} options={ASSET_TYPES.map((t) => ({ value: t, label: ASSET_TYPE_LABELS[t] }))} />
@@ -695,8 +727,8 @@ type DetailTab = 'overview' | 'workorders' | 'damage' | 'checklists' | 'service'
 type ChecklistTemplateWithItems = FleetChecklistTemplate & { items: FleetChecklistTemplateItem[] };
 type ChecklistRunWithItems = FleetChecklistRun & { items: FleetChecklistRunItem[] };
 
-function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, properties, profiles, profilesById, onBack, onChanged, onNavigate }: {
-  vehicle: FleetVehicle; isAdmin: boolean; userId: string; organisationId: string; companies: { id: string; name: string }[]; properties: { id: string; name: string }[];
+function VehicleDetail({ onEdit, vehicle, isAdmin, userId, organisationId, companies, properties, profiles, profilesById, onBack, onChanged, onNavigate }: {
+  onEdit: () => void; vehicle: FleetVehicle; isAdmin: boolean; userId: string; organisationId: string; companies: { id: string; name: string }[]; properties: { id: string; name: string }[];
   profiles: Pick<Profile, 'id' | 'name'>[]; profilesById: Map<string, Pick<Profile, 'id' | 'name'>>; onBack: () => void; onChanged: () => void; onNavigate: (page: string) => void;
 }) {
   const [tab, setTab] = useState<DetailTab>('overview');
@@ -705,6 +737,7 @@ function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, pr
   const [serviceSchedules, setServiceSchedules] = useState<FleetServiceSchedule[]>([]);
   const [serviceRecords, setServiceRecords] = useState<FleetServiceRecord[]>([]);
   const [inspections, setInspections] = useState<FleetInspection[]>([]);
+  const [sources, setSources] = useState<FleetVehicleSource[]>([]);
   const [meterReadings, setMeterReadings] = useState<FleetMeterReading[]>([]);
   const [tires, setTires] = useState<FleetTire[]>([]);
   const [costs, setCosts] = useState<FleetCost[]>([]);
@@ -719,12 +752,13 @@ function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, pr
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [dmg, wo, sched, srec, insp, meters, tir, cst, dev, evt, tpl, runs] = await Promise.all([
+    const [dmg, wo, sched, srec, insp, srcs, meters, tir, cst, dev, evt, tpl, runs] = await Promise.all([
       supabase.from('vihem_fleet_damage_reports').select('*').eq('vehicle_id', vehicle.id).order('created_at', { ascending: false }),
       supabase.from('vihem_work_orders').select('*').eq('vehicle_id', vehicle.id).order('created_at', { ascending: false }),
       supabase.from('vihem_fleet_service_schedules').select('*').eq('vehicle_id', vehicle.id).eq('active', true).order('name'),
       supabase.from('vihem_fleet_service_records').select('*').eq('vehicle_id', vehicle.id).order('performed_at', { ascending: false }),
       supabase.from('vihem_fleet_inspections').select('*').eq('vehicle_id', vehicle.id).eq('active', true).order('next_inspection_date'),
+      supabase.from('vihem_fleet_vehicle_sources').select('*').eq('vehicle_id', vehicle.id).order('created_at'),
       supabase.from('vihem_fleet_meter_readings').select('*').eq('vehicle_id', vehicle.id).order('recorded_at', { ascending: false }).limit(100),
       supabase.from('vihem_fleet_tires').select('*').eq('vehicle_id', vehicle.id).order('created_at', { ascending: false }),
       isAdmin ? supabase.from('vihem_fleet_costs').select('*').eq('vehicle_id', vehicle.id).order('cost_date', { ascending: false }) : Promise.resolve({ data: [] }),
@@ -738,6 +772,7 @@ function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, pr
     setServiceSchedules((sched.data || []) as FleetServiceSchedule[]);
     setServiceRecords((srec.data || []) as FleetServiceRecord[]);
     setInspections((insp.data || []) as FleetInspection[]);
+    setSources((srcs.data || []) as FleetVehicleSource[]);
     setMeterReadings((meters.data || []) as FleetMeterReading[]);
     setTires((tir.data || []) as FleetTire[]);
     setCosts((cst.data || []) as FleetCost[]);
@@ -802,6 +837,7 @@ function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, pr
             <p className="text-sm text-slate-500">{ASSET_TYPE_LABELS[vehicle.asset_type]} · {vehicle.make} {vehicle.model} {vehicle.model_year || ''}</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            {isAdmin && <Button size="sm" variant="secondary" onClick={onEdit}><Pencil className="h-4 w-4" /> Redigera</Button>}
             <Button size="sm" variant="secondary" onClick={showQr}><QrCode className="h-4 w-4" /> QR-etikett</Button>
             <Button size="sm" onClick={() => setReportModal(true)}><Camera className="h-4 w-4" /> Rapportera skada/fel</Button>
           </div>
@@ -833,7 +869,7 @@ function VehicleDetail({ vehicle, isAdmin, userId, organisationId, companies, pr
       {tab === 'damage' && <DamageTab vehicle={vehicle} reports={damageReports} isAdmin={isAdmin} organisationId={organisationId} onChanged={reload} onNavigate={onNavigate} />}
       {tab === 'checklists' && <ChecklistsTab vehicle={vehicle} templates={checklistTemplates} runs={checklistRuns} isAdmin={isAdmin} organisationId={organisationId} userId={userId} onChanged={reload} />}
       {tab === 'service' && <ServiceTab vehicle={vehicle} schedules={serviceSchedules} records={serviceRecords} isAdmin={isAdmin} organisationId={organisationId} userId={userId} onChanged={reload} />}
-      {tab === 'inspections' && <InspectionsTab vehicle={vehicle} inspections={inspections} isAdmin={isAdmin} organisationId={organisationId} userId={userId} onChanged={reload} />}
+      {tab === 'inspections' && <InspectionsTab vehicle={vehicle} sources={sources} inspections={inspections} isAdmin={isAdmin} organisationId={organisationId} userId={userId} onChanged={reload} />}
       {tab === 'meters' && <MetersTab vehicle={vehicle} readings={meterReadings} profilesById={profilesById} organisationId={organisationId} onChanged={reload} />}
       {tab === 'tires' && <TiresTab vehicle={vehicle} tires={tires} organisationId={organisationId} userId={userId} onChanged={reload} />}
       {tab === 'documents' && <DocumentsTab vehicle={vehicle} organisationId={organisationId} userId={userId} onChanged={reload} />}
@@ -1568,8 +1604,8 @@ function ServiceRecordModal({ open, onClose, vehicle, schedule, organisationId, 
 type InspectionForm = { inspection_type: string; interval_months: string; next_inspection_date: string; notes: string };
 const EMPTY_INSPECTION_FORM: InspectionForm = { inspection_type: '', interval_months: '', next_inspection_date: '', notes: '' };
 
-function InspectionsTab({ vehicle, inspections, isAdmin, organisationId, userId, onChanged }: {
-  vehicle: FleetVehicle; inspections: FleetInspection[]; isAdmin: boolean; organisationId: string; userId: string; onChanged: () => void;
+function InspectionsTab({ vehicle, sources, inspections, isAdmin, organisationId, userId, onChanged }: {
+  vehicle: FleetVehicle; sources: FleetVehicleSource[]; inspections: FleetInspection[]; isAdmin: boolean; organisationId: string; userId: string; onChanged: () => void;
 }) {
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState<InspectionForm>(EMPTY_INSPECTION_FORM);
@@ -1596,6 +1632,7 @@ function InspectionsTab({ vehicle, inspections, isAdmin, organisationId, userId,
   };
 
   return (
+    <div className="space-y-5">
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-200 p-4">
         <h3 className="font-semibold text-slate-900">Besiktningar & återkommande kontroller</h3>
@@ -1635,6 +1672,97 @@ function InspectionsTab({ vehicle, inspections, isAdmin, organisationId, userId,
       </Modal>
 
       <InspectionResultModal open={resultModal !== null} onClose={() => setResultModal(null)} vehicle={vehicle} inspection={resultModal} organisationId={organisationId} userId={userId} onSaved={() => { setResultModal(null); onChanged(); }} />
+    </Card>
+    <VehicleSourcesCard vehicle={vehicle} sources={sources} isAdmin={isAdmin} organisationId={organisationId} userId={userId} onChanged={onChanged} />
+    </div>
+  );
+}
+
+function VehicleSourcesCard({ vehicle, sources, isAdmin, organisationId, userId, onChanged }: {
+  vehicle: FleetVehicle; sources: FleetVehicleSource[]; isAdmin: boolean; organisationId: string; userId: string; onChanged: () => void;
+}) {
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+
+  const recheck = async (body: { source_id?: string; vehicle_id?: string }) => {
+    const { data, error: err } = await supabase.functions.invoke('vihem-fleet-recheck-sources', { body });
+    if (err) throw err;
+    if (data?.error) throw new Error(data.error);
+  };
+
+  const add = async () => {
+    const value = url.trim();
+    if (!value) return;
+    setBusy('add'); setError('');
+    try {
+      const { data, error: err } = await supabase.from('vihem_fleet_vehicle_sources')
+        .upsert({ organisation_id: organisationId, vehicle_id: vehicle.id, url: value, created_by: userId }, { onConflict: 'vehicle_id,url' }).select('id').single();
+      if (err) throw err;
+      await recheck({ source_id: data.id });
+      setUrl('');
+      onChanged();
+    } catch (err) {
+      setError(describeError(err));
+      onChanged();
+    } finally { setBusy(''); }
+  };
+  const check = async (id?: string) => {
+    setBusy(id || 'all'); setError('');
+    try { await recheck(id ? { source_id: id } : { vehicle_id: vehicle.id }); onChanged(); }
+    catch (err) { setError(describeError(err)); } finally { setBusy(''); }
+  };
+  const toggleAuto = async (src: FleetVehicleSource) => {
+    await supabase.from('vihem_fleet_vehicle_sources').update({ auto_check: !src.auto_check }).eq('id', src.id);
+    onChanged();
+  };
+  const remove = async (src: FleetVehicleSource) => {
+    if (!window.confirm('Ta bort den sparade länken?')) return;
+    await supabase.from('vihem_fleet_vehicle_sources').delete().eq('id', src.id);
+    onChanged();
+  };
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 p-4">
+        <div>
+          <h3 className="font-semibold text-slate-900">Informationskällor (AI-kontroll)</h3>
+          <p className="text-xs text-slate-500">Sidor med uppgifter om fordonet. Kontrolleras automatiskt varje natt och uppdaterar besiktningsdatum.</p>
+        </div>
+        {isAdmin && sources.length > 0 && <Button size="sm" variant="secondary" loading={busy === 'all'} onClick={() => check()}><RefreshCw className="h-4 w-4" /> Kontrollera alla nu</Button>}
+      </div>
+      {sources.length ? (
+        <div className="divide-y divide-slate-100">
+          {sources.map((src) => (
+            <div key={src.id} className="space-y-1 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <a href={src.url} target="_blank" rel="noreferrer" className="inline-flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold text-blue-700 hover:underline"><ExternalLink className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{src.label || src.url}</span></a>
+                {isAdmin && (
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={src.auto_check} onChange={() => toggleAuto(src)} /> Automatisk</label>
+                    <Button size="sm" variant="secondary" loading={busy === src.id} onClick={() => check(src.id)}><RefreshCw className="h-4 w-4" /> Kontrollera</Button>
+                    <button onClick={() => remove(src)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-slate-500">
+                Senaste besiktning: {fmtDate(src.last_inspection_date)} · Nästa: {fmtDate(src.next_inspection_date)} · Kontrollerad: {src.last_checked_at ? new Date(src.last_checked_at).toLocaleString('sv-SE') : 'aldrig'}
+              </p>
+              {src.last_change_summary && <p className="text-xs text-emerald-700">Senaste ändring: {src.last_change_summary}</p>}
+              {src.last_status === 'error' && <p className="text-xs text-red-600">Kunde inte kontrollera: {src.last_error}</p>}
+            </div>
+          ))}
+        </div>
+      ) : <p className="p-4 text-sm text-slate-500">Inga sparade länkar. {isAdmin ? 'Lägg till en länk, t.ex. till fordonets sida på biluppgifter.se.' : ''}</p>}
+      {isAdmin && (
+        <div className="border-t border-slate-100 p-4">
+          <div className="flex flex-wrap gap-2">
+            <div className="min-w-[16rem] flex-1"><Input label="Lägg till länk" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." /></div>
+            <div className="self-end"><Button onClick={add} loading={busy === 'add'}>Spara och kontrollera</Button></div>
+          </div>
+          {error && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        </div>
+      )}
     </Card>
   );
 }
