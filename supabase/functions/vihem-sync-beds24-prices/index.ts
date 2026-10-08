@@ -14,9 +14,25 @@ const BEDS24_BASE_URL = "https://api.beds24.com/v2";
 // handful of calendar entries per room.
 const SYNC_DAYS = 365;
 
+// Beds24 "Daily Price" levels. Level 1 is the normal nightly price. Levels 2-4
+// are the length-of-stay prices: a Beds24 price rule per level carries the
+// minimum stay, and (once a channel rate plan is mapped to it, see
+// vihem_short_stay_channel_rate_codes) Beds24 offers that price to the channel
+// as its own rate plan. VI-HEM owns the PRICE of every level per date (season
+// discount); a level with no discount on a date gets no price, which closes
+// that rate plan for the date on the channels.
+const LEVELS = [
+  { level: 2, minNights: 2, name: "Kort 2+ natter" },
+  { level: 3, minNights: 7, name: "Vecka 7+ natter" },
+  { level: 4, minNights: 28, name: "Manad 28+ natter" },
+] as const;
+const LEVEL_CHANNELS = ["booking", "expedia"] as const;
+
 type Season = { id: string; name: string; start_date: string; end_date: string; priority: number };
 type Rate = { unit_id: string; season_id: string | null; price_per_night: number };
-type LosDiscount = { id: string; unit_id: string; season_id: string | null; min_nights: number; discount_percent: number; beds24_fixed_price_id: string | null };
+type LosDiscount = { unit_id: string; season_id: string | null; min_nights: number; discount_percent: number };
+type RateCode = { unit_id: string; level: number; channel: string; rate_code: string };
+type PriceVector = { price1: number; price2: number | null; price3: number | null; price4: number | null };
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
@@ -38,12 +54,6 @@ Deno.serve(async (req: Request) => {
     const organisationId = profile.organisation_id;
     if (!organisationId) return json({ error: "Användaren saknar organisation." }, 400);
 
-    // Length-of-stay discounts become Beds24 "fixed prices", which only the
-    // Beds24 booking page honours -- Booking.com/Expedia/Airbnb get theirs from
-    // their own rate plans/campaigns. Opt-in only until that is verified.
-    const body = await req.json().catch(() => ({}));
-    const includeDiscounts = body?.include_discounts === true;
-
     const { data: connection } = await serviceClient.from("vihem_beds24_connections").select("*").eq("organisation_id", organisationId).maybeSingle();
     if (!connection?.enabled || !connection?.refresh_token) return json({ error: "Beds24 är inte anslutet eller aktiverat." }, 400);
 
@@ -55,16 +65,18 @@ Deno.serve(async (req: Request) => {
       .neq("beds24_room_id", "");
     if (!units || units.length === 0) return json({ error: "Ingen enhet är kopplad mot Beds24 än." }, 400);
 
-    const [{ data: seasons }, { data: rates }, { data: discounts }] = await Promise.all([
+    const [{ data: seasons }, { data: rates }, { data: discounts }, { data: rateCodes }] = await Promise.all([
       serviceClient.from("vihem_short_stay_seasons").select("id, name, start_date, end_date, priority").eq("organisation_id", organisationId),
       serviceClient.from("vihem_short_stay_rates").select("unit_id, season_id, price_per_night").eq("organisation_id", organisationId),
-      serviceClient.from("vihem_short_stay_los_discounts").select("id, unit_id, season_id, min_nights, discount_percent, beds24_fixed_price_id").eq("organisation_id", organisationId),
+      serviceClient.from("vihem_short_stay_los_discounts").select("unit_id, season_id, min_nights, discount_percent").eq("organisation_id", organisationId),
+      serviceClient.from("vihem_short_stay_channel_rate_codes").select("unit_id, level, channel, rate_code").eq("organisation_id", organisationId),
     ]);
 
     const token = await ensureAccessToken(serviceClient, connection);
     const today = new Date().toISOString().slice(0, 10);
+    const propertyRules = new Map<number, any[]>();
 
-    const results: { unit_id: string; unit_name: string; days_synced: number; discount_rules_synced?: number; error?: string }[] = [];
+    const results: { unit_id: string; unit_name: string; days_synced: number; rules_synced?: number; error?: string }[] = [];
     for (const unit of units) {
       const roomId = Number(unit.beds24_room_id);
       const propertyId = Number(unit.beds24_property_id);
@@ -72,64 +84,39 @@ Deno.serve(async (req: Request) => {
         results.push({ unit_id: unit.id, unit_name: unit.name, days_synced: 0, error: "Ogiltigt Beds24 room id." });
         continue;
       }
-      const ranges = buildPriceRanges(unit.id, today, SYNC_DAYS, (seasons || []) as Season[], (rates || []) as Rate[]);
+      const ranges = buildPriceRanges(unit.id, today, SYNC_DAYS, (seasons || []) as Season[], (rates || []) as Rate[], (discounts || []) as LosDiscount[]);
       if (ranges.length === 0) {
         results.push({ unit_id: unit.id, unit_name: unit.name, days_synced: 0, error: "Inget pris konfigurerat för perioden." });
         await serviceClient.from("vihem_short_stay_price_sync_log").insert({ organisation_id: organisationId, unit_id: unit.id, status: "failed", message: "Inget pris konfigurerat för perioden.", days_synced: 0 });
         continue;
       }
       try {
+        // 1. Make sure the length-of-stay price rules (levels 2-4) exist and
+        //    point at this unit's channel rate plans.
+        let rulesSynced = 0;
+        if (Number.isFinite(propertyId)) {
+          rulesSynced = await ensureLevelRules(token, propertyId, roomId, propertyRules, ((rateCodes || []) as RateCode[]).filter((c) => c.unit_id === unit.id));
+        }
+
+        // 2. Push the nightly price (level 1) and every level's price per date.
         const response = await fetch(`${BEDS24_BASE_URL}/inventory/rooms/calendar`, {
           method: "POST",
           headers: { accept: "application/json", "content-type": "application/json", token },
-          body: JSON.stringify([{ roomId, calendar: ranges.map(r => ({ from: r.from, to: r.to, price1: r.price1 })) }]),
+          body: JSON.stringify([{ roomId, calendar: ranges }]),
         });
         const text = await response.text();
         if (!response.ok) throw new Error(readBeds24Error(safeJson(text), response.status, "Beds24 avvisade prisuppdateringen."));
+        const parsed = safeJson(text);
+        const first = Array.isArray(parsed) ? parsed[0] : parsed;
+        if (first && first.success === false) throw new Error(readBeds24Error(first, 400, "Beds24 avvisade prisuppdateringen."));
         const daysSynced = ranges.reduce((sum, r) => sum + (dayDiff(r.from, r.to) + 1), 0);
 
-        const unitDiscounts = includeDiscounts ? ((discounts || []) as LosDiscount[]).filter(d => d.unit_id === unit.id) : [];
-        let discountRulesSynced = 0;
-        const discountErrors: string[] = [];
-        for (const discount of unitDiscounts) {
-          const season = discount.season_id ? (seasons || []).find((s: Season) => s.id === discount.season_id) : null;
-          if (discount.season_id && !season) continue;
-          const basePrice = getBaseNightlyPrice((rates || []) as Rate[], unit.id, season?.id ?? null);
-          if (basePrice === null) continue;
-          const discountedPrice = Math.round(basePrice * (1 - discount.discount_percent / 100));
-          // A season-scoped tier gets that season's exact date range. A
-          // "gäller alla säsonger" tier (season_id null) has no natural
-          // range of its own, so it rides the same rolling sync window as
-          // the base calendar price -- re-pushed with a fresh window every
-          // sync, same as the calendar prices are.
-          const firstNight = season?.start_date ?? today;
-          const lastNight = season?.end_date ?? addDays(today, SYNC_DAYS - 1);
-          try {
-            const beds24Id = await pushFixedPrice(token, {
-              id: discount.beds24_fixed_price_id ? Number(discount.beds24_fixed_price_id) : undefined,
-              propertyId: Number.isFinite(propertyId) ? propertyId : undefined,
-              roomId,
-              name: `${season?.name ?? 'Alla säsonger'} · ${discount.min_nights}+ nätter (${discount.discount_percent}%)`,
-              firstNight,
-              lastNight,
-              minNights: discount.min_nights,
-              roomPrice: discountedPrice,
-            });
-            if (beds24Id && beds24Id !== discount.beds24_fixed_price_id) {
-              await serviceClient.from("vihem_short_stay_los_discounts").update({ beds24_fixed_price_id: beds24Id }).eq("id", discount.id);
-            }
-            discountRulesSynced++;
-          } catch (discountError) {
-            discountErrors.push(discountError instanceof Error ? discountError.message : "Okänt fel för rabattregel.");
-          }
-        }
-
-        results.push({ unit_id: unit.id, unit_name: unit.name, days_synced: daysSynced, discount_rules_synced: discountRulesSynced, error: discountErrors.length ? discountErrors.join(" · ") : undefined });
+        results.push({ unit_id: unit.id, unit_name: unit.name, days_synced: daysSynced, rules_synced: rulesSynced });
         await serviceClient.from("vihem_short_stay_price_sync_log").insert({
           organisation_id: organisationId,
           unit_id: unit.id,
-          status: discountErrors.length ? "failed" : "ok",
-          message: `${ranges.length} prisintervall, ${daysSynced} dagar. ${discountRulesSynced} rabattregler synkade.${discountErrors.length ? ` Fel: ${discountErrors.join(" · ")}` : ""}`,
+          status: "ok",
+          message: `${ranges.length} prisintervall, ${daysSynced} dagar. ${rulesSynced} prisregler uppdaterade.`,
           days_synced: daysSynced,
         });
       } catch (unitError) {
@@ -139,7 +126,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const failed = results.filter(r => r.error);
+    const failed = results.filter((r) => r.error);
     return json({ ok: failed.length === 0, results, synced_units: results.length - failed.length, failed_units: failed.length });
   } catch (err) {
     console.error(err);
@@ -148,10 +135,8 @@ Deno.serve(async (req: Request) => {
 });
 
 // --- Price calculation: a duplicate of src/lib/shortStayPricing.ts's
-// findSeasonForDate/getBaseNightlyPrice/buildBeds24PriceRanges, kept in
-// sync manually rather than shared -- edge functions can't import from
-// src/, and this logic is small and stable enough that duplication is
-// less risk than a cross-boundary build dependency.
+// findSeasonForDate/getBaseNightlyPrice, kept in sync manually rather than
+// shared -- edge functions can't import from src/.
 
 function addDays(date: string, days: number) {
   const d = new Date(`${date}T00:00:00Z`);
@@ -164,7 +149,7 @@ function dayDiff(from: string, to: string) {
 }
 
 function findSeasonForDate(seasons: Season[], date: string): Season | null {
-  const matches = seasons.filter(s => date >= s.start_date && date <= s.end_date);
+  const matches = seasons.filter((s) => date >= s.start_date && date <= s.end_date);
   if (matches.length === 0) return null;
   return matches.sort((a, b) => {
     if (b.priority !== a.priority) return b.priority - a.priority;
@@ -174,53 +159,99 @@ function findSeasonForDate(seasons: Season[], date: string): Season | null {
 
 function getBaseNightlyPrice(rates: Rate[], unitId: string, seasonId: string | null): number | null {
   if (seasonId) {
-    const seasonRate = rates.find(r => r.unit_id === unitId && r.season_id === seasonId);
+    const seasonRate = rates.find((r) => r.unit_id === unitId && r.season_id === seasonId);
     if (seasonRate) return Number(seasonRate.price_per_night);
   }
-  const defaultRate = rates.find(r => r.unit_id === unitId && r.season_id === null);
+  const defaultRate = rates.find((r) => r.unit_id === unitId && r.season_id === null);
   return defaultRate ? Number(defaultRate.price_per_night) : null;
 }
 
-function buildPriceRanges(unitId: string, startDate: string, days: number, seasons: Season[], rates: Rate[]) {
-  const ranges: { from: string; to: string; price1: number }[] = [];
-  let current: { from: string; to: string; price1: number } | null = null;
+// A tier scoped to the date's season wins over a unit-wide (season null) one.
+function discountFor(discounts: LosDiscount[], unitId: string, seasonId: string | null, minNights: number): number | null {
+  const scoped = discounts.find((d) => d.unit_id === unitId && d.min_nights === minNights && seasonId !== null && d.season_id === seasonId);
+  if (scoped) return Number(scoped.discount_percent);
+  const wide = discounts.find((d) => d.unit_id === unitId && d.min_nights === minNights && d.season_id === null);
+  return wide ? Number(wide.discount_percent) : null;
+}
+
+function priceVectorForDate(unitId: string, date: string, seasons: Season[], rates: Rate[], discounts: LosDiscount[]): PriceVector | null {
+  const season = findSeasonForDate(seasons, date);
+  const base = getBaseNightlyPrice(rates, unitId, season?.id ?? null);
+  if (base === null) return null;
+  const levelPrice = (minNights: number) => {
+    const pct = discountFor(discounts, unitId, season?.id ?? null, minNights);
+    return pct === null ? null : Math.round(base * (1 - pct / 100));
+  };
+  return { price1: base, price2: levelPrice(2), price3: levelPrice(7), price4: levelPrice(28) };
+}
+
+function buildPriceRanges(unitId: string, startDate: string, days: number, seasons: Season[], rates: Rate[], discounts: LosDiscount[]) {
+  type Range = { from: string; to: string } & PriceVector;
+  const ranges: Range[] = [];
+  let current: Range | null = null;
+  const same = (a: PriceVector, b: PriceVector) => a.price1 === b.price1 && a.price2 === b.price2 && a.price3 === b.price3 && a.price4 === b.price4;
   for (let i = 0; i < days; i++) {
     const date = addDays(startDate, i);
-    const season = findSeasonForDate(seasons, date);
-    const price = getBaseNightlyPrice(rates, unitId, season?.id ?? null);
-    if (price === null) { current = null; continue; }
-    if (current && current.price1 === price && addDays(current.to, 1) === date) {
+    const vector = priceVectorForDate(unitId, date, seasons, rates, discounts);
+    if (vector === null) { current = null; continue; }
+    if (current && same(current, vector) && addDays(current.to, 1) === date) {
       current.to = date;
     } else {
-      current = { from: date, to: date, price1: price };
+      current = { from: date, to: date, ...vector };
       ranges.push(current);
     }
   }
   return ranges;
 }
 
-// Creates or updates one Beds24 "fixed price" rule (their mechanism for a
-// different nightly rate once a booking reaches a minimum number of
-// nights) and returns the rule's Beds24 id so the caller can store it for
-// future updates. The exact shape of a successful response's `new`/
-// `modified` object isn't byte-verified against live docs (only read
-// against /inventory/fixedPrices was verified before this was written),
-// so this tries the plausible id locations defensively and logs the raw
-// response the first time a rule is created, to confirm/correct against
-// on the first real sync.
-async function pushFixedPrice(token: string, rule: { id?: number; propertyId?: number; roomId: number; name: string; firstNight: string; lastNight: string; minNights: number; roomPrice: number }) {
-  const response = await fetch(`${BEDS24_BASE_URL}/inventory/fixedPrices`, {
-    method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json", token },
-    body: JSON.stringify([rule]),
+// --- Beds24 price rules (levels 2-4) -----------------------------------------
+
+async function loadPropertyRules(token: string, propertyId: number, cache: Map<number, any[]>) {
+  if (cache.has(propertyId)) return cache.get(propertyId)!;
+  const response = await fetch(`${BEDS24_BASE_URL}/properties?id=${propertyId}&includeAllRooms=true&includePriceRules=true`, {
+    headers: { accept: "application/json", token },
   });
   const text = await response.text();
-  if (!response.ok) throw new Error(readBeds24Error(safeJson(text), response.status, "Beds24 avvisade rabattregeln."));
-  const payload = safeJson(text);
-  const first = Array.isArray(payload) ? payload[0] : payload;
-  if (!rule.id) console.log("[beds24-prices] fixedPrices create response", text.slice(0, 500));
-  const foundId = first?.new?.id ?? first?.modified?.id ?? first?.id ?? rule.id;
-  return foundId ? String(foundId) : null;
+  if (!response.ok) throw new Error(readBeds24Error(safeJson(text), response.status, "Kunde inte läsa prisreglerna i Beds24."));
+  const data = safeJson(text);
+  const rooms = (data?.data ?? []).flatMap((p: any) => p.roomTypes ?? []);
+  cache.set(propertyId, rooms);
+  return rooms;
+}
+
+// Creates/updates the three length-of-stay rules for one room. A level's channel
+// is only switched on when a channel rate plan code exists for it, so nothing is
+// offered to a channel that has no matching rate plan there.
+async function ensureLevelRules(token: string, propertyId: number, roomId: number, cache: Map<number, any[]>, codes: RateCode[]) {
+  const rooms = await loadPropertyRules(token, propertyId, cache);
+  const room = rooms.find((r: any) => r.id === roomId);
+  if (!room) throw new Error(`Rum ${roomId} hittades inte i Beds24-fastighet ${propertyId}.`);
+  const base = (room.priceRules ?? []).find((r: any) => r.id === 1);
+  const channelKeys = Object.keys(base?.channels ?? {});
+  const priceFor = base?.priceFor?.type ? base.priceFor : { type: "maxCapacity" };
+
+  const rules = LEVELS.map((lv) => {
+    const channels: Record<string, { enable: boolean; rateCode?: string }> = {};
+    for (const key of channelKeys) channels[key] = { enable: false };
+    for (const channel of LEVEL_CHANNELS) {
+      const code = codes.find((c) => c.level === lv.level && c.channel === channel);
+      if (code) channels[channel] = { enable: true, rateCode: code.rate_code };
+    }
+    return { id: lv.level, name: lv.name, offer: lv.level, minimumStay: lv.minNights, maximumStay: 365, priceFor, channels };
+  });
+
+  const response = await fetch(`${BEDS24_BASE_URL}/properties`, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json", token },
+    body: JSON.stringify([{ id: propertyId, roomTypes: [{ id: roomId, priceRules: rules }] }]),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(readBeds24Error(safeJson(text), response.status, "Beds24 avvisade prisreglerna."));
+  const parsed = safeJson(text);
+  const first = Array.isArray(parsed) ? parsed[0] : parsed;
+  // "internal error" on bookingPage is a known Beds24 quirk for these fields (we never send them); only real failures count.
+  if (first && first.success === false && !first.modified) throw new Error(readBeds24Error(first, 400, "Beds24 avvisade prisreglerna."));
+  return rules.length;
 }
 
 // --- Beds24 auth (duplicate of vihem-beds24-connection/index.ts's token
