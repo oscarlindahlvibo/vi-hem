@@ -468,3 +468,6 @@ verify_jwt = false
 # Authenticated staff or the existing internal scheduler secret, checked in the function.
 [functions.vihem-sync-beds24-messages]
 verify_jwt = false
+
+[functions.vihem-send-beds24-message]
+verify_jwt = false

@@ -28,3 +28,11 @@ Detta aktiverar inte incheckningsutskick. Nästa steg behöver separat hantera u
 - Migreringen provkörd på den befintliga PostgreSQL 15-servern i en transaktion: upsert utan dubbletter, läsning genom tabell/vy för admin, nekade klientskrivningar och noll åtkomst för hyresgäst/okänd profil. Allt rullades tillbaka efter testet.
 
 API-referens: https://beds24.com/api/v2/apiV2.yaml och https://wiki.beds24.com/index.php/Category:API_V2.
+
+## Manuella svar (2026-10-08)
+
+`vihem-send-beds24-message` skickar text via Beds24 för Booking.com, Airbnb, Expedia och Agoda. Direktbokningar och iCal-bokningar är spärrade. API-behörigheten behöver skrivåtkomst till bookings-personal. Endast organisationens admin, superadmin och staff med aktiverad korttidsmodul får skicka. Rummet och fastigheten verifieras mot den verkliga bokningen i Beds24; klienten väljer aldrig organisation eller mottagaradress.
+
+Migration `20261008170000_beds24_manual_messages.sql` lagrar utskicksreferens, avsändare, text och status. Klienten har enbart läsrätt. UUID-referensen tas i anspråk före POST och återanvänds vid statuskontroll. En unik indexering av obekräftade texter skyddar även vid omladdning. Beds24 saknar dokumenterad idempotensnyckel: timeout, 5xx, trasigt svar och success:false behandlas därför som obekräftade och skickas aldrig automatiskt igen. Kontrollera dessa i Beds24; ändra inte pending-status utan att först utreda om meddelandet skickades. sent betyder accepterat av Beds24, inte bekräftad leverans hos kanalen. Läsflödet synkas efter accepterat utskick, annars vid nästa ordinarie synkning.
+
+Verifiering: `node scripts/beds24-send-message-check.mjs`, befintlig meddelandesynkningstest, typkontroll, produktionsbygge och SQL i återställd transaktion. Inga testmeddelanden skickas till riktiga gäster.

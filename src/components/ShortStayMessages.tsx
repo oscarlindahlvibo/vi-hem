@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Download, MessageSquare, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Button, Input } from './ui';
@@ -67,7 +67,7 @@ export function ShortStayMessages({ organisationId, bookingId, onOpenBooking }: 
   const current = threads.find(thread => thread.beds24_booking_id === selected);
   return <section className="space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h2 className="font-semibold text-slate-900 flex items-center gap-2"><MessageSquare className="h-5 w-5" /> Gästmeddelanden</h2><p className="text-sm text-slate-500">Hämtas från Beds24 var 15:e minut. Meddelanden skickas och besvaras i Beds24 tills vidare.</p></div>
+      <div><h2 className="font-semibold text-slate-900 flex items-center gap-2"><MessageSquare className="h-5 w-5" /> Gästmeddelanden</h2><p className="text-sm text-slate-500">Hämtas från Beds24 var 15:e minut. Svara direkt i konversationen för kanalbokningar.</p></div>
       <Button variant="secondary" onClick={() => void sync()} loading={syncing}><RefreshCw className="h-4 w-4" /> Hämta meddelanden</Button>
     </div>
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
@@ -89,19 +89,61 @@ export function ShortStayMessages({ organisationId, bookingId, onOpenBooking }: 
         {selected ? <>
           {!bookingId && <button onClick={() => setSelected(null)} className="mb-3 flex items-center gap-1 text-sm text-blue-600 md:hidden"><ArrowLeft className="h-4 w-4" /> Konversationer</button>}
           <div className="mb-4 flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-semibold">{current?.guest_name || `Bokning ${selected}`}</h3><p className="text-sm text-slate-500">{current?.unit_name} {current?.channel_name && `· ${current.channel_name}`}</p>{current?.start_date && <p className="text-xs text-slate-500">{current.start_date} – {current.end_date}</p>}</div>{current?.booking_id && onOpenBooking && <Button variant="secondary" onClick={() => onOpenBooking(current.booking_id!)}>Öppna bokning</Button>}</div>
-          <ShortStayMessageThread key={`${organisationId}:${selected}`} organisationId={organisationId} bookingId={selected} revision={revision} />
+          <ShortStayMessageThread key={`${organisationId}:${selected}`} organisationId={organisationId} bookingId={selected} revision={revision} onSent={() => setRevision(value => value + 1)} />
         </> : <p className="py-12 text-center text-sm text-slate-500">Välj en konversation för att läsa chattflödet.</p>}
       </div>
     </div>
   </section>;
 }
 
-function ShortStayMessageThread({ organisationId, bookingId, revision }: { organisationId: string; bookingId: string; revision: number }) {
+function ShortStayMessageThread({ organisationId, bookingId, revision, onSent }: { organisationId: string; bookingId: string; revision: number; onSent: () => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [limit, setLimit] = useState(100);
   const [hasMore, setHasMore] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState('');
+  const [sendNotice, setSendNotice] = useState('');
+  const [capability, setCapability] = useState<{ canSend: boolean; reason?: string } | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [uncertain, setUncertain] = useState(false);
+  const requestId = useRef<string | null>(null);
+  const inFlight = useRef(false);
+  useEffect(() => {
+    let live = true;
+    void supabase.functions.invoke('vihem-send-beds24-message', { body: { action: 'context', bookingId } }).then(({ data, error }) => {
+      if (live) setCapability(error ? { canSend: false, reason: 'Kunde inte kontrollera skickafunktionen. Hämta meddelanden eller öppna konversationen igen.' } : data);
+    });
+    return () => { live = false; };
+  }, [bookingId, organisationId, revision]);
+  async function send() {
+    if (inFlight.current || !draft.trim() || !capability?.canSend) return;
+    inFlight.current = true; setSending(true); setSendError(''); setSendNotice('');
+    requestId.current ||= crypto.randomUUID();
+    try {
+      const { data, error } = await supabase.functions.invoke('vihem-send-beds24-message', { body: { bookingId, requestId: requestId.current, message: draft.trim() } });
+      if (error) {
+        let detail = '';
+        if ('context' in error) { const body = await error.context.json().catch(() => ({})); detail = body.error?.message || ''; }
+        throw new Error(detail || 'Utskickets status kunde inte kontrolleras.');
+      }
+      if (data?.status === 'sent') {
+        setDraft(''); requestId.current = null; setUncertain(false);
+        setSendNotice('Beds24 har tagit emot meddelandet för utskick.'); onSent();
+      } else if (data?.status === 'failed') {
+        requestId.current = null; setUncertain(false);
+        setSendError('Beds24 avvisade utskicket. Kontrollera anslutningens skrivbehörighet eller försök senare.');
+      } else {
+        setUncertain(true);
+        setSendError('Utskicket är ännu inte bekräftat. Kontrollera i Beds24 innan du skickar igen. VI-HEM skickar inte samma utskick en gång till.');
+      }
+    } catch (err) {
+      setUncertain(true);
+      setSendError((err instanceof Error ? err.message : 'Kunde inte skicka.') + ' Kontrollera status med knappen nedan.');
+    } finally { inFlight.current = false; setSending(false); }
+  }
   const load = useCallback(async () => {
     const { data, error: loadError } = await supabase.from('vihem_short_stay_messages')
       .select('id, source, message, sent_at, attachment_name, attachment_mime_type')
@@ -113,7 +155,9 @@ function ShortStayMessageThread({ organisationId, bookingId, revision }: { organ
     let live = true;
     async function refresh() {
       const { data, loadError } = await load();
+      const { count } = await supabase.from('vihem_short_stay_message_sends').select('id', { count: 'exact', head: true }).eq('organisation_id', organisationId).eq('beds24_booking_id', bookingId).eq('status', 'pending');
       if (!live) return;
+      setPendingCount(count || 0);
       if (loadError) setError('Kunde inte läsa konversationen.');
       else { setError(''); setMessages(((data || []).slice(0, limit) as Message[]).reverse()); setHasMore((data?.length || 0) > limit); }
       setLoading(false);
@@ -144,5 +188,14 @@ function ShortStayMessageThread({ organisationId, bookingId, revision }: { organ
         {message.attachment_name && <button onClick={() => void attachment(message)} className="mt-2 flex max-w-full items-center gap-1 break-all text-left text-sm text-blue-700"><Download className="h-4 w-4 shrink-0" /> {message.attachment_name}</button>}
       </article>)}
     </div>
+    {pendingCount > 0 && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{pendingCount} utskick saknar bekräftelse. Kontrollera dem i Beds24 innan samma text skickas igen.</p>}
+    <form className="space-y-2 border-t pt-3" onSubmit={event => { event.preventDefault(); void send(); }}>
+      <label className="block text-sm font-medium" htmlFor={`guest-reply-${bookingId}`}>Meddelande till gästen</label>
+      <textarea id={`guest-reply-${bookingId}`} rows={4} maxLength={5000} value={draft} disabled={sending || uncertain || !capability?.canSend} onChange={event => setDraft(event.target.value)} placeholder="Skriv ditt svar…" className="w-full rounded-lg border border-slate-300 p-3 text-base disabled:bg-slate-50" />
+      {!capability ? <p className="text-sm text-slate-500">Kontrollerar bokningskanalen…</p> : !capability.canSend && <p className="text-sm text-slate-500">{capability.reason}</p>}
+      {sendError && <p role="alert" className="text-sm text-red-700">{sendError}</p>}
+      {sendNotice && <p role="status" className="text-sm text-emerald-700">{sendNotice}</p>}
+      <div className="flex items-center justify-between gap-2"><span className="text-xs text-slate-500">{draft.length}/5 000 tecken · via Beds24</span><Button type="submit" loading={sending} disabled={!capability?.canSend || !draft.trim()}>{uncertain ? 'Kontrollera utskickets status' : 'Skicka meddelande'}</Button></div>
+    </form>
   </div>;
 }
