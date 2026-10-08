@@ -46,12 +46,22 @@ Deno.serve(async (req: Request) => {
     const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
     const serviceClient = createClient(supabaseUrl, serviceKey);
 
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) return json({ error: "Unauthorized" }, 401);
+    const body = await req.json().catch(() => ({}));
+    const dryRun = body?.dry_run === true;
 
-    const { data: profile } = await serviceClient.from("vihem_profiles").select("id, role, organisation_id").eq("id", user.id).maybeSingle();
-    if (!profile || !["admin", "superadmin"].includes(profile.role)) return json({ error: "Saknar behörighet." }, 403);
-    const organisationId = profile.organisation_id;
+    // Server-to-server calls (maintenance from the host) authenticate with the
+    // service-role key and name the organisation explicitly; everyone else must
+    // be an admin of their own organisation.
+    let organisationId: string | null = null;
+    if (authHeader === `Bearer ${serviceKey}` && typeof body?.organisation_id === "string") {
+      organisationId = body.organisation_id;
+    } else {
+      const { data: { user }, error: userError } = await userClient.auth.getUser();
+      if (userError || !user) return json({ error: "Unauthorized" }, 401);
+      const { data: profile } = await serviceClient.from("vihem_profiles").select("id, role, organisation_id").eq("id", user.id).maybeSingle();
+      if (!profile || !["admin", "superadmin"].includes(profile.role)) return json({ error: "Saknar behörighet." }, 403);
+      organisationId = profile.organisation_id;
+    }
     if (!organisationId) return json({ error: "Användaren saknar organisation." }, 400);
 
     const { data: connection } = await serviceClient.from("vihem_beds24_connections").select("*").eq("organisation_id", organisationId).maybeSingle();
@@ -88,6 +98,10 @@ Deno.serve(async (req: Request) => {
       if (ranges.length === 0) {
         results.push({ unit_id: unit.id, unit_name: unit.name, days_synced: 0, error: "Inget pris konfigurerat för perioden." });
         await serviceClient.from("vihem_short_stay_price_sync_log").insert({ organisation_id: organisationId, unit_id: unit.id, status: "failed", message: "Inget pris konfigurerat för perioden.", days_synced: 0 });
+        continue;
+      }
+      if (dryRun) {
+        results.push({ unit_id: unit.id, unit_name: unit.name, days_synced: ranges.reduce((sum, r) => sum + (dayDiff(r.from, r.to) + 1), 0), preview: ranges } as any);
         continue;
       }
       try {
