@@ -464,3 +464,7 @@ verify_jwt = false
 # Daily re-check of saved vehicle info pages (pg_cron, shared secret header) + on-demand from the vehicle page.
 [functions.vihem-fleet-recheck-sources]
 verify_jwt = false
+
+# Authenticated staff or the existing internal scheduler secret, checked in the function.
+[functions.vihem-sync-beds24-messages]
+verify_jwt = false

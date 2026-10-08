@@ -10,6 +10,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { formatDateTime } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import { ShortStayPricingPanel } from '../components/ShortStayPricingPanel';
+import { ShortStayMessages } from '../components/ShortStayMessages';
 import {
   Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea,
 } from '../components/ui';
@@ -23,7 +24,7 @@ interface ShortStayPageProps {
   onNavigate: (page: string) => void;
 }
 
-type Tab = 'overview' | 'calendar' | 'cleaning' | 'bookings' | 'pricing' | 'key_boxes' | 'receipts' | 'settings';
+type Tab = 'overview' | 'calendar' | 'cleaning' | 'bookings' | 'messages' | 'pricing' | 'key_boxes' | 'receipts' | 'settings';
 
 interface KeyBox {
   id: string;
@@ -1504,6 +1505,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
           ['calendar', 'Kalender'],
           ['cleaning', 'Städning'],
           ['bookings', 'Bokningar'],
+          ...(['admin', 'superadmin', 'staff'].includes(user?.role || '') ? [['messages', 'Gästmeddelanden']] : []),
           ...(isAdmin ? [['pricing', 'Priser']] : []),
           ['key_boxes', 'Nyckelboxar'],
           ['receipts', 'Kvitton'],
@@ -1534,6 +1536,15 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
             )}
           />
         </Card>
+      ) : tab === 'messages' && organisationId ? (
+        <ShortStayMessages organisationId={organisationId} onOpenBooking={id => {
+          const booking = bookings.find(item => item.id === id);
+          if (booking) { openEditBooking(booking); return; }
+          void supabase.from('vihem_short_stay_bookings').select('*').eq('organisation_id', organisationId).eq('id', id).single().then(({ data, error: loadError }) => {
+            if (loadError || !data) setError('Bokningen kunde inte öppnas.');
+            else openEditBooking(data as ShortStayBooking);
+          });
+        }} />
       ) : tab === 'overview' ? (
         <div className="space-y-5">
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -2556,6 +2567,12 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
 
       <Modal open={bookingModalOpen} onClose={() => setBookingModalOpen(false)} title={editingBooking ? 'Redigera bokning' : 'Ny bokning'} size="lg">
         <div className="space-y-4">
+          {editingBooking?.beds24_booking_id && organisationId && ['admin', 'superadmin', 'staff'].includes(user?.role || '') && (
+            <details className="rounded-lg border border-slate-200 p-3">
+              <summary className="cursor-pointer font-medium text-slate-800">Gästmeddelanden från Beds24</summary>
+              <div className="mt-3"><ShortStayMessages organisationId={organisationId} bookingId={editingBooking.beds24_booking_id} /></div>
+            </details>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Select
               label="Enhet"
