@@ -306,6 +306,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   const [sheetBusy, setSheetBusy] = useState(false);
   const [openEntry, setOpenEntry] = useState<OpenTimeEntry | null>(null);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  const [savingClose, setSavingClose] = useState(false);
   const [detailTab, setDetailTab] = useState<'overview' | 'comments' | 'time' | 'history'>('overview');
   const [history, setHistory] = useState<{ id: string; event_type: string; actor_id: string | null; created_at: string; metadata: Record<string, any> }[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -747,6 +749,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       await fetchWorkOrders();
     } catch (err) {
       console.error('Error updating status:', err);
+      throw err;
     } finally {
       setUpdatingStatus(false);
     }
@@ -814,6 +817,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       await fetchWorkOrders();
     } catch (err) {
       console.error('Error updating assignment:', err);
+      throw err;
     } finally {
       setUpdatingAssignment(false);
     }
@@ -1192,6 +1196,41 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         cancelled: [],
       };
 
+  const currentAssigneeIds = selectedWorkOrder
+    ? (selectedWorkOrder.assigned_to_ids?.length ? selectedWorkOrder.assigned_to_ids : selectedWorkOrder.assigned_to ? [selectedWorkOrder.assigned_to] : [])
+    : [];
+  const statusDirty = Boolean(isStaff && selectedWorkOrder && newDetailStatus !== selectedWorkOrder.status);
+  const assignmentDirty = Boolean(isStaff && selectedWorkOrder
+    && [...newAssignedToIds].sort().join(',') !== [...currentAssigneeIds].sort().join(','));
+  const detailDirty = statusDirty || assignmentDirty;
+  const resetDetailPending = () => {
+    if (!selectedWorkOrder) return;
+    setNewDetailStatus(selectedWorkOrder.status);
+    setNewAssignedToIds(currentAssigneeIds);
+  };
+  const requestCloseDetail = () => {
+    if (detailDirty) setConfirmCloseOpen(true);
+    else setShowDetailModal(false);
+  };
+  const saveAndCloseDetail = async () => {
+    setSavingClose(true);
+    try {
+      if (statusDirty) await updateWorkOrderStatus();
+      if (assignmentDirty) await updateWorkOrderAssignment();
+      setConfirmCloseOpen(false);
+      setShowDetailModal(false);
+      toast.show('Ändringarna är sparade');
+    } catch (err: any) {
+      toast.show(err?.message || 'Kunde inte spara ändringarna.', { tone: 'error' });
+    } finally {
+      setSavingClose(false);
+    }
+  };
+  const discardAndCloseDetail = () => {
+    resetDetailPending();
+    setConfirmCloseOpen(false);
+    setShowDetailModal(false);
+  };
   const openWorkOrder = (wo: WOWithRelations) => {
     setSelectedWorkOrder(wo);
     setNewDetailStatus(wo.status);
@@ -1927,7 +1966,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       {/* Detail Modal */}
       <Modal
         open={showDetailModal}
-        onClose={() => setShowDetailModal(false)}
+        onClose={requestCloseDetail}
         title={selectedWorkOrder?.title || 'Arbetsorder'}
         size="xl"
       >
@@ -1939,6 +1978,9 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                   Redigera arbetsorder
                 </Button>
               </div>
+            )}
+            {detailDirty && (
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Du har ändringar som inte är sparade. Du får välja att spara när du stänger.</p>
             )}
             <div role="tablist" className="no-scrollbar -mx-1 flex gap-1 overflow-x-auto rounded-2xl bg-slate-100 p-1">
               {([
@@ -1987,14 +2029,6 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                       onChange={(e) => setNewDetailStatus(e.target.value as WOStatus)}
                       className="text-sm"
                     />
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={updateWorkOrderStatus}
-                      loading={updatingStatus}
-                    >
-                      Uppdatera
-                    </Button>
                   </div>
                 ) : (
                   <Badge className={getWOStatusColor(selectedWorkOrder.status)}>
@@ -2084,14 +2118,6 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                         </label>
                       ))}
                     </div>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={updateWorkOrderAssignment}
-                      loading={updatingAssignment}
-                    >
-                      Uppdatera tilldelning
-                    </Button>
                   </div>
                 </div>
               )}
@@ -2380,6 +2406,19 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
           </div>
         </Modal>
       )}
+      <Modal open={confirmCloseOpen} onClose={() => setConfirmCloseOpen(false)} title="Spara ändringar?" size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-vihem-muted">
+            Du har ändrat {[statusDirty ? 'status' : '', assignmentDirty ? 'tilldelning' : ''].filter(Boolean).join(' och ')} men inte sparat. Vill du spara ändringarna innan du stänger?
+          </p>
+          <div className="space-y-2">
+            <Button className="w-full" onClick={saveAndCloseDetail} loading={savingClose}>Spara ändringar</Button>
+            <Button variant="secondary" className="w-full" onClick={discardAndCloseDetail} disabled={savingClose}>Stäng utan att spara</Button>
+            <Button variant="ghost" className="w-full" onClick={() => setConfirmCloseOpen(false)} disabled={savingClose}>Fortsätt redigera</Button>
+          </div>
+        </div>
+      </Modal>
+
       {isStaff && sheetWo && (
         <>
           <WorkOrderActionSheet open={quickSheet?.kind === 'actions'} onClose={() => setQuickSheet(null)} title={sheetWo.title} actions={actionsFor(sheetWo)} />
