@@ -14,8 +14,8 @@ const corsHeaders = {
 const SETTINGS_KEY = "fleet_source_recheck";
 const SECRET_HEADER = "x-vihem-fleet-recheck-secret";
 const MAX_SOURCES_PER_RUN = 100;
-const MAX_AI_PER_RUN = 10; // en edge-worker hinner inte med fler tolkningar per anrop; cron kör varje timme
-const CONCURRENCY = 5;
+const MAX_AI_PER_RUN = 4; // edge-workern avbryts efter ~60 s och AI-tolkning tar 15-40 s; cron kör varje timme
+const CONCURRENCY = 2; // håll nere trycket mot källsidorna (de svarar 429 annars)
 const INSPECTION_TYPE = "Kontrollbesiktning";
 const DAY_MS = 86_400_000;
 
@@ -25,7 +25,7 @@ const DAY_MS = 86_400_000;
 function isDue(src: any, now: number): boolean {
   if (!src.last_checked_at) return true;
   const age = now - new Date(src.last_checked_at).getTime();
-  if (src.last_status === "error") return age >= 7 * DAY_MS;
+  if (src.last_status === "error") return age >= 3 * 3_600_000;
   if (!src.next_inspection_date) return age >= 14 * DAY_MS;
   const daysToDue = (new Date(src.next_inspection_date).getTime() - now) / DAY_MS;
   if (daysToDue <= 60) return age >= DAY_MS - 3_600_000;
