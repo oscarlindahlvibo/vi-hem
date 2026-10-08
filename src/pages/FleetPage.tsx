@@ -439,13 +439,16 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
   const [lookupSourceUrl, setLookupSourceUrl] = useState('');
   const [saveSource, setSaveSource] = useState(true);
 
+  const regForUrl = form.registration_number.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  const suggestedLookupUrl = regForUrl.length >= 2 ? `https://biluppgifter.se/fordon/${regForUrl}` : '';
   const lookupExtracted = useRef<Record<string, unknown>>({});
   const str = (v: unknown) => (typeof v === 'string' && v ? v : '');
   const num = (v: unknown) => (typeof v === 'number' ? String(v) : '');
 
   const handleLookup = async () => {
-    const body = lookupMode === 'url' ? { url: lookupUrl.trim() } : { text: lookupText.trim() };
-    if (lookupMode === 'url' && !lookupUrl.trim()) { setLookupError('Klistra in en länk först.'); return; }
+    const effectiveUrl = lookupUrl.trim() || suggestedLookupUrl;
+    const body = lookupMode === 'url' ? { url: effectiveUrl } : { text: lookupText.trim() };
+    if (lookupMode === 'url' && !effectiveUrl) { setLookupError('Ange registreringsnummer eller klistra in en länk först.'); return; }
     if (lookupMode === 'text' && !lookupText.trim()) { setLookupError('Klistra in text först.'); return; }
     setLookupLoading(true);
     setLookupError('');
@@ -606,7 +609,7 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
           </div>
           {lookupMode === 'url' ? (
             <div className="flex gap-2">
-              <Input value={lookupUrl} onChange={(e) => setLookupUrl(e.target.value)} placeholder="https://biluppgifter.se/fordon/..." className="flex-1" />
+              <Input value={lookupUrl} onChange={(e) => setLookupUrl(e.target.value)} placeholder={suggestedLookupUrl || 'https://biluppgifter.se/fordon/REGNR'} className="flex-1" />
               <Button type="button" size="sm" variant="secondary" onClick={handleLookup} loading={lookupLoading}>Hämta med AI</Button>
             </div>
           ) : (
@@ -616,7 +619,7 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
             </div>
           )}
           <p className="mt-1.5 text-xs text-slate-500">
-            {lookupMode === 'url' ? 'Sidan hämtas och tolkas av AI.' : 'Ingenting hämtas -- bara texten du klistrat in tolkas.'} Kontrollera alltid fälten nedan innan du sparar.
+            {lookupMode === 'url' ? (suggestedLookupUrl && !lookupUrl.trim() ? 'Tomt fält = biluppgifter.se för angivet registreringsnummer. Sidan hämtas och tolkas av AI.' : 'Sidan hämtas och tolkas av AI.') : 'Ingenting hämtas -- bara texten du klistrat in tolkas.'} Kontrollera alltid fälten nedan innan du sparar.
           </p>
           {lookupError && <p className="mt-1.5 text-xs text-red-600">{lookupError}</p>}
           {lookupNote && <p className="mt-1.5 text-xs text-emerald-700">{lookupNote}</p>}
