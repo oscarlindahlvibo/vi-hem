@@ -243,6 +243,11 @@ async function ensureLevelRules(token: string, propertyId: number, roomId: numbe
   const base = (room.priceRules ?? []).find((r: any) => r.id === 1);
   const channelKeys = Object.keys(base?.channels ?? {});
   const priceFor = base?.priceFor?.type ? base.priceFor : { type: "maxCapacity" };
+  // A positive extra-person price makes the rule bookable above Price For.
+  // Preserve occupancy supplements from the standard rule, otherwise rooms
+  // priced for three people lose their four-person channel prices.
+  const extraPerson = Number(base?.extraPerson ?? 0);
+  const extraChild = Number(base?.extraChild ?? 0);
 
   const rules = LEVELS.map((lv) => {
     const channels: Record<string, { enable: boolean; rateCode?: string }> = {};
@@ -255,7 +260,7 @@ async function ensureLevelRules(token: string, propertyId: number, roomId: numbe
     // disabled, which excludes these rules from channel exports even with a
     // mapped rate code. Use the active standard offer; the explicit rate code
     // and minimum stay distinguish each channel's length-of-stay plan.
-    return { id: lv.level, name: lv.name, offer: 1, minimumStay: lv.minNights, maximumStay: 365, priceFor, channels };
+    return { id: lv.level, name: lv.name, offer: 1, minimumStay: lv.minNights, maximumStay: 365, priceFor, extraPerson, extraChild, channels };
   });
 
   const response = await fetch(`${BEDS24_BASE_URL}/properties`, {
