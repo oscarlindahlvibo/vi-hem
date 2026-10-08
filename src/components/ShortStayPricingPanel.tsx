@@ -328,7 +328,7 @@ export function ShortStayPricingPanel({ organisationId, units }: Props) {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="font-bold text-slate-950">Rabatt vid längre vistelse</h3>
-                  <p className="mt-1 text-sm text-slate-500">T.ex. billigare från natt 2 på en viss säsong, ännu billigare från en vecka.</p>
+                  <p className="mt-1 text-sm text-slate-500">Rabatt per säsong för vistelser från 2, 7 eller 28 nätter. Det är de tre nivåer som skickas till Beds24 och vidare som egna prisalternativ till Booking.com och Expedia. Under en säsong utan rabatt stängs prisalternativet på kanalerna. Rabatten gäller bara från den natt vistelsen når gränsen, så en natt får aldrig rabatt.</p>
                 </div>
                 <Button size="sm" variant="secondary" onClick={() => { setDiscountForm(emptyDiscountForm); setShowDiscountForm(value => !value); }}><Plus className="h-4 w-4" /> Ny rabattnivå</Button>
               </div>
@@ -336,7 +336,7 @@ export function ShortStayPricingPanel({ organisationId, units }: Props) {
                 <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
                   <div className="grid gap-3 sm:grid-cols-3">
                     <Select label="Gäller säsong" value={discountForm.seasonId} onChange={e => setDiscountForm(current => ({ ...current, seasonId: e.target.value }))} options={[{ value: '', label: 'Alla säsonger (standard)' }, ...seasons.map(season => ({ value: season.id, label: season.name }))]} />
-                    <Input label="Från antal nätter" type="number" min="1" value={discountForm.minNights} onChange={e => setDiscountForm(current => ({ ...current, minNights: e.target.value }))} />
+                    <Select label="Från antal nätter" value={discountForm.minNights || '2'} onChange={e => setDiscountForm(current => ({ ...current, minNights: e.target.value }))} options={[{ value: '2', label: '2 nätter (kort vistelse)' }, { value: '7', label: '7 nätter (vecka)' }, { value: '28', label: '28 nätter (månad)' }]} />
                     <Input label="Rabatt (%)" type="number" min="0" max="100" value={discountForm.discountPercent} onChange={e => setDiscountForm(current => ({ ...current, discountPercent: e.target.value }))} />
                   </div>
                   <div className="mt-3 flex gap-2">
