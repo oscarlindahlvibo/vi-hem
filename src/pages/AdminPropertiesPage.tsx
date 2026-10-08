@@ -1,3 +1,4 @@
+import { ContextChatLauncher } from '../components/chat/ContextChatLauncher';
 import React, { useState, useEffect } from 'react';
 import {
   Building2, Plus, Edit2, Home, Users, ChevronRight,
@@ -418,6 +419,7 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
                 <p className="text-slate-500 text-sm">{selectedProperty.address}, {selectedProperty.zip} {selectedProperty.city}</p>
               </div>
               <div className="flex gap-2">
+                <ContextChatLauncher type="property" id={selectedProperty.id} name={selectedProperty.name} onNavigate={onNavigate} />
                 <Button variant="secondary" onClick={() => openEditPropertyModal(selectedProperty)} className="gap-1">
                   <Edit2 className="w-3.5 h-3.5" /> Redigera
                 </Button>

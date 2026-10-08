@@ -1,5 +1,4 @@
-// Sends a native push notification (iOS via APNs; Android/FCM not wired up
-// yet, see the platform switch below) for one vihem_notifications row.
+// Sends native notifications via APNs or FCM for one notification row.
 //
 // Called by a AFTER INSERT trigger on vihem_notifications (see migration
 // 20260829100000_push_notification_dispatch.sql) via pg_net with a shared
@@ -14,6 +13,7 @@
 // rather than having to remember to call this from every insert call site.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { parseFcmConfig, sendFcmPush } from "../_shared/fcm.ts";
 import { sendApnsPush, type ApnsConfig } from "../_shared/apns.ts";
 
 const corsHeaders = {
@@ -85,37 +85,32 @@ Deno.serve(async (request) => {
     .is("read_at", null);
 
   const apnsConfig = apnsConfigFromEnv();
+  const fcmConfig = parseFcmConfig(Deno.env.get("FCM_SERVICE_ACCOUNT_JSON"));
 
   let sent = 0;
   const deactivated: string[] = [];
   const failures: Array<{ platform: string; status: number; reason?: string }> = [];
 
   for (const pushToken of tokens) {
-    if (pushToken.platform === "ios") {
-      if (!apnsConfig) {
-        failures.push({ platform: "ios", status: 0, reason: "APNS_NOT_CONFIGURED" });
-        continue;
-      }
-      const result = await sendApnsPush(pushToken.token, {
-        title: notification.title || "VI-HEM",
-        body: notification.message || "",
-        badge: unreadCount ?? undefined,
-        data: { notification_id: notification.id, type: notification.type, link: notification.link || "" },
-      }, apnsConfig);
-
-      if (result.ok) {
-        sent++;
-      } else {
-        failures.push({ platform: "ios", status: result.status, reason: result.reason });
-        if (result.tokenInvalid) {
-          await supabase.from("vihem_push_tokens").update({ active: false }).eq("id", pushToken.id);
-          deactivated.push(pushToken.id);
-        }
-      }
-    } else {
-      // Android/FCM and web push are registered (vihem_push_tokens.platform
-      // already supports them) but no sender is wired up yet.
-      failures.push({ platform: pushToken.platform, status: 0, reason: "PLATFORM_NOT_IMPLEMENTED" });
+    if (pushToken.platform === 'ios' && !apnsConfig) { failures.push({platform:'ios',status:0,reason:'APNS_NOT_CONFIGURED'}); continue; }
+    if (pushToken.platform === 'android' && !fcmConfig) { failures.push({platform:'android',status:0,reason:'FCM_NOT_CONFIGURED'}); continue; }
+    if (!['ios','android'].includes(pushToken.platform)) { failures.push({platform:pushToken.platform,status:0,reason:'PLATFORM_NOT_IMPLEMENTED'});continue; }
+    const {data:claimed,error:claimError}=await supabase.rpc('vihem_push_claim',{notification:notification.id,device:pushToken.id});
+    if(claimError){failures.push({platform:pushToken.platform,status:0,reason:'DELIVERY_CLAIM_FAILED'});continue;}
+    if(!claimed)continue;
+    try {
+      const data={notification_id:notification.id,type:notification.type,link:notification.link||''};
+      const result=pushToken.platform==='ios'
+       ? await sendApnsPush(pushToken.token,{title:notification.title||'VI-HEM',body:notification.message||'',badge:unreadCount??undefined,data},apnsConfig!)
+       : await sendFcmPush(pushToken.token,{title:notification.title||'VI-HEM',body:notification.message||'',data},fcmConfig!);
+      // A transport timeout cannot prove whether the provider accepted the push.
+      // Preserve that uncertainty instead of blindly retrying and notifying twice.
+      await supabase.from('vihem_push_deliveries').update({status:result.ok?'sent':result.status===0?'unknown':'failed',finished_at:new Date().toISOString()}).eq('notification_id',notification.id).eq('token_id',pushToken.id);
+      if(result.ok)sent++;
+      else {failures.push({platform:pushToken.platform,status:result.status,reason:result.reason});if(result.tokenInvalid){await supabase.from('vihem_push_tokens').update({active:false}).eq('id',pushToken.id);deactivated.push(pushToken.id);}}
+    }catch{
+      await supabase.from('vihem_push_deliveries').update({status:'unknown',finished_at:new Date().toISOString()}).eq('notification_id',notification.id).eq('token_id',pushToken.id);
+      failures.push({platform:pushToken.platform,status:0,reason:'PUSH_CONNECTION_FAILED'});
     }
   }
 

@@ -23,7 +23,9 @@
     "test:mobile-bundle": "node scripts/check-mobile-web-build.mjs",
     "vibofast:build": "npm --prefix apps/vibofast run build",
     "ekangen:dev": "npm --prefix apps/ekangen run dev",
-    "ekangen:build": "npm --prefix apps/ekangen install --no-audit --no-fund && npm --prefix apps/ekangen run build"
+    "ekangen:build": "npm --prefix apps/ekangen install --no-audit --no-fund && npm --prefix apps/ekangen run build",
+    "test:chat": "node scripts/chat-invariants-check.mjs",
+    "test:chat:integration": "node scripts/chat-integration-check.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
@@ -37,6 +39,7 @@
     "@capawesome/capacitor-badge": "^8.0.2",
     "@supabase/supabase-js": "^2.57.4",
     "@types/qrcode": "^1.5.6",
+    "heic2any": "^0.0.4",
     "lucide-react": "^0.344.0",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",

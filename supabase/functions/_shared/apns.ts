@@ -47,7 +47,7 @@ function base64UrlFromString(value: string): string {
   return base64UrlFromBytes(new TextEncoder().encode(value));
 }
 
-function pkcs8KeyBytesFromPem(pem: string): Uint8Array {
+function pkcs8KeyBytesFromPem(pem: string): ArrayBuffer {
   const base64 = pem
     .replace(/-----BEGIN PRIVATE KEY-----/g, "")
     .replace(/-----END PRIVATE KEY-----/g, "")
@@ -58,7 +58,7 @@ function pkcs8KeyBytesFromPem(pem: string): Uint8Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+  return bytes.buffer;
 }
 
 let cachedToken: { jwt: string; keyId: string; expiresAt: number } | null = null;
@@ -114,9 +114,11 @@ export async function sendApnsPush(deviceToken: string, payload: ApnsPushPayload
       "apns-topic": config.topic,
       "apns-push-type": "alert",
       "apns-priority": "10",
+      ...(payload.data?.notification_id ? {"apns-collapse-id": String(payload.data.notification_id)} : {}),
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
   });
 
   if (response.status === 200) return { ok: true, status: 200, tokenInvalid: false };

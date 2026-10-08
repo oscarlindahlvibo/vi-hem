@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { ModuleKey, Role } from '../types';
@@ -66,6 +66,12 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   useScrollLock(mobileMenuOpen);
   const keyboardOpen = useKeyboardOpen();
+  const [chatFocused, setChatFocused] = useState(false);
+  useLayoutEffect(() => {
+    const update = (event: Event) => setChatFocused(Boolean((event as CustomEvent).detail));
+    window.addEventListener('vihem-chat-focus', update);
+    return () => window.removeEventListener('vihem-chat-focus', update);
+  }, []);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [notificationSettingsModalOpen, setNotificationSettingsModalOpen] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -427,7 +433,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
         </div>
       </main>
 
-      {user?.role !== 'superadmin' && !keyboardOpen && (
+      {user?.role !== 'superadmin' && !keyboardOpen && !chatFocused && (
         <nav aria-label="Huvudnavigering" className="vihem-floating-nav pointer-events-none fixed inset-x-0 bottom-0 z-20 px-3 pb-[max(env(safe-area-inset-bottom),0.5rem)] lg:hidden">
           <div className="pointer-events-auto mx-auto grid max-w-md grid-cols-5 gap-0.5 rounded-full border border-slate-200/70 bg-white/95 p-1.5 shadow-float backdrop-blur-xl">
             {bottomItems.map((item) => (

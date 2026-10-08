@@ -1,748 +1,860 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Archive, ChevronRight, MessageCircle, Paperclip, Plus, Send, X } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
+import { CreateChatDialog } from "../components/chat/CreateChatDialog";
+import { ChatGroupInfo } from "../components/chat/ChatGroupInfo";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, MessageCircle, Plus, X } from "lucide-react";
+import { useAuth } from "../contexts/AuthContext";
+import { supabase } from "../lib/supabase";
+import { Avatar, Button, Input, Modal, PageHeader } from "../components/ui";
 import {
-  Button,
-  EmptyState,
-  Input,
-  LoadingPage,
-  Modal,
-  PageHeader,
-} from '../components/ui';
-import { formatDateTime } from '../lib/utils';
-import type { ChatMessage, ChatThread, Profile } from '../types';
+  chatRpc,
+  chatTitle,
+  CommunicationMessage,
+  Conversation,
+  messageReceipt,
+} from "../lib/chat";
+import { uploadChatFile, discardChatFile } from "../lib/chatMedia";
+import { useChat } from "../hooks/useChat";
+import { useChatComposerDraft } from "../hooks/useChatComposerDraft";
+import { useChatActivity } from "../hooks/useChatActivity";
+import { ConversationList } from "../components/chat/ConversationList";
+import { MessageTimeline } from "../components/chat/MessageTimeline";
+import { ChatAvatar } from "../components/chat/ChatAvatar";
+import { ChatComposer } from "../components/chat/ChatComposer";
 
-interface ChatPageProps {
+type Person = { id: string; name: string; role: string };
+export function ChatPage({
+  onNavigate,
+  initialThreadId,
+  initialMessageId,
+}: {
   onNavigate: (page: string) => void;
   initialThreadId?: string;
-}
-
-type ChatMode = 'tenant' | 'staff' | 'group';
-
-type ThreadUser = Pick<Profile, 'id' | 'name' | 'email' | 'role'>;
-
-type ChatThreadWithRelations = ChatThread & {
-  tenant?: ThreadUser | null;
-  participants?: {
-    id: string;
-    user_id: string;
-    last_read_at: string | null;
-    user?: ThreadUser | null;
-  }[];
-};
-
-export function ChatPage({ onNavigate: _onNavigate, initialThreadId }: ChatPageProps) {
+  initialMessageId?: string;
+}) {
   const { user } = useAuth();
-  const [threads, setThreads] = useState<ChatThreadWithRelations[]>([]);
-  const [selectedThread, setSelectedThread] = useState<ChatThreadWithRelations | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [availableUsers, setAvailableUsers] = useState<Profile[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [messagesLoading, setMessagesLoading] = useState(false);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [creatingThread, setCreatingThread] = useState(false);
-  const [createError, setCreateError] = useState('');
-  const [chatMode, setChatMode] = useState<ChatMode>('tenant');
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-  const [newSubject, setNewSubject] = useState('');
-  const [newMessage, setNewMessage] = useState('');
-  const [messageText, setMessageText] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'open' | 'closed' | 'all'>('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showMobileMessages, setShowMobileMessages] = useState(false);
-  const [pendingAttachment, setPendingAttachment] = useState<{ url: string; name: string } | null>(null);
-  const [uploadingAttachment, setUploadingAttachment] = useState(false);
-  const [attachmentError, setAttachmentError] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const initialThreadHandledRef = useRef(false);
-
-  const isStaff = user?.role === 'staff' || user?.role === 'admin' || user?.role === 'superadmin';
-
-  useEffect(() => {
-    fetchThreads();
-  }, [statusFilter, user?.id]);
-
-  useEffect(() => {
-    if (isStaff) fetchAvailableUsers();
-  }, [isStaff, user?.organisation_id]);
-
-  useEffect(() => {
-    if (!selectedThread) return;
-    fetchMessages(selectedThread.id);
-    markThreadAsRead(selectedThread.id);
-  }, [selectedThread?.id]);
-
-  // Opening the app from a "Nytt chattmeddelande" notification should land
-  // directly in that conversation, not just the thread list -- runs once,
-  // as soon as the referenced thread has actually loaded.
-  useEffect(() => {
-    if (!initialThreadId || initialThreadHandledRef.current || threads.length === 0) return;
-    const thread = threads.find((candidate) => candidate.id === initialThreadId);
-    if (thread) {
-      initialThreadHandledRef.current = true;
-      setSelectedThread(thread);
-      setShowMobileMessages(true);
-    }
-  }, [initialThreadId, threads]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const fetchThreads = async () => {
-    if (!user) return;
-
-    try {
-      setLoading(true);
-      let query = supabase
-        .from('vihem_chat_threads')
-        .select(`
-          id,
-          organisation_id,
-          tenant_id,
-          assigned_to,
-          chat_type,
-          created_by,
-          subject,
-          status,
-          maintenance_request_id,
-          last_message_at,
-          created_at,
-          tenant:vihem_profiles!chat_threads_tenant_id_fkey(id, name, email, role),
-          participants:vihem_chat_participants(id, user_id, last_read_at, user:vihem_profiles!chat_participants_user_id_fkey(id, name, email, role))
-        `)
-        .order('last_message_at', { ascending: false });
-
-      if (!isStaff) {
-        query = query.eq('tenant_id', user.id).eq('chat_type', 'tenant_support');
-      }
-
-      if (isStaff && statusFilter !== 'all') {
-        query = query.eq('status', statusFilter);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      setThreads((data || []) as unknown as ChatThreadWithRelations[]);
-    } catch (error) {
-      console.error('Error fetching threads:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchAvailableUsers = async () => {
-    if (!user?.organisation_id) return;
-
-    const { data, error } = await supabase
-      .from('vihem_profiles')
-      .select('*')
-      .eq('organisation_id', user.organisation_id)
-      .eq('active', true)
-      .in('role', ['tenant', 'staff', 'admin'])
-      .order('name');
-
-    if (error) {
-      console.error('Error fetching chat users:', error);
-      return;
-    }
-
-    setAvailableUsers((data || []) as Profile[]);
-  };
-
-  const fetchMessages = async (threadId: string) => {
-    try {
-      setMessagesLoading(true);
-      const { data, error } = await supabase
-        .from('vihem_chat_messages')
-        .select('id, thread_id, sender_id, message, created_at, read_at, attachment_url, attachment_type, attachment_name, sender:vihem_profiles!chat_messages_sender_id_fkey(id, name)')
-        .eq('thread_id', threadId)
-        .order('created_at', { ascending: true });
-
-      if (error) throw error;
-      setMessages((data || []) as unknown as ChatMessage[]);
-    } catch (error) {
-      console.error('Error fetching messages:', error);
-    } finally {
-      setMessagesLoading(false);
-    }
-  };
-
-  const markThreadAsRead = async (threadId: string) => {
-    if (!user) return;
-    try {
-      await supabase
-        .from('vihem_chat_messages')
-        .update({ read_at: new Date().toISOString() })
-        .eq('thread_id', threadId)
-        .neq('sender_id', user.id)
-        .is('read_at', null);
-
-      // Per-participant read marker (vihem_chat_participants.last_read_at)
-      // drives the unread indicator in the thread list -- distinct from
-      // the message-level read_at above, which is shared across every
-      // reader in a group thread and can't tell "unread for ME" on its own.
-      const nowIso = new Date().toISOString();
-      await supabase
-        .from('vihem_chat_participants')
-        .update({ last_read_at: nowIso })
-        .eq('thread_id', threadId)
-        .eq('user_id', user.id);
-      setThreads((current) => current.map((thread) => thread.id !== threadId ? thread : {
-        ...thread,
-        participants: (thread.participants || []).map((participant) =>
-          participant.user_id === user.id ? { ...participant, last_read_at: nowIso } : participant
-        ),
-      }));
-
-      // Chat notifications are a compact inbox badge. Opening chat marks the
-      // corresponding notification stream as seen as well.
-      await supabase
-        .from('vihem_notifications')
-        .update({ read_at: new Date().toISOString() })
-        .eq('user_id', user.id)
-        .in('type', ['chat', 'message', 'chat_message'])
-        .is('read_at', null);
-    } catch (error) {
-      console.error('Error marking thread as read:', error);
-    }
-  };
-
-  // A thread is unread for the current user if their own participant
-  // row's last_read_at predates the thread's last message -- covers both
-  // "never opened" (last_read_at null) and "opened before this message
-  // arrived". Sending a message yourself also updates your own
-  // last_read_at (see sendMessage), so your own outgoing message never
-  // flags the thread as unread for you.
-  const isThreadUnread = (thread: ChatThreadWithRelations) => {
-    const own = (thread.participants || []).find((participant) => participant.user_id === user?.id);
-    if (!own) return false;
-    if (!own.last_read_at) return true;
-    return new Date(own.last_read_at).getTime() < new Date(thread.last_message_at).getTime();
-  };
-
-  const getThreadParticipants = (thread: ChatThreadWithRelations) =>
-    (thread.participants || [])
-      .map((participant) => participant.user)
-      .filter(Boolean) as ThreadUser[];
-
-  const getThreadTitle = (thread: ChatThreadWithRelations) => {
-    if (!isStaff) return thread.subject;
-    if (thread.chat_type === 'tenant_support') return thread.tenant?.name || 'Okänd hyresgäst';
-
-    const otherParticipants = getThreadParticipants(thread).filter((participant) => participant.id !== user?.id);
-    if (thread.chat_type === 'group') return thread.subject || otherParticipants.map((participant) => participant.name).join(', ');
-    return otherParticipants[0]?.name || thread.subject || 'Direktchatt';
-  };
-
-  const getThreadSubtitle = (thread: ChatThreadWithRelations) => {
-    if (thread.chat_type === 'group') return `${getThreadParticipants(thread).length} deltagare`;
-    if (thread.chat_type === 'direct') return 'Personalchatt';
-    return thread.subject;
-  };
-
-  const filteredThreads = searchQuery
-    ? threads.filter((thread) =>
-        getThreadTitle(thread).toLowerCase().includes(searchQuery.toLowerCase()) ||
-        thread.subject.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : threads;
-
-  const selectableUsers = isStaff
-    ? availableUsers.filter((candidate) => {
-        if (candidate.id === user?.id) return false;
-        if (chatMode === 'tenant') return candidate.role === 'tenant';
-        if (chatMode === 'staff') return candidate.role !== 'tenant';
-        return true;
-      })
-    : [];
-
-  const toggleSelectedUser = (userId: string) => {
-    setSelectedUserIds((current) =>
-      current.includes(userId)
-        ? current.filter((id) => id !== userId)
-        : [...current, userId]
-    );
-  };
-
-  const resetCreateModal = () => {
-    setShowCreateModal(false);
-    setCreateError('');
-    setCreatingThread(false);
-    setChatMode('tenant');
-    setSelectedUserIds([]);
-    setNewSubject('');
-    setNewMessage('');
-  };
-
-  const createThread = async () => {
-    if (!user || !newSubject.trim() || !newMessage.trim()) return;
-
-    try {
-      setCreatingThread(true);
-      setCreateError('');
-
-      const selectedUsers = availableUsers.filter((candidate) => selectedUserIds.includes(candidate.id));
-      const tenantRecipients = selectedUsers.filter((candidate) => candidate.role === 'tenant');
-      const staffRecipients = selectedUsers.filter((candidate) => candidate.role !== 'tenant');
-
-      if (isStaff && selectedUserIds.length === 0) {
-        setCreateError('Välj minst en mottagare.');
-        return;
-      }
-
-      if (isStaff && chatMode === 'tenant' && (selectedUserIds.length !== 1 || tenantRecipients.length !== 1)) {
-        setCreateError('Välj exakt en hyresgäst.');
-        return;
-      }
-
-      if (isStaff && chatMode === 'staff' && (selectedUserIds.length !== 1 || tenantRecipients.length > 0)) {
-        setCreateError('Välj exakt en person i personalen.');
-        return;
-      }
-
-      if (isStaff && chatMode === 'group' && selectedUserIds.length < 2) {
-        setCreateError('Välj minst två deltagare för en gruppchatt.');
-        return;
-      }
-
-      if (isStaff && chatMode === 'group' && tenantRecipients.length > 1) {
-        setCreateError('En gruppchatt kan inte innehålla flera hyresgäster.');
-        return;
-      }
-
-      const now = new Date().toISOString();
-      const tenantRecipient = tenantRecipients[0];
-      const threadType = isStaff
-        ? chatMode === 'group'
-          ? 'group'
-          : chatMode === 'staff'
-            ? 'direct'
-            : 'tenant_support'
-        : 'tenant_support';
-
-      const { data: threadData, error: threadError } = await supabase
-        .from('vihem_chat_threads')
-        .insert({
-          tenant_id: isStaff ? tenantRecipient?.id || null : user.id,
-          assigned_to: isStaff && staffRecipients.length === 1 ? staffRecipients[0].id : null,
-          organisation_id: user.organisation_id,
-          chat_type: threadType,
-          created_by: user.id,
-          subject: newSubject.trim(),
-          status: 'open',
-          last_message_at: now,
-        })
-        .select('id')
-        .single();
-
-      if (threadError) throw threadError;
-
-      const participantIds = new Set<string>([user.id]);
-      if (isStaff) selectedUserIds.forEach((id) => participantIds.add(id));
-
-      const { error: participantError } = await supabase
-        .from('vihem_chat_participants')
-        .insert([...participantIds].map((userId) => ({ thread_id: threadData.id, user_id: userId })));
-
-      if (participantError) throw participantError;
-
-      const { error: messageError } = await supabase.from('vihem_chat_messages').insert({
-        thread_id: threadData.id,
-        sender_id: user.id,
-        message: newMessage.trim(),
-      });
-
-      if (messageError) throw messageError;
-
-      resetCreateModal();
-      fetchThreads();
-    } catch (error) {
-      console.error('Error creating thread:', error);
-      setCreateError('Kunde inte skapa chatten. Försök igen.');
-    } finally {
-      setCreatingThread(false);
-    }
-  };
-
-  const handleAttachmentSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file || !user || !selectedThread) return;
-
-    setAttachmentError('');
-    setUploadingAttachment(true);
-    try {
-      const extension = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
-      const path = `${selectedThread.id}/${Date.now()}-${crypto.randomUUID()}${extension}`;
-      const { error: uploadError } = await supabase.storage.from('vihem-chat-attachments').upload(path, file, { contentType: file.type });
-      if (uploadError) throw uploadError;
-      const { data } = supabase.storage.from('vihem-chat-attachments').getPublicUrl(path);
-      setPendingAttachment({ url: data.publicUrl, name: file.name });
-    } catch (error) {
-      console.error('Error uploading attachment:', error);
-      setAttachmentError('Kunde inte ladda upp bilden. Försök igen.');
-    } finally {
-      setUploadingAttachment(false);
-    }
-  };
-
-  const sendMessage = async () => {
-    if ((!messageText.trim() && !pendingAttachment) || !selectedThread || !user) return;
-
-    try {
-      const { error: messageError } = await supabase.from('vihem_chat_messages').insert({
-        thread_id: selectedThread.id,
-        sender_id: user.id,
-        message: messageText.trim(),
-        attachment_url: pendingAttachment?.url || null,
-        attachment_type: pendingAttachment ? 'image' : null,
-        attachment_name: pendingAttachment?.name || null,
-      });
-      if (messageError) throw messageError;
-
-      await supabase
-        .from('vihem_chat_threads')
-        .update({ last_message_at: new Date().toISOString() })
-        .eq('id', selectedThread.id);
-
-      setMessageText('');
-      setPendingAttachment(null);
-      fetchMessages(selectedThread.id);
-      fetchThreads();
-      // Sending doesn't otherwise touch last_read_at -- without this, your
-      // own outgoing message (which bumps the thread's last_message_at)
-      // would make the thread look unread to yourself in the list.
-      markThreadAsRead(selectedThread.id);
-    } catch (error) {
-      console.error('Error sending message:', error);
-    }
-  };
-
-  const closeThread = async (threadId: string) => {
-    try {
-      await supabase.from('vihem_chat_threads').update({ status: 'closed' }).eq('id', threadId);
-      setSelectedThread(null);
-      fetchThreads();
-    } catch (error) {
-      console.error('Error closing thread:', error);
-    }
-  };
-
-  if (loading && threads.length === 0) return <LoadingPage />;
-
+  if (!user?.organisation_id)
+    return <p>Du behöver vara inloggad i en organisation.</p>;
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto px-4 py-6">
+    <ChatWorkspace
+      key={`${user.organisation_id}:${user.id}`}
+      user={user}
+      onNavigate={onNavigate}
+      initialThreadId={initialThreadId}
+      initialMessageId={initialMessageId}
+    />
+  );
+}
+function ChatWorkspace({
+  user,
+  onNavigate,
+  initialThreadId,
+  initialMessageId,
+}: {
+  user: { id: string; organisation_id: string | null; role: string };
+  onNavigate: (page: string) => void;
+  initialThreadId?: string;
+  initialMessageId?: string;
+}) {
+  const chat = useChat(user.id, user.organisation_id!, initialThreadId),
+    activity = useChatActivity(chat.selected, user.id);
+  const { messages, selected, loadingMessages, seek, setError } = chat;
+  const handledMessage = useRef("");
+  const current = chat.current,
+    staff = ["admin", "superadmin", "staff"].includes(user.role);
+  const {
+    mentionIds,
+    setMentionIds,
+    link,
+    setLink,
+    reply,
+    setReply,
+    attachment,
+    setAttachment,
+  } = useChatComposerDraft(user.organisation_id!, user.id, chat.selected);
+  const [shareOpen, setShareOpen] = useState(false),
+    [shareType, setShareType] = useState<"workorder" | "project">("workorder"),
+    [entities, setEntities] = useState<{ id: string; title: string }[]>([]),
+    [forwardOpen, setForwardOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false),
+    [people, setPeople] = useState<Person[]>([]),
+    [peopleSearch, setPeopleSearch] = useState("");
+  const [kind, setKind] = useState("direct"),
+    [recipients, setRecipients] = useState<string[]>([]),
+    [title, setTitle] = useState(""),
+    [busy, setBusy] = useState(false);
+  const [threadMenu, setThreadMenu] = useState<Conversation | null>(null),
+    [messageMenu, setMessageMenu] = useState<CommunicationMessage | null>(null);
+  const [editText, setEditText] = useState(""),
+    [editOpen, setEditOpen] = useState(false),
+    [infoOpen, setInfoOpen] = useState(false),
+    [groupTitle, setGroupTitle] = useState("");
+  const [viewport, setViewport] = useState({
+    height: window.visualViewport?.height || window.innerHeight,
+    top: window.visualViewport?.offsetTop || 0,
+  });
+  const generation = useRef(0),
+    mounted = useRef(true),
+    runLock = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    generation.current++;
+    setMessageMenu(null);
+    setThreadMenu(null);
+  }, [chat.selected]);
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("vihem-chat-focus", { detail: !!chat.selected }),
+    );
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent("vihem-chat-focus", { detail: false }),
+      );
+    };
+  }, [chat.selected]);
+  useEffect(() => {
+    const update = () =>
+      setViewport({
+        height: window.visualViewport?.height || window.innerHeight,
+        top: window.visualViewport?.offsetTop || 0,
+      });
+    window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
+    };
+  }, []);
+  useEffect(() => {
+    if (
+      !initialMessageId ||
+      selected !== initialThreadId ||
+      loadingMessages ||
+      !messages.length ||
+      handledMessage.current === initialMessageId
+    )
+      return;
+    handledMessage.current = initialMessageId;
+    void seek(initialMessageId).then(() =>
+      requestAnimationFrame(() =>
+        document
+          .getElementById(`chat-message-${initialMessageId}`)
+          ?.scrollIntoView({ block: "center" }),
+      ),
+    );
+  }, [
+    initialMessageId,
+    initialThreadId,
+    selected,
+    loadingMessages,
+    messages,
+    seek,
+  ]);
+  useEffect(() => {
+    if ((!createOpen && !infoOpen) || !staff) return;
+    let live = true;
+    void supabase
+      .from("vihem_profiles")
+      .select("id,name,role")
+      .eq("organisation_id", user.organisation_id)
+      .eq("active", true)
+      .in("role", ["staff", "admin", "superadmin", "tenant"])
+      .order("name")
+      .then(({ data, error }) => {
+        if (live) {
+          if (error) setError("Mottagare kunde inte hämtas.");
+          else setPeople(data || []);
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [createOpen, infoOpen, staff, user.organisation_id, setError]);
+  useEffect(() => {
+    if (!shareOpen) return;
+    let live = true;
+    void supabase
+      .from(
+        shareType === "workorder"
+          ? "vihem_work_orders"
+          : "vihem_customer_projects",
+      )
+      .select("id,title")
+      .eq("organisation_id", user.organisation_id)
+      .order("created_at", { ascending: false })
+      .limit(100)
+      .then(({ data, error }) => {
+        if (live) {
+          setEntities(data || []);
+          if (error) setError("Delbara objekt kunde inte hämtas.");
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [shareOpen, shareType, user.organisation_id, setError]);
+  async function run(action: () => Promise<unknown>) {
+    if (runLock.current) return;
+    runLock.current = true;
+    setBusy(true);
+    chat.setError("");
+    try {
+      await action();
+      await chat.refreshInbox();
+    } catch (err) {
+      chat.setError((err as Error).message);
+    } finally {
+      runLock.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }
+  async function create() {
+    await run(async () => {
+      const id = await chatRpc<string>("vihem_chat_create", {
+        kind: staff ? kind : "tenant_support",
+        recipients: staff ? recipients : [],
+        title,
+      });
+      setCreateOpen(false);
+      setRecipients([]);
+      setTitle("");
+      setPeopleSearch("");
+      await chat.refreshInbox();
+      chat.setSelected(id);
+    });
+  }
+  async function upload(file: File, duration?: number) {
+    if (!current) return;
+    const epoch = generation.current;
+    const data = await uploadChatFile(current.id, file);
+    if (epoch !== generation.current)
+      throw new Error(
+        "Du bytte konversation. Bilagan har inte lagts in i den nya chatten.",
+      );
+    if (attachment?.attachment_path)
+      await discardChatFile(current.id, attachment.attachment_path);
+    setAttachment({
+      attachment_path: data.path,
+      attachment_name: data.name,
+      attachment_mime: data.mime,
+      attachment_size: data.size,
+      attachment_type: data.mime.startsWith("image/")
+        ? "image"
+        : data.mime.startsWith("audio/")
+          ? "audio"
+          : data.mime.startsWith("video/")
+            ? "video"
+            : "document",
+      audio_duration: duration || null,
+    });
+  }
+  function send() {
+    activity.stopTyping();
+    chat.send({
+      ...attachment,
+      ...link,
+      reply_to: reply?.id || null,
+      mentions: mentionIds.filter((id) =>
+        chat.draft.includes(
+          "@" + current?.participants.find((p) => p.user_id === id)?.name,
+        ),
+      ),
+    });
+    setAttachment(null);
+    setLink(null);
+    setReply(null);
+    setMentionIds([]);
+  }
+  const filteredPeople = people.filter(
+    (p) =>
+      p.id !== user.id &&
+      p.name.toLowerCase().includes(peopleSearch.toLowerCase()) &&
+      (kind === "tenant_support"
+        ? p.role === "tenant"
+        : kind === "direct"
+          ? p.role !== "tenant"
+          : true),
+  );
+  const ownGroup =
+    current?.chat_type === "group" &&
+    (current.created_by === user.id ||
+      ["admin", "superadmin"].includes(user.role));
+  return (
+    <div className={`space-y-4 ${chat.selected ? "chat-mobile-active" : ""}`}>
+      <div className={chat.selected ? "hidden md:block" : ""}>
         <PageHeader
           title="Meddelanden"
-          subtitle={isStaff ? 'Konversationer med hyresgäster och kollegor' : 'Dina meddelanden med fastighetskontoret'}
+          subtitle={
+            staff
+              ? "Kollegor, grupper och fastighetskontoret"
+              : "Kontakta fastighetskontoret"
+          }
+          icon={MessageCircle}
           action={
-            <Button onClick={() => setShowCreateModal(true)} variant="primary" className="gap-2">
+            <Button
+              onClick={() => {
+                setKind(staff ? "direct" : "tenant_support");
+                setCreateOpen(true);
+              }}
+            >
               <Plus size={18} />
-              {isStaff ? 'Ny chatt' : 'Ny konversation'}
+              Ny chatt
             </Button>
           }
         />
-
-        <div className="flex gap-0 bg-white rounded-xl border border-slate-200 overflow-hidden" style={{ height: 'calc(100vh - 220px)', minHeight: '500px' }}>
-          <div className={`${showMobileMessages ? 'hidden' : 'flex'} md:flex flex-col w-full md:w-80 border-r border-slate-200`}>
-            {isStaff && (
-              <div className="p-3 border-b border-slate-200 space-y-2">
-                <select
-                  value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value as 'open' | 'closed' | 'all')}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="all">Alla</option>
-                  <option value="open">Öppna</option>
-                  <option value="closed">Stängda</option>
-                </select>
-                <Input
-                  placeholder="Sök konversation..."
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                />
-              </div>
-            )}
-
-            <div className="flex-1 overflow-y-auto">
-              {filteredThreads.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full p-6">
-                  <EmptyState
-                    icon={<MessageCircle className="w-10 h-10" />}
-                    title="Inga konversationer"
-                    description="Du har inga meddelanden än"
-                  />
-                </div>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {filteredThreads.map((thread) => {
-                    const unread = isThreadUnread(thread);
-                    return (
-                      <button
-                        key={thread.id}
-                        onClick={() => { setSelectedThread(thread); setShowMobileMessages(true); }}
-                        className={`w-full p-4 text-left transition-colors ${selectedThread?.id === thread.id ? 'bg-blue-50 border-l-2 border-blue-500' : unread ? 'bg-emerald-50 hover:bg-emerald-100' : 'hover:bg-slate-50'}`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex min-w-0 items-center gap-1.5">
-                              {unread && <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-700" aria-label="Oläst" />}
-                              <p className={`truncate text-sm ${unread ? 'font-bold text-emerald-900' : 'font-semibold text-slate-900'}`}>{getThreadTitle(thread)}</p>
-                            </div>
-                            <p className="text-xs text-slate-500 truncate">{getThreadSubtitle(thread)}</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className={`text-xs ${unread ? 'font-semibold text-emerald-700' : 'text-slate-400'}`}>{formatDateTime(thread.last_message_at)}</span>
-                              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${thread.status === 'open' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
-                                {thread.status === 'open' ? 'Öppen' : 'Stängd'}
-                              </span>
-                            </div>
-                          </div>
-                          <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className={`${showMobileMessages ? 'flex' : 'hidden'} md:flex flex-1 flex-col`}>
-            {selectedThread ? (
-              <>
-                <div className="border-b border-slate-200 px-4 py-3 flex items-center justify-between bg-white">
-                  <div>
-                    <button
-                      onClick={() => setShowMobileMessages(false)}
-                      className="md:hidden mb-1 flex items-center gap-1 text-blue-600 text-xs font-medium"
-                    >
-                      ← Tillbaka
-                    </button>
-                    <h2 className="font-semibold text-slate-900 text-sm">{selectedThread.subject}</h2>
-                    <p className="text-xs text-slate-500">
-                      {isStaff ? getThreadTitle(selectedThread) : 'Fastighetskontoret'}
-                    </p>
-                  </div>
-                  <div className="flex gap-1">
-                    {isStaff && selectedThread.status === 'open' && (
-                      <Button variant="secondary" size="sm" onClick={() => closeThread(selectedThread.id)} className="gap-1">
-                        <Archive size={14} />
-                        Stäng
-                      </Button>
-                    )}
-                    <Button variant="secondary" size="sm" onClick={() => { setSelectedThread(null); setShowMobileMessages(false); }}>
-                      <X size={14} />
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
-                  {messagesLoading ? (
-                    <div className="flex items-center justify-center h-32">
-                      <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    </div>
-                  ) : messages.length === 0 ? (
-                    <div className="flex items-center justify-center h-32">
-                      <EmptyState
-                        icon={<MessageCircle className="w-8 h-8" />}
-                        title="Inga meddelanden"
-                        description="Starta konversationen"
-                      />
-                    </div>
-                  ) : (
-                    messages.map((msg) => {
-                      const isOwn = msg.sender_id === user?.id;
-                      return (
-                        <div key={msg.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-xs lg:max-w-md px-4 py-2.5 rounded-2xl text-sm ${isOwn ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white text-slate-900 border border-slate-200 rounded-bl-sm shadow-sm'}`}>
-                            {!isOwn && (
-                              <p className="text-xs font-semibold mb-1 opacity-60">{msg.sender?.name}</p>
-                            )}
-                            {msg.attachment_url && (
-                              <a href={msg.attachment_url} target="_blank" rel="noreferrer" className="mb-1.5 block">
-                                <img src={msg.attachment_url} alt={msg.attachment_name || 'Bifogad bild'} className="max-h-56 w-full rounded-lg object-cover" />
-                              </a>
-                            )}
-                            {msg.message && <p className="break-words leading-relaxed">{msg.message}</p>}
-                            <p className={`text-xs mt-1 ${isOwn ? 'text-blue-200' : 'text-slate-400'}`}>
-                              {formatDateTime(msg.created_at)}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                  <div ref={messagesEndRef} />
-                </div>
-
-                <div className="border-t border-slate-200 p-3 bg-white">
-                  {attachmentError && <p className="mb-2 text-xs font-semibold text-red-600">{attachmentError}</p>}
-                  {pendingAttachment && (
-                    <div className="mb-2 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
-                      <img src={pendingAttachment.url} alt={pendingAttachment.name} className="h-10 w-10 rounded object-cover" />
-                      <span className="min-w-0 flex-1 truncate text-xs text-slate-600">{pendingAttachment.name}</span>
-                      <button type="button" onClick={() => setPendingAttachment(null)} className="shrink-0 text-slate-400 hover:text-slate-600" aria-label="Ta bort bild">
-                        <X size={14} />
-                      </button>
-                    </div>
-                  )}
-                  <div className="flex items-end gap-2">
-                    <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleAttachmentSelect} />
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={selectedThread.status !== 'open' || uploadingAttachment}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-50"
-                      aria-label="Bifoga bild"
-                    >
-                      {uploadingAttachment ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" /> : <Paperclip size={16} />}
-                    </button>
-                    <textarea
-                      rows={1}
-                      placeholder={selectedThread.status === 'open' ? 'Skriv ett meddelande...' : 'Konversationen är stängd'}
-                      value={messageText}
-                      disabled={selectedThread.status !== 'open'}
-                      onChange={(event) => setMessageText(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey) {
-                          event.preventDefault();
-                          sendMessage();
-                        }
-                      }}
-                      className="max-h-32 min-h-[2.5rem] flex-1 resize-y rounded-2xl border border-slate-200 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
-                    />
-                    <Button
-                      onClick={sendMessage}
-                      variant="primary"
-                      disabled={(!messageText.trim() && !pendingAttachment) || selectedThread.status !== 'open'}
-                      className="shrink-0 rounded-full aspect-square px-3"
-                    >
-                      <Send size={16} />
-                    </Button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="flex flex-col items-center justify-center flex-1 text-center p-8">
-                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                  <MessageCircle className="w-8 h-8 text-slate-400" />
-                </div>
-                <p className="font-medium text-slate-700">Välj en konversation</p>
-                <p className="text-sm text-slate-400 mt-1">Klicka på en konversation för att börja chatta</p>
-              </div>
-            )}
-          </div>
-        </div>
       </div>
-
-      <Modal open={showCreateModal} onClose={resetCreateModal} title={isStaff ? 'Ny chatt' : 'Ny konversation'} size="lg">
-        <div className="space-y-4">
-          {isStaff && (
+      {chat.error && (
+        <p
+          role="alert"
+          className="rounded-lg bg-red-50 p-3 text-sm text-red-700"
+        >
+          {chat.error}
+        </p>
+      )}
+      <div
+        className={`chat-workspace flex min-h-0 overflow-hidden rounded-card border bg-white shadow-sm ${chat.selected ? "chat-workspace-active" : ""}`}
+        style={
+          {
+            "--chat-height": `${viewport.height}px`,
+            "--chat-top": `${viewport.top}px`,
+          } as React.CSSProperties
+        }
+      >
+        <aside
+          className={`${chat.selected ? "hidden md:block" : "block"} h-full w-full shrink-0 border-r md:w-80 xl:w-96`}
+        >
+          <ConversationList
+            threads={chat.threads}
+            userId={user.id}
+            tenant={!staff}
+            selected={chat.selected}
+            select={chat.setSelected}
+            filter={chat.filter}
+            setFilter={chat.setFilter}
+            query={chat.query}
+            setQuery={chat.setQuery}
+            hasMore={chat.hasThreads}
+            more={chat.moreThreads}
+            onAction={setThreadMenu}
+          />
+        </aside>
+        <section
+          className={`${chat.selected ? "flex" : "hidden md:flex"} min-h-0 min-w-0 flex-1 flex-col`}
+        >
+          {current ? (
             <>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { value: 'tenant', label: 'Hyresgäst' },
-                  { value: 'staff', label: 'Personal' },
-                  { value: 'group', label: 'Grupp' },
-                ].map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => {
-                      setChatMode(option.value as ChatMode);
-                      setSelectedUserIds([]);
-                      setCreateError('');
-                    }}
-                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${chatMode === option.value ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="rounded-lg border border-slate-200 max-h-56 overflow-y-auto">
-                {selectableUsers.length === 0 ? (
-                  <p className="p-4 text-sm text-slate-500">Inga mottagare att välja.</p>
-                ) : (
-                  selectableUsers.map((candidate) => {
-                    const checked = selectedUserIds.includes(candidate.id);
-                    const singleSelect = chatMode !== 'group';
-                    return (
-                      <label key={candidate.id} className="flex items-center gap-3 p-3 border-b border-slate-100 last:border-b-0 cursor-pointer hover:bg-slate-50">
-                        <input
-                          type={singleSelect ? 'radio' : 'checkbox'}
-                          checked={checked}
-                          onChange={() => {
-                            setSelectedUserIds(singleSelect ? [candidate.id] : selectedUserIds);
-                            if (!singleSelect) toggleSelectedUser(candidate.id);
-                          }}
-                          className="w-4 h-4"
-                        />
-                        <span className="min-w-0">
-                          <span className="block text-sm font-medium text-slate-800 truncate">{candidate.name}</span>
-                          <span className="block text-xs text-slate-500 truncate">
-                            {candidate.email} · {candidate.role === 'tenant' ? 'Hyresgäst' : candidate.role === 'admin' ? 'Admin' : 'Personal'}
-                          </span>
-                        </span>
-                      </label>
-                    );
-                  })
-                )}
-              </div>
-
-              {chatMode === 'group' && (
-                <p className="text-xs text-slate-500">
-                  Gruppchattar kan innehålla personal och högst en hyresgäst. Hyresgäster kan aldrig starta eller delta i chattar med andra hyresgäster.
+              <header className="flex shrink-0 items-center gap-3 border-b bg-white p-3 pt-[max(env(safe-area-inset-top),0.75rem)] md:pt-3">
+                <button
+                  aria-label="Tillbaka till konversationer"
+                  className="rounded-full p-2 md:hidden"
+                  onClick={() => chat.setSelected(null)}
+                >
+                  <ArrowLeft />
+                </button>
+                <ChatAvatar
+                  name={chatTitle(current, user.id, !staff)}
+                  path={current.group_image_path}
+                />
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate font-semibold text-vihem-ink">
+                    {chatTitle(current, user.id, !staff)}
+                  </h2>
+                  <p className="truncate text-xs text-slate-500">
+                    {!chat.online
+                      ? "Offline"
+                      : chat.connection !== "connected"
+                        ? "Återansluter…"
+                        : activity.onlineUsers.length
+                          ? "Aktiv i chatten"
+                          : current.chat_type === "group"
+                            ? `${current.participants.length} deltagare`
+                            : "VI-HEM"}
+                  </p>
+                </div>
+                <button
+                  aria-label="Konversationsinställningar"
+                  className="p-2 text-xl"
+                  onClick={() => setThreadMenu(current)}
+                >
+                  ⋯
+                </button>
+              </header>
+              {chat.error && (
+                <p
+                  role="alert"
+                  className="shrink-0 bg-red-50 p-3 text-sm text-red-700"
+                >
+                  {chat.error}
                 </p>
               )}
+              <MessageTimeline
+                messages={chat.messages}
+                members={current.participants}
+                reactions={chat.reactions}
+                userId={user.id}
+                group={current.chat_type === "group"}
+                older={() => void chat.older()}
+                hasOlder={chat.hasOlder}
+                loading={chat.loadingMessages}
+                retry={(m) => void chat.retry(m)}
+                action={setMessageMenu}
+                reportVisible={chat.reportVisible}
+                replyTo={setReply}
+                seek={chat.seek}
+                openLink={(type, id) =>
+                  onNavigate(
+                    `${type === "workorder" ? "workorder" : "customer-project"}/${id}`,
+                  )
+                }
+              />
+              {!!activity.typingUsers.length && (
+                <p className="bg-slate-50 px-4 py-1 text-xs text-slate-500">
+                  {activity.typingUsers
+                    .map(
+                      (id) =>
+                        current.participants.find((p) => p.user_id === id)
+                          ?.name || "Deltagare",
+                    )
+                    .join(", ")}{" "}
+                  skriver…
+                </p>
+              )}
+              {staff && (
+                <div className="flex gap-2 bg-white px-3 pt-1">
+                  <button
+                    className="py-1 text-xs text-blue-600"
+                    onClick={() => {
+                      setShareType("workorder");
+                      setShareOpen(true);
+                    }}
+                  >
+                    Dela arbetsorder
+                  </button>
+                  <button
+                    className="py-1 text-xs text-blue-600"
+                    onClick={() => {
+                      setShareType("project");
+                      setShareOpen(true);
+                    }}
+                  >
+                    Dela projekt
+                  </button>
+                </div>
+              )}
+              {link && (
+                <div className="flex items-center justify-between px-3 py-2 text-xs text-blue-600">
+                  <span>
+                    {link.linked_work_order_id ? "Arbetsorder" : "Projekt"}{" "}
+                    bifogat · granskas vid öppning
+                  </span>
+                  <button
+                    aria-label="Ta bort länk"
+                    onClick={() => setLink(null)}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
+              {attachment && (
+                <div className="flex items-center gap-2 border-t px-3 py-2 text-sm">
+                  <span className="min-w-0 flex-1 truncate">
+                    {attachment.attachment_name}
+                  </span>
+                  <button
+                    aria-label="Ta bort bilaga"
+                    onClick={() =>
+                      void run(async () => {
+                        if (attachment.attachment_path)
+                          await discardChatFile(
+                            current.id,
+                            attachment.attachment_path,
+                          );
+                        setAttachment(null);
+                      })
+                    }
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              )}
+              <ChatComposer
+                text={chat.draft}
+                setText={chat.setDraft}
+                disabled={current.status !== "open"}
+                hasAttachment={!!attachment || !!link}
+                reply={reply}
+                clearReply={() => setReply(null)}
+                send={send}
+                attach={upload}
+                onTyping={activity.typing}
+                members={current.participants.filter(
+                  (p) => p.user_id !== user.id,
+                )}
+                onMention={(id) =>
+                  setMentionIds((ids) => [...new Set([...ids, id])])
+                }
+              />
             </>
-          )}
-
-          <Input
-            label="Ämne"
-            placeholder="Ange ämne för konversationen"
-            value={newSubject}
-            onChange={(event) => setNewSubject(event.target.value)}
-          />
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Meddelande</label>
-            <textarea
-              placeholder="Skriv ditt meddelande här..."
-              value={newMessage}
-              onChange={(event) => setNewMessage(event.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-              rows={4}
-            />
-          </div>
-
-          {createError && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
-              {createError}
+          ) : (
+            <div className="flex flex-1 items-center justify-center p-8 text-slate-500">
+              {chat.selected
+                ? "Hämtar konversation…"
+                : "Välj en konversation eller starta en ny chatt."}
             </div>
           )}
-
-          <div className="flex gap-3 pt-1">
-            <Button variant="secondary" onClick={resetCreateModal} className="flex-1">
-              Avbryt
-            </Button>
+        </section>
+      </div>
+      <CreateChatDialog
+        open={createOpen}
+        onClose={() => !busy && setCreateOpen(false)}
+        staff={staff}
+        busy={busy}
+        kind={kind}
+        setKind={setKind}
+        recipients={recipients}
+        setRecipients={setRecipients}
+        peopleSearch={peopleSearch}
+        setPeopleSearch={setPeopleSearch}
+        filteredPeople={filteredPeople}
+        title={title}
+        setTitle={setTitle}
+        create={create}
+      />
+      <Modal
+        open={!!threadMenu}
+        onClose={() => setThreadMenu(null)}
+        title="Konversation"
+      >
+        {threadMenu && (
+          <div className="space-y-2">
+            {[
+              [
+                "pinned",
+                threadMenu.pinned ? "Lossa från toppen" : "Fäst överst",
+              ],
+              [
+                "manual_unread",
+                threadMenu.manual_unread
+                  ? "Ta bort oläst markering"
+                  : "Markera som oläst",
+              ],
+              [
+                "archived",
+                threadMenu.archived ? "Återställ från arkiv" : "Arkivera",
+              ],
+            ].map(([field, label]) => (
+              <Button
+                key={field}
+                variant="secondary"
+                className="w-full"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    const param =
+                      field === "pinned"
+                        ? "pinned_value"
+                        : field === "archived"
+                          ? "archived_value"
+                          : "unread_value";
+                    await chatRpc("vihem_chat_settings", {
+                      thread: threadMenu.id,
+                      [param]:
+                        !threadMenu[
+                          field as "pinned" | "archived" | "manual_unread"
+                        ],
+                    });
+                    if (
+                      field === "manual_unread" &&
+                      !threadMenu.manual_unread &&
+                      chat.selected === threadMenu.id
+                    )
+                      chat.setSelected(null);
+                    setThreadMenu(null);
+                  })
+                }
+              >
+                {label}
+              </Button>
+            ))}
+            {staff && (
+              <Button
+                variant="secondary"
+                className="w-full"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    await chatRpc("vihem_chat_status", {
+                      thread: threadMenu.id,
+                      new_status:
+                        threadMenu.status === "open" ? "closed" : "open",
+                    });
+                    setThreadMenu(null);
+                  })
+                }
+              >
+                {threadMenu.status === "open"
+                  ? "Stäng konversation"
+                  : "Öppna konversation igen"}
+              </Button>
+            )}
+            <label className="block text-sm">
+              Notifikationer
+              <select
+                className="mt-1 block w-full rounded-lg border p-3"
+                value={threadMenu.notification_mode}
+                disabled={busy}
+                onChange={(e) =>
+                  void run(async () => {
+                    await chatRpc("vihem_chat_settings", {
+                      thread: threadMenu.id,
+                      notification_value: e.target.value,
+                    });
+                    setThreadMenu(null);
+                  })
+                }
+              >
+                <option value="all">Alla meddelanden</option>
+                <option value="mentions">Endast omnämnanden</option>
+                <option value="none">Tyst</option>
+              </select>
+            </label>
             <Button
-              variant="primary"
-              onClick={createThread}
-              loading={creatingThread}
-              disabled={!newSubject.trim() || !newMessage.trim()}
-              className="flex-1"
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
+                chat.setSelected(threadMenu.id);
+                setGroupTitle(threadMenu.subject);
+                setThreadMenu(null);
+                setInfoOpen(true);
+              }}
             >
-              Skicka
+              Visa information och deltagare
             </Button>
           </div>
+        )}
+      </Modal>
+      <Modal
+        open={!!messageMenu}
+        onClose={() => setMessageMenu(null)}
+        title="Meddelande"
+      >
+        {messageMenu && (
+          <div className="space-y-3">
+            {current?.chat_type === "group" &&
+              messageMenu.sender_id === user.id && (
+                <p className="text-sm text-slate-500">
+                  Läst av:{" "}
+                  {messageReceipt(messageMenu, current.participants)
+                    .map((p) => p.name)
+                    .join(", ") || "Ingen ännu"}
+                </p>
+              )}
+            <div className="flex gap-2">
+              {["👍", "❤️", "😂", "✅"].map((emoji) => (
+                <Button
+                  variant="secondary"
+                  key={emoji}
+                  disabled={busy || !!messageMenu.local_status}
+                  onClick={() =>
+                    void run(async () => {
+                      await chatRpc("vihem_chat_message_action", {
+                        message_id: messageMenu.id,
+                        action: "reaction",
+                        text_value: emoji,
+                      });
+                      setMessageMenu(null);
+                    })
+                  }
+                >
+                  {emoji}
+                </Button>
+              ))}
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setReply(messageMenu);
+                setMessageMenu(null);
+              }}
+            >
+              Svara
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() =>
+                void run(async () => {
+                  await navigator.clipboard.writeText(messageMenu.message);
+                  setMessageMenu(null);
+                })
+              }
+            >
+              Kopiera
+            </Button>
+            {staff && !messageMenu.local_status && (
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() => setForwardOpen(true)}
+                >
+                  Vidarebefordra internt
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const source = messageMenu.id;
+                    setMessageMenu(null);
+                    onNavigate(`workorder-new/${source}`);
+                  }}
+                >
+                  Skapa arbetsorder
+                </Button>
+              </>
+            )}
+            {messageMenu.sender_id === user.id &&
+              !messageMenu.local_status &&
+              Date.now() - Date.parse(messageMenu.created_at) < 900000 && (
+                <>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setEditText(messageMenu.message);
+                      setEditOpen(true);
+                    }}
+                  >
+                    Redigera
+                  </Button>
+                  <Button
+                    variant="danger"
+                    disabled={busy}
+                    onClick={() => {
+                      if (window.confirm("Radera meddelandet?"))
+                        void run(async () => {
+                          await chatRpc("vihem_chat_message_action", {
+                            message_id: messageMenu.id,
+                            action: "delete",
+                          });
+                          setMessageMenu(null);
+                          void chat.refresh();
+                        });
+                    }}
+                  >
+                    Radera
+                  </Button>
+                </>
+              )}
+          </div>
+        )}
+      </Modal>
+      <Modal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        title={shareType === "workorder" ? "Dela arbetsorder" : "Dela projekt"}
+      >
+        <div className="max-h-80 space-y-2 overflow-y-auto">
+          {!entities.length && (
+            <p className="text-sm text-slate-500">
+              Inga objekt med åtkomst hittades.
+            </p>
+          )}
+          {entities.map((entity) => (
+            <Button
+              key={entity.id}
+              className="w-full justify-start"
+              variant="secondary"
+              onClick={() => {
+                setLink(
+                  shareType === "workorder"
+                    ? { linked_work_order_id: entity.id }
+                    : { linked_project_id: entity.id },
+                );
+                setShareOpen(false);
+              }}
+            >
+              {entity.title}
+            </Button>
+          ))}
         </div>
       </Modal>
+      <Modal
+        open={forwardOpen}
+        onClose={() => setForwardOpen(false)}
+        title="Vidarebefordra till intern chatt"
+      >
+        <div className="max-h-80 space-y-2 overflow-y-auto">
+          {chat.threads
+            .filter(
+              (t) =>
+                t.id !== chat.selected &&
+                !t.participants.some((p) => p.role === "tenant") &&
+                t.status === "open",
+            )
+            .map((t) => (
+              <Button
+                key={t.id}
+                className="w-full"
+                variant="secondary"
+                loading={busy}
+                onClick={() =>
+                  void run(async () => {
+                    chat.forward(t.id, messageMenu!);
+                    setForwardOpen(false);
+                    setMessageMenu(null);
+                  })
+                }
+              >
+                {chatTitle(t, user.id, false)}
+              </Button>
+            ))}
+        </div>
+      </Modal>
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title="Redigera meddelande"
+      >
+        <textarea
+          value={editText}
+          onChange={(e) => setEditText(e.target.value)}
+          maxLength={10000}
+          rows={5}
+          className="w-full rounded-lg border p-3 text-base"
+        />
+        <Button
+          loading={busy}
+          onClick={() =>
+            void run(async () => {
+              await chatRpc("vihem_chat_message_action", {
+                message_id: messageMenu!.id,
+                action: "edit",
+                text_value: editText,
+              });
+              setEditOpen(false);
+              setMessageMenu(null);
+              void chat.refresh();
+            })
+          }
+        >
+          Spara
+        </Button>
+      </Modal>
+      <ChatGroupInfo
+        open={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        onLeave={() => chat.setSelected(null)}
+        current={current}
+        ownGroup={!!ownGroup}
+        busy={busy}
+        activity={activity}
+        run={run}
+        groupTitle={groupTitle}
+        setGroupTitle={setGroupTitle}
+        user={user}
+        people={people}
+      />
     </div>
   );
 }

@@ -328,6 +328,7 @@ function AppInner() {
     if (!user) return;
     void registerNativePush(user.id, user.organisation_id);
     const notificationSince = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    let countDisposed = false;
     const refreshNotificationCounts = async () => {
       const [allUnread, chatUnread] = await Promise.all([
         supabase
@@ -336,17 +337,12 @@ function AppInner() {
           .eq('user_id', user.id)
           .gte('created_at', notificationSince)
           .is('read_at', null),
-        supabase
-          .from('vihem_notifications')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .gte('created_at', notificationSince)
-          .is('read_at', null)
-          .in('type', ['chat', 'message', 'chat_message']),
+        supabase.rpc('vihem_chat_unread'),
       ]);
 
+      if (countDisposed) return;
       setNotificationCount(allUnread.count ?? 0);
-      setChatNotificationCount(chatUnread.count ?? 0);
+      setChatNotificationCount(Number(chatUnread.data || 0));
       void syncNativeBadge(allUnread.count ?? 0);
     };
 
@@ -362,9 +358,21 @@ function AppInner() {
       }, () => {
         void refreshNotificationCounts();
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_chat_threads', filter: `organisation_id=eq.${user.organisation_id}` }, () => void refreshNotificationCounts())
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'vihem_chat_participants', filter: `user_id=eq.${user.id}` }, () => void refreshNotificationCounts())
       .subscribe();
+    const refreshChatCounts = () => void refreshNotificationCounts();
+    window.addEventListener('vihem-chat-unread', refreshChatCounts);
+    window.addEventListener('online', refreshChatCounts);
+    document.addEventListener('visibilitychange', refreshChatCounts);
+    const chatBadgeTimer = window.setInterval(refreshChatCounts, 30000);
 
     return () => {
+      countDisposed = true;
+      window.clearInterval(chatBadgeTimer);
+      window.removeEventListener('vihem-chat-unread', refreshChatCounts);
+      window.removeEventListener('online', refreshChatCounts);
+      document.removeEventListener('visibilitychange', refreshChatCounts);
       supabase.removeChannel(channel);
       void unregisterNativePush(user.id);
     };
@@ -385,7 +393,7 @@ function AppInner() {
     return addPushNavigationListener((link) => {
       setCurrentPage(link);
       if (link === 'notifications') setNotificationCount(0);
-      if (link === 'chat') setChatNotificationCount(0);
+
       scrollAppTo(0);
     });
   }, []);
@@ -414,7 +422,7 @@ function AppInner() {
   const navigate = (page: string) => {
     setCurrentPage(page);
     if (page === 'notifications') setNotificationCount(0);
-    if (page === 'chat') setChatNotificationCount(0);
+
     scrollAppTo(0);
   };
 
@@ -460,8 +468,17 @@ function AppInner() {
       return <FleetPage onNavigate={navigate} initialVehicleId={currentPage.split('/')[1]} />;
     }
 
+    if (currentPage.startsWith('workorder-new/')) {
+      if (!isStaff) return renderDashboard();
+      return <WorkOrdersPage onNavigate={navigate} sourceChatMessageId={currentPage.split('/')[1]} />;
+    }
+    if (currentPage.startsWith('customer-project/')) {
+      if (!isStaff || !enabledModules.customer_projects) return renderDashboard();
+      return <CustomerProjectsPage onNavigate={navigate} initialProjectId={currentPage.split('/')[1]} />;
+    }
+
     if (currentPage.startsWith('chat/')) {
-      return <ChatPage onNavigate={navigate} initialThreadId={currentPage.split('/')[1]} />;
+      return <ChatPage onNavigate={navigate} initialThreadId={currentPage.split('/')[1]} initialMessageId={currentPage.split('/')[2]} />;
     }
 
     if (currentPage.startsWith('agreements-v2/new/')) {

@@ -1,3 +1,4 @@
+import { TenantChatLauncher } from '../components/chat/ContextChatLauncher';
 import React, { useState, useEffect } from 'react';
 import { Users, Plus, Edit2, Home, Mail, Phone, KeyRound, RefreshCw, FileSignature, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -583,6 +584,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
               <div className="flex items-start justify-between mb-4">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900 mb-3">{selectedTenant.name}</h2>
+                  <TenantChatLauncher tenantId={selectedTenant.id} onNavigate={onNavigate} />
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 text-sm text-slate-600">
                       <Mail className="w-4 h-4" />

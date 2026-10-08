@@ -1,3 +1,4 @@
+import { ContextChatLauncher } from '../components/chat/ContextChatLauncher';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -58,7 +59,7 @@ import type {
   WorkOrder,
 } from '../types';
 
-interface CustomerProjectsPageProps { onNavigate: (page: string) => void; }
+interface CustomerProjectsPageProps { onNavigate: (page: string) => void; initialProjectId?: string; }
 
 const STATUS_LABELS: Record<CustomerProjectStatus, string> = {
   draft: 'Utkast',
@@ -180,7 +181,7 @@ const STAFF_PROJECT_TABS: ProjectTabId[] = [
   'documents',
 ];
 
-export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjectsPageProps) {
+export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId }: CustomerProjectsPageProps) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [loading, setLoading] = useState(true);
@@ -370,6 +371,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     fixed_price_amount: '0',
   });
 
+  useEffect(() => { if (initialProjectId && projects.some(project => project.id === initialProjectId)) setSelectedProjectId(initialProjectId); }, [initialProjectId, projects]);
   const selectedProject = selectedProjectId ? projects.find(project => project.id === selectedProjectId) || null : null;
 
   useEffect(() => { fetchAll(); }, [user?.organisation_id]);
@@ -1298,6 +1300,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
 
         {selectedProject ? (
           <div className="space-y-5">
+            <ContextChatLauncher type="project" id={selectedProject.id} name={selectedProject.title || selectedProject.name} suggestedIds={projectAssignments.map(a => a.user_id)} onNavigate={_onNavigate} />
             <button
               type="button"
               onClick={() => setSelectedProjectId(null)}

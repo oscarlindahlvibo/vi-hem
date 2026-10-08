@@ -125,7 +125,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // chance to actually process the redirect.
     const hasPendingUrlSession = /[#?&](access_token|token_hash)=/.test(window.location.hash + window.location.search);
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if(session?.access_token)await supabase.realtime.setAuth(session.access_token);
       if (session?.user) {
         fetchProfile(session.user.id)
           .then(profile => {
@@ -157,6 +158,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
         (async () => {
           try {
+            await supabase.realtime.setAuth(session.access_token);
             const profile = await fetchProfile(session.user.id);
             setUser(profile);
           } catch (error) {
@@ -167,6 +169,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         })();
       } else if (event === 'SIGNED_OUT') {
+        void supabase.removeAllChannels();
+        for(const key of Object.keys(localStorage))if(key.startsWith('vihem-chat:'))localStorage.removeItem(key);
         setUser(null);
         setLoading(false);
       }

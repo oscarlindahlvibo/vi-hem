@@ -213,3 +213,9 @@
 /* Flytande bottennavigationen får aldrig ligga över en öppen modal/panel eller dess knappar. */
 .vihem-floating-nav { transition: transform 0.22s ease, opacity 0.2s ease; }
 html[data-overlay-open] .vihem-floating-nav { transform: translateY(130%); opacity: 0; pointer-events: none; }
+
+/* Chat follows the existing VI-HEM tokens; a mobile thread owns its viewport. */
+.chat-workspace { height: max(480px, calc(100dvh - 12rem)); }
+@media (max-width: 767px) {
+ .chat-workspace-active { margin-top: 0 !important; position: fixed; inset-inline: 0; top: var(--chat-top, 0px); height: var(--chat-height, 100dvh); z-index: 40; border: 0; border-radius: 0; }
+}

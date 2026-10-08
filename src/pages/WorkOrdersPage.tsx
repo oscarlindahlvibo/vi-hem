@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { WorkOrderChatFiles } from '../components/chat/WorkOrderChatFiles';
+import { ContextChatLauncher } from '../components/chat/ContextChatLauncher';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -270,7 +272,7 @@ function WorkOrderCategoryManagerModal({ open, onClose, organisationId, userId }
   );
 }
 
-export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: { onNavigate: (page: string) => void; initialWorkOrderId?: string }) {
+export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, sourceChatMessageId }: { onNavigate: (page: string) => void; initialWorkOrderId?: string; sourceChatMessageId?: string }) {
   const { user, loading: authLoading } = useAuth();
   const { categories: timeCategories } = useTimeCategories();
   const { categories: woCategories } = useWorkOrderCategories();
@@ -313,6 +315,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Create form state
+  const [chatSourceFile,setChatSourceFile]=useState<{id:string;name:string}|null>(null),[includeChatFile,setIncludeChatFile]=useState(false);
+  const createdFromChat=useRef<string|null>(null);
   const [createForm, setCreateForm] = useState<CreateWorkOrderForm>(defaultCreateForm);
   const [submittingCreate, setSubmittingCreate] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -386,6 +390,27 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       setShowDetailModal(true);
     }
   }, [initialWorkOrderId, loading, workOrders]);
+
+  useEffect(() => {
+    if (!sourceChatMessageId || !user || !isStaff) return;
+    createdFromChat.current=null;setChatSourceFile(null);setIncludeChatFile(false);
+    let live = true;
+    void supabase.from('vihem_chat_messages').select('id,message,deleted_at,attachment_path,attachment_name,thread:vihem_chat_threads(property_id,tenant_id,maintenance_request_id)').eq('id', sourceChatMessageId).maybeSingle().then(async ({ data, error }) => {
+      if (!live) return;
+      if (error || !data || data.deleted_at) { setCreateError('Meddelandet kunde inte hämtas.'); setShowCreateModal(true); return; }
+      if(data.attachment_path)setChatSourceFile({id:data.id,name:data.attachment_name||'Bilaga'});
+      const thread = (Array.isArray(data.thread) ? data.thread[0] : data.thread) as { property_id: string | null; tenant_id: string | null; maintenance_request_id: string | null } | null;
+      let apartmentId = '', propertyId = thread?.property_id || '';
+      if (thread?.maintenance_request_id) {
+        const { data: request } = await supabase.from('vihem_maintenance_requests').select('property_id,apartment_id').eq('id', thread.maintenance_request_id).maybeSingle();
+        apartmentId = request?.apartment_id || ''; propertyId ||= request?.property_id || '';
+      }
+      if (!live) return;
+      setCreateForm({ ...defaultCreateForm, title: data.message.split('\n')[0].slice(0,100), description: data.message, property_id: propertyId, apartment_id: apartmentId, tenant_id: thread?.tenant_id || '' });
+      setShowCreateModal(true);
+    });
+    return () => { live = false; };
+  }, [sourceChatMessageId, user?.id, isStaff]);
 
   // Fetch comments when detail modal opens
   useEffect(() => {
@@ -547,12 +572,15 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     }
   }
 
+  const createSubmission = useRef(false);
   async function createWorkOrder() {
-    if (!user || !createForm.title) return;
+    if (!user || !createForm.title || createSubmission.current) return;
+    createSubmission.current = true;
 
     try {
       setSubmittingCreate(true);
       setCreateError('');
+      if(createdFromChat.current&&includeChatFile&&chatSourceFile){const {error}=await supabase.functions.invoke('vihem-chat-to-workorder',{body:{work_order_id:createdFromChat.current,message_id:chatSourceFile.id}});if(error)throw new Error('Arbetsordern är skapad, men bilagan kunde inte kopieras. Tryck på Skapa igen för att försöka kopiera bilagan utan att skapa en ny arbetsorder.');createdFromChat.current=null;setChatSourceFile(null);setShowCreateModal(false);await fetchWorkOrders();return;}
       const workOrderId = createClientId();
       const attachments = await uploadWorkOrderFiles(workOrderId, createForm.files, user.id);
       const checklist = createForm.checklist
@@ -582,6 +610,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       ]);
 
       if (error) throw error;
+      if(includeChatFile&&chatSourceFile){createdFromChat.current=workOrderId;const {error:copyError}=await supabase.functions.invoke('vihem-chat-to-workorder',{body:{work_order_id:workOrderId,message_id:chatSourceFile.id}});if(copyError)throw new Error('Arbetsordern är skapad, men bilagan kunde inte kopieras. Tryck på Skapa igen för att försöka kopiera bilagan utan att skapa en ny arbetsorder.');}
+      createdFromChat.current=null;setChatSourceFile(null);
       setCreateForm(defaultCreateForm);
       setShowCreateModal(false);
       await fetchWorkOrders();
@@ -589,6 +619,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       console.error('Error creating work order:', err);
       setCreateError(err.message || 'Kunde inte skapa arbetsordern. Kontrollera fälten och försök igen.');
     } finally {
+      createSubmission.current = false;
       setSubmittingCreate(false);
     }
   }
@@ -1665,6 +1696,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
           open={showCreateModal}
           onClose={() => {
             setShowCreateModal(false);
+            createdFromChat.current=null;setChatSourceFile(null);setIncludeChatFile(false);
             setCreateError('');
           }}
           title="Ny arbetsorder"
@@ -1816,6 +1848,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                   onChange={(event) => setCreateForm({ ...createForm, files: Array.from(event.target.files || []) })}
                 />
               </label>
+              {chatSourceFile&&<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeChatFile} disabled={!!createdFromChat.current} onChange={e=>setIncludeChatFile(e.target.checked)}/>Kopiera {chatSourceFile.name} från chatten till arbetsordern (privat bilaga)</label>}
               {createForm.files.length > 0 && (
                 <div className="space-y-1">
                   {createForm.files.map((file, index) => (
@@ -1973,7 +2006,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         {selectedWorkOrder && (
           <div className="space-y-6">
             {isStaff && (
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-2">
+                <ContextChatLauncher type="workorder" id={selectedWorkOrder.id} name={selectedWorkOrder.title} suggestedIds={selectedWorkOrder.assigned_to_ids || []} onNavigate={_onNavigate} />
                 <Button variant="secondary" size="sm" onClick={openEditModal}>
                   Redigera arbetsorder
                 </Button>
@@ -2212,6 +2246,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
               </div>
             )}
 
+            <WorkOrderChatFiles workOrderId={selectedWorkOrder.id}/>
             <WorkOrderOperationsPanel
               workOrderId={selectedWorkOrder.id}
               propertyId={selectedWorkOrder.property_id}

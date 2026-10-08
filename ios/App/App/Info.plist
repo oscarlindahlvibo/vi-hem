@@ -31,6 +31,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>VI-HEM behöver mikrofonen för att spela in röstmeddelanden i chatten.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>VI-HEM använder kameran för att skanna kvitton och leverantörsfakturor.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

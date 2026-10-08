@@ -479,6 +479,12 @@ verify_jwt = false
 [functions.vihem-ekangen-stripe-webhook]
 verify_jwt = false
 
-# Admin-hjälp för Ekängens hemsida (Stripe-status, import från Beds24). Autentiseras i koden (inloggad admin).
+# Admin-hjälp för Ekängens hemsida. Autentiseras i koden.
 [functions.vihem-ekangen-admin]
+verify_jwt = false
+
+[functions.vihem-chat-upload]
+verify_jwt = false
+
+[functions.vihem-chat-to-workorder]
 verify_jwt = false
