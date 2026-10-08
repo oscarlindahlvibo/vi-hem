@@ -15,6 +15,25 @@ const SETTINGS_KEY = "fleet_source_recheck";
 const SECRET_HEADER = "x-vihem-fleet-recheck-secret";
 const MAX_SOURCES_PER_RUN = 100;
 const INSPECTION_TYPE = "Kontrollbesiktning";
+const DAY_MS = 86_400_000;
+
+// Schemalagd körning: hämta bara källor som är "på tur". Besiktning sker en gång
+// om året, så långt från förfallodatum räcker en kontroll per månad; nära eller
+// efter förfall kontrolleras sidan dagligen så att en utförd besiktning fångas direkt.
+function isDue(src: any, now: number): boolean {
+  if (!src.last_checked_at) return true;
+  const age = now - new Date(src.last_checked_at).getTime();
+  if (src.last_status === "error") return age >= 7 * DAY_MS;
+  if (!src.next_inspection_date) return age >= 14 * DAY_MS;
+  const daysToDue = (new Date(src.next_inspection_date).getTime() - now) / DAY_MS;
+  if (daysToDue <= 60) return age >= DAY_MS - 3_600_000;
+  return age >= 30 * DAY_MS;
+}
+
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -56,8 +75,11 @@ Deno.serve(async (req: Request) => {
   if (typeof body.source_id === "string") query = query.eq("id", body.source_id);
   else if (typeof body.vehicle_id === "string") query = query.eq("vehicle_id", body.vehicle_id);
   else query = query.eq("auto_check", true); // schemalagd körning: bara källor med automatisk kontroll
-  const { data: sources, error } = await query;
+  const { data: allSources, error } = await query;
   if (error) return json({ error: error.message }, 500);
+  const manual = typeof body.source_id === "string" || typeof body.vehicle_id === "string";
+  const nowMs = Date.now();
+  const sources = manual ? allSources : (allSources ?? []).filter((src: any) => isDue(src, nowMs));
 
   const aiCache = new Map<string, Awaited<ReturnType<typeof loadAiSettings>>>();
   const results: { source_id: string; status: string; summary?: string; error?: string }[] = [];
@@ -74,6 +96,14 @@ Deno.serve(async (req: Request) => {
       const pageText = await fetchPageText(target.toString());
       if (!pageText.trim()) throw new Error("Kunde inte läsa något innehåll från sidan.");
 
+      // Oförändrad sida sedan senast = ingen AI-körning (hämtningen är gratis, AI:n kostar).
+      const contentHash = await sha256(pageText);
+      if (src.content_hash && src.content_hash === contentHash && src.last_status === "ok") {
+        await admin.from("vihem_fleet_vehicle_sources").update({ last_checked_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", src.id);
+        results.push({ source_id: src.id, status: "unchanged" });
+        continue;
+      }
+
       if (!aiCache.has(src.organisation_id)) aiCache.set(src.organisation_id, await loadAiSettings(admin, src.organisation_id));
       const ai = aiCache.get(src.organisation_id)!;
       if (!ai.openaiKey) throw new Error("Ingen AI-nyckel konfigurerad.");
@@ -89,9 +119,12 @@ Deno.serve(async (req: Request) => {
       if (newNext && newNext !== src.next_inspection_date) changes.push(`Nästa besiktning senast ${newNext}${src.next_inspection_date ? ` (tidigare ${src.next_inspection_date})` : ""}`);
 
       // Uppdatera fordonets besiktningspost, men låt aldrig en äldre uppgift skriva över en nyare.
+      let notifyNewInspection = false;
       if (newLast || newNext) {
         const { data: insp } = await admin.from("vihem_fleet_inspections").select("id, last_inspection_date, next_inspection_date")
           .eq("vehicle_id", src.vehicle_id).eq("inspection_type", INSPECTION_TYPE).eq("active", true).maybeSingle();
+        const prevLast: string | null = insp?.last_inspection_date ?? src.last_inspection_date ?? null;
+        notifyNewInspection = !!(newLast && prevLast && newLast > prevLast);
         const olderThanExisting = !!(insp?.last_inspection_date && newLast && newLast < insp.last_inspection_date);
         if (!olderThanExisting) {
           const payload: Record<string, unknown> = {};
@@ -109,8 +142,21 @@ Deno.serve(async (req: Request) => {
         }
       }
 
+      if (notifyNewInspection) {
+        const { data: veh } = await admin.from("vihem_fleet_vehicles").select("name, registration_number").eq("id", src.vehicle_id).maybeSingle();
+        const { data: admins } = await admin.from("vihem_profiles").select("id").eq("organisation_id", src.organisation_id).in("role", ["admin", "superadmin"]).eq("active", true);
+        const label = [veh?.name, veh?.registration_number ? `(${veh.registration_number})` : ""].filter(Boolean).join(" ");
+        for (const a of admins ?? []) {
+          await admin.rpc("create_notification", {
+            recipient_id: a.id, org_uuid: src.organisation_id, notification_title: "Besiktning utförd",
+            notification_message: `${label}: besiktigad ${newLast}${newNext ? `, nästa senast ${newNext}` : ""}.`,
+            notification_type: "fleet", notification_link: `fleet/${src.vehicle_id}`,
+          });
+        }
+      }
+
       await admin.from("vihem_fleet_vehicle_sources").update({
-        extracted: found, last_inspection_date: newLast, next_inspection_date: newNext,
+        content_hash: contentHash, extracted: found, last_inspection_date: newLast, next_inspection_date: newNext,
         last_checked_at: new Date().toISOString(), last_status: "ok", last_error: "",
         last_change_summary: changes.length ? changes.join(" · ") : src.last_change_summary,
         updated_at: new Date().toISOString(),
