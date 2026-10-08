@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Download, MessageSquare, RefreshCw } from 'lucide-react';
+import { ShortStayTemplatePicker } from './ShortStayTemplatePicker';
 import { supabase } from '../lib/supabase';
 import { Button, Input } from './ui';
 
 interface Thread {
-  beds24_booking_id: string; booking_id: string | null; guest_name: string | null;
+  unit_id: string; beds24_booking_id: string; booking_id: string | null; guest_name: string | null;
   unit_name: string; channel_name: string | null; start_date: string | null;
   end_date: string | null; last_message: string; last_message_at: string; message_count: number;
 }
@@ -89,14 +90,14 @@ export function ShortStayMessages({ organisationId, bookingId, onOpenBooking }: 
         {selected ? <>
           {!bookingId && <button onClick={() => setSelected(null)} className="mb-3 flex items-center gap-1 text-sm text-blue-600 md:hidden"><ArrowLeft className="h-4 w-4" /> Konversationer</button>}
           <div className="mb-4 flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-semibold">{current?.guest_name || `Bokning ${selected}`}</h3><p className="text-sm text-slate-500">{current?.unit_name} {current?.channel_name && `· ${current.channel_name}`}</p>{current?.start_date && <p className="text-xs text-slate-500">{current.start_date} – {current.end_date}</p>}</div>{current?.booking_id && onOpenBooking && <Button variant="secondary" onClick={() => onOpenBooking(current.booking_id!)}>Öppna bokning</Button>}</div>
-          <ShortStayMessageThread key={`${organisationId}:${selected}`} organisationId={organisationId} bookingId={selected} revision={revision} onSent={() => setRevision(value => value + 1)} />
+          <ShortStayMessageThread key={`${organisationId}:${selected}`} organisationId={organisationId} bookingId={selected} unitId={current?.unit_id} revision={revision} onSent={() => setRevision(value => value + 1)} />
         </> : <p className="py-12 text-center text-sm text-slate-500">Välj en konversation för att läsa chattflödet.</p>}
       </div>
     </div>
   </section>;
 }
 
-function ShortStayMessageThread({ organisationId, bookingId, revision, onSent }: { organisationId: string; bookingId: string; revision: number; onSent: () => void }) {
+function ShortStayMessageThread({ organisationId, bookingId, unitId, revision, onSent }: { organisationId: string; bookingId: string; unitId?: string; revision: number; onSent: () => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -190,6 +191,7 @@ function ShortStayMessageThread({ organisationId, bookingId, revision, onSent }:
     </div>
     {pendingCount > 0 && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{pendingCount} utskick saknar bekräftelse. Kontrollera dem i Beds24 innan samma text skickas igen.</p>}
     <form className="space-y-2 border-t pt-3" onSubmit={event => { event.preventDefault(); void send(); }}>
+      <ShortStayTemplatePicker organisationId={organisationId} bookingId={bookingId} unitId={unitId} disabled={sending || uncertain || !capability?.canSend} hasDraft={!!draft.trim()} onApply={text => { setDraft(text); setSendError(''); setSendNotice(''); }} />
       <label className="block text-sm font-medium" htmlFor={`guest-reply-${bookingId}`}>Meddelande till gästen</label>
       <textarea id={`guest-reply-${bookingId}`} rows={4} maxLength={5000} value={draft} disabled={sending || uncertain || !capability?.canSend} onChange={event => setDraft(event.target.value)} placeholder="Skriv ditt svar…" className="w-full rounded-lg border border-slate-300 p-3 text-base disabled:bg-slate-50" />
       {!capability ? <p className="text-sm text-slate-500">Kontrollerar bokningskanalen…</p> : !capability.canSend && <p className="text-sm text-slate-500">{capability.reason}</p>}

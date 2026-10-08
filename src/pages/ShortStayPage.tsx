@@ -10,6 +10,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { formatDateTime } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import { ShortStayPricingPanel } from '../components/ShortStayPricingPanel';
+import { ShortStayMessageTemplates } from '../components/ShortStayMessageTemplates';
 import { ShortStayMessages } from '../components/ShortStayMessages';
 import {
   Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea,
@@ -24,7 +25,7 @@ interface ShortStayPageProps {
   onNavigate: (page: string) => void;
 }
 
-type Tab = 'overview' | 'calendar' | 'cleaning' | 'bookings' | 'messages' | 'pricing' | 'key_boxes' | 'receipts' | 'settings';
+type Tab = 'overview' | 'calendar' | 'cleaning' | 'bookings' | 'messages' | 'message_templates' | 'pricing' | 'key_boxes' | 'receipts' | 'settings';
 
 interface KeyBox {
   id: string;
@@ -1505,7 +1506,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
           ['calendar', 'Kalender'],
           ['cleaning', 'Städning'],
           ['bookings', 'Bokningar'],
-          ...(['admin', 'superadmin', 'staff'].includes(user?.role || '') ? [['messages', 'Gästmeddelanden']] : []),
+          ...(['admin', 'superadmin', 'staff'].includes(user?.role || '') ? [['messages', 'Gästmeddelanden'], ['message_templates', 'Meddelandemallar']] : []),
           ...(isAdmin ? [['pricing', 'Priser']] : []),
           ['key_boxes', 'Nyckelboxar'],
           ['receipts', 'Kvitton'],
@@ -1536,6 +1537,8 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
             )}
           />
         </Card>
+      ) : tab === 'message_templates' && organisationId && ['admin', 'superadmin', 'staff'].includes(user?.role || '') ? (
+        <ShortStayMessageTemplates organisationId={organisationId} units={units} canManage={['admin', 'superadmin'].includes(user?.role || '')} />
       ) : tab === 'messages' && organisationId ? (
         <ShortStayMessages organisationId={organisationId} onOpenBooking={id => {
           const booking = bookings.find(item => item.id === id);

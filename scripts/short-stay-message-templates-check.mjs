@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import ts from 'typescript';
+const source = await readFile(new URL('../src/lib/shortStayMessageTemplates.ts', import.meta.url), 'utf8');
+const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } }).outputText;
+const { validateTemplate, languageLabel } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const translations = validateTemplate(' Incheckning ', [{language:' SV ',text:' Hej!\nVälkommen. '},{language:'en-gb',text:'Welcome!'},{language:'ar',text:'أهلاً'}]);
+assert.deepEqual(translations,{sv:'Hej!\nVälkommen.','en-gb':'Welcome!',ar:'أهلاً'});
+assert.equal(languageLabel('sv'),'Svenska'); assert.equal(languageLabel('en-gb'),'en-gb');
+assert.throws(()=>validateTemplate('',[{language:'sv',text:'Hej'}]),/mallnamn/);
+assert.throws(()=>validateTemplate('a'.repeat(121),[{language:'sv',text:'Hej'}]),/mallnamn/);
+assert.throws(()=>validateTemplate('Mall',[]),/minst ett språk/);
+for (const language of ['__proto__','sv_SE','', 'constructor']) assert.throws(()=>validateTemplate('Mall',[{language,text:'Hej'}]),/språkkod/);
+assert.throws(()=>validateTemplate('Mall',[{language:'sv',text:'Hej'},{language:'SV',text:'Hello'}]),/finns redan/);
+assert.throws(()=>validateTemplate('Mall',[{language:'en',text:'  '}]),/Skriv en text/);
+assert.throws(()=>validateTemplate('Mall',[{language:'sv',text:'a'.repeat(5001)}]),/Skriv en text/);
+assert.equal(validateTemplate('Mall',[{language:'sv',text:'a'.repeat(5000)}]).sv.length,5000);
+console.log('PASS: independent multilingual texts, custom language codes, Swedish/English/Arabic, duplicate languages, empty/oversized content and preserved line breaks.');

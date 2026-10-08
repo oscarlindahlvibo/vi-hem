@@ -36,3 +36,13 @@ API-referens: https://beds24.com/api/v2/apiV2.yaml och https://wiki.beds24.com/i
 Migration `20261008170000_beds24_manual_messages.sql` lagrar utskicksreferens, avsändare, text och status. Klienten har enbart läsrätt. UUID-referensen tas i anspråk före POST och återanvänds vid statuskontroll. En unik indexering av obekräftade texter skyddar även vid omladdning. Beds24 saknar dokumenterad idempotensnyckel: timeout, 5xx, trasigt svar och success:false behandlas därför som obekräftade och skickas aldrig automatiskt igen. Kontrollera dessa i Beds24; ändra inte pending-status utan att först utreda om meddelandet skickades. sent betyder accepterat av Beds24, inte bekräftad leverans hos kanalen. Läsflödet synkas efter accepterat utskick, annars vid nästa ordinarie synkning.
 
 Verifiering: `node scripts/beds24-send-message-check.mjs`, befintlig meddelandesynkningstest, typkontroll, produktionsbygge och SQL i återställd transaktion. Inga testmeddelanden skickas till riktiga gäster.
+
+## Meddelandemallar per lägenhet (2026-10-08)
+
+Fliken **Korttidsuthyrning → Meddelandemallar** väljer en korttidsenhet (lägenhet eller rum). Organisationens admin/superadmin skapar, redigerar och tar bort namngivna mallar. En mall innehåller en separat manuellt skriven text per språkkod; förslag finns för sv/en/de/da/no/fi/fr/es/pl och egna koder som ar eller en-gb stöds. Ingen automatisk översättning eller automatisk sändning sker. Varje språktext har samma gräns på 5 000 tecken som chattens skickafunktion.
+
+I konversationen hämtas endast mallar för den aktuella lägenheten. Välj mall och språk, förhandsvisa och tryck **Lägg in mall**. Texten hamnar i svarsfältet och kan ändras innan **Skicka meddelande**. Ett befintligt utkast ersätts först efter bekräftelse. Mallar fungerar även i bokningsdialogen och för äldre trådar där endast meddelandesynkens enhetskoppling finns kvar. Personal kan använda och läsa mallar men inte ändra dem.
+
+Migration `20261008183000_short_stay_message_templates.sql` skapar en egen tabell med RLS för organisation/modul/roll och kontroll att lägenheten hör till samma organisation vid skrivning. Databasen validerar språkobjekt och texter. Namn är unika inom lägenheten utan hänsyn till stora/små bokstäver. Sparande/borttagning kontrollerar senaste updated_at så att andra administratörers samtidiga ändringar inte skrivs över. Malltexter behandlas som vanlig text.
+
+Verifiering: `node scripts/short-stay-message-templates-check.mjs`, befintliga läs-/skickatester, typkontroll och produktionsbygge. SQL testas i en transaktion med ROLLBACK, inklusive admin-skrivning, staff-läsning, nekad staff-skrivning och nekad tenant/okänd användare/anon/TRUNCATE. Ingen befintlig bokning eller gästkonversation ändras av installationen.
