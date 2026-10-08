@@ -19,6 +19,7 @@ import {
   Users,
   Edit2,
   UserPlus,
+  ArrowLeft,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -366,13 +367,9 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
     fixed_price_amount: '0',
   });
 
-  const selectedProject = projects.find(project => project.id === selectedProjectId) || projects[0] || null;
+  const selectedProject = selectedProjectId ? projects.find(project => project.id === selectedProjectId) || null : null;
 
   useEffect(() => { fetchAll(); }, [user?.organisation_id]);
-
-  useEffect(() => {
-    if (!selectedProjectId && projects.length > 0) setSelectedProjectId(projects[0].id);
-  }, [projects, selectedProjectId]);
 
   const projectAssignments = useMemo(
     () => assignments.filter(assignment => assignment.project_id === selectedProject?.id),
@@ -1234,8 +1231,8 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         )}
       />
 
-      <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[320px_minmax(0,1fr)]">
-        <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-5">
+        {!selectedProject && <div className="space-y-4">
           <SearchInput placeholder="Sök projekt, kund, adress..." value={searchQuery} onChange={setSearchQuery} />
           <div className={`grid gap-1 rounded-lg bg-slate-100 p-1 ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {[
@@ -1265,7 +1262,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
               />
             </Card>
           ) : (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:block 2xl:space-y-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
               {filteredProjects.map(project => {
                 const customer = customers.find(c => c.id === project.customer_id);
                 const projectStaff = assignments.filter(a => a.project_id === project.id);
@@ -1273,7 +1270,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
                   <Card
                     key={project.id}
                     onClick={() => { setSelectedProjectId(project.id); setTab('overview'); }}
-                    className={`p-4 ${selectedProject?.id === project.id ? 'border-blue-300 ring-2 ring-blue-100' : ''}`}
+                    className="p-4"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -1294,10 +1291,17 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
               })}
             </div>
           )}
-        </div>
+        </div>}
 
         {selectedProject ? (
           <div className="space-y-5">
+            <button
+              type="button"
+              onClick={() => setSelectedProjectId(null)}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white px-3.5 text-sm font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200 transition-colors hover:bg-slate-50 hover:text-slate-900"
+            >
+              <ArrowLeft className="h-4 w-4" /> Alla kundprojekt
+            </button>
             <Card className="p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0">
@@ -1614,11 +1618,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
               </div>
             </Card>
           </div>
-        ) : (
-          <Card>
-            <EmptyState icon={<Briefcase className="w-12 h-12" />} title="Välj ett projekt" />
-          </Card>
-        )}
+        ) : null}
       </div>
 
       <CustomerModal open={showCustomerModal} onClose={() => setShowCustomerModal(false)} form={customerForm} setForm={setCustomerForm} onSave={handleSaveCustomer} saving={saving} error={error} />
