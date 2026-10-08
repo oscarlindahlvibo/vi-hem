@@ -56,6 +56,10 @@ import {
   CheckCircle2,
   RotateCcw,
   Tag,
+  MoreHorizontal,
+  Repeat,
+  SlidersHorizontal,
+  ListChecks,
 } from 'lucide-react';
 import { TIME_CATEGORY_LABELS } from '../lib/utils';
 import { useTimeCategories } from '../contexts/TimeCategoriesContext';
@@ -63,10 +67,17 @@ import { useWorkOrderCategories, type WorkOrderCategoryOption } from '../context
 import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
 import type { TimeCategory } from '../types';
 import { WorkOrderOperationsPanel } from '../components/WorkOrderOperationsPanel';
+import { WorkOrderCard } from '../components/workorders/WorkOrderCard';
+import { AssigneeSheet, CommentSheet, DueDateSheet, SwitchJobSheet, WorkOrderActionSheet, actionIcons, type QuickAction } from '../components/workorders/WorkOrderSheets';
+import { SkeletonList } from '../components/ui';
+import { useToast } from '../components/toast';
+import { fetchOpenTimeEntries, startOrSwitchToWorkOrder, type OpenTimeEntry } from '../lib/timeClock';
 
-type FilterView = 'all' | 'mine' | 'unassigned';
+type FilterView = 'all' | 'mine' | 'unassigned' | 'overdue';
 type WorkOrderListTab = 'active' | 'archived';
-type WorkOrderSort = 'due_date' | 'created_at';
+type WorkOrderSort = 'due_date' | 'created_at' | 'updated_at' | 'priority';
+type QuickSheet = { kind: 'actions' | 'due' | 'assignee' | 'comment' | 'switch'; id: string } | null;
+const PRIORITY_RANK: Record<WOPriority, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 
 type WorkOrderPerson = Pick<Profile, 'name'>;
 
@@ -288,6 +299,12 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   const [selectedWorkOrderIds, setSelectedWorkOrderIds] = useState<string[]>([]);
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [bulkError, setBulkError] = useState('');
+  const toast = useToast();
+  const [selectMode, setSelectMode] = useState(false);
+  const [quickSheet, setQuickSheet] = useState<QuickSheet>(null);
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const [openEntry, setOpenEntry] = useState<OpenTimeEntry | null>(null);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   // Create form state
   const [createForm, setCreateForm] = useState<CreateWorkOrderForm>(defaultCreateForm);
@@ -337,6 +354,21 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       }
     }
   }, [authLoading, user, isStaff]);
+
+  async function refreshOpenEntry() {
+    if (!user || !isStaff) return;
+    try {
+      const entries = await fetchOpenTimeEntries(user.id);
+      setOpenEntry(entries[entries.length - 1] || null);
+    } catch (err) {
+      console.error('Error loading open time entry:', err);
+    }
+  }
+
+  useEffect(() => {
+    if (!authLoading && user && isStaff) refreshOpenEntry();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, user?.id, isStaff]);
 
   useEffect(() => {
     if (!initialWorkOrderId || loading || workOrders.length === 0) return;
@@ -854,48 +886,28 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
 
   async function checkActiveTimeEntry() {
     if (!user) return;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const { data } = await supabase
-      .from('vihem_time_entries')
-      .select('id, work_order_id')
-      .eq('user_id', user.id)
-      .eq('status', 'draft')
-      .gte('start_time', today.toISOString())
-      .is('end_time', null)
-      .order('start_time', { ascending: false })
-      .limit(1);
-    setActiveTimeEntry(data?.[0] || null);
+    try {
+      const entries = await fetchOpenTimeEntries(user.id);
+      const latest = entries[entries.length - 1] || null;
+      setOpenEntry(latest);
+      setActiveTimeEntry(latest ? { id: latest.id, work_order_id: latest.work_order_id } : null);
+    } catch (err) {
+      console.error('Error checking active time entry:', err);
+    }
   }
 
   async function handleStampIn() {
     if (!user || !selectedWorkOrder) return;
     try {
       setStampingIn(true);
-      const { error } = await supabase.from('vihem_time_entries').insert({
-        user_id: user.id,
-        organisation_id: user.organisation_id || null,
-        work_order_id: selectedWorkOrder.id,
-        // A work order created inside a customer project (see
-        // CustomerProjectsPage's "Arbetsordrar" tab) needs customer_project_id
-        // set too -- refresh_customer_project_financials sums time straight
-        // off vihem_time_entries.customer_project_id, not work_order_id.
-        customer_project_id: selectedWorkOrder.customer_project_id || null,
-        category: selectedWorkOrder.customer_project_id ? 'customer_project' : stampCategory,
-        start_time: new Date().toISOString(),
-        end_time: null,
-        break_minutes: 0,
-        total_minutes: 0,
-        comment: stampComment || '',
-        status: 'draft',
-      });
-      if (error) throw error;
+      await startOrSwitchToWorkOrder({ user, workOrder: selectedWorkOrder, category: stampCategory, comment: stampComment });
       setShowStampInModal(false);
       setStampComment('');
       await checkActiveTimeEntry();
       await fetchTimeLogged();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to stamp in:', err);
+      toast.show(err?.message || 'Kunde inte stämpla in.', { tone: 'error' });
     } finally {
       setStampingIn(false);
     }
@@ -936,6 +948,77 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     }
   }
 
+  async function completeOne(wo: WOWithRelations) {
+    if (!isStaff || ARCHIVED_WO_STATUSES.includes(wo.status)) return;
+    const previous = { status: wo.status, completed_at: wo.completed_at ?? null };
+    const now = new Date().toISOString();
+    const payload = { status: 'completed' as WOStatus, completed_at: now, updated_at: now };
+    const { error } = await supabase.from('vihem_work_orders').update(payload).eq('id', wo.id);
+    if (error) {
+      toast.show(error.message || 'Kunde inte klarmarkera arbetsordern.', { tone: 'error' });
+      return;
+    }
+    try { await syncLinkedMaintenanceStatus(wo.maintenance_request_id); } catch (err) { console.error(err); }
+    setWorkOrders((orders) => orders.map((o) => (o.id === wo.id ? { ...o, ...payload } : o)));
+    toast.show('Arbetsordern är klarmarkerad', {
+      actionLabel: 'Ångra',
+      onAction: async () => {
+        const { error: undoError } = await supabase.from('vihem_work_orders')
+          .update({ status: previous.status, completed_at: previous.completed_at, updated_at: new Date().toISOString() }).eq('id', wo.id);
+        if (undoError) { toast.show(undoError.message || 'Kunde inte ångra.', { tone: 'error' }); return; }
+        try { await syncLinkedMaintenanceStatus(wo.maintenance_request_id); } catch (err) { console.error(err); }
+        setWorkOrders((orders) => orders.map((o) => (o.id === wo.id ? { ...o, status: previous.status, completed_at: previous.completed_at } : o)));
+      },
+    });
+  }
+
+  async function changeDueDateFor(id: string, date: string) {
+    setSheetBusy(true);
+    const { error } = await supabase.from('vihem_work_orders').update({ due_date: date }).eq('id', id);
+    setSheetBusy(false);
+    if (error) { toast.show(error.message || 'Kunde inte ändra förfallodatum.', { tone: 'error' }); return; }
+    setWorkOrders((orders) => orders.map((o) => (o.id === id ? { ...o, due_date: date } : o)));
+    setSelectedWorkOrder((cur) => (cur && cur.id === id ? { ...cur, due_date: date } : cur));
+    setQuickSheet(null);
+    toast.show(`Förfallodatum: ${formatDate(date)}`);
+  }
+
+  async function changeAssigneesFor(id: string, ids: string[]) {
+    setSheetBusy(true);
+    const { error } = await supabase.from('vihem_work_orders').update({ assigned_to: ids[0] || null, assigned_to_ids: ids }).eq('id', id);
+    setSheetBusy(false);
+    if (error) { toast.show(error.message || 'Kunde inte ändra ansvarig.', { tone: 'error' }); return; }
+    setWorkOrders((orders) => orders.map((o) => (o.id === id ? { ...o, assigned_to: ids[0] || null, assigned_to_ids: ids } : o)));
+    setQuickSheet(null);
+    toast.show('Ansvarig uppdaterad');
+  }
+
+  async function addCommentTo(id: string, text: string, internal: boolean) {
+    if (!user) return;
+    setSheetBusy(true);
+    const { error } = await supabase.from('vihem_work_order_comments').insert([{ work_order_id: id, user_id: user.id, comment: text, internal }]);
+    setSheetBusy(false);
+    if (error) { toast.show(error.message || 'Kunde inte publicera kommentaren.', { tone: 'error' }); return; }
+    setQuickSheet(null);
+    toast.show(internal ? 'Intern anteckning sparad' : 'Meddelande skickat till kund');
+  }
+
+  async function startOrSwitchTo(wo: WOWithRelations) {
+    if (!user || !isStaff) return;
+    setSheetBusy(true);
+    try {
+      await startOrSwitchToWorkOrder({ user, workOrder: wo, category: 'work_order' as TimeCategory });
+      await refreshOpenEntry();
+      setQuickSheet(null);
+      toast.show(openEntry ? `Du jobbar nu på: ${wo.title}` : `Tidrapportering startad: ${wo.title}`);
+      if (selectedWorkOrder?.id === wo.id) { await checkActiveTimeEntry(); await fetchTimeLogged(); }
+    } catch (err: any) {
+      toast.show(err?.message || 'Kunde inte byta arbetsorder. Inget har ändrats.', { tone: 'error' });
+    } finally {
+      setSheetBusy(false);
+    }
+  }
+
   function filteredWorkOrders() {
     return workOrders.filter((wo) => {
       const isArchived = ARCHIVED_WO_STATUSES.includes(wo.status);
@@ -950,6 +1033,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         matchesView = assignedIds.includes(user?.id || '');
       } else if (filterView === 'unassigned') {
         matchesView = assignedIds.length === 0;
+      } else if (filterView === 'overdue') {
+        matchesView = isWorkOrderOverdue(wo);
       }
 
       return matchesTab && matchesSearch && matchesStatus && matchesPriority && matchesView;
@@ -963,6 +1048,13 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
 
       if (sortBy === 'created_at') {
         return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+      }
+      if (sortBy === 'updated_at') {
+        return new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime();
+      }
+      if (sortBy === 'priority') {
+        const diff = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+        if (diff !== 0) return diff;
       }
 
       const aDue = a.due_date ? new Date(`${a.due_date}T12:00:00`).getTime() : Number.POSITIVE_INFINITY;
@@ -1072,28 +1164,104 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         cancelled: [],
       };
 
+  const openWorkOrder = (wo: WOWithRelations) => {
+    setSelectedWorkOrder(wo);
+    setNewDetailStatus(wo.status);
+    setNewAssignedToIds(wo.assigned_to_ids?.length ? wo.assigned_to_ids : wo.assigned_to ? [wo.assigned_to] : []);
+    setShowDetailModal(true);
+  };
+  const assigneeList = (wo: WOWithRelations): string[] => {
+    const ids = wo.assigned_to_ids?.length ? wo.assigned_to_ids : wo.assigned_to ? [wo.assigned_to] : [];
+    if (ids.length === 0) return wo.assigned?.name ? [wo.assigned.name] : [];
+    return ids.map(assigneeName);
+  };
+  const overdueCount = workOrders.filter((wo) => isWorkOrderOverdue(wo)).length;
+  const mineCount = workOrders.filter((wo) => {
+    if (ARCHIVED_WO_STATUSES.includes(wo.status)) return false;
+    const ids = wo.assigned_to_ids?.length ? wo.assigned_to_ids : wo.assigned_to ? [wo.assigned_to] : [];
+    return ids.includes(user?.id || '');
+  }).length;
+  const activeChip: 'all' | 'mine' | 'overdue' | 'archived' = listTab === 'archived' ? 'archived' : filterView === 'mine' ? 'mine' : filterView === 'overdue' ? 'overdue' : 'all';
+  const selectChip = (chip: 'all' | 'mine' | 'overdue' | 'archived') => {
+    setListTab(chip === 'archived' ? 'archived' : 'active');
+    setFilterStatus('all');
+    setFilterView(chip === 'mine' ? 'mine' : chip === 'overdue' ? 'overdue' : 'all');
+  };
+  const chips: { key: 'all' | 'mine' | 'overdue' | 'archived'; label: string; count: number; tone?: 'danger' }[] = [
+    { key: 'all', label: 'Alla', count: activeCount },
+    ...(isStaff ? [{ key: 'mine' as const, label: 'Mina', count: mineCount }] : []),
+    { key: 'overdue', label: 'Försenade', count: overdueCount, tone: 'danger' as const },
+    { key: 'archived', label: 'Arkiverade', count: archivedCount },
+  ];
+  const advancedActive = filterStatus !== 'all' || filterPriority !== 'all' || filterView === 'unassigned' || sortBy !== 'due_date';
+  const sheetWo = quickSheet ? workOrders.find((o) => o.id === quickSheet.id) || null : null;
+  const openEntryLabel = openEntry
+    ? (openEntry.work_order?.title || (openEntry.entry_type === 'break' ? 'Rast' : openEntry.entry_type === 'lunch' ? 'Lunch' : TIME_CATEGORY_LABELS[openEntry.category] || 'Pågående pass'))
+    : '';
+  const actionsFor = (wo: WOWithRelations): QuickAction[] => {
+    const list: QuickAction[] = [
+      { key: 'open', label: 'Öppna arbetsordern', icon: actionIcons.open, onSelect: () => openWorkOrder(wo) },
+    ];
+    if (!isStaff) return list;
+    if (!ARCHIVED_WO_STATUSES.includes(wo.status)) {
+      if (openEntry?.work_order_id === wo.id) {
+        list.push({ key: 'running', label: 'Tidrapportering pågår här', icon: actionIcons.start, hint: 'Stämpla ut i arbetsorderns detaljvy', onSelect: () => openWorkOrder(wo) });
+      } else if (openEntry) {
+        list.push({ key: 'switch', label: 'Byt till denna arbetsorder', icon: actionIcons.switch, hint: `Pågår: ${openEntryLabel}`, onSelect: () => setQuickSheet({ kind: 'switch', id: wo.id }) });
+      } else {
+        list.push({ key: 'start', label: 'Starta tidrapportering', icon: actionIcons.start, onSelect: () => startOrSwitchTo(wo) });
+      }
+    }
+    list.push(
+      { key: 'assignee', label: 'Ändra ansvarig', icon: actionIcons.assignee, hint: assigneeList(wo).join(', ') || 'Ej tilldelad', onSelect: () => setQuickSheet({ kind: 'assignee', id: wo.id }) },
+      { key: 'due', label: 'Ändra förfallodatum', icon: actionIcons.date, hint: wo.due_date ? formatDate(wo.due_date) : 'Inget datum', onSelect: () => setQuickSheet({ kind: 'due', id: wo.id }) },
+      { key: 'comment', label: 'Lägg till kommentar', icon: actionIcons.comment, onSelect: () => setQuickSheet({ kind: 'comment', id: wo.id }) },
+    );
+    if (!ARCHIVED_WO_STATUSES.includes(wo.status)) {
+      list.push({ key: 'complete', label: 'Klarmarkera', icon: actionIcons.complete, tone: 'success', onSelect: () => completeOne(wo) });
+    }
+    return list;
+  };
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Arbetsordrar"
-        subtitle={`${filtered.length} arbetsordrar`}
-        action={
-          isStaff ? (
-            <div className="flex items-center gap-2">
-              {isAdmin && (
-                <Button variant="secondary" size="sm" onClick={() => setShowCategoryManager(true)}>
-                  <Tag className="w-4 h-4" />
-                  Kategorier
-                </Button>
-              )}
-              <Button onClick={() => setShowCreateModal(true)} size="sm">
-                <Plus className="w-4 h-4" />
-                Ny arbetsorder
-              </Button>
-            </div>
-          ) : null
-        }
-      />
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-vihem-ink">Arbetsordrar</h1>
+          <p className="text-sm text-vihem-muted">
+            {activeCount} aktiva{overdueCount > 0 && <span className="font-semibold text-vihem-danger"> · {overdueCount} försenade</span>}
+          </p>
+        </div>
+        {isStaff && (
+          <div className="relative flex shrink-0 items-center gap-2">
+            <Button onClick={() => setShowCreateModal(true)}>
+              <Plus className="h-4 w-4" />
+              Ny arbetsorder
+            </Button>
+            {isAdmin && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Fler alternativ"
+                  aria-expanded={moreMenuOpen}
+                  onClick={() => setMoreMenuOpen((v) => !v)}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50"
+                ><MoreHorizontal className="h-5 w-5" /></button>
+                {moreMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setMoreMenuOpen(false)} />
+                    <div className="absolute right-0 top-12 z-40 w-52 animate-fade-in rounded-2xl bg-white p-1.5 shadow-float ring-1 ring-slate-200">
+                      <button onClick={() => { setMoreMenuOpen(false); setShowCategoryManager(true); }} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-vihem-ink hover:bg-slate-50">
+                        <Tag className="h-4 w-4 text-slate-500" />Hantera kategorier
+                      </button>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       <WorkOrderCategoryManagerModal
         open={showCategoryManager}
@@ -1102,192 +1270,100 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         userId={user?.id || ''}
       />
 
-      <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-1">
-        <button
-          type="button"
-          onClick={() => {
-            setListTab('active');
-            setFilterStatus('all');
-            setFilterView('all');
-          }}
-          className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-            listTab === 'active' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
-          }`}
-        >
-          <ClipboardList className="w-4 h-4" />
-          Aktiva
-          <span className={listTab === 'active' ? 'text-blue-100' : 'text-slate-400'}>{activeCount}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setListTab('archived');
-            setFilterStatus('all');
-            setFilterView('all');
-          }}
-          className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-            listTab === 'archived' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
-          }`}
-        >
-          <Archive className="w-4 h-4" />
-          Arkiverade
-          <span className={listTab === 'archived' ? 'text-blue-100' : 'text-slate-400'}>{archivedCount}</span>
-        </button>
+      <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5 lg:mx-0 lg:px-0">
+        {chips.map((chip) => {
+          const on = activeChip === chip.key;
+          return (
+            <button
+              key={chip.key}
+              type="button"
+              onClick={() => selectChip(chip.key)}
+              aria-pressed={on}
+              className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-colors active:scale-[0.97] ${
+                on ? 'bg-vihem-navy text-white shadow-sm' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              {chip.label}
+              <span className={`rounded-full px-1.5 text-xs ${on ? 'bg-white/20 text-white' : chip.tone === 'danger' && chip.count > 0 ? 'bg-red-50 text-vihem-danger' : 'bg-slate-100 text-slate-500'}`}>{chip.count}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Filter bar */}
-      <div className="space-y-3 md:space-y-0 md:flex md:items-center md:gap-3 flex-wrap">
-        <SearchInput
-          value={searchQuery}
-          onChange={setSearchQuery}
-          placeholder="Sök arbetsordrar..."
-          className="flex-1 md:min-w-[200px]"
-        />
-
-        <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2">
+        <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Sök arbetsordrar..." className="min-w-0 flex-1" />
+        <button
+          type="button"
+          onClick={() => setShowFilters(!showFilters)}
+          aria-expanded={showFilters}
+          aria-label="Filter och sortering"
+          className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ring-1 transition-colors ${showFilters ? 'bg-blue-50 text-vihem-blue ring-blue-200' : 'bg-white text-slate-500 ring-slate-200 hover:bg-slate-50'}`}
+        >
+          <SlidersHorizontal className="h-5 w-5" />
+          {advancedActive && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-vihem-blue" />}
+        </button>
+        {isStaff && viewMode === 'list' && (
           <button
-            onClick={() => setShowFilters(!showFilters)}
-            className="p-2 rounded-lg border border-slate-300 hover:bg-slate-50 transition-colors md:hidden"
+            type="button"
+            onClick={() => { setSelectMode((v) => !v); setSelectedWorkOrderIds([]); setBulkError(''); }}
+            aria-pressed={selectMode}
+            className={`flex h-11 shrink-0 items-center gap-1.5 rounded-xl px-3 text-sm font-semibold ring-1 transition-colors ${selectMode ? 'bg-vihem-blue text-white ring-vihem-blue' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50'}`}
           >
-            <Filter className="w-4 h-4 text-slate-600" />
+            <ListChecks className="h-5 w-5" /><span className="hidden sm:inline">{selectMode ? 'Klar' : 'Markera flera'}</span>
           </button>
-
-          <Select
-            options={[
-              { value: 'all', label: 'Alla statusar' },
-              ...statusFilterOptions,
-            ]}
-            value={filterStatus}
-            onChange={(e) => setFilterStatus((e.target.value as any) || 'all')}
-            className="hidden md:block"
-          />
-
-          <Select
-            options={[
-              { value: 'all', label: 'Alla prioriteter' },
-              { value: 'low', label: WO_PRIORITY_LABELS.low },
-              { value: 'normal', label: WO_PRIORITY_LABELS.normal },
-              { value: 'high', label: WO_PRIORITY_LABELS.high },
-              { value: 'urgent', label: WO_PRIORITY_LABELS.urgent },
-            ]}
-            value={filterPriority}
-            onChange={(e) => setFilterPriority((e.target.value as any) || 'all')}
-            className="hidden md:block"
-          />
-
-          <Select
-            options={[
-              { value: 'all', label: 'Alla arbetsordrar' },
-              { value: 'mine', label: 'Mina arbetsordrar' },
-              { value: 'unassigned', label: 'Ej tilldelade arbetsordrar' },
-            ]}
-            value={filterView}
-            onChange={(e) => setFilterView((e.target.value as any) || 'all')}
-            className="hidden md:block"
-          />
-
-          <Select
-            options={[
-              { value: 'due_date', label: 'Sortera: förfallodag' },
-              { value: 'created_at', label: 'Sortera: senast skapade' },
-            ]}
-            value={sortBy}
-            onChange={(e) => setSortBy((e.target.value as WorkOrderSort) || 'due_date')}
-            className="hidden md:block"
-          />
-
-          <div className="hidden md:flex items-center gap-1 border border-slate-300 rounded-lg p-1">
-            <button
-              onClick={() => setViewMode('list')}
-              className={`p-2 rounded transition-colors ${
-                viewMode === 'list' ? 'bg-blue-100 text-blue-600' : 'hover:bg-slate-100'
-              }`}
-            >
-              <List className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setViewMode('kanban')}
-              className={`p-2 rounded transition-colors ${
-                viewMode === 'kanban' ? 'bg-blue-100 text-blue-600' : 'hover:bg-slate-100'
-              }`}
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
+        )}
       </div>
 
-      {/* Mobile filters */}
       {showFilters && (
-        <Card className="p-4 md:hidden space-y-3">
-          <Select
-            label="Status"
-            options={[
-              { value: 'all', label: 'Alla statusar' },
-              ...statusFilterOptions,
-            ]}
-            value={filterStatus}
-            onChange={(e) => setFilterStatus((e.target.value as any) || 'all')}
-          />
-
-          <Select
-            label="Prioritet"
-            options={[
-              { value: 'all', label: 'Alla prioriteter' },
-              { value: 'low', label: WO_PRIORITY_LABELS.low },
-              { value: 'normal', label: WO_PRIORITY_LABELS.normal },
-              { value: 'high', label: WO_PRIORITY_LABELS.high },
-              { value: 'urgent', label: WO_PRIORITY_LABELS.urgent },
-            ]}
-            value={filterPriority}
-            onChange={(e) => setFilterPriority((e.target.value as any) || 'all')}
-          />
-
-          <Select
-            label="Visning"
-            options={[
-              { value: 'all', label: 'Alla arbetsordrar' },
-              { value: 'mine', label: 'Mina arbetsordrar' },
-              { value: 'unassigned', label: 'Ej tilldelade arbetsordrar' },
-            ]}
-            value={filterView}
-            onChange={(e) => setFilterView((e.target.value as any) || 'all')}
-          />
-
-          <Select
-            label="Sortering"
-            options={[
-              { value: 'due_date', label: 'Förfallodag' },
-              { value: 'created_at', label: 'Senast skapade' },
-            ]}
-            value={sortBy}
-            onChange={(e) => setSortBy((e.target.value as WorkOrderSort) || 'due_date')}
-          />
-
+        <Card className="animate-fade-in space-y-3 p-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Select
+              label="Status"
+              options={[{ value: 'all', label: 'Alla statusar' }, ...statusFilterOptions]}
+              value={filterStatus}
+              onChange={(e) => setFilterStatus((e.target.value as any) || 'all')}
+            />
+            <Select
+              label="Prioritet"
+              options={[
+                { value: 'all', label: 'Alla prioriteter' },
+                { value: 'low', label: WO_PRIORITY_LABELS.low },
+                { value: 'normal', label: WO_PRIORITY_LABELS.normal },
+                { value: 'high', label: WO_PRIORITY_LABELS.high },
+                { value: 'urgent', label: WO_PRIORITY_LABELS.urgent },
+              ]}
+              value={filterPriority}
+              onChange={(e) => setFilterPriority((e.target.value as any) || 'all')}
+            />
+            <Select
+              label="Visning"
+              options={[
+                { value: 'all', label: 'Alla arbetsordrar' },
+                { value: 'mine', label: 'Mina arbetsordrar' },
+                { value: 'unassigned', label: 'Ej tilldelade' },
+                { value: 'overdue', label: 'Försenade' },
+              ]}
+              value={filterView}
+              onChange={(e) => setFilterView((e.target.value as any) || 'all')}
+            />
+            <Select
+              label="Sortering"
+              options={[
+                { value: 'due_date', label: 'Förfallodatum' },
+                { value: 'updated_at', label: 'Senast uppdaterade' },
+                { value: 'priority', label: 'Prioritet' },
+                { value: 'created_at', label: 'Nyast först' },
+              ]}
+              value={sortBy}
+              onChange={(e) => setSortBy((e.target.value as WorkOrderSort) || 'due_date')}
+            />
+          </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setViewMode('list');
-                setShowFilters(false);
-              }}
-              className={`flex-1 p-2 rounded border transition-colors ${
-                viewMode === 'list' ? 'bg-blue-100 border-blue-300' : 'border-slate-300'
-              }`}
-            >
-              <List className="w-4 h-4 inline mr-1" />
-              Lista
+            <button onClick={() => setViewMode('list')} className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl border p-2 text-sm font-semibold transition-colors ${viewMode === 'list' ? 'border-blue-200 bg-blue-50 text-vihem-blue' : 'border-slate-200 text-slate-600'}`}>
+              <List className="h-4 w-4" />Lista
             </button>
-            <button
-              onClick={() => {
-                setViewMode('kanban');
-                setShowFilters(false);
-              }}
-              className={`flex-1 p-2 rounded border transition-colors ${
-                viewMode === 'kanban' ? 'bg-blue-100 border-blue-300' : 'border-slate-300'
-              }`}
-            >
-              <LayoutGrid className="w-4 h-4 inline mr-1" />
-              Kanban
+            <button onClick={() => setViewMode('kanban')} className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl border p-2 text-sm font-semibold transition-colors ${viewMode === 'kanban' ? 'border-blue-200 bg-blue-50 text-vihem-blue' : 'border-slate-200 text-slate-600'}`}>
+              <LayoutGrid className="h-4 w-4" />Kanban
             </button>
           </div>
         </Card>
@@ -1295,7 +1371,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
 
       {/* Content */}
       {loading ? (
-        <LoadingPage />
+        <SkeletonList rows={7} />
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<ClipboardList className="w-12 h-12" />}
@@ -1316,151 +1392,54 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
         />
       ) : viewMode === 'list' ? (
         <>
-          {isStaff && (
-            <Card className="p-3">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-wrap items-center gap-3">
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={allVisibleSelected}
-                      onChange={toggleAllVisibleWorkOrders}
-                      className="h-4 w-4 rounded border-slate-300 accent-blue-600"
-                    />
-                    Välj alla synliga
-                  </label>
-                  <span className="text-sm text-slate-500">
-                    {selectedWorkOrderIds.length} markerade
-                  </span>
-                  {selectedWorkOrderIds.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedWorkOrderIds([])}
-                      className="text-sm font-medium text-slate-500 hover:text-slate-800"
-                    >
-                      Rensa val
-                    </button>
-                  )}
+          {isStaff && selectMode && (
+            <div className="sticky top-[4.25rem] z-20 animate-fade-in rounded-2xl bg-vihem-navy p-3 text-white shadow-float lg:top-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="font-bold">{selectedWorkOrderIds.length} markerade</span>
+                  <button type="button" onClick={toggleAllVisibleWorkOrders} className="font-semibold text-sky-200 hover:text-white">{allVisibleSelected ? 'Avmarkera alla' : 'Välj alla'}</button>
+                  {selectedWorkOrderIds.length > 0 && <button type="button" onClick={() => setSelectedWorkOrderIds([])} className="font-semibold text-sky-200 hover:text-white">Rensa</button>}
                 </div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:flex">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => bulkUpdateWorkOrders('complete')}
-                    loading={bulkUpdating}
-                    disabled={selectedWorkOrderIds.length === 0}
-                    className="gap-1"
-                  >
-                    <CheckCircle2 className="h-4 w-4" />
-                    Klarmarkera
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => bulkUpdateWorkOrders('archive')}
-                    loading={bulkUpdating}
-                    disabled={selectedWorkOrderIds.length === 0}
-                    className="gap-1"
-                  >
-                    <Archive className="h-4 w-4" />
-                    Arkivera
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => bulkUpdateWorkOrders('reopen')}
-                    loading={bulkUpdating}
-                    disabled={selectedWorkOrderIds.length === 0}
-                    className="gap-1"
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    Markera som ej klar
-                  </Button>
+                <div className="flex gap-2">
+                  <button type="button" disabled={selectedWorkOrderIds.length === 0 || bulkUpdating} onClick={() => bulkUpdateWorkOrders('complete')} className="flex min-h-10 items-center gap-1.5 rounded-xl bg-vihem-success px-3 text-sm font-bold disabled:opacity-40"><CheckCircle2 className="h-4 w-4" />Klar</button>
+                  <button type="button" disabled={selectedWorkOrderIds.length === 0 || bulkUpdating} onClick={() => bulkUpdateWorkOrders('archive')} className="flex min-h-10 items-center gap-1.5 rounded-xl bg-white/15 px-3 text-sm font-bold disabled:opacity-40"><Archive className="h-4 w-4" />Arkivera</button>
+                  <button type="button" disabled={selectedWorkOrderIds.length === 0 || bulkUpdating} onClick={() => bulkUpdateWorkOrders('reopen')} className="flex min-h-10 items-center gap-1.5 rounded-xl bg-white/15 px-3 text-sm font-bold disabled:opacity-40"><RotateCcw className="h-4 w-4" />Ej klar</button>
                 </div>
               </div>
-              {bulkError && (
-                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {bulkError}
-                </div>
-              )}
-            </Card>
+              {bulkError && <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{bulkError}</div>}
+            </div>
           )}
-          <div className="grid gap-3 md:hidden">
+          <div className="grid gap-2.5 md:grid-cols-2 lg:hidden">
             {filtered.map((wo) => (
-              <Card
+              <WorkOrderCard
                 key={wo.id}
-                className={`p-4 cursor-pointer hover:shadow-md transition-all ${
-                  selectedWorkOrderIds.includes(wo.id) ? 'ring-2 ring-blue-500 ring-offset-1' : ''
-                }`}
-                onClick={() => {
-                  setSelectedWorkOrder(wo);
-                  setNewDetailStatus(wo.status);
-                  setNewAssignedToIds(wo.assigned_to_ids?.length ? wo.assigned_to_ids : wo.assigned_to ? [wo.assigned_to] : []);
-                  setShowDetailModal(true);
-                }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  {isStaff && (
-                    <input
-                      type="checkbox"
-                      checked={selectedWorkOrderIds.includes(wo.id)}
-                      onChange={() => toggleWorkOrderSelection(wo.id)}
-                      onClick={(event) => event.stopPropagation()}
-                      className="mt-1 h-4 w-4 rounded border-slate-300 accent-blue-600"
-                      aria-label={`Markera ${wo.title}`}
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-semibold text-slate-900 leading-snug break-words">{wo.title}</h3>
-                    <p className="mt-1 text-sm text-slate-500 break-words">
-                      {wo.property?.name || (wo.customer_project ? `Kundprojekt: ${wo.customer_project.title || wo.customer_project.name}` : 'Ingen fastighet')}
-                    </p>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-slate-400 shrink-0 mt-1" />
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Badge className={getWOStatusColor(wo.status)}>
-                    {WO_STATUS_LABELS[wo.status]}
-                  </Badge>
-                  <Badge className={getWOPriorityColor(wo.priority)}>
-                    {WO_PRIORITY_LABELS[wo.priority]}
-                  </Badge>
-                  {isWorkOrderOverdue(wo) && (
-                    <Badge className="bg-red-100 text-red-700">Försenad</Badge>
-                  )}
-                </div>
-
-                <div className="mt-4 grid gap-2 text-sm text-slate-600">
-                  {formatScheduleWindow(wo) && (
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Clock className="w-4 h-4 text-slate-400 shrink-0" />
-                      <span className="truncate">{formatScheduleWindow(wo)}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 min-w-0">
-                    <ClipboardList className="w-4 h-4 text-slate-400 shrink-0" />
-                    <span className="truncate">{wo.category}</span>
-                  </div>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <User className="w-4 h-4 text-slate-400 shrink-0" />
-                    <span className="truncate">{assigneeNames(wo)}</span>
-                  </div>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
-                    <span>{wo.due_date ? formatDate(wo.due_date) : 'Inget förfallodatum'}</span>
-                  </div>
-                </div>
-              </Card>
+                id={wo.id}
+                title={wo.title}
+                subtitle={wo.property?.name || (wo.customer_project ? `Kundprojekt: ${wo.customer_project.title || wo.customer_project.name}` : 'Ingen fastighet')}
+                status={wo.status}
+                priority={wo.priority}
+                category={wo.category}
+                dueDate={wo.due_date}
+                overdue={isWorkOrderOverdue(wo)}
+                assignees={assigneeList(wo)}
+                selectMode={selectMode}
+                selected={selectedWorkOrderIds.includes(wo.id)}
+                canAct={isStaff && !ARCHIVED_WO_STATUSES.includes(wo.status)}
+                onOpen={() => openWorkOrder(wo)}
+                onToggleSelect={() => toggleWorkOrderSelection(wo.id)}
+                onComplete={() => completeOne(wo)}
+                onChangeDueDate={() => setQuickSheet({ kind: 'due', id: wo.id })}
+                onMenu={() => setQuickSheet({ kind: 'actions', id: wo.id })}
+              />
             ))}
           </div>
 
-          <Card className="hidden md:block overflow-hidden">
+          <Card className="hidden overflow-hidden lg:block">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50">
-                    {isStaff && (
+                    {isStaff && selectMode && (
                       <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">
                         <input
                           type="checkbox"
@@ -1495,7 +1474,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                         setShowDetailModal(true);
                       }}
                     >
-                      {isStaff && (
+                      {isStaff && selectMode && (
                         <td className="px-4 py-3">
                           <input
                             type="checkbox"
@@ -2263,8 +2242,12 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                     </Button>
                   </div>
                 ) : activeTimeEntry ? (
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
-                    Du har en pågående tidrapport på en annan arbetsorder. Stämpla ut där först.
+                  <div className="space-y-2 rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-sm text-amber-800">Du har en pågående tidrapport: <span className="font-semibold">{openEntryLabel}</span></p>
+                    <Button variant="secondary" className="w-full gap-2" onClick={() => setQuickSheet({ kind: 'switch', id: selectedWorkOrder.id })}>
+                      <Repeat className="h-4 w-4" />
+                      Byt till detta jobb
+                    </Button>
                   </div>
                 ) : (
                   <Button
@@ -2313,6 +2296,32 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
             </div>
           </div>
         </Modal>
+      )}
+      {isStaff && sheetWo && (
+        <>
+          <WorkOrderActionSheet open={quickSheet?.kind === 'actions'} onClose={() => setQuickSheet(null)} title={sheetWo.title} actions={actionsFor(sheetWo)} />
+          <DueDateSheet open={quickSheet?.kind === 'due'} onClose={() => setQuickSheet(null)} current={sheetWo.due_date} saving={sheetBusy} onPick={(date) => changeDueDateFor(sheetWo.id, date)} />
+          <AssigneeSheet
+            open={quickSheet?.kind === 'assignee'}
+            onClose={() => setQuickSheet(null)}
+            staff={staffMembers.map((m) => ({ id: m.id, name: m.name }))}
+            currentIds={sheetWo.assigned_to_ids?.length ? sheetWo.assigned_to_ids : sheetWo.assigned_to ? [sheetWo.assigned_to] : []}
+            saving={sheetBusy}
+            onSave={(ids) => changeAssigneesFor(sheetWo.id, ids)}
+          />
+          <CommentSheet open={quickSheet?.kind === 'comment'} onClose={() => setQuickSheet(null)} saving={sheetBusy} onSubmit={(text, internal) => addCommentTo(sheetWo.id, text, internal)} />
+          {openEntry && (
+            <SwitchJobSheet
+              open={quickSheet?.kind === 'switch'}
+              onClose={() => setQuickSheet(null)}
+              currentLabel={openEntryLabel}
+              currentSince={openEntry.start_time}
+              targetTitle={sheetWo.title}
+              busy={sheetBusy}
+              onConfirm={() => startOrSwitchTo(sheetWo)}
+            />
+          )}
+        </>
       )}
     </div>
   );
