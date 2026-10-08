@@ -445,6 +445,8 @@ export function lockBackgroundScroll(): () => void {
     previousRootOverflow = root ? root.style.overflow : null;
     document.body.style.overflow = 'hidden';
     if (root) root.style.overflow = 'hidden';
+    // Flytande menyn döljs så länge en modal/panel är öppen (se .vihem-floating-nav i index.css).
+    document.documentElement.setAttribute('data-overlay-open', 'true');
   }
   backgroundScrollLockCount++;
   let released = false;
@@ -456,6 +458,7 @@ export function lockBackgroundScroll(): () => void {
       document.body.style.overflow = previousBodyOverflow ?? '';
       const root = document.getElementById('root');
       if (root) root.style.overflow = previousRootOverflow ?? '';
+      document.documentElement.removeAttribute('data-overlay-open');
     }
   };
 }

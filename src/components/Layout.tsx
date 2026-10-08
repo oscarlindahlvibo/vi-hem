@@ -427,7 +427,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       </main>
 
       {user?.role !== 'superadmin' && !keyboardOpen && (
-        <nav aria-label="Huvudnavigering" className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pb-[max(env(safe-area-inset-bottom),0.5rem)] lg:hidden">
+        <nav aria-label="Huvudnavigering" className="vihem-floating-nav pointer-events-none fixed inset-x-0 bottom-0 z-20 px-3 pb-[max(env(safe-area-inset-bottom),0.5rem)] lg:hidden">
           <div className="pointer-events-auto mx-auto grid max-w-md grid-cols-5 gap-0.5 rounded-full border border-slate-200/70 bg-white/95 p-1.5 shadow-float backdrop-blur-xl">
             {bottomItems.map((item) => (
               <button

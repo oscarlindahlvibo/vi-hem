@@ -209,3 +209,7 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Flytande bottennavigationen får aldrig ligga över en öppen modal/panel eller dess knappar. */
+.vihem-floating-nav { transition: transform 0.22s ease, opacity 0.2s ease; }
+html[data-overlay-open] .vihem-floating-nav { transform: translateY(130%); opacity: 0; pointer-events: none; }
