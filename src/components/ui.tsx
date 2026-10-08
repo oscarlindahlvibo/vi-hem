@@ -291,26 +291,26 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, subtitle, action, backButton, icon: Icon }: PageHeaderProps) {
   return (
-    <div className="mb-6 flex min-w-0 flex-col gap-4 border-b border-slate-200/70 pb-5 sm:flex-row sm:items-start sm:justify-between">
+    <div className="mb-5 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex items-center gap-3 min-w-0">
         {backButton && (
-          <button onClick={backButton} className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-white hover:text-slate-950">
+          <button onClick={backButton} aria-label="Tillbaka" className="rounded-full p-2 text-slate-600 transition-colors hover:bg-white hover:text-slate-950">
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="m15 18-6-6 6-6" />
             </svg>
           </button>
         )}
         {Icon && (
-          <div className="hidden rounded-xl bg-blue-600 p-2.5 text-white shadow-sm shadow-blue-600/20 sm:block">
+          <div className="hidden rounded-2xl bg-blue-50 p-2.5 text-vihem-blue sm:block">
             <Icon className="h-5 w-5" />
           </div>
         )}
         <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-xl font-bold tracking-[-0.02em] text-slate-950 break-words sm:text-2xl">
-            {Icon && <Icon className="h-5 w-5 text-blue-600 sm:hidden" />}
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-vihem-ink break-words">
+            {Icon && <Icon className="h-5 w-5 text-vihem-blue sm:hidden" />}
             {title}
           </h1>
-          {subtitle && <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">{subtitle}</p>}
+          {subtitle && <p className="mt-0.5 max-w-3xl text-sm leading-6 text-vihem-muted">{subtitle}</p>}
         </div>
       </div>
       {action && <div className="w-full sm:w-auto sm:flex-shrink-0">{action}</div>}

@@ -118,9 +118,9 @@ export function LoginPage() {
           {/* BankID login */}
           <div className="mb-6">
             {bankIdBusy ? (
-              <div className="rounded-xl border-2 border-[#193E4F]/20 bg-slate-50 p-5 text-center">
+              <div className="rounded-xl border-2 border-vihem-navy/20 bg-slate-50 p-5 text-center">
                 <div className="mb-3 flex items-center justify-between">
-                  <span className="flex items-center gap-2 text-sm font-semibold text-[#193E4F]">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-vihem-navy">
                     <BankIDLogo className="h-5 w-auto flex-shrink-0" /> BankID
                   </span>
                   <button type="button" onClick={bankId.reset} className="text-slate-400 hover:text-slate-600" title="Avbryt">
@@ -134,7 +134,7 @@ export function LoginPage() {
                   <a
                     href={bankId.launchUrl}
                     onClick={() => bankId.confirmLaunched()}
-                    className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#193E4F] px-4 py-3 text-sm font-semibold text-white hover:bg-[#122e3c]"
+                    className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-vihem-navy px-4 py-3 text-sm font-semibold text-white hover:bg-vihem-navy/90"
                   >
                     <BankIDLogo variant="white" className="h-5 w-auto flex-shrink-0" /> Öppna BankID-appen
                   </a>
@@ -149,7 +149,7 @@ export function LoginPage() {
                   onClick={() => handleBankIDLogin()}
                   className={`w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl font-semibold text-sm transition-all border-2 ${
                     bankIDAvailable
-                      ? 'bg-[#193E4F] hover:bg-[#122e3c] text-white border-[#193E4F] hover:border-[#122e3c] cursor-pointer'
+                      ? 'bg-vihem-navy hover:bg-vihem-navy/90 text-white border-vihem-navy hover:border-vihem-navy/90 cursor-pointer'
                       : 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed'
                   }`}
                   title={bankIDAvailable ? 'Logga in med BankID' : 'BankID-integration är inte aktiverad ännu'}

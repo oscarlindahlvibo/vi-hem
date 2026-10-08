@@ -217,7 +217,7 @@ export function PublicAgreementSignPage() {
                   <div className="rounded-2xl bg-white p-5 shadow-sm">
                     <p className="mb-3 text-sm font-semibold text-slate-700">Signera med BankID</p>
                     {bankIdBusy ? (
-                      <div className="rounded-xl border-2 border-[#193E4F]/20 bg-slate-50 p-5 text-center">
+                      <div className="rounded-xl border-2 border-vihem-navy/20 bg-slate-50 p-5 text-center">
                         {bankId.qrImage && (
                           <img src={bankId.qrImage} alt="QR-kod för BankID" className="mx-auto mb-3 h-44 w-44 rounded-lg border border-slate-200 bg-white p-2" />
                         )}
@@ -225,7 +225,7 @@ export function PublicAgreementSignPage() {
                           <a
                             href={bankId.launchUrl}
                             onClick={() => bankId.confirmLaunched()}
-                            className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#193E4F] px-4 py-3 text-sm font-semibold text-white hover:bg-[#122e3c]"
+                            className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-vihem-navy px-4 py-3 text-sm font-semibold text-white hover:bg-vihem-navy/90"
                           >
                             <ShieldCheck className="h-4 w-4" /> Öppna BankID-appen
                           </a>
@@ -237,7 +237,7 @@ export function PublicAgreementSignPage() {
                       <button
                         onClick={() => { if (checkConsent()) void bankId.start(() => initiateBankIDAgreementSign(token)); }}
                         disabled={!allConsentsAccepted}
-                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#193E4F] py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#122e3c]"
+                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-vihem-navy py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-vihem-navy/90"
                       >
                         <ShieldCheck className="h-4 w-4" /> Starta BankID
                       </button>

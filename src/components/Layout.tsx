@@ -512,7 +512,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       >
         <div className="space-y-4">
           {bankIdBusy ? (
-            <div className="rounded-xl border-2 border-[#193E4F]/20 bg-slate-50 p-5 text-center">
+            <div className="rounded-xl border-2 border-vihem-navy/20 bg-slate-50 p-5 text-center">
               {bankIdLink.qrImage && (
                 <img src={bankIdLink.qrImage} alt="QR-kod för BankID" className="mx-auto mb-3 h-44 w-44 rounded-lg border border-slate-200 bg-white p-2" />
               )}
@@ -520,7 +520,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
                 <a
                   href={bankIdLink.launchUrl}
                   onClick={() => bankIdLink.confirmLaunched()}
-                  className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#193E4F] px-4 py-3 text-sm font-semibold text-white hover:bg-[#122e3c]"
+                  className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-vihem-navy px-4 py-3 text-sm font-semibold text-white hover:bg-vihem-navy/90"
                 >
                   <ShieldCheck className="h-4 w-4" /> Öppna BankID-appen
                 </a>

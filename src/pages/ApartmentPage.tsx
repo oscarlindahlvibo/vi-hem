@@ -769,7 +769,7 @@ Signeringsmetod: Handskriven signatur`,
                   <a
                     href={bankId.launchUrl}
                     onClick={() => bankId.confirmLaunched()}
-                    className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#193E4F] px-4 py-3 text-sm font-semibold text-white hover:bg-[#122e3c]"
+                    className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-vihem-navy px-4 py-3 text-sm font-semibold text-white hover:bg-vihem-navy/90"
                   >
                     <ShieldCheck className="h-4 w-4" /> Öppna BankID-appen
                   </a>

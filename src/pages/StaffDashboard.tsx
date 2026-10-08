@@ -2,11 +2,11 @@ import { DashboardCards } from '../components/DashboardCards';
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Card, Badge, StatCard, LoadingPage } from '../components/ui';
+import { Card, Badge, StatCard, LoadingPage, Avatar } from '../components/ui';
 import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, isBreakLike, entryKindLabel, clockTone, CLOCK_TONE_STYLES, LUNCH_WARNING_MINUTES, LUNCH_OVERDUE_MINUTES } from '../lib/utils';
 import { useTimeCategories } from '../contexts/TimeCategoriesContext';
 import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News, Profile, ShortStayBooking, CustomerProject } from '../types';
-import { Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, Square, Repeat2, Coffee, Utensils, BedDouble, Briefcase } from 'lucide-react';
+import { Bell, Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, Square, Repeat2, Coffee, Utensils, BedDouble, Briefcase } from 'lucide-react';
 
 interface StaffDashboardProps {
   onNavigate: (page: string) => void;
@@ -333,77 +333,58 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
   const shortStayAttentionCount = shortStayEvents.length;
   const attentionCount = attentionWorkOrdersCount + newMRCount + shortStayAttentionCount + ongoingCustomerProjects.length;
   const quickLinks = [
-    {
-      label: 'Arbetsordrar',
-      count: attentionWorkOrdersCount,
-      icon: <ClipboardList className="h-6 w-6" />,
-      className: 'bg-[#173b73] text-white hover:bg-[#102d59]',
-      page: 'workorders',
-    },
-    {
-      label: 'Kundprojekt',
-      count: ongoingCustomerProjects.length,
-      icon: <Briefcase className="h-6 w-6" />,
-      className: 'bg-[#2d9cff] text-white hover:bg-[#1687e8]',
-      page: 'customer-projects',
-    },
+    { label: 'Arbetsordrar', count: attentionWorkOrdersCount, icon: <ClipboardList className="h-5 w-5" />, page: 'workorders', alert: true },
+    { label: 'Kundprojekt', count: ongoingCustomerProjects.length, icon: <Briefcase className="h-5 w-5" />, page: 'customer-projects', alert: false },
+    { label: 'Olästa notiser', count: notificationCount, icon: <Bell className="h-5 w-5" />, page: 'notifications', alert: true },
   ];
 
   return (
     <DashboardCards>
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 bg-slate-50/80 px-4 py-4 sm:px-6">
-          <div className="flex items-center justify-between gap-4">
+      <section className="vihem-surface overflow-hidden rounded-card p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#173b73] text-base font-black text-white shadow-sm sm:h-11 sm:w-11">
-              {user?.name?.charAt(0) || 'V'}
-            </div>
+            <Avatar name={user?.name} size="lg" className="bg-vihem-navy text-white" />
             <div className="min-w-0">
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-blue-700">VI-HEM · Dagens översikt</p>
-              <h1 className="truncate text-xl font-bold text-slate-900 sm:text-2xl">
-                {getGreeting()}, {firstName}
-              </h1>
-              <p className="mt-0.5 truncate text-sm text-slate-500">
+              <h1 className="truncate text-xl font-bold tracking-tight text-vihem-ink sm:text-2xl">{getGreeting()}, {firstName}</h1>
+              <p className="truncate text-sm text-vihem-muted">
                 {user?.role === 'admin' ? 'Överblick över dagens drift' : 'Din arbetsdag i VI-HEM'}
               </p>
             </div>
           </div>
           <button
             onClick={() => onNavigate('notifications')}
-            className="relative rounded-2xl p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+            className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100"
             aria-label="Öppna aviseringar"
             title="Öppna aviseringar"
           >
-            <AlertCircle className="h-5 w-5" />
+            <Bell className="h-5 w-5" />
             {notificationCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-rose-500 px-1 text-xs font-bold text-white">
+              <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-vihem-danger px-1 text-[11px] font-bold text-white ring-2 ring-white">
                 {notificationCount > 99 ? '99+' : notificationCount}
               </span>
             )}
           </button>
-          </div>
         </div>
 
-        <div className="grid min-w-0 grid-cols-1 gap-2 p-3 sm:grid-cols-2 sm:p-4">
+        <div className="mt-4 grid grid-cols-3 gap-2">
           {quickLinks.map((tile) => (
             <button
               key={tile.label}
               onClick={() => onNavigate(tile.page)}
-              className={`group relative flex min-w-0 items-center justify-center gap-2 rounded-xl px-3 py-3 text-left font-semibold shadow-sm transition-colors ${tile.className}`}
+              className="flex min-w-0 flex-col items-start gap-1 rounded-2xl bg-slate-50 p-3 text-left transition-colors hover:bg-blue-50 active:scale-[0.98]"
             >
-              <span className="shrink-0 opacity-80 transition-opacity group-hover:opacity-100">{tile.icon}</span>
-              <span className="min-w-0 truncate text-sm">{tile.label}</span>
-              {tile.count !== null && tile.count > 0 && (
-                <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[11px] font-bold text-white shadow-sm">
-                  {tile.count}
-                </span>
-              )}
+              <span className="flex w-full items-center justify-between text-vihem-blue">
+                {tile.icon}
+                {tile.alert && tile.count !== null && tile.count > 0 && <span className="h-2 w-2 rounded-full bg-vihem-danger" />}
+              </span>
+              <span className="text-2xl font-bold leading-none text-vihem-ink">{tile.count ?? 0}</span>
+              <span className="w-full truncate text-xs font-semibold text-vihem-muted">{tile.label}</span>
             </button>
           ))}
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white px-4 py-5 shadow-sm sm:px-6">
+      <section className="vihem-surface rounded-card px-4 py-5 sm:px-6">
         <button
           onClick={() => onNavigate('timetracking')}
           className="mb-4 flex w-full min-w-0 items-center justify-between gap-3 text-left"
@@ -482,7 +463,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
               </div>
               <button
                 onClick={() => onNavigate('timetracking')}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
+                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200"
               >
                 Öppna tidsregistrering
                 <ArrowRight className="h-4 w-4" />
@@ -493,14 +474,14 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
           <div>
             <button
               onClick={() => onNavigate('timetracking')}
-              className="flex w-full min-w-0 items-center justify-center gap-3 rounded-xl bg-[#173b73] px-4 py-3 text-base font-bold text-white shadow-sm transition-colors hover:bg-[#102d59]"
+              className="flex min-h-14 w-full min-w-0 items-center justify-center gap-3 rounded-2xl bg-vihem-blue px-4 text-base font-bold text-white shadow-sm shadow-blue-600/25 transition-all hover:bg-blue-700 active:scale-[0.98]"
             >
               <Timer className="h-6 w-6 shrink-0" />
               <span className="truncate">Stämpla in</span>
             </button>
             <button
               onClick={() => onNavigate('timetracking')}
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100"
+              className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200"
             >
               Öppna tidsregistrering
               <ArrowRight className="h-4 w-4" />
@@ -509,7 +490,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
         )}
       </section>
 
-      <section className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
+      <section className="vihem-surface overflow-hidden rounded-card">
         <button
           onClick={() => {
             document.getElementById('staff-dashboard-attention-items')?.scrollIntoView({
@@ -649,7 +630,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
         </div>
       </section>
 
-      <section className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
+      <section className="vihem-surface overflow-hidden rounded-card">
         <button
           onClick={() => onNavigate('news')}
           className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-5 text-left sm:px-6"
