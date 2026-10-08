@@ -2,7 +2,7 @@ import { DashboardCards } from '../components/DashboardCards';
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Card, Badge, StatCard, LoadingPage, Avatar } from '../components/ui';
+import { Card, Badge, LoadingPage, Avatar } from '../components/ui';
 import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, isBreakLike, entryKindLabel, clockTone, CLOCK_TONE_STYLES, LUNCH_WARNING_MINUTES, LUNCH_OVERDUE_MINUTES } from '../lib/utils';
 import { useTimeCategories } from '../contexts/TimeCategoriesContext';
 import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News, Profile, ShortStayBooking, CustomerProject } from '../types';
@@ -673,12 +673,6 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
         </div>
       </section>
 
-      <div data-dashboard-group className="hidden grid-cols-1 gap-4 sm:grid sm:grid-cols-2 lg:col-span-2 lg:grid-cols-4">
-        <StatCard label="Nya felanmälningar" value={newMRCount} icon={<AlertCircle className="w-6 h-6" />} color="text-red-600 bg-red-50" onClick={() => onNavigate('maintenance')} />
-        <StatCard label="Akuta ärenden" value={urgentMRCount} icon={<Wrench className="w-6 h-6" />} color="text-orange-600 bg-orange-50" />
-        <StatCard label="Mina arbetsordrar" value={myWorkOrdersCount} icon={<ClipboardList className="w-6 h-6" />} color="text-blue-600 bg-blue-50" onClick={() => onNavigate('workorders')} />
-        <StatCard label="Nya arbetsordrar" value={newWorkOrdersCount} icon={<Plus className="w-6 h-6" />} color="text-green-600 bg-green-50" />
-      </div>
 
       {user?.role === 'admin' && (
         <div data-dashboard-group className="grid grid-cols-1 gap-4 lg:col-span-2 lg:grid-cols-2">
