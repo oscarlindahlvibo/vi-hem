@@ -14,6 +14,8 @@ const corsHeaders = {
 const SETTINGS_KEY = "fleet_source_recheck";
 const SECRET_HEADER = "x-vihem-fleet-recheck-secret";
 const MAX_SOURCES_PER_RUN = 100;
+const MAX_AI_PER_RUN = 10; // en edge-worker hinner inte med fler tolkningar per anrop; cron kör varje timme
+const CONCURRENCY = 5;
 const INSPECTION_TYPE = "Kontrollbesiktning";
 const DAY_MS = 86_400_000;
 
@@ -84,10 +86,10 @@ Deno.serve(async (req: Request) => {
   const aiCache = new Map<string, Awaited<ReturnType<typeof loadAiSettings>>>();
   const results: { source_id: string; status: string; summary?: string; error?: string }[] = [];
 
-  for (const src of sources ?? []) {
+  const handle = async (src: any) => {
     try {
       const { data: org } = await admin.from("vihem_organisation_modules").select("enabled").eq("organisation_id", src.organisation_id).eq("module_key", "fleet_management").maybeSingle();
-      if (!org?.enabled) continue;
+      if (!org?.enabled) return;
 
       let target: URL;
       try { target = new URL(src.url); } catch { throw new Error("Ogiltig länk."); }
@@ -101,7 +103,7 @@ Deno.serve(async (req: Request) => {
       if (src.content_hash && src.content_hash === contentHash && src.last_status === "ok") {
         await admin.from("vihem_fleet_vehicle_sources").update({ last_checked_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", src.id);
         results.push({ source_id: src.id, status: "unchanged" });
-        continue;
+        return;
       }
 
       if (!aiCache.has(src.organisation_id)) aiCache.set(src.organisation_id, await loadAiSettings(admin, src.organisation_id));
@@ -169,6 +171,12 @@ Deno.serve(async (req: Request) => {
       }).eq("id", src.id);
       results.push({ source_id: src.id, status: "error", error: message });
     }
+  };
+
+  // Manuell körning: alla angivna källor. Schemalagd: högst MAX_AI_PER_RUN per anrop, äldst kontrollerade först.
+  const queue = manual ? (sources ?? []) : (sources ?? []).slice(0, MAX_AI_PER_RUN);
+  for (let i = 0; i < queue.length; i += CONCURRENCY) {
+    await Promise.all(queue.slice(i, i + CONCURRENCY).map(handle));
   }
   return json({ ok: true, checked: results.length, results });
 });
