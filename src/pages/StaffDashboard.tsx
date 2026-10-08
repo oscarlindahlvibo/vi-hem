@@ -1,3 +1,4 @@
+import { DashboardCards } from '../components/DashboardCards';
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -349,7 +350,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
   ];
 
   return (
-    <div className="grid min-w-0 max-w-full grid-cols-1 items-start gap-3 overflow-hidden sm:gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+    <DashboardCards>
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-slate-50/80 px-4 py-4 sm:px-6">
           <div className="flex items-center justify-between gap-4">
@@ -691,7 +692,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
         </div>
       </section>
 
-      <div className="hidden grid-cols-1 gap-4 sm:grid sm:grid-cols-2 lg:col-span-2 lg:grid-cols-4">
+      <div data-dashboard-group className="hidden grid-cols-1 gap-4 sm:grid sm:grid-cols-2 lg:col-span-2 lg:grid-cols-4">
         <StatCard label="Nya felanmälningar" value={newMRCount} icon={<AlertCircle className="w-6 h-6" />} color="text-red-600 bg-red-50" onClick={() => onNavigate('maintenance')} />
         <StatCard label="Akuta ärenden" value={urgentMRCount} icon={<Wrench className="w-6 h-6" />} color="text-orange-600 bg-orange-50" />
         <StatCard label="Mina arbetsordrar" value={myWorkOrdersCount} icon={<ClipboardList className="w-6 h-6" />} color="text-blue-600 bg-blue-50" onClick={() => onNavigate('workorders')} />
@@ -699,7 +700,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
       </div>
 
       {user?.role === 'admin' && (
-        <div className="grid grid-cols-1 gap-4 lg:col-span-2 lg:grid-cols-2">
+        <div data-dashboard-group className="grid grid-cols-1 gap-4 lg:col-span-2 lg:grid-cols-2">
           <Card className="overflow-hidden border-emerald-200 bg-emerald-50">
             <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <div className="flex min-w-0 items-start gap-3">
@@ -892,7 +893,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
       </Card>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:col-span-2">
+      <div data-dashboard-group className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:col-span-2">
         <button
           onClick={() => onNavigate('workorders')}
           className="p-4 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-colors text-left"
@@ -936,6 +937,6 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
           </div>
         </button>
       </div>
-    </div>
+    </DashboardCards>
   );
 }
