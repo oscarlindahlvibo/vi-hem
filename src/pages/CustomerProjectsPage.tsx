@@ -20,6 +20,7 @@ import {
   Edit2,
   UserPlus,
   ArrowLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -114,6 +115,7 @@ const PROJECT_TYPES = [
 ];
 
 const currency = new Intl.NumberFormat('sv-SE', { style: 'currency', currency: 'SEK', maximumFractionDigits: 0 });
+const STATUS_LABELS_CHANGE: Record<string, string> = { approved_by_customer: 'Godkänd av kund', completed: 'Slutförd', invoiced: 'Fakturerad' };
 const hours = (minutes: number) => `${(minutes / 60).toLocaleString('sv-SE', { maximumFractionDigits: 1 })} h`;
 const money = (value?: number | null) => currency.format(Number(value || 0));
 
@@ -201,6 +203,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
   const [projectListView, setProjectListView] = useState<ProjectListView>('active');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [tab, setTab] = useState<ProjectTabId>('overview');
+  const [statDetail, setStatDetail] = useState<null | 'regular' | 'ata' | 'billable' | 'material' | 'changes'>(null);
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showTimeModal, setShowTimeModal] = useState(false);
@@ -1335,18 +1338,18 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
 
             {isAdmin ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-                <Stat label="Ordinarie tid" value={hours(regularMinutes)} icon={<Timer className="w-5 h-5" />} />
-                <Stat label="ÄTA-tid" value={hours(ataMinutes)} icon={<Timer className="w-5 h-5 text-amber-600" />} />
-                <Stat label="Fakturerbar tid" value={money(timeValue)} icon={<Coins className="w-5 h-5" />} />
-                <Stat label="Materialvärde" value={money(materialSale)} icon={<Package className="w-5 h-5" />} />
-                <Stat label="ÄTA-belopp" value={money(changeOrderAmount)} icon={<Receipt className="w-5 h-5" />} />
+                <Stat label="Ordinarie tid" value={hours(regularMinutes)} icon={<Timer className="w-5 h-5" />} onClick={() => setStatDetail('regular')} />
+                <Stat label="ÄTA-tid" value={hours(ataMinutes)} icon={<Timer className="w-5 h-5 text-amber-600" />} onClick={() => setStatDetail('ata')} />
+                <Stat label="Fakturerbar tid" value={money(timeValue)} icon={<Coins className="w-5 h-5" />} onClick={() => setStatDetail('billable')} />
+                <Stat label="Materialvärde" value={money(materialSale)} icon={<Package className="w-5 h-5" />} onClick={() => setStatDetail('material')} />
+                <Stat label="ÄTA-belopp" value={money(changeOrderAmount)} icon={<Receipt className="w-5 h-5" />} onClick={() => setStatDetail('changes')} />
                 <Stat label="Fakturerbart" value={money(invoiceable)} icon={<FileText className="w-5 h-5" />} />
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Stat label="Ordinarie tid" value={hours(regularMinutes)} icon={<Timer className="w-5 h-5" />} />
-                <Stat label="ÄTA-tid" value={hours(ataMinutes)} icon={<Timer className="w-5 h-5 text-amber-600" />} />
-                <Stat label="Materialrader" value={`${projectMaterials.length}`} icon={<Package className="w-5 h-5" />} />
+                <Stat label="Ordinarie tid" value={hours(regularMinutes)} icon={<Timer className="w-5 h-5" />} onClick={() => setStatDetail('regular')} />
+                <Stat label="ÄTA-tid" value={hours(ataMinutes)} icon={<Timer className="w-5 h-5 text-amber-600" />} onClick={() => setStatDetail('ata')} />
+                <Stat label="Materialrader" value={`${projectMaterials.length}`} icon={<Package className="w-5 h-5" />} onClick={() => setStatDetail('material')} />
                 <Stat label="ÄTA" value={`${projectChangeOrders.length}`} icon={<Receipt className="w-5 h-5" />} />
               </div>
             )}
@@ -1621,6 +1624,71 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
         ) : null}
       </div>
 
+      {selectedProject && (() => {
+        const rate = Number(selectedProject.hourly_rate || 0);
+        const timeRows = (list: TimeEntry[]) => list
+          .slice()
+          .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
+          .map(entry => {
+            const who = staff.find(m => m.id === entry.user_id)?.name || 'Användare';
+            const clock = (v: string) => new Date(v).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+            const span = entry.end_time ? `${clock(entry.start_time)}–${clock(entry.end_time)}` : `${clock(entry.start_time)}– pågår`;
+            const wo = entry.work_order_id ? workOrders.find(w => w.id === entry.work_order_id)?.title : '';
+            return { id: entry.id, title: who, meta: [formatDate(entry.start_time), span, wo, entry.comment].filter(Boolean).join(' · '), minutes: entry.total_minutes || 0 };
+          });
+        const detail = (() => {
+          if (statDetail === 'regular' || statDetail === 'ata') {
+            const list = statDetail === 'ata' ? projectAtaTimeEntries : projectTimeEntries.filter(e => e.project_billing_scope !== 'outside_quote');
+            const rows = timeRows(list);
+            return { title: statDetail === 'ata' ? 'ÄTA-tid – alla stämplingar' : 'Ordinarie tid – alla stämplingar', empty: 'Ingen tid stämplad.', rows: rows.map(r => ({ id: r.id, title: r.title, meta: r.meta, value: hours(r.minutes) })), total: hours(rows.reduce((sum, r) => sum + r.minutes, 0)) };
+          }
+          if (statDetail === 'billable') {
+            const rows = timeRows(projectTimeEntries.filter(e => e.project_billable !== false));
+            return { title: 'Fakturerbar tid', empty: 'Ingen fakturerbar tid.', rows: rows.map(r => ({ id: r.id, title: r.title, meta: r.meta, value: `${hours(r.minutes)} · ${money((r.minutes / 60) * rate)}` })), total: `${hours(rows.reduce((sum, r) => sum + r.minutes, 0))} · ${money(timeValue)}`, note: `Timpris ${money(rate)}` };
+          }
+          if (statDetail === 'material') {
+            const rows = projectMaterials.slice().sort((a, b) => (b.material_date || '').localeCompare(a.material_date || ''));
+            return {
+              title: 'Tillagt material', empty: 'Inget material registrerat.',
+              rows: rows.map(item => ({ id: item.id, title: item.name, meta: `${formatDate(item.material_date)} · ${item.quantity} ${item.unit}${item.supplier ? ` · ${item.supplier}` : ''}`, value: isAdmin ? money(Number(item.sale_price || 0) * Number(item.quantity || 0)) : '' })),
+              total: isAdmin ? money(materialSale) : `${rows.length} rader`,
+            };
+          }
+          if (statDetail === 'changes') {
+            const rows = projectChangeOrders.filter(item => ['approved_by_customer', 'completed', 'invoiced'].includes(item.status));
+            return { title: 'ÄTA-belopp', empty: 'Inga godkända ÄTA.', rows: rows.map(item => ({ id: item.id, title: `${item.change_order_number} · ${item.title}`, meta: STATUS_LABELS_CHANGE[item.status] || item.status, value: money(item.billing_mode === 'deduction' ? -Number(item.actual_amount || 0) : Number(item.actual_amount || 0)) })), total: money(changeOrderAmount) };
+          }
+          return null;
+        })();
+        return (
+          <Modal open={statDetail !== null && detail !== null} onClose={() => setStatDetail(null)} title={detail?.title || ''} size="lg">
+            {detail && (
+              <div className="space-y-3">
+                {'note' in detail && detail.note && <p className="text-xs text-slate-500">{detail.note}</p>}
+                {detail.rows.length === 0 ? (
+                  <p className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">{detail.empty}</p>
+                ) : (
+                  <div className="divide-y divide-slate-100 rounded-2xl ring-1 ring-slate-200">
+                    {detail.rows.map(row => (
+                      <div key={row.id} className="flex items-start justify-between gap-3 px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="break-words text-sm font-semibold text-slate-900">{row.title}</p>
+                          {row.meta && <p className="mt-0.5 break-words text-xs text-slate-500">{row.meta}</p>}
+                        </div>
+                        {row.value && <p className="shrink-0 text-sm font-semibold text-slate-800">{row.value}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center justify-between rounded-2xl bg-blue-50 px-4 py-3 text-sm font-bold text-vihem-navy">
+                  <span>Summa</span><span>{detail.total}</span>
+                </div>
+              </div>
+            )}
+          </Modal>
+        );
+      })()}
+
       <CustomerModal open={showCustomerModal} onClose={() => setShowCustomerModal(false)} form={customerForm} setForm={setCustomerForm} onSave={handleSaveCustomer} saving={saving} error={error} />
       <ProjectModal open={showProjectModal} onClose={() => setShowProjectModal(false)} form={projectForm} setForm={setProjectForm} customers={customers} staff={staff} onSave={handleSaveProject} saving={saving} error={error} onCreateCustomer={handleCreateCustomerInline} />
       <TimeModal open={showTimeModal} onClose={() => { setShowTimeModal(false); setEditingTimeEntry(null); }} form={timeForm} setForm={setTimeForm} staff={staff} isAdmin={isAdmin} onSave={handleSaveTime} saving={saving} error={error} editing={Boolean(editingTimeEntry)} changeOrders={projectChangeOrders} />
@@ -1638,14 +1706,16 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate }: CustomerProjec
   );
 }
 
-function Stat({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
-  return (
-    <Card className="p-4">
-      <div className="mb-2 text-blue-600">{icon}</div>
+function Stat({ label, value, icon, onClick }: { label: string; value: string; icon: React.ReactNode; onClick?: () => void }) {
+  const content = (
+    <Card className={`p-4 ${onClick ? 'transition-shadow group-hover:shadow-md group-focus-visible:ring-2 group-focus-visible:ring-vihem-blue' : ''}`}>
+      <div className="mb-2 flex items-center justify-between text-blue-600">{icon}{onClick && <ChevronRight className="h-4 w-4 text-slate-300 transition-colors group-hover:text-slate-500" />}</div>
       <p className="text-xs text-slate-500">{label}</p>
       <p className="mt-1 break-words text-lg font-bold text-slate-900">{value}</p>
     </Card>
   );
+  if (!onClick) return content;
+  return <button type="button" onClick={onClick} className="group block w-full rounded-card text-left outline-none" aria-label={`Visa underlag för ${label}`}>{content}</button>;
 }
 
 function InfoPanel({ title, rows }: { title: string; rows: [string, string][] }) {
