@@ -78,7 +78,7 @@ async function uploadFleetFile(
 // ── Huvudkomponent ────────────────────────────────────────────────────────
 
 type FleetView = 'dashboard' | 'list' | 'detail';
-type ListFilter = { status?: FleetVehicleStatus; inspectionsDue?: boolean; serviceDue?: boolean; damageOpen?: boolean; workOrdersOpen?: boolean } | null;
+type ListFilter = { status?: FleetVehicleStatus; inspectionsDue?: 'overdue' | 'soon'; serviceDue?: 'overdue' | 'soon'; damageOpen?: boolean; workOrdersOpen?: boolean } | null;
 
 export function FleetPage({ onNavigate, initialVehicleId }: { onNavigate: (page: string) => void; initialVehicleId?: string }) {
   const { user } = useAuth();
@@ -269,10 +269,10 @@ function FleetDashboard({ stats, onFilter, vehicles, inspections, serviceSchedul
     { label: 'På verkstad', value: stats.byStatus.workshop, icon: Wrench, className: 'text-amber-600', onClick: () => onFilter({ status: 'workshop' }) },
     { label: 'Ur drift', value: stats.byStatus.out_of_service, icon: X, className: 'text-slate-500', onClick: () => onFilter({ status: 'out_of_service' }) },
     { label: 'Körförbud', value: stats.byStatus.driving_ban, icon: AlertTriangle, className: 'text-red-600', onClick: () => onFilter({ status: 'driving_ban' }) },
-    { label: 'Besiktning förfallen', value: stats.inspectionsOverdue, icon: Calendar, className: 'text-red-600', onClick: () => onFilter({ inspectionsDue: true }) },
-    { label: 'Besiktning inom 30 dagar', value: stats.inspectionsSoon, icon: Calendar, className: 'text-amber-600', onClick: () => onFilter({ inspectionsDue: true }) },
-    { label: 'Service förfallen', value: stats.serviceOverdue, icon: Wrench, className: 'text-red-600', onClick: () => onFilter({ serviceDue: true }) },
-    { label: 'Service snart', value: stats.serviceSoon, icon: Wrench, className: 'text-amber-600', onClick: () => onFilter({ serviceDue: true }) },
+    { label: 'Besiktning förfallen', value: stats.inspectionsOverdue, icon: Calendar, className: 'text-red-600', onClick: () => onFilter({ inspectionsDue: 'overdue' }) },
+    { label: 'Besiktning inom 30 dagar', value: stats.inspectionsSoon, icon: Calendar, className: 'text-amber-600', onClick: () => onFilter({ inspectionsDue: 'soon' }) },
+    { label: 'Service förfallen', value: stats.serviceOverdue, icon: Wrench, className: 'text-red-600', onClick: () => onFilter({ serviceDue: 'overdue' }) },
+    { label: 'Service snart', value: stats.serviceSoon, icon: Wrench, className: 'text-amber-600', onClick: () => onFilter({ serviceDue: 'soon' }) },
     { label: 'Öppna skador/fel', value: stats.damageOpen, icon: AlertTriangle, className: stats.damageUrgent > 0 ? 'text-red-600' : 'text-slate-900', onClick: () => onFilter({ damageOpen: true }) },
     { label: 'Öppna arbetsordrar', value: stats.workOrdersOpen, icon: ClipboardList, className: 'text-slate-900', onClick: () => onFilter({ workOrdersOpen: true }) },
   ];
@@ -354,8 +354,8 @@ function FleetList({ vehicles, companiesById, propertiesById, profilesById, filt
   const filtered = useMemo(() => {
     let rows = vehicles;
     if (filter?.status) rows = rows.filter((v) => v.status === filter.status);
-    if (filter?.inspectionsDue) { const ids = new Set(inspections.filter((i) => { const u = urgencyFromDays(daysUntil(i.next_inspection_date)); return u === 'overdue' || u === 'soon'; }).map((i) => i.vehicle_id)); rows = rows.filter((v) => ids.has(v.id)); }
-    if (filter?.serviceDue) { const ids = new Set(serviceSchedules.filter((s) => urgencyFromDays(daysUntil(s.next_due_date)) === 'overdue' || urgencyFromDays(daysUntil(s.next_due_date)) === 'soon').map((s) => s.vehicle_id)); rows = rows.filter((v) => ids.has(v.id)); }
+    if (filter?.inspectionsDue) { const ids = new Set(inspections.filter((i) => { const u = urgencyFromDays(daysUntil(i.next_inspection_date)); return u === filter.inspectionsDue; }).map((i) => i.vehicle_id)); rows = rows.filter((v) => ids.has(v.id)); }
+    if (filter?.serviceDue) { const ids = new Set(serviceSchedules.filter((s) => urgencyFromDays(daysUntil(s.next_due_date)) === filter.serviceDue).map((s) => s.vehicle_id)); rows = rows.filter((v) => ids.has(v.id)); }
     if (filter?.damageOpen) { const ids = new Set(damageReports.filter((d) => d.status === 'open').map((d) => d.vehicle_id)); rows = rows.filter((v) => ids.has(v.id)); }
     if (filter?.workOrdersOpen) { const ids = new Set(fleetWorkOrders.filter((w) => w.status !== 'completed' && w.status !== 'cancelled').map((w) => w.vehicle_id).filter(Boolean) as string[]); rows = rows.filter((v) => ids.has(v.id)); }
     if (search.trim()) { const q = search.toLowerCase(); rows = rows.filter((v) => `${v.name} ${v.registration_number} ${v.internal_number} ${v.make} ${v.model}`.toLowerCase().includes(q)); }
