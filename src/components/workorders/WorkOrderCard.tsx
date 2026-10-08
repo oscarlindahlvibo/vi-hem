@@ -47,9 +47,19 @@ export function WorkOrderCard(props: WorkOrderCardProps) {
   const gesture = useRef<{ x: number; y: number; lock: 'h' | 'v' | null; pointerId: number } | null>(null);
   const suppressClick = useRef(false);
   const pressTimer = useRef<number | undefined>(undefined);
+  const cardRef = useRef<HTMLDivElement>(null);
   const swipeEnabled = canAct && !selectMode;
 
   useEffect(() => () => window.clearTimeout(pressTimer.current), []);
+
+  // iOS/Safari markerar annars text (och visar kopiera-menyn) vid långtryck. Stäng av det på kortet.
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const block = (e: Event) => e.preventDefault();
+    el.addEventListener('selectstart', block);
+    return () => el.removeEventListener('selectstart', block);
+  }, []);
 
   const clearPress = () => { window.clearTimeout(pressTimer.current); pressTimer.current = undefined; };
 
@@ -65,6 +75,7 @@ export function WorkOrderCard(props: WorkOrderCardProps) {
         setDx(0);
         setDragging(false);
         navigator.vibrate?.(12);
+        window.getSelection()?.removeAllRanges();
         props.onMenu();
       }, LONG_PRESS_MS);
     }
@@ -136,6 +147,7 @@ export function WorkOrderCard(props: WorkOrderCardProps) {
         </>
       )}
       <div
+        ref={cardRef}
         role="button"
         tabIndex={0}
         aria-label={`Öppna arbetsorder ${title}`}
@@ -154,6 +166,9 @@ export function WorkOrderCard(props: WorkOrderCardProps) {
           transform: dx ? `translateX(${dx}px)` : undefined,
           transition: dragging ? 'none' : 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1)',
           touchAction: 'pan-y',
+          WebkitTouchCallout: 'none',
+          WebkitUserSelect: 'none',
+          userSelect: 'none',
         }}
         className={`relative flex cursor-pointer select-none items-stretch gap-3 rounded-card border bg-white px-3.5 py-3 shadow-card outline-none transition-colors focus-visible:ring-2 focus-visible:ring-vihem-blue ${
           selected ? 'border-vihem-blue bg-blue-50/60' : 'border-slate-200/70'
