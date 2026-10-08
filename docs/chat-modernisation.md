@@ -4,7 +4,7 @@
 
 Implementation på separat branch `codex/chat-modernisation`, uppdaterad mot Claudes senaste `main` (`b3d6430`) före publicering. Produktion har inte uppdaterats. Befintlig stack React/Vite, Capacitor och self-hosted Supabase används. Den separata Beds24-gästchatten, webbplatserna, tidrapporteringen och arbetsordrarnas kommentarer bevaras.
 
-Detta är en kodleverans med verifierad backend och webbflöden. Godkännande för produktionssättning kräver fortfarande fysisk iOS/Android-verifiering och en samordnad klientuppdatering. Gamla mobilklienter som skriver direkt till chattabellerna kan inte fortsätta skriva efter den nya RLS-migrationen; planera därför minsta tillåtna appversion eller en kort underhållsperiod. Rulla inte ut nya RLS-regler separat utan denna plan.
+Detta är en kodleverans med verifierad backend och webbflöden. Oscar har nu godkänt att äldre mobilversioner får förlora chatten. Samordna därför nya webb/backend utan krav på att alla gamla appar uppdateras först. Fysisk iPhone-verifiering återstår. Android-push kräver separat Firebase-konfiguration och enhetstest. Ett kontrollerat manuellt releasepaket beskrivs i `docs/chat-release.md`.
 
 ## Nuläge som faktiskt verifierades
 
@@ -109,3 +109,11 @@ Integrationstestet skapar syntetiska grupper/meddelanden/objekt och testar även
 ## Publicering
 
 Koden är pushad till `codex/chat-modernisation`, med `main` oförändrad. Granska jämförelsen: https://github.com/oscarlindahlvibo/vi-hem/compare/main...codex/chat-modernisation . GitHub-integrationen nekade automatiskt skapande av pull request med HTTP 403 (`Resource not accessible by integration`). Ingen pull request har därför skapats genom verktyget; jämförelsen kan användas för att skapa en manuellt. Detta påverkar inte den pushade kodleveransen.
+
+## Komplettering inför release
+
+Branchen uppdaterades mot Claudes `main` 2b935b7. Ett kallstartsfel verifierades: WebSocket kan bli SUBSCRIBED innan postgres_changes är redo. Både inbox och meddelandevy synkroniserar nu när CDC bekräftas redo. Testerna väntar på faktisk CDC-start och tolererar SDK:s återanslutning efter serverstart; ett tidigt omtest med 15 sekunders gräns misslyckades, efter serverinitiering gick hela integrationssviten igenom. Inga misslyckade testkörningar räknas som godkända.
+
+Åtta automatiska tester verifierar releaseverktygets read-only-standard, rollback-repetition, paket/serverdrift, oväntade Realtime-värden, schema utan journal, konflikt i journalhash och återupptagning efter commit/ledger-avbrott. Det nya införandet prövar alla sex migrationer i en gemensam transaktion. Exakt installationspaket ska dessutom genomgå `--check` och `--rehearse` på servern före manuell publicering. Runtime/API-ändringen prövas endast i isolerad QA tills Oscar deployar.
+
+Xcode byggde den nya iOS-appen framgångsrikt för iPhone 17 Pro-simulator (iOS 26.5); appen installerades och startades. Simulatorns interaktiva chatt-/tangentbordsprov blockerades av låst Mac och räknas inte som utfört. Ett syntetiskt APNs-prov via HTTP/2 med produktionskonfiguration fick HTTP 400 BadDeviceToken för en avsiktligt ogiltig token; ingen riktig användare kontaktades. Detta visar providerkontakt men bevisar inte leverans till en riktig telefon.

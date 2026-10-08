@@ -56,8 +56,12 @@ const other = await rpc("oscar", "vihem_chat_create", {
   recipients: [c.users.christofer.id],
 });
 const received = [];
+let cdcReady = false;
 const channel = clients.christofer
   .channel("qa-integrated")
+  .on("system", {}, (payload) => {
+    if (payload.extension === "postgres_changes" && payload.status === "ok") cdcReady = true;
+  })
   .on(
     "postgres_changes",
     {
@@ -99,7 +103,7 @@ const channel = clients.christofer
     () => received.push("typing"),
   );
 await new Promise((resolve, reject) => {
-  const timer = setTimeout(() => reject(Error("QA RT timeout")), 15000);
+  const timer = setTimeout(() => reject(Error("QA RT timeout")), 45000);
   channel.subscribe((s) => {
     if (s === "SUBSCRIBED") {
       clearTimeout(timer);
@@ -107,6 +111,11 @@ await new Promise((resolve, reject) => {
     }
   });
 });
+// Socket subscription can precede CDC startup on a cold self-hosted stack.
+// Test event delivery only after the database subscription is actually ready.
+for (let i = 0; i < 300 && !cdcReady; i++)
+  await new Promise(resolve => setTimeout(resolve, 100));
+assert.ok(cdcReady, "postgres_changes subscription ready");
 const a = crypto.randomUUID(),
   b = crypto.randomUUID();
 await Promise.all([

@@ -296,8 +296,12 @@ export function useChat(userId: string, org: string, initialThread?: string) {
         } else if (
           payload.extension === "postgres_changes" &&
           payload.status === "ok"
-        )
+        ) {
           setConnection("connected");
+          // A cold self-hosted instance may accept the socket before CDC is
+          // ready. Catch messages/read receipts written during that interval.
+          refresh();
+        }
       })
       .on(
         "postgres_changes",
@@ -391,6 +395,11 @@ export function useChat(userId: string, org: string, initialThread?: string) {
     };
     const channel = supabase
       .channel(`chat-thread:${thread}:${userId}`)
+      .on("system", {}, (payload) => {
+        if (disposed || selectedRef.current !== thread) return;
+        if (payload.extension === "postgres_changes" && payload.status === "ok")
+          void fetchRecent(thread);
+      })
       .on(
         "postgres_changes",
         {
