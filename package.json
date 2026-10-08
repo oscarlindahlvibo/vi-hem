@@ -21,7 +21,9 @@
     "viborent:build": "vite build --config apps/viborent/vite.config.ts",
     "viborent:preview": "vite preview --config apps/viborent/vite.config.ts",
     "test:mobile-bundle": "node scripts/check-mobile-web-build.mjs",
-    "vibofast:build": "npm --prefix apps/vibofast run build"
+    "vibofast:build": "npm --prefix apps/vibofast run build",
+    "ekangen:dev": "npm --prefix apps/ekangen run dev",
+    "ekangen:build": "npm --prefix apps/ekangen install --no-audit --no-fund && npm --prefix apps/ekangen run build"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

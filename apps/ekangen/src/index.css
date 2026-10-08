@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+  body { @apply bg-paper-50 font-sans text-fjord-950; }
+  h1, h2, h3 { @apply font-serif; }
+  :focus-visible { @apply outline-2 outline-offset-2 outline-fjord-500; }
+}
+@layer components {
+  .btn { @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-6 text-base font-semibold transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply bg-fjord-700 text-white shadow-sm hover:bg-fjord-800; }
+  .btn-amber { @apply bg-amber-500 text-fjord-950 shadow-sm hover:bg-amber-400; }
+  .btn-ghost { @apply bg-white text-fjord-800 ring-1 ring-fjord-200 hover:bg-fjord-50; }
+  .field { @apply w-full rounded-xl border border-fjord-200 bg-white px-4 py-3 text-base text-fjord-950 placeholder:text-fjord-300 focus:border-fjord-500 focus:outline-none focus:ring-2 focus:ring-fjord-500/20; }
+  .label { @apply mb-1.5 block text-sm font-semibold text-fjord-800; }
+  .card { @apply rounded-2xl bg-white shadow-card ring-1 ring-fjord-100; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
