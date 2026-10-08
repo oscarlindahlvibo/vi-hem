@@ -471,3 +471,10 @@ verify_jwt = false
 
 [functions.vihem-send-beds24-message]
 verify_jwt = false
+
+# Ekängens vandrarhem: publik bokning (ingen JWT; allt valideras och prissätts serverside) + Stripe-webhook (signatur).
+[functions.vihem-ekangen-booking]
+verify_jwt = false
+
+[functions.vihem-ekangen-stripe-webhook]
+verify_jwt = false

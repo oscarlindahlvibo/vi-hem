@@ -1,4 +1,5 @@
 import { WebsiteAdmin } from './modules/vibofast/WebsiteAdmin';
+import { EkangenAdmin } from './modules/ekangen/EkangenAdmin';
 import { InterestsAdmin } from './modules/vibofast/InterestsAdmin';
 import React, { useCallback, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -567,6 +568,10 @@ function AppInner() {
       case 'vibofast-website':
         if (!isAdmin) return renderDashboard();
         return <WebsiteAdmin client={supabase} />;
+
+      case 'ekangen-website':
+        if (!isAdmin) return renderDashboard();
+        return <EkangenAdmin client={supabase} />;
 
       case 'admin-properties':
         if (!isAdmin) return renderDashboard();
