@@ -15,6 +15,8 @@ async function load(path) {
 }
 const {
   mergeChatMessages,
+  mergeChatReactions,
+  reactionKey,
   messageReceipt,
   chatTitle,
   validateChatFile,
@@ -148,4 +150,47 @@ assert.equal(fcm.tokenInvalid, true);
 assert.equal(fcm.reason, "UNREGISTERED");
 console.log(
   "PASS: FCM service account parsing, signed OAuth exchange, conversation deep link, notification deduplication tag and invalid token handling (mocked provider).",
+);
+
+const reaction = {
+  message_id: "message",
+  user_id: "recipient",
+  emoji: "👍",
+  active: true,
+};
+const revisions = new Map([[reactionKey(reaction), 2]]);
+assert.deepEqual(
+  mergeChatReactions([], [reaction], new Set(["message"]), revisions, 1),
+  [],
+  "late snapshot cannot restore a realtime-removed reaction",
+);
+assert.deepEqual(
+  mergeChatReactions([reaction], [], new Set(["message"]), revisions, 1, true),
+  [reaction],
+  "new realtime reaction survives an initial history response",
+);
+assert.deepEqual(
+  mergeChatReactions([reaction], [], new Set(["message"]), revisions, 2),
+  [],
+  "current snapshot removes stale reaction",
+);
+console.log(
+  "PASS: delayed reaction snapshots preserve newer realtime adds and removals.",
+);
+
+const earlier = { ...row, id: "z", created_at: "2026-10-09T08:00:00.123456Z" };
+const later = { ...row, id: "a", created_at: "2026-10-09T08:00:00.123789Z" };
+assert.deepEqual(
+  mergeChatMessages([later], [earlier]).map((m) => m.id),
+  ["z", "a"],
+  "simultaneous messages retain PostgreSQL microsecond order",
+);
+assert.equal(
+  messageReceipt(later, [{ user_id: "two", last_read_at: earlier.created_at }])
+    .length,
+  0,
+  "an earlier read boundary in the same millisecond is not a receipt",
+);
+console.log(
+  "PASS: PostgreSQL microseconds preserved in ordering and read receipts.",
 );

@@ -6,6 +6,8 @@ import {
   Conversation,
   draftKey,
   mergeChatMessages,
+  mergeChatReactions,
+  reactionKey,
   Reaction,
   readLocal,
   writeLocal,
@@ -32,7 +34,8 @@ export function useChat(userId: string, org: string, initialThread?: string) {
     messagesRef = useRef(messages),
     inboxEpoch = useRef(0),
     threadEpoch = useRef(0),
-    sending = useRef(new Set<string>());
+    sending = useRef(new Set<string>()),
+    confirmed = useRef(new Map<string, CommunicationMessage>());
   const filterRef = useRef(filter),
     queryRef = useRef(query),
     readBoundary = useRef("");
@@ -58,6 +61,8 @@ export function useChat(userId: string, org: string, initialThread?: string) {
     inboxQueued = useRef(false),
     loadingMoreThreads = useRef(false);
   const lastSubmission = useRef({ signature: "", time: 0 });
+  const reactionRevision = useRef(0),
+    reactionChanged = useRef(new Map<string, number>());
   const key = useCallback(
     (thread: string) => draftKey(org, userId, thread),
     [org, userId],
@@ -152,6 +157,39 @@ export function useChat(userId: string, org: string, initialThread?: string) {
     });
     return promise;
   }, [fetchInbox]);
+  const fetchReactions = useCallback(
+    async (thread: string, ids: string[], replace = false) => {
+      const epoch = threadEpoch.current,
+        startRevision = reactionRevision.current,
+        unique = [...new Set(ids)],
+        rows: Reaction[] = [];
+      for (let offset = 0; offset < unique.length; offset += 200) {
+        const result = await supabase
+          .from("vihem_chat_reactions")
+          .select("*")
+          .eq("thread_id", thread)
+          .in("message_id", unique.slice(offset, offset + 200))
+          .eq("active", true);
+        if (result.error)
+          throw new Error("Reaktionerna kunde inte synkroniseras.");
+        rows.push(...(result.data || []));
+      }
+      if (selectedRef.current !== thread || threadEpoch.current !== epoch)
+        return;
+      const fetched = new Set(unique);
+      setReactions((previous) =>
+        mergeChatReactions(
+          previous,
+          rows,
+          fetched,
+          reactionChanged.current,
+          startRevision,
+          replace,
+        ),
+      );
+    },
+    [],
+  );
   const fetchRecent = useCallback(
     async (thread: string, replace = false) => {
       const epoch = threadEpoch.current;
@@ -180,19 +218,21 @@ export function useChat(userId: string, org: string, initialThread?: string) {
           mergeChatMessages(replace ? pending : current, data.slice(0, 50)),
         );
         if (replace) setHasOlder(data.length > 50);
-        const { data: rows } = await supabase
-          .from("vihem_chat_reactions")
-          .select("*")
-          .eq("thread_id", thread)
-          .eq("active", true);
-        if (selectedRef.current === thread) setReactions(rows || []);
+        await fetchReactions(
+          thread,
+          [
+            ...(replace ? [] : messagesRef.current.map((row) => row.id)),
+            ...data.slice(0, 50).map((row) => row.id),
+          ],
+          replace,
+        );
       } catch (err) {
         if (selectedRef.current === thread) setError((err as Error).message);
       } finally {
         if (selectedRef.current === thread) setLoadingMessages(false);
       }
     },
-    [org, userId],
+    [org, userId, fetchReactions],
   );
   useEffect(() => {
     inboxEpoch.current++;
@@ -209,6 +249,8 @@ export function useChat(userId: string, org: string, initialThread?: string) {
     setVisibleMessage(null);
     setMessages([]);
     setReactions([]);
+    reactionChanged.current.clear();
+    reactionRevision.current = 0;
     setCurrent(threadsRef.current.find((t) => t.id === selected) || null);
     if (selected)
       void chatRpc<Conversation[]>("vihem_chat_inbox", {
@@ -331,6 +373,22 @@ export function useChat(userId: string, org: string, initialThread?: string) {
     if (!selected) return;
     let disposed = false;
     const thread = selected;
+    const receive = (message: CommunicationMessage) => {
+      if (disposed || selectedRef.current !== thread) return;
+      if (message.sender_id === userId) {
+        if (sending.current.has(message.id))
+          confirmed.current.set(message.id, message);
+        const queueKey = draftKey(org, userId, thread) + ":outbox";
+        writeLocal(
+          queueKey,
+          readLocal<CommunicationMessage[]>(queueKey, []).filter(
+            (row) => row.id !== message.id,
+          ),
+        );
+      }
+      setMessages((current) => mergeChatMessages(current, [message]));
+      void refreshInbox();
+    };
     const channel = supabase
       .channel(`chat-thread:${thread}:${userId}`)
       .on(
@@ -341,13 +399,7 @@ export function useChat(userId: string, org: string, initialThread?: string) {
           table: "vihem_chat_messages",
           filter: `thread_id=eq.${thread}`,
         },
-        (payload) => {
-          if (disposed || selectedRef.current !== thread) return;
-          setMessages((current) =>
-            mergeChatMessages(current, [payload.new as CommunicationMessage]),
-          );
-          void refreshInbox();
-        },
+        (payload) => receive(payload.new as CommunicationMessage),
       )
       .on(
         "postgres_changes",
@@ -357,13 +409,7 @@ export function useChat(userId: string, org: string, initialThread?: string) {
           table: "vihem_chat_messages",
           filter: `thread_id=eq.${thread}`,
         },
-        (payload) => {
-          if (disposed || selectedRef.current !== thread) return;
-          setMessages((current) =>
-            mergeChatMessages(current, [payload.new as CommunicationMessage]),
-          );
-          void refreshInbox();
-        },
+        (payload) => receive(payload.new as CommunicationMessage),
       )
       .on(
         "postgres_changes",
@@ -373,16 +419,29 @@ export function useChat(userId: string, org: string, initialThread?: string) {
           table: "vihem_chat_reactions",
           filter: `thread_id=eq.${thread}`,
         },
-        () => {
-          void supabase
-            .from("vihem_chat_reactions")
-            .select("*")
-            .eq("thread_id", thread)
-            .eq("active", true)
-            .then(({ data }) => {
-              if (!disposed && selectedRef.current === thread)
-                setReactions(data || []);
-            });
+        (payload) => {
+          if (
+            disposed ||
+            selectedRef.current !== thread ||
+            payload.eventType === "DELETE"
+          )
+            return;
+          const changed = payload.new as Reaction;
+          reactionChanged.current.set(
+            reactionKey(changed),
+            ++reactionRevision.current,
+          );
+          setReactions((current) => [
+            ...current.filter(
+              (row) =>
+                !(
+                  row.message_id === changed.message_id &&
+                  row.user_id === changed.user_id &&
+                  row.emoji === changed.emoji
+                ),
+            ),
+            ...(changed.active ? [changed] : []),
+          ]);
         },
       )
       .subscribe((status) => {
@@ -392,7 +451,7 @@ export function useChat(userId: string, org: string, initialThread?: string) {
       disposed = true;
       void supabase.removeChannel(channel);
     };
-  }, [selected, userId, fetchRecent, refreshInbox]);
+  }, [selected, org, userId, fetchRecent, refreshInbox]);
   useEffect(() => {
     const last =
       visibleMessage?.thread === selected
@@ -435,6 +494,10 @@ export function useChat(userId: string, org: string, initialThread?: string) {
       if (selectedRef.current === thread) {
         setMessages((current) => mergeChatMessages(current, data.slice(0, 50)));
         setHasOlder(data.length > 50);
+        await fetchReactions(
+          thread,
+          data.slice(0, 50).map((row) => row.id),
+        );
       }
     } catch (err) {
       setError((err as Error).message);
@@ -442,46 +505,53 @@ export function useChat(userId: string, org: string, initialThread?: string) {
       if (selectedRef.current === thread) setLoadingMessages(false);
     }
   }
-  const seek = useCallback(async (id: string) => {
-    const thread = selectedRef.current;
-    if (!thread || messagesRef.current.some((m) => m.id === id)) return;
-    const { data: target, error: failure } = await supabase
-      .from("vihem_chat_messages")
-      .select("id,created_at")
-      .eq("thread_id", thread)
-      .eq("id", id)
-      .maybeSingle();
-    if (failure || !target) {
-      setError("Det ursprungliga meddelandet är inte tillgängligt.");
-      return;
-    }
-    let first = messagesRef.current.find((m) => !m.local_status);
-    if (!first) return;
-    setLoadingMessages(true);
-    try {
-      while (selectedRef.current === thread && first) {
-        const data: CommunicationMessage[] = await chatRpc<
-          CommunicationMessage[]
-        >("vihem_chat_history", {
-          thread,
-          before_time: first.created_at,
-          before_id: first.id,
-          batch: 100,
-        });
-        if (selectedRef.current !== thread) return;
-        setMessages((current) => mergeChatMessages(current, data));
-        if (data.some((m) => m.id === id) || data.length < 100) {
-          setHasOlder(data.length === 100);
-          break;
-        }
-        first = data[data.length - 1];
+  const seek = useCallback(
+    async (id: string) => {
+      const thread = selectedRef.current;
+      if (!thread || messagesRef.current.some((m) => m.id === id)) return;
+      const { data: target, error: failure } = await supabase
+        .from("vihem_chat_messages")
+        .select("id,created_at")
+        .eq("thread_id", thread)
+        .eq("id", id)
+        .maybeSingle();
+      if (failure || !target) {
+        setError("Det ursprungliga meddelandet är inte tillgängligt.");
+        return;
       }
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      if (selectedRef.current === thread) setLoadingMessages(false);
-    }
-  }, []);
+      let first = messagesRef.current.find((m) => !m.local_status);
+      if (!first) return;
+      setLoadingMessages(true);
+      try {
+        while (selectedRef.current === thread && first) {
+          const data: CommunicationMessage[] = await chatRpc<
+            CommunicationMessage[]
+          >("vihem_chat_history", {
+            thread,
+            before_time: first.created_at,
+            before_id: first.id,
+            batch: 100,
+          });
+          if (selectedRef.current !== thread) return;
+          setMessages((current) => mergeChatMessages(current, data));
+          await fetchReactions(
+            thread,
+            data.map((row) => row.id),
+          );
+          if (data.some((m) => m.id === id) || data.length < 100) {
+            setHasOlder(data.length === 100);
+            break;
+          }
+          first = data[data.length - 1];
+        }
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        if (selectedRef.current === thread) setLoadingMessages(false);
+      }
+    },
+    [fetchReactions],
+  );
   function storeOutbox(
     thread: string,
     row: CommunicationMessage | null,
@@ -526,6 +596,13 @@ export function useChat(userId: string, org: string, initialThread?: string) {
         setMessages((current) => mergeChatMessages(current, [saved]));
       void refreshInbox();
     } catch (err) {
+      const acknowledged = confirmed.current.get(row.id);
+      if (acknowledged) {
+        storeOutbox(row.thread_id, null, row.id);
+        if (selectedRef.current === row.thread_id)
+          setMessages((current) => mergeChatMessages(current, [acknowledged]));
+        return;
+      }
       const failed = {
         ...row,
         local_status: "failed" as const,
@@ -538,6 +615,7 @@ export function useChat(userId: string, org: string, initialThread?: string) {
         setMessages((current) => mergeChatMessages(current, [failed]));
     } finally {
       sending.current.delete(row.id);
+      confirmed.current.delete(row.id);
     }
   }
   function send(extra: Partial<CommunicationMessage> = {}) {

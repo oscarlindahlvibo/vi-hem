@@ -63,6 +63,35 @@ export interface Reaction {
   emoji: string;
   active: boolean;
 }
+export const reactionKey = (row: Reaction) =>
+  `${row.message_id}:${row.user_id}:${row.emoji}`;
+// A delayed history response must not undo a newer realtime add/remove.
+export function mergeChatReactions(
+  current: Reaction[],
+  snapshot: Reaction[],
+  fetchedIds: Set<string>,
+  changed: Map<string, number>,
+  startedAt: number,
+  replace = false,
+): Reaction[] {
+  const newer = (row: Reaction) =>
+    (changed.get(reactionKey(row)) || 0) > startedAt;
+  return [
+    ...current.filter(
+      (row) => newer(row) || (!replace && !fetchedIds.has(row.message_id)),
+    ),
+    ...snapshot.filter((row) => !newer(row)),
+  ];
+}
+// PostgreSQL timestamps have microseconds; Date.parse alone truncates those
+// and can falsely mark a later message in the same millisecond as read.
+export function compareChatTimestamps(a: string, b: string): number {
+  const milliseconds = Date.parse(a) - Date.parse(b);
+  if (milliseconds) return milliseconds;
+  const remainder = (value: string) =>
+    Number((value.match(/\.(\d+)/)?.[1] || "").slice(3, 9).padEnd(6, "0"));
+  return remainder(a) - remainder(b);
+}
 export function mergeChatMessages(
   current: CommunicationMessage[],
   incoming: CommunicationMessage[],
@@ -71,7 +100,7 @@ export function mergeChatMessages(
   for (const message of incoming) byId.set(message.id, message);
   return [...byId.values()].sort(
     (a, b) =>
-      Date.parse(a.created_at) - Date.parse(b.created_at) ||
+      compareChatTimestamps(a.created_at, b.created_at) ||
       a.id.localeCompare(b.id),
   );
 }
@@ -101,7 +130,7 @@ export function messageReceipt(
     (p) =>
       p.user_id !== message.sender_id &&
       p.last_read_at &&
-      Date.parse(p.last_read_at) >= Date.parse(message.created_at),
+      compareChatTimestamps(p.last_read_at, message.created_at) >= 0,
   );
 }
 export const chatFileTypes = [

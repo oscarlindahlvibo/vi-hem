@@ -328,22 +328,38 @@ function AppInner() {
     if (!user) return;
     void registerNativePush(user.id, user.organisation_id);
     const notificationSince = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-    let countDisposed = false;
-    const refreshNotificationCounts = async () => {
-      const [allUnread, chatUnread] = await Promise.all([
-        supabase
-          .from('vihem_notifications')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .gte('created_at', notificationSince)
-          .is('read_at', null),
-        supabase.rpc('vihem_chat_unread'),
-      ]);
-
+    let countDisposed = false, countInFlight = false, countQueued = false;
+    let countTimer: ReturnType<typeof setTimeout> | undefined;
+    const refreshNotificationCounts = () => {
       if (countDisposed) return;
-      setNotificationCount(allUnread.count ?? 0);
-      setChatNotificationCount(Number(chatUnread.data || 0));
-      void syncNativeBadge(allUnread.count ?? 0);
+      countQueued = true;
+      if (countTimer) return;
+      countTimer = setTimeout(() => { countTimer = undefined; void loadNotificationCounts().catch(() => {}); }, 200);
+    };
+    const loadNotificationCounts = async () => {
+      if (countDisposed || countInFlight) return;
+      countInFlight = true; countQueued = false;
+      try {
+        const [allUnread, chatUnread] = await Promise.all([
+          supabase
+            .from('vihem_notifications')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', user.id)
+            .gte('created_at', notificationSince)
+            .is('read_at', null),
+          supabase.rpc('vihem_chat_unread'),
+        ]);
+
+        if (countDisposed) return;
+        if (!allUnread.error) {
+          setNotificationCount(allUnread.count ?? 0);
+          void syncNativeBadge(allUnread.count ?? 0);
+        }
+        if (!chatUnread.error) setChatNotificationCount(Number(chatUnread.data || 0));
+      } finally {
+        countInFlight = false;
+        if (countQueued && !countDisposed) refreshNotificationCounts();
+      }
     };
 
     void refreshNotificationCounts();
@@ -369,6 +385,7 @@ function AppInner() {
 
     return () => {
       countDisposed = true;
+      clearTimeout(countTimer);
       window.clearInterval(chatBadgeTimer);
       window.removeEventListener('vihem-chat-unread', refreshChatCounts);
       window.removeEventListener('online', refreshChatCounts);
