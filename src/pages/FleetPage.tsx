@@ -1730,7 +1730,7 @@ function VehicleSourcesCard({ vehicle, sources, isAdmin, organisationId, userId,
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 p-4">
         <div>
           <h3 className="font-semibold text-slate-900">Informationskällor (AI-kontroll)</h3>
-          <p className="text-xs text-slate-500">Sidor med uppgifter om fordonet. Kontrolleras automatiskt varje natt och uppdaterar besiktningsdatum.</p>
+          <p className="text-xs text-slate-500">Fordon med registreringsnummer kontrolleras automatiskt mot biluppgifter.se. Stäng av kontrollen eller lägg till en alternativ länk här. Besiktningsdatum uppdateras automatiskt.</p>
         </div>
         {isAdmin && sources.length > 0 && <Button size="sm" variant="secondary" loading={busy === 'all'} onClick={() => check()}><RefreshCw className="h-4 w-4" /> Kontrollera alla nu</Button>}
       </div>
