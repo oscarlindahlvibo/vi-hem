@@ -2,7 +2,7 @@
 // Samma modell som Vibo hemsida: allt innehåll, priser och bokningar ägs av VI-HEM; sajten läser bara publika RPC:er.
 import { useCallback, useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { Globe, HelpCircle, ImagePlus, Plus, Settings2, Trash2, CalendarCheck, BedDouble, FileText } from 'lucide-react';
+import { Globe, HelpCircle, ImagePlus, Plus, Settings2, Trash2, CalendarCheck, BedDouble, FileText, CheckCircle2, XCircle, Copy, Download } from 'lucide-react';
 import { Badge, Button, Card, Input, LoadingPage, PageHeader, SegmentedControl, Select, Textarea } from '../../components/ui';
 import { useToast } from '../../components/toast';
 
@@ -178,7 +178,34 @@ function UnitCard({ client, unit, reload, toast }: { client: SupabaseClient; uni
   const [p, setP] = useState<UnitPayload>({ kind: 'room', features: [], images: [], ...unit.payload, title: unit.payload.title ?? unit.name });
   const [sort, setSort] = useState(String(unit.sort_order));
   const [busy, setBusy] = useState(false);
+  const [importing, setImporting] = useState(false);
   const set = (patch: Partial<UnitPayload>) => setP((cur) => ({ ...cur, ...patch }));
+
+  async function importFromBeds24() {
+    setImporting(true);
+    try {
+      const { data, error } = await client.functions.invoke('vihem-ekangen-admin', { body: { action: 'beds24_room', unit_id: unit.unit_id } });
+      if (error) {
+        const ctx = (error as { context?: Response }).context;
+        const parsed = ctx ? await ctx.clone().json().catch(() => null) : null;
+        throw new Error(parsed?.error?.message || error.message);
+      }
+      const r = data.data as { title: string; kind: string; beds: string; features: string[]; description: string };
+      const filled: string[] = [];
+      setP((cur) => {
+        const next = { ...cur };
+        if (!cur.title?.trim() || cur.title === unit.name) { next.title = r.title || cur.title; filled.push('rubrik'); }
+        if (!cur.beds?.trim() && r.beds) { next.beds = r.beds; filled.push('sängar'); }
+        if (!cur.description?.trim() && r.description) { next.description = r.description; filled.push('beskrivning'); }
+        const merged = [...new Set([...(cur.features || []), ...r.features])];
+        if (merged.length !== (cur.features || []).length) { next.features = merged; filled.push('bekvämligheter'); }
+        next.kind = cur.kind === 'apartment' || r.kind === 'apartment' ? 'apartment' : 'room';
+        return next;
+      });
+      toast(filled.length ? 'Hämtade från Beds24. Granska och spara.' : 'Inget nytt att hämta – fälten är redan ifyllda.');
+    } catch (e) { toast(errorText(e, 'Kunde inte hämta från Beds24.'), { tone: 'error' }); }
+    finally { setImporting(false); }
+  }
 
   async function save() {
     setBusy(true);
@@ -206,9 +233,12 @@ function UnitCard({ client, unit, reload, toast }: { client: SupabaseClient; uni
       </button>
       {open && (
         <div className="space-y-4 border-t border-slate-100 p-4">
-          <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <input type="checkbox" checked={published} onChange={(e) => setPublished(e.target.checked)} className="h-4 w-4 accent-blue-600" /> Visa och tillåt bokning på hemsidan
-          </label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+              <input type="checkbox" checked={published} onChange={(e) => setPublished(e.target.checked)} className="h-4 w-4 accent-blue-600" /> Visa och tillåt bokning på hemsidan
+            </label>
+            <Button size="sm" variant="secondary" onClick={importFromBeds24} loading={importing}><Download className="h-4 w-4" />Hämta från Beds24</Button>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <Input label="Rubrik" value={p.title || ''} onChange={(e) => set({ title: e.target.value })} />
             <Input label="Adress på sajten (t.ex. rum-1)" value={p.slug || ''} onChange={(e) => set({ slug: e.target.value })} />
@@ -337,6 +367,8 @@ function SettingsTab({ client, settings, reload, toast }: { client: SupabaseClie
     finally { setBusy(false); }
   }
   return (
+    <div className="space-y-4">
+    <PaymentStatus client={client} />
     <Card className="space-y-4 p-5">
       <h3 className="flex items-center gap-2 font-semibold text-slate-900"><Settings2 className="h-4 w-4" />Direktbokning</h3>
       <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
@@ -354,6 +386,64 @@ function SettingsTab({ client, settings, reload, toast }: { client: SupabaseClie
         <Input label="Mejla nya bokningar till" value={s.notification_email} onChange={(e) => setS({ ...s, notification_email: e.target.value })} hint="Admins får alltid en notis i VI-HEM." />
       </div>
       <Button onClick={save} loading={busy}>Spara inställningar</Button>
+    </Card>
+    </div>
+  );
+}
+
+// ── Betalning (Stripe) ─────────────────────────────────────────────────────
+interface PaymentInfo { stripe: { secretKeySet: boolean; webhookSecretSet: boolean; mode: 'live' | 'test' | null; verified: boolean | null; error: string }; webhookUrl: string; siteUrl: string }
+
+function PaymentStatus({ client }: { client: SupabaseClient }) {
+  const [info, setInfo] = useState<PaymentInfo | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  const check = useCallback(async () => {
+    setBusy(true); setError('');
+    try {
+      const { data, error: err } = await client.functions.invoke('vihem-ekangen-admin', { body: { action: 'status' } });
+      if (err) throw err;
+      setInfo(data.data as PaymentInfo);
+    } catch (e) { setError(errorText(e, 'Kunde inte kontrollera betalningen.')); }
+    finally { setBusy(false); }
+  }, [client]);
+  useEffect(() => { void check(); }, [check]);
+
+  const row = (ok: boolean | null, label: string, detail?: string) => (
+    <li className="flex items-start gap-2 text-sm">
+      {ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />}
+      <span><span className="font-semibold text-slate-800">{label}</span>{detail && <span className="text-slate-500"> – {detail}</span>}</span>
+    </li>
+  );
+  const ready = info?.stripe.secretKeySet && info.stripe.webhookSecretSet && info.stripe.verified;
+  return (
+    <Card className="space-y-3 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-semibold text-slate-900">Betalning via Stripe</h3>
+        <div className="flex items-center gap-2">
+          {info && <Badge className={ready ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}>{ready ? (info.stripe.mode === 'test' ? 'Redo (testläge)' : 'Redo') : 'Nycklar saknas'}</Badge>}
+          <Button size="sm" variant="secondary" onClick={check} loading={busy}>Kontrollera</Button>
+        </div>
+      </div>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {info && (
+        <>
+          <ul className="space-y-1.5">
+            {row(info.stripe.secretKeySet, 'Stripe-nyckel', info.stripe.secretKeySet ? (info.stripe.verified ? `giltig${info.stripe.mode ? `, ${info.stripe.mode === 'live' ? 'skarpt läge' : 'testläge'}` : ''}` : info.stripe.error || 'kunde inte verifieras') : 'saknas på servern')}
+            {row(info.stripe.webhookSecretSet, 'Webhook-hemlighet', info.stripe.webhookSecretSet ? 'finns' : 'saknas på servern')}
+          </ul>
+          <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+            <p className="font-semibold text-slate-800">Webhook-adress att lägga in i Stripe</p>
+            <div className="mt-1 flex items-center gap-2">
+              <code className="min-w-0 flex-1 break-all rounded bg-white px-2 py-1 ring-1 ring-slate-200">{info.webhookUrl}</code>
+              <Button size="sm" variant="secondary" onClick={() => { void navigator.clipboard?.writeText(info.webhookUrl); toast.show('Adressen är kopierad.'); }}><Copy className="h-3.5 w-3.5" /></Button>
+            </div>
+            <p className="mt-2">Händelser: <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>, <code>checkout.session.expired</code>, <code>charge.refunded</code></p>
+          </div>
+          {!ready && <p className="text-xs text-slate-500">Nycklarna läggs in på servern med <code>bash ~/vi-hem/apps/ekangen/deploy/set-stripe-keys.sh</code> – de visas aldrig här. Tills de finns kan hemsidan visas men inte ta betalt.</p>}
+        </>
+      )}
     </Card>
   );
 }
