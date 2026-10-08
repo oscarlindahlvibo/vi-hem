@@ -57,6 +57,7 @@ import {
   RotateCcw,
   Tag,
   MoreHorizontal,
+  Lock,
   Repeat,
   SlidersHorizontal,
   ListChecks,
@@ -68,7 +69,7 @@ import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
 import type { TimeCategory } from '../types';
 import { WorkOrderOperationsPanel } from '../components/WorkOrderOperationsPanel';
 import { WorkOrderCard } from '../components/workorders/WorkOrderCard';
-import { AssigneeSheet, CommentSheet, DueDateSheet, SwitchJobSheet, WorkOrderActionSheet, actionIcons, type QuickAction } from '../components/workorders/WorkOrderSheets';
+import { AssigneeSheet, CommentModeToggle, CommentSheet, DueDateSheet, SwitchJobSheet, WorkOrderActionSheet, actionIcons, type QuickAction } from '../components/workorders/WorkOrderSheets';
 import { SkeletonList } from '../components/ui';
 import { useToast } from '../components/toast';
 import { fetchOpenTimeEntries, startOrSwitchToWorkOrder, type OpenTimeEntry } from '../lib/timeClock';
@@ -305,6 +306,9 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
   const [sheetBusy, setSheetBusy] = useState(false);
   const [openEntry, setOpenEntry] = useState<OpenTimeEntry | null>(null);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [detailTab, setDetailTab] = useState<'overview' | 'comments' | 'time' | 'history'>('overview');
+  const [history, setHistory] = useState<{ id: string; event_type: string; actor_id: string | null; created_at: string; metadata: Record<string, any> }[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Create form state
   const [createForm, setCreateForm] = useState<CreateWorkOrderForm>(defaultCreateForm);
@@ -386,8 +390,12 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
     if (showDetailModal && selectedWorkOrder) {
       fetchComments();
       fetchTimeLogged();
-      if (isStaff) checkActiveTimeEntry();
+      if (isStaff) { checkActiveTimeEntry(); fetchHistory(); }
     }
+  }, [showDetailModal, selectedWorkOrder?.id]);
+
+  useEffect(() => {
+    if (showDetailModal) setDetailTab('overview');
   }, [showDetailModal, selectedWorkOrder?.id]);
 
   useEffect(() => {
@@ -498,6 +506,26 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
       console.error('Error fetching comments:', err);
     } finally {
       setLoadingComments(false);
+    }
+  }
+
+  async function fetchHistory() {
+    if (!selectedWorkOrder || !isStaff) return;
+    try {
+      setLoadingHistory(true);
+      const { data, error } = await supabase
+        .from('vihem_audit_events')
+        .select('id, event_type, actor_id, created_at, metadata')
+        .eq('entity_type', 'work_order')
+        .eq('entity_id', selectedWorkOrder.id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setHistory((data || []) as typeof history);
+    } catch (err) {
+      console.error('Error fetching work order history:', err);
+      setHistory([]);
+    } finally {
+      setLoadingHistory(false);
     }
   }
 
@@ -1912,6 +1940,24 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                 </Button>
               </div>
             )}
+            <div role="tablist" className="no-scrollbar -mx-1 flex gap-1 overflow-x-auto rounded-2xl bg-slate-100 p-1">
+              {([
+                { key: 'overview', label: 'Översikt' },
+                { key: 'comments', label: `Kommentarer${comments.length ? ` (${comments.length})` : ''}` },
+                ...(isStaff ? [{ key: 'time', label: 'Tid' }, { key: 'history', label: 'Historik' }] : []),
+              ] as { key: 'overview' | 'comments' | 'time' | 'history'; label: string }[]).map((t) => (
+                <button
+                  key={t.key}
+                  role="tab"
+                  aria-selected={detailTab === t.key}
+                  onClick={() => setDetailTab(t.key)}
+                  className={`min-h-9 flex-1 shrink-0 whitespace-nowrap rounded-xl px-3 text-sm font-semibold transition-all ${detailTab === t.key ? 'bg-white text-vihem-blue shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                >{t.label}</button>
+              ))}
+            </div>
+
+            {detailTab === 'overview' && (
+              <div className="space-y-6">
             {/* Work order info */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -2156,68 +2202,62 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
               </div>
             </div>
 
-            {/* Comments section */}
-            <div className="border-t border-slate-200 pt-4">
-              <h3 className="font-semibold text-slate-800 mb-3">Kommentarer</h3>
+              </div>
+            )}
 
+            {detailTab === 'comments' && (
+            <div className="space-y-4">
               {loadingComments ? (
-                <p className="text-sm text-slate-500">Laddar kommentarer...</p>
+                <p className="text-sm text-vihem-muted">Laddar kommentarer...</p>
               ) : comments.length === 0 ? (
-                <p className="text-sm text-slate-500 mb-4">Inga kommentarer ännu</p>
+                <p className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-sm text-vihem-muted">Inga kommentarer ännu</p>
               ) : (
-                <div className="space-y-3 mb-4">
+                <div className="space-y-2.5">
                   {comments.map((comment) => (
                     <div
                       key={comment.id}
-                      className={`p-3 rounded-lg text-sm ${
-                        comment.internal ? 'bg-yellow-50 border border-yellow-200' : 'bg-slate-50'
+                      className={`rounded-2xl px-3.5 py-3 text-sm ${
+                        comment.internal ? 'border border-dashed border-amber-300 bg-amber-50' : 'bg-blue-50/70'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <p className="font-medium text-slate-800">{comment.user?.name || 'Unknown'}</p>
-                        {comment.internal && (
-                          <Badge className="bg-yellow-100 text-yellow-700">Intern</Badge>
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <p className="font-semibold text-vihem-ink">{comment.user?.name || 'Okänd'}</p>
+                        {comment.internal ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800"><Lock className="h-3 w-3" />Intern anteckning</span>
+                        ) : (
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-blue-800">Synlig för kund</span>
                         )}
                       </div>
-                      <p className="text-slate-600">{comment.comment}</p>
-                      <p className="text-xs text-slate-400 mt-1">
-                        {formatDateTime(comment.created_at)}
-                      </p>
+                      <p className="whitespace-pre-wrap text-slate-700">{comment.comment}</p>
+                      <p className="mt-1 text-xs text-vihem-muted">{formatDateTime(comment.created_at)}</p>
                     </div>
                   ))}
                 </div>
               )}
 
-              <div className="space-y-2">
+              <div className="space-y-3 rounded-2xl bg-white p-3 ring-1 ring-slate-200">
+                {isStaff && <CommentModeToggle mode={commentInternal ? 'internal' : 'customer'} onChange={(m) => setCommentInternal(m === 'internal')} />}
                 <Textarea
-                  label="Ny kommentar"
                   value={commentText}
                   onChange={(e) => setCommentText(e.target.value)}
-                  placeholder={commentInternal ? 'Skriv intern kommentar...' : 'Skriv kommentar som kunden kan se...'}
+                  placeholder={commentInternal ? 'Skriv intern anteckning...' : 'Skriv ett meddelande...'}
                   rows={3}
                 />
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="internal"
-                    checked={commentInternal}
-                    onChange={(e) => setCommentInternal(e.target.checked)}
-                    className="rounded border-slate-300"
-                  />
-                  <label htmlFor="internal" className="text-sm text-slate-700">
-                    Intern kommentar (annars syns kommentaren för kunden)
-                  </label>
-                </div>
-
-                <Button
-                  onClick={addComment}
-                  loading={postingComment}
-                  disabled={!commentText.trim()}
-                  className="w-full"
-                >
-                  Publicera kommentar
+                <Button onClick={addComment} loading={postingComment} disabled={!commentText.trim()} className="w-full">
+                  {commentInternal ? 'Spara intern anteckning' : 'Skicka meddelande'}
                 </Button>
+              </div>
+            </div>
+            )}
+
+            {isStaff && detailTab === 'time' && (
+              <div className="space-y-4">
+            {/* Time logged */}
+            <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">
+              <Clock className="w-4 h-4 text-slate-600" />
+              <div>
+                <p className="text-xs font-medium text-slate-500">Tid loggad</p>
+                <p className="text-sm font-medium text-slate-800">{formatMinutes(totalTimeLogged)}</p>
               </div>
             </div>
 
@@ -2260,6 +2300,49 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId }: 
                   </Button>
                 )}
               </div>
+            )}
+              </div>
+            )}
+
+            {isStaff && detailTab === 'history' && (
+            <div className="space-y-2">
+              {loadingHistory ? (
+                <p className="text-sm text-vihem-muted">Laddar historik...</p>
+              ) : (
+                <>
+                  {history.map((h) => {
+                    const m = h.metadata || {};
+                    const who = h.actor_id ? assigneeName(h.actor_id) : 'System';
+                    const text = h.event_type === 'work_order_status_changed'
+                      ? `Status: ${WO_STATUS_LABELS[m.from as WOStatus] || m.from} → ${WO_STATUS_LABELS[m.to as WOStatus] || m.to}`
+                      : h.event_type === 'work_order_due_date_changed'
+                        ? `Förfallodatum: ${m.from ? formatDate(m.from) : 'inget'} → ${m.to ? formatDate(m.to) : 'inget'}`
+                        : h.event_type === 'work_order_priority_changed'
+                          ? `Prioritet: ${WO_PRIORITY_LABELS[m.from as WOPriority] || m.from} → ${WO_PRIORITY_LABELS[m.to as WOPriority] || m.to}`
+                          : h.event_type === 'work_order_assignment_changed'
+                            ? `Tilldelning: ${((m.from as string[]) || []).map(assigneeName).join(', ') || 'ingen'} → ${((m.to as string[]) || []).map(assigneeName).join(', ') || 'ingen'}`
+                            : h.event_type;
+                    return (
+                      <div key={h.id} className="flex gap-3 rounded-2xl bg-slate-50 px-3.5 py-2.5 text-sm">
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-vihem-blue" />
+                        <div className="min-w-0">
+                          <p className="font-medium text-vihem-ink">{text}</p>
+                          <p className="text-xs text-vihem-muted">{who} · {formatDateTime(h.created_at)}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="flex gap-3 rounded-2xl bg-slate-50 px-3.5 py-2.5 text-sm">
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-slate-300" />
+                    <div className="min-w-0">
+                      <p className="font-medium text-vihem-ink">Arbetsordern skapades</p>
+                      <p className="text-xs text-vihem-muted">{selectedWorkOrder.creator?.name || 'Okänd'} · {formatDateTime(selectedWorkOrder.created_at)}</p>
+                    </div>
+                  </div>
+                  {history.length === 0 && <p className="px-1 text-xs text-vihem-muted">Ändringar av status, förfallodatum, prioritet och tilldelning loggas härifrån och framåt.</p>}
+                </>
+              )}
+            </div>
             )}
           </div>
         )}
