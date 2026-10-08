@@ -22,7 +22,7 @@ DOMAINS=(-d "$DOMAIN")
 if getent hosts "www.$DOMAIN" >/dev/null; then DOMAINS+=(-d "www.$DOMAIN"); else echo "OBS: www.$DOMAIN saknar DNS-post -- certifikatet utfärdas bara för $DOMAIN."; fi
 MAIL_ARGS=(--register-unsafely-without-email)
 [[ -n "${CERTBOT_EMAIL:-}" ]] && MAIL_ARGS=(-m "$CERTBOT_EMAIL")
-certbot certonly --webroot -w "$ROOT" "${DOMAINS[@]}" --non-interactive --agree-tos --keep-until-expiring "${MAIL_ARGS[@]}"
+certbot certonly --webroot -w "$ROOT" "${DOMAINS[@]}" --non-interactive --agree-tos --expand --keep-until-expiring "${MAIL_ARGS[@]}"
 
 cp nginx-https.conf "$CONF"
 nginx -t
