@@ -2,6 +2,7 @@ import { WebsiteAdmin } from './modules/vibofast/WebsiteAdmin';
 import { InterestsAdmin } from './modules/vibofast/InterestsAdmin';
 import React, { useCallback, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ToastProvider } from './components/toast';
 import { TimeCategoriesProvider } from './contexts/TimeCategoriesContext';
 import { WorkOrderCategoriesProvider } from './contexts/WorkOrderCategoriesContext';
 import { Layout } from './components/Layout';
@@ -716,11 +717,13 @@ export default function App() {
   return (
     <AppErrorBoundary>
       <AuthProvider>
+        <ToastProvider>
         <TimeCategoriesProvider>
           <WorkOrderCategoriesProvider>
             <AppInner />
           </WorkOrderCategoriesProvider>
         </TimeCategoriesProvider>
+        </ToastProvider>
       </AuthProvider>
     </AppErrorBoundary>
   );

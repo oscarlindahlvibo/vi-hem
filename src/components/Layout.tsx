@@ -43,10 +43,29 @@ interface LayoutProps {
   enabledModules?: Partial<Record<ModuleKey, boolean>>;
 }
 
+/** Döljer den flytande menyn medan tangentbordet är uppe, så att den inte hamnar ovanpå inmatningsfält. */
+function useKeyboardOpen() {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const check = () => {
+      const el = document.activeElement;
+      const typing = !!el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
+      setOpen(typing && vv.height < window.innerHeight * 0.75);
+    };
+    vv.addEventListener('resize', check);
+    window.addEventListener('focusout', check);
+    return () => { vv.removeEventListener('resize', check); window.removeEventListener('focusout', check); };
+  }, []);
+  return open;
+}
+
 export function Layout({ children, currentPage, onNavigate, notificationCount = 0, chatNotificationCount = 0, enabledModules = {} }: LayoutProps) {
   const { user, signOut, bankIDAvailable, refreshProfile } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   useScrollLock(mobileMenuOpen);
+  const keyboardOpen = useKeyboardOpen();
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [notificationSettingsModalOpen, setNotificationSettingsModalOpen] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -313,15 +332,15 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
           <span className="text-sm font-black text-slate-950">VI-HEM</span>
         </div>
         <div className="flex items-center gap-2">
-          {notificationCount > 0 && (
-            <button type="button" onClick={() => navigate('notifications')} className="relative p-2" aria-label="Öppna aviseringar" title="Öppna aviseringar">
-              <Bell className="w-5 h-5 text-slate-500" />
-              <span className="absolute top-1 right-1 bg-red-500 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">{notificationCount}</span>
+          <button type="button" onClick={() => navigate('notifications')} className="relative rounded-full p-2 hover:bg-slate-100" aria-label="Öppna aviseringar" title="Öppna aviseringar">
+            <Bell className="w-5 h-5 text-slate-500" />
+            {notificationCount > 0 && <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-vihem-danger px-1 text-[10px] font-bold text-white">{notificationCount > 9 ? '9+' : notificationCount}</span>}
+          </button>
+          {user?.role === 'superadmin' && (
+            <button onClick={() => setMobileMenuOpen(true)} className="rounded-xl p-2 hover:bg-slate-100" aria-label="Meny">
+              <Menu className="w-5 h-5 text-slate-600" />
             </button>
           )}
-          <button onClick={() => setMobileMenuOpen(true)} className="rounded-xl p-2 hover:bg-slate-100">
-            <Menu className="w-5 h-5 text-slate-600" />
-          </button>
         </div>
       </div>
 
@@ -401,29 +420,33 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       )}
 
       {/* Main content */}
-      <main className="vihem-mobile-main min-w-0 flex-1 overflow-x-hidden pb-24 pt-16 lg:ml-[17rem] lg:pb-0 lg:pt-0">
+      <main className="vihem-mobile-main min-w-0 flex-1 overflow-x-hidden pb-32 pt-16 lg:ml-[17rem] lg:pb-0 lg:pt-0">
         <div className="w-full min-w-0 max-w-[1560px] overflow-x-hidden p-4 lg:p-6 xl:p-8">
           {children}
         </div>
       </main>
 
-      {user?.role !== 'superadmin' && (
-        <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/80 bg-white/95 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-2 shadow-[0_-12px_34px_rgba(15,23,42,0.08)] backdrop-blur-xl lg:hidden">
-          <div className="grid grid-cols-5 gap-1">
+      {user?.role !== 'superadmin' && !keyboardOpen && (
+        <nav aria-label="Huvudnavigering" className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pb-[max(env(safe-area-inset-bottom),0.5rem)] lg:hidden">
+          <div className="pointer-events-auto mx-auto grid max-w-md grid-cols-5 gap-0.5 rounded-full border border-slate-200/70 bg-white/95 p-1.5 shadow-float backdrop-blur-xl">
             {bottomItems.map((item) => (
               <button
                 key={item.label}
                 onClick={item.action}
-                className={`relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-semibold transition-colors ${
-                  item.active ? 'text-blue-600' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                aria-current={item.active ? 'page' : undefined}
+                className={`relative flex min-h-[3.25rem] min-w-0 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1.5 text-[10.5px] font-semibold transition-colors duration-200 active:scale-95 ${
+                  item.active ? 'bg-blue-50 text-vihem-blue' : 'text-vihem-muted hover:text-slate-900'
                 }`}
               >
-                <span className={item.active ? 'text-blue-600' : 'text-slate-400'}>{item.icon}</span>
+                <span className={item.active ? 'text-vihem-blue' : 'text-vihem-muted'}>{item.icon}</span>
                 <span className="truncate">{item.label}</span>
                 {item.label === 'Chatt' && chatNotificationCount > 0 && (
-                  <span className="absolute right-3 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
+                  <span className="absolute right-3 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-vihem-danger px-1 text-[10px] font-bold text-white ring-2 ring-white">
                     {chatNotificationCount > 9 ? '9+' : chatNotificationCount}
                   </span>
+                )}
+                {item.label === 'Mer' && notificationCount > 0 && (
+                  <span className="absolute right-4 top-2 h-2 w-2 rounded-full bg-vihem-danger ring-2 ring-white" />
                 )}
               </button>
             ))}

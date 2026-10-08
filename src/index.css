@@ -33,14 +33,19 @@
 @layer base {
   :root {
     color-scheme: light;
-    --vihem-ink: #172033;
-    --vihem-muted: #667085;
-    --vihem-line: #dbe3ee;
+    --vihem-navy: #193b73;
+    --vihem-ink: #14213d;
+    --vihem-muted: #6b7a99;
+    --vihem-line: #e1e8f3;
     --vihem-surface: #ffffff;
-    --vihem-canvas: #f7f9fc;
-    --vihem-accent: #2f6fed;
-    --vihem-accent-dark: #245bd4;
-    --vihem-success: #059669;
+    --vihem-canvas: #f3f6fb;
+    --vihem-accent: #2563eb;
+    --vihem-accent-dark: #1d4fd8;
+    --vihem-success: #0f9f76;
+    --vihem-danger: #e5484d;
+    --vihem-radius-card: 1.125rem;
+    --vihem-radius-sheet: 1.75rem;
+    --vihem-shadow-card: 0 1px 2px rgba(25, 59, 115, 0.04), 0 6px 20px rgba(25, 59, 115, 0.06);
   }
 
   html {
@@ -55,12 +60,7 @@
   body {
     @apply text-slate-800;
     min-height: 100vh;
-    background:
-      linear-gradient(90deg, rgba(47, 111, 237, 0.045) 0 1px, transparent 1px),
-      linear-gradient(180deg, rgba(47, 111, 237, 0.045) 0 1px, transparent 1px),
-      radial-gradient(circle at 20% 0%, rgba(47, 111, 237, 0.12), transparent 26rem),
-      linear-gradient(180deg, #ffffff 0%, var(--vihem-canvas) 44%, #f1f5f9 100%);
-    background-size: 32px 32px, 32px 32px, auto, auto;
+    background: var(--vihem-canvas);
     font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     overflow-x: hidden;
   }
@@ -163,9 +163,9 @@
 
 @layer components {
   .vihem-surface {
-    background: rgba(255, 255, 255, 0.96);
-    border: 1px solid rgba(219, 227, 238, 0.95);
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 34px rgba(15, 23, 42, 0.055);
+    background: #ffffff;
+    border: 1px solid var(--vihem-line);
+    box-shadow: var(--vihem-shadow-card);
   }
 
   .vihem-field {
@@ -191,5 +191,21 @@
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+}
+
+@layer utilities {
+  .pb-safe { padding-bottom: max(env(safe-area-inset-bottom, 0px), 0.75rem); }
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+}
+
+/* Respect reduced-motion: no sheet/toast/swipe animations. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
