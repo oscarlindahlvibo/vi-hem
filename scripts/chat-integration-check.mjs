@@ -60,7 +60,8 @@ let cdcReady = false;
 const channel = clients.christofer
   .channel("qa-integrated")
   .on("system", {}, (payload) => {
-    if (payload.extension === "postgres_changes" && payload.status === "ok") cdcReady = true;
+    if (payload.extension === "postgres_changes" && payload.status === "ok")
+      cdcReady = true;
   })
   .on(
     "postgres_changes",
@@ -114,7 +115,7 @@ await new Promise((resolve, reject) => {
 // Socket subscription can precede CDC startup on a cold self-hosted stack.
 // Test event delivery only after the database subscription is actually ready.
 for (let i = 0; i < 300 && !cdcReady; i++)
-  await new Promise(resolve => setTimeout(resolve, 100));
+  await new Promise((resolve) => setTimeout(resolve, 100));
 assert.ok(cdcReady, "postgres_changes subscription ready");
 const a = crypto.randomUUID(),
   b = crypto.randomUUID();
@@ -331,6 +332,18 @@ await rpc("oscar", "vihem_chat_send", {
   body: "Shared work order",
   order_link: orderId,
 });
+await rpc("oscar", "vihem_chat_send", {
+  thread: group,
+  client_id: crypto.randomUUID(),
+  body: "",
+  order_link: orderId,
+});
+assert.equal(
+  (await rpc("oscar", "vihem_chat_inbox", { thread_filter: group }))[0].latest
+    .message,
+  "Delad arbetsorder",
+  "shared order without text has a real preview",
+);
 for (
   let i = 0;
   i < 30 && (!received.includes("reaction") || !received.includes("typing"));
@@ -563,6 +576,18 @@ await rpc("oscar", "vihem_chat_send", {
   body: "Shared QA project",
   project_link: projectId,
 });
+await rpc("oscar", "vihem_chat_send", {
+  thread: projectChat,
+  client_id: crypto.randomUUID(),
+  body: "",
+  project_link: projectId,
+});
+assert.equal(
+  (await rpc("oscar", "vihem_chat_inbox", { thread_filter: projectChat }))[0]
+    .latest.message,
+  "Delat projekt",
+  "shared project without text has a real preview",
+);
 await rpc("oscar", "vihem_chat_group", {
   thread: projectChat,
   action: "add",

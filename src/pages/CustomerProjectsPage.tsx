@@ -39,7 +39,7 @@ import {
   Select,
   Textarea,
 } from '../components/ui';
-import { formatDate, WO_CATEGORIES, WO_STATUS_LABELS } from '../lib/utils';
+import { formatDate, WO_CATEGORIES, WO_STATUS_LABELS, CUSTOMER_PROJECT_STATUS_LABELS as STATUS_LABELS } from '../lib/utils';
 import type {
   CustomerProject,
   CustomerProjectStatus,
@@ -61,25 +61,6 @@ import type {
 } from '../types';
 
 interface CustomerProjectsPageProps { onNavigate: (page: string) => void; initialProjectId?: string; }
-
-const STATUS_LABELS: Record<CustomerProjectStatus, string> = {
-  draft: 'Utkast',
-  quote_created: 'Offert skapad',
-  quote_sent: 'Offert skickad',
-  quote_accepted: 'Offert accepterad',
-  planned: 'Planerat',
-  in_progress: 'Pågående',
-  paused: 'Pausat',
-  waiting_customer: 'Väntar på kund',
-  waiting_material: 'Väntar på material',
-  ready_for_inspection: 'Klart för besiktning',
-  inspected_with_remarks: 'Besiktigat med anmärkningar',
-  approved: 'Godkänt',
-  invoiced: 'Fakturerat',
-  completed: 'Avslutat',
-  archived: 'Arkiverat',
-  cancelled: 'Avbrutet',
-};
 
 const STATUS_CLASS: Record<string, string> = {
   draft: 'bg-slate-100 text-slate-600',

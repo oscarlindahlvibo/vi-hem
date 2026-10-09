@@ -1,3 +1,4 @@
+import type { CustomerProjectStatus } from '../types';
 import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -60,6 +61,25 @@ export const WO_STATUS_LABELS: Record<WOStatus, string> = {
   ready_for_check: 'Klar för kontroll',
   completed: 'Slutförd',
   cancelled: 'Avbruten',
+};
+
+export const CUSTOMER_PROJECT_STATUS_LABELS: Record<CustomerProjectStatus, string> = {
+  draft: 'Utkast',
+  quote_created: 'Offert skapad',
+  quote_sent: 'Offert skickad',
+  quote_accepted: 'Offert accepterad',
+  planned: 'Planerat',
+  in_progress: 'Pågående',
+  paused: 'Pausat',
+  waiting_customer: 'Väntar på kund',
+  waiting_material: 'Väntar på material',
+  ready_for_inspection: 'Klart för besiktning',
+  inspected_with_remarks: 'Besiktigat med anmärkningar',
+  approved: 'Godkänt',
+  invoiced: 'Fakturerat',
+  completed: 'Avslutat',
+  archived: 'Arkiverat',
+  cancelled: 'Avbrutet',
 };
 
 export const WO_PRIORITY_LABELS: Record<WOPriority, string> = {

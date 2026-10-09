@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
 import { ClipboardList, FolderKanban } from "lucide-react";
+import {
+  formatDate,
+  WO_STATUS_LABELS,
+  CUSTOMER_PROJECT_STATUS_LABELS,
+} from "../../lib/utils";
+import type { WOStatus, CustomerProjectStatus } from "../../types";
 import { supabase } from "../../lib/supabase";
 export function ChatEntityCard({
   type,
@@ -17,8 +23,12 @@ export function ChatEntityCard({
       property?: { name: string } | null;
     } | null>(null),
     [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let live = true;
+    setLoading(true);
+    setRow(null);
+    setFailed(false);
     const query =
       type === "workorder"
         ? supabase
@@ -29,9 +39,10 @@ export function ChatEntityCard({
             .from("vihem_customer_projects")
             .select("title,status")
             .eq("id", id);
-    void query.maybeSingle().then(({ data }) => {
+    void query.maybeSingle().then(({ data, error }) => {
       if (live) {
-        setRow(data as unknown as typeof row);
+        setFailed(!!error);
+        setRow(error ? null : (data as unknown as typeof row));
         setLoading(false);
       }
     });
@@ -43,27 +54,31 @@ export function ChatEntityCard({
   if (!row)
     return (
       <p className="mt-2 text-xs opacity-70">
-        Du saknar åtkomst till det delade{" "}
-        {type === "workorder" ? "arbetsordern" : "projektet"}.
+        {failed
+          ? "Kunde inte hämta länken. Öppna konversationen igen för att försöka på nytt."
+          : "Det delade objektet är inte tillgängligt för dig."}
       </p>
     );
   return (
     <button
+      type="button"
       onClick={open}
       className="mt-2 flex w-full items-start gap-2 rounded-xl border border-current/20 bg-black/5 p-3 text-left"
     >
       {type === "workorder" ? (
-        <ClipboardList size={20} />
+        <ClipboardList size={20} className="shrink-0" />
       ) : (
-        <FolderKanban size={20} />
+        <FolderKanban size={20} className="shrink-0" />
       )}
       <span className="min-w-0">
         <span className="block font-semibold">{row.title}</span>
         <span className="block text-xs opacity-75">
           {row.property?.name}
           {row.property?.name ? " · " : ""}
-          {row.status}
-          {row.due_date ? ` · ${row.due_date}` : ""}
+          {type === "workorder"
+            ? WO_STATUS_LABELS[row.status as WOStatus] || row.status
+            : CUSTOMER_PROJECT_STATUS_LABELS[row.status as CustomerProjectStatus] || row.status}
+          {row.due_date ? ` · ${formatDate(row.due_date)}` : ""}
         </span>
       </span>
     </button>
