@@ -5,19 +5,19 @@ export default {
     extend: {
       colors: {
         vihem: {
-          navy: '#193B73',
-          blue: '#2563EB',
-          canvas: '#F3F6FB',
-          success: '#0F9F76',
-          danger: '#E5484D',
-          ink: '#14213D',
-          muted: '#6B7A99',
+          navy: 'rgb(var(--vihem-navy-rgb) / <alpha-value>)',
+          blue: 'rgb(var(--vihem-accent-rgb) / <alpha-value>)',
+          canvas: 'rgb(var(--vihem-canvas-rgb) / <alpha-value>)',
+          success: 'rgb(var(--vihem-success-rgb) / <alpha-value>)',
+          danger: 'rgb(var(--vihem-danger-rgb) / <alpha-value>)',
+          ink: 'rgb(var(--vihem-ink-rgb) / <alpha-value>)',
+          muted: 'rgb(var(--vihem-muted-rgb) / <alpha-value>)',
         },
       },
-      borderRadius: { card: '1.125rem', sheet: '1.75rem' },
+      borderRadius: { card: 'var(--vihem-radius-card)', sheet: 'var(--vihem-radius-sheet)' },
       boxShadow: {
-        card: '0 1px 2px rgba(25, 59, 115, 0.04), 0 6px 20px rgba(25, 59, 115, 0.06)',
-        float: '0 10px 30px rgba(25, 59, 115, 0.18), 0 2px 6px rgba(25, 59, 115, 0.08)',
+        card: 'var(--vihem-shadow-card)',
+        float: 'var(--vihem-shadow-float)',
         sheet: '0 -12px 40px rgba(20, 33, 61, 0.2)',
       },
       keyframes: {

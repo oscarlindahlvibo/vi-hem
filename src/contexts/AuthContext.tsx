@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { clearAvatarPhotos } from '../lib/avatarPhotos';
 import { supabase } from '../lib/supabase';
 import { BANKID_ENABLED } from '../lib/bankid';
 import type { Profile } from '../types';
@@ -135,7 +136,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           })
           .catch(error => {
             console.error('Error fetching profile:', error);
-            setUser(null);
+            clearAvatarPhotos();
+        setUser(null);
             setLoading(false);
           });
       } else if (!hasPendingUrlSession) {
@@ -163,7 +165,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(profile);
           } catch (error) {
             console.error('Error fetching profile after sign in:', error);
-            setUser(null);
+            clearAvatarPhotos();
+        setUser(null);
           } finally {
             setLoading(false);
           }
@@ -171,6 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else if (event === 'SIGNED_OUT') {
         void supabase.removeAllChannels();
         for(const key of Object.keys(localStorage))if(key.startsWith('vihem-chat:'))localStorage.removeItem(key);
+        clearAvatarPhotos();
         setUser(null);
         setLoading(false);
       }
@@ -218,13 +222,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const profile = await fetchProfile(authUser.id);
       if (!profile) {
         await supabase.auth.signOut();
+        clearAvatarPhotos();
         setUser(null);
         return { error: 'Kontot finns i Supabase Auth men saknar VI-HEM-profil. Kontrollera att profilraden finns i vihem_profiles.' };
       }
       setUser(profile);
     } catch (profileError) {
       await supabase.auth.signOut();
-      setUser(null);
+      clearAvatarPhotos();
+        setUser(null);
       return { error: profileFetchErrorMessage(profileError) };
     }
     return { error: null };
@@ -245,7 +251,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem(LOCAL_SUPERADMIN_STORAGE_KEY);
     localStorage.removeItem(LOCAL_USER_STORAGE_KEY);
     await supabase.auth.signOut();
-    setUser(null);
+    clearAvatarPhotos();
+        setUser(null);
   }
 
   async function finishPasswordRecovery() {

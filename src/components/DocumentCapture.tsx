@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, X } from 'lucide-react';
-import { Badge, Button } from './ui';
+import { Modal, Badge, Button } from './ui';
 
 export type DocumentCaptureKind = 'receipt' | 'supplier_invoice';
 
@@ -499,7 +499,7 @@ export function DocumentCapture({ documentKind, file, onFileChange, resetKey }: 
         </div>
       </div>
       {scannerOpen && (
-        <div className="fixed inset-0 z-[100] bg-slate-950">
+        <Modal open={scannerOpen} onClose={()=>setScannerOpen(false)} title="Dokumentscanner" size="fullscreen"><div className="relative h-full bg-slate-950">
           <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-slate-950/75 px-4 py-3 text-white backdrop-blur">
             <div>
               <p className="text-sm font-bold">Scanna {documentKind === 'receipt' ? 'kvitto' : 'faktura'}</p>
@@ -510,7 +510,7 @@ export function DocumentCapture({ documentKind, file, onFileChange, resetKey }: 
               Stäng
             </Button>
           </div>
-          <div ref={cameraPreviewRef} className="relative h-[100dvh] w-screen bg-slate-950">
+          <div ref={cameraPreviewRef} className="relative h-full w-full bg-slate-950">
             <video ref={videoRef} className="h-full w-full object-cover" muted playsInline autoPlay />
             <div className="pointer-events-none absolute inset-0 bg-slate-950/20" />
             <div className="pointer-events-none absolute inset-0 shadow-[0_0_0_999px_rgba(15,23,42,0.38)]" />
@@ -540,7 +540,7 @@ export function DocumentCapture({ documentKind, file, onFileChange, resetKey }: 
               </Button>
             </div>
           </div>
-        </div>
+        </div></Modal>
       )}
       {scannerImageDataUrl && scannerCorners && (
         <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3">
