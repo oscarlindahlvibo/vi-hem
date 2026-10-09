@@ -224,6 +224,7 @@ export function LoadingPage() {
 }
 
 interface StatCardProps {
+  compactMobile?: boolean;
   label: string;
   value: string | number;
   icon: React.ReactNode;
@@ -231,10 +232,10 @@ interface StatCardProps {
   onClick?: () => void;
 }
 
-export function StatCard({ label, value, icon, color = 'text-blue-600 bg-blue-50', onClick }: StatCardProps) {
+export function StatCard({ label, value, icon, color = 'text-blue-600 bg-blue-50', onClick, compactMobile = false }: StatCardProps) {
   return (
     <Card className={`p-4 min-w-0 ${onClick ? 'cursor-pointer hover:shadow-md transition-all' : ''}`} onClick={onClick}>
-      <div className="flex items-center gap-3 min-w-0">
+      <div className={`flex gap-3 min-w-0 ${compactMobile ? 'flex-col items-start sm:flex-row sm:items-center' : 'items-center'}`}>
         <div className={`flex-shrink-0 rounded-lg p-2.5 ring-1 ring-black/5 ${color}`}>{icon}</div>
         <div className="min-w-0">
           <p className="text-xl sm:text-2xl font-bold text-slate-800 break-words leading-tight">{value}</p>

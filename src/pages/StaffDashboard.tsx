@@ -2,10 +2,10 @@ import { DashboardCards } from '../components/DashboardCards';
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Card, Badge, LoadingPage, Avatar } from '../components/ui';
-import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOStatusColor, getWOPriorityColor, WO_PRIORITY_LABELS, isBreakLike, entryKindLabel, clockTone, CLOCK_TONE_STYLES, LUNCH_WARNING_MINUTES, LUNCH_OVERDUE_MINUTES } from '../lib/utils';
+import { Card, Badge, LoadingPage, Avatar, Button } from '../components/ui';
+import { formatDate, formatDateTime, WO_STATUS_LABELS, getWOPriorityColor, WO_PRIORITY_LABELS, isBreakLike, entryKindLabel, clockTone, CLOCK_TONE_STYLES, LUNCH_WARNING_MINUTES, LUNCH_OVERDUE_MINUTES } from '../lib/utils';
 import { useTimeCategories } from '../contexts/TimeCategoriesContext';
-import type { MaintenanceRequest, WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News, Profile, ShortStayBooking, CustomerProject } from '../types';
+import type { WorkOrder, TimeEntry, StaffAbsenceRequest, StaffAbsenceType, StaffAbsenceStatus, News, Profile, ShortStayBooking, CustomerProject } from '../types';
 import { Bell, Wrench, ClipboardList, Clock, AlertCircle, Timer, Plus, ArrowRight, CalendarX, Newspaper, Square, Repeat2, Coffee, Utensils, BedDouble, Briefcase } from 'lucide-react';
 
 interface StaffDashboardProps {
@@ -30,9 +30,6 @@ const ABSENCE_STATUS_LABEL: Record<StaffAbsenceStatus, string> = {
 };
 
 const ACTIVE_CUSTOMER_PROJECT_STATUSES = [
-  'draft',
-  'quote_created',
-  'quote_sent',
   'quote_accepted',
   'planned',
   'in_progress',
@@ -85,14 +82,29 @@ function workOrderDueLabel(dueDate: string, today = localDateKey()) {
   return 'Deadline';
 }
 
+function DashboardWorkOrder({ order, onOpen }: { order: WorkOrder; onOpen: () => void }) {
+  const due = order.due_date?.slice(0, 10);
+  const overdue = !!due && due < localDateKey();
+  return <button type="button" aria-label={`Öppna arbetsorder ${order.title}`} onClick={onOpen} className="vihem-focus flex w-full items-start justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-slate-50">
+    <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-vihem-ink break-words">{order.title}</span>
+      <span className="mt-1 flex flex-wrap gap-2">
+        {['high','urgent'].includes(order.priority) && <Badge className={getWOPriorityColor(order.priority)}>{WO_PRIORITY_LABELS[order.priority]}</Badge>}
+        {order.status !== 'new' && <span className="text-xs text-vihem-muted">{WO_STATUS_LABELS[order.status]}</span>}
+      </span>
+    </span>
+    {due && <span className={`shrink-0 text-right text-xs ${overdue ? 'text-vihem-danger' : 'text-vihem-muted'}`}><span className="block font-medium">{formatDate(due)}</span><span>{workOrderDueLabel(due)}</span></span>}
+    <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+  </button>;
+}
+
 export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashboardProps) {
   const { user } = useAuth();
   const { labelFor } = useTimeCategories();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [retry, setRetry] = useState(0);
+  const [projectCount, setProjectCount] = useState(0);
   const [newMRCount, setNewMRCount] = useState(0);
-  const [urgentMRCount, setUrgentMRCount] = useState(0);
-  const [myWorkOrdersCount, setMyWorkOrdersCount] = useState(0);
-  const [newWorkOrdersCount, setNewWorkOrdersCount] = useState(0);
   const [attentionWorkOrdersCount, setAttentionWorkOrdersCount] = useState(0);
   const [activeTimeEntry, setActiveTimeEntry] = useState<TimeEntry | null>(null);
   const [myWorkOrders, setMyWorkOrders] = useState<WorkOrder[]>([]);
@@ -115,14 +127,14 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
 
   useEffect(() => {
     if (!user?.id) return;
-
+    let disposed = false, revision = 0;
+    setLoading(true);
     const fetchDashboardData = async () => {
+      const request = ++revision;
       try {
-        setLoading(true);
 
         const [
           newMRResult,
-          urgentMRResult,
           myWOResult,
           newWOResult,
           activeTimeResult,
@@ -140,13 +152,6 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
             .from('vihem_maintenance_requests')
             .select('id', { count: 'exact', head: true })
             .eq('status', 'received'),
-
-          // Count urgent maintenance requests (priority='urgent' and status not in 'done','closed')
-          supabase
-            .from('vihem_maintenance_requests')
-            .select('id', { count: 'exact', head: true })
-            .eq('priority', 'urgent')
-            .not('status', 'in', '(done,closed)'),
 
           // Count my assigned work orders, including multi-assignee rows.
           supabase
@@ -228,7 +233,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
           user.role === 'admin' || user.role === 'staff'
             ? supabase
                 .from('vihem_customer_projects')
-                .select('*, project_manager:project_manager_id(id, name, email)')
+                .select('*, project_manager:project_manager_id(id, name, email)', { count: 'exact' })
                 .eq('organisation_id', user.organisation_id)
                 .in('status', ACTIVE_CUSTOMER_PROJECT_STATUSES)
                 .order('updated_at', { ascending: false })
@@ -243,14 +248,15 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
             .limit(4),
         ]);
 
+        if (disposed || request !== revision) return;
+        for (const result of [newMRResult, myWOResult, newWOResult, activeTimeResult, myWODetailsResult, newWODetailsResult, staffProfilesResult, todayAbsencesResult, clockedInResult, shortStayTodayResult, customerProjectsResult, newsResult]) if (result.error) throw result.error;
+        setLoadError('');
+        setProjectCount('count' in customerProjectsResult ? customerProjectsResult.count || 0 : 0);
         setNewMRCount(newMRResult.count || 0);
-        setUrgentMRCount(urgentMRResult.count || 0);
         const myWorkOrderIds = (myWOResult.data || []).map((order) => order.id);
         const unassignedNewWorkOrderIds = ((newWOResult.data || []) as Pick<WorkOrder, 'id' | 'assigned_to' | 'assigned_to_ids'>[])
           .filter(isUnassignedWorkOrder)
           .map((order) => order.id);
-        setMyWorkOrdersCount(myWorkOrderIds.length);
-        setNewWorkOrdersCount(unassignedNewWorkOrderIds.length);
         setAttentionWorkOrdersCount(new Set([...myWorkOrderIds, ...unassignedNewWorkOrderIds]).size);
 
         setActiveTimeEntry(activeTimeResult.data && activeTimeResult.data.length > 0 ? activeTimeResult.data[0] : null);
@@ -297,9 +303,10 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
         setTodayShortStayBookings((shortStayTodayResult.data || []) as ShortStayBooking[]);
         setOngoingCustomerProjects((customerProjectsResult.data || []) as CustomerProject[]);
       } catch (error) {
-        console.error('Error fetching dashboard data:', error);
+        if (disposed || request !== revision) return;
+        setLoadError('Din översikt kunde inte hämtas. Kontrollera anslutningen och försök igen.');
       } finally {
-        setLoading(false);
+        if (!disposed && request === revision) setLoading(false);
       }
     };
 
@@ -315,13 +322,14 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
       .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_customer_projects' }, () => fetchDashboardData())
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [user?.id, user?.organisation_id, user?.role]);
+    return () => { disposed = true; revision++; supabase.removeChannel(channel); };
+  }, [user?.id, user?.organisation_id, user?.role, retry]);
 
   if (loading) {
     return <LoadingPage />;
   }
 
+  if (loadError) return <div className="space-y-4"><p role="alert" className="text-sm text-vihem-danger">{loadError}</p><Button variant="secondary" onClick={() => { setLoading(true); setRetry(value => value + 1); }}>Försök igen</Button></div>;
   const firstName = user?.name?.split(' ')[0] || 'där';
   const dashboardToday = localDateKey();
   const todayCheckIns = todayShortStayBookings.filter(booking => booking.start_date === dashboardToday);
@@ -331,11 +339,11 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
     ...todayCheckOuts.map(booking => ({ booking, type: 'out' as const })),
   ];
   const shortStayAttentionCount = shortStayEvents.length;
-  const attentionCount = attentionWorkOrdersCount + newMRCount + shortStayAttentionCount + ongoingCustomerProjects.length;
+  const attentionCount = attentionWorkOrdersCount + newMRCount + shortStayAttentionCount;
   const quickLinks = [
-    { label: 'Arbetsordrar', count: attentionWorkOrdersCount, icon: <ClipboardList className="h-5 w-5" />, page: 'workorders', alert: true },
-    { label: 'Kundprojekt', count: ongoingCustomerProjects.length, icon: <Briefcase className="h-5 w-5" />, page: 'customer-projects', alert: false },
-    { label: 'Olästa notiser', count: notificationCount, icon: <Bell className="h-5 w-5" />, page: 'notifications', alert: true },
+    { label: 'Jobb', count: attentionWorkOrdersCount, icon: <ClipboardList className="h-5 w-5" />, page: 'workorders', alert: true },
+    { label: 'Projekt', count: projectCount, icon: <Briefcase className="h-5 w-5" />, page: 'customer-projects', alert: false },
+    { label: 'Notiser', count: notificationCount, icon: <Bell className="h-5 w-5" />, page: 'notifications', alert: true },
   ];
 
   return (
@@ -345,25 +353,13 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
           <div className="flex min-w-0 items-center gap-3">
             <Avatar userId={user?.id} src={user?.avatar_url} name={user?.name} size="lg" className="bg-vihem-navy text-white" />
             <div className="min-w-0">
-              <h1 className="truncate text-xl font-bold tracking-tight text-vihem-ink sm:text-2xl">{getGreeting()}, {firstName}</h1>
+              <h1 className="break-words text-xl font-bold tracking-tight text-vihem-ink sm:text-2xl">{getGreeting()}, {firstName}</h1>
               <p className="truncate text-sm text-vihem-muted">
                 {user?.role === 'admin' ? 'Överblick över dagens drift' : 'Din arbetsdag i VI-HEM'}
               </p>
             </div>
           </div>
-          <button
-            onClick={() => onNavigate('notifications')}
-            className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100"
-            aria-label="Öppna aviseringar"
-            title="Öppna aviseringar"
-          >
-            <Bell className="h-5 w-5" />
-            {notificationCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-vihem-danger px-1 text-[11px] font-bold text-white ring-2 ring-white">
-                {notificationCount > 99 ? '99+' : notificationCount}
-              </span>
-            )}
-          </button>
+
         </div>
 
         <div className="mt-4 grid grid-cols-3 gap-2">
@@ -378,7 +374,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
                 {tile.alert && tile.count !== null && tile.count > 0 && <span className="h-2 w-2 rounded-full bg-vihem-danger" />}
               </span>
               <span className="text-2xl font-bold leading-none text-vihem-ink">{tile.count ?? 0}</span>
-              <span className="w-full truncate text-xs font-semibold text-vihem-muted">{tile.label}</span>
+              <span className="min-h-8 w-full break-words text-xs leading-4 font-semibold text-vihem-muted">{tile.label}</span>
             </button>
           ))}
         </div>
@@ -609,7 +605,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
               </span>
               <span className="min-w-0">
                 <span className="block text-sm font-semibold leading-5 text-slate-950 sm:text-base">
-                  {ongoingCustomerProjects.length} pågående kundprojekt
+                  {projectCount} pågående kundprojekt
                 </span>
                 <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500">
                   Aktiva projekt som inte är slutförda eller arkiverade
@@ -674,9 +670,9 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
       </section>
 
 
-      {user?.role === 'admin' && (
+      {user?.role === 'admin' && (clockedInEntries.length > 0 || todayAbsences.length > 0) && (
         <div data-dashboard-group className="grid grid-cols-1 gap-4 lg:col-span-2 lg:grid-cols-2">
-          <Card className="overflow-hidden border-emerald-200 bg-emerald-50">
+          {clockedInEntries.length > 0 && <Card className="overflow-hidden border-emerald-200 bg-emerald-50">
             <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <div className="flex min-w-0 items-start gap-3">
                 <div className="shrink-0 rounded-xl bg-emerald-100 p-2.5 text-emerald-700">
@@ -723,9 +719,9 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
                 ))
               )}
             </div>
-          </Card>
+          </Card>}
 
-          <Card className="overflow-hidden border-amber-200 bg-amber-50">
+          {todayAbsences.length > 0 && <Card className="overflow-hidden border-amber-200 bg-amber-50">
             <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <div className="flex min-w-0 items-start gap-3">
                 <div className="shrink-0 rounded-xl bg-amber-100 p-2.5 text-amber-700">
@@ -771,7 +767,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
                 ))
               )}
             </div>
-          </Card>
+          </Card>}
         </div>
       )}
 
@@ -786,37 +782,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
               <p className="text-sm text-slate-500">Inga tilldelade arbetsordrar</p>
             </div>
           ) : (
-            myWorkOrders.map((wo) => (
-              <div
-                key={wo.id}
-                className="px-6 py-4 hover:bg-slate-50 transition-colors cursor-pointer"
-                onClick={() => onNavigate(`workorder/${wo.id}`)}
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-medium text-slate-800 truncate">{wo.title}</h3>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <Badge className={getWOPriorityColor(wo.priority)}>
-                        {WO_PRIORITY_LABELS[wo.priority]}
-                      </Badge>
-                      <Badge className={getWOStatusColor(wo.status)}>
-                        {WO_STATUS_LABELS[wo.status]}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="text-right text-sm text-slate-600">
-                    {wo.due_date ? (
-                      <div>
-                        <p className="font-medium text-slate-700">{formatDate(wo.due_date)}</p>
-                        <p className="text-xs text-slate-500">{workOrderDueLabel(wo.due_date)}</p>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-400">Inget datum</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
+            myWorkOrders.map(wo => <DashboardWorkOrder key={wo.id} order={wo} onOpen={() => onNavigate(`workorder/${wo.id}`)} />)
           )}
         </div>
       </Card>
@@ -832,37 +798,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
               <p className="text-sm text-slate-500">Inga nya arbetsordrar</p>
             </div>
           ) : (
-            newWorkOrders.map((wo) => (
-              <div
-                key={wo.id}
-                className="px-6 py-4 hover:bg-slate-50 transition-colors cursor-pointer"
-                onClick={() => onNavigate(`workorder/${wo.id}`)}
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-medium text-slate-800 truncate">{wo.title}</h3>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <Badge className={getWOPriorityColor(wo.priority)}>
-                        {WO_PRIORITY_LABELS[wo.priority]}
-                      </Badge>
-                      <Badge className={getWOStatusColor(wo.status)}>
-                        {WO_STATUS_LABELS[wo.status]}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="text-right text-sm text-slate-600">
-                    {wo.due_date ? (
-                      <div>
-                        <p className="font-medium text-slate-700">{formatDate(wo.due_date)}</p>
-                        <p className="text-xs text-slate-500">{workOrderDueLabel(wo.due_date)}</p>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-400">Inget datum</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
+            newWorkOrders.map(wo => <DashboardWorkOrder key={wo.id} order={wo} onOpen={() => onNavigate(`workorder/${wo.id}`)} />)
           )}
         </div>
       </Card>

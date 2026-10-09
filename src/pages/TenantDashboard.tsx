@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Card, Badge, StatCard, LoadingPage } from '../components/ui';
+import { Card, Badge, StatCard, LoadingPage, Button, Avatar } from '../components/ui';
 import { formatDate, formatCurrency, MR_STATUS_LABELS } from '../lib/utils';
 import { isActiveLaundryBooking } from '../lib/laundry';
 import type { Tenancy, MaintenanceRequest, LaundryBooking, News } from '../types';
 import {
-  Home,
   Wrench,
   WashingMachine,
   FileText,
@@ -21,6 +20,7 @@ import {
 
 interface TenantDashboardProps {
   onNavigate: (page: string) => void;
+  financeEnabled?: boolean;
 }
 
 interface TenantData {
@@ -29,6 +29,7 @@ interface TenantData {
     property: { address: string; name: string } | null;
   }) | null;
   maintenanceRequests: MaintenanceRequest[];
+  openMaintenanceCount: number;
   laundryBookings: (LaundryBooking & {
     slot: { date: string; start_time: string; end_time: string; room_name: string } | null;
   })[];
@@ -38,11 +39,13 @@ interface TenantData {
   error: string | null;
 }
 
-export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) => {
+export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate, financeEnabled = false }) => {
   const { user } = useAuth();
+  const [retry, setRetry] = useState(0);
   const [data, setData] = useState<TenantData>({
     tenancy: null,
     maintenanceRequests: [],
+    openMaintenanceCount: 0,
     laundryBookings: [],
     news: [],
     pendingContracts: [],
@@ -52,6 +55,7 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
 
   useEffect(() => {
     if (!user?.id) return;
+    let disposed = false;
 
     const fetchDashboardData = async () => {
       try {
@@ -66,7 +70,7 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
 
         if (tenancyError) throw tenancyError;
 
-        const [mrRes, laundryRes, newsRes, contractRes] = await Promise.all([
+        const [mrRes, laundryRes, newsRes, contractRes, openMRRes] = await Promise.all([
           supabase
             .from('vihem_maintenance_requests')
             .select('*')
@@ -92,15 +96,15 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
                 .eq('tenancy_id', tenancyData.id)
                 .eq('status', 'pending_tenant')
             : Promise.resolve({ data: [], error: null }),
+          supabase.from('vihem_maintenance_requests').select('id', { count: 'exact', head: true }).eq('tenant_id', user.id).not('status', 'in', '(done,closed)'),
         ]);
 
-        if (mrRes.error) console.error('Error fetching tenant maintenance requests:', mrRes.error);
-        if (laundryRes.error) console.error('Error fetching tenant laundry bookings:', laundryRes.error);
-        if (newsRes.error) console.error('Error fetching tenant news:', newsRes.error);
-        if (contractRes.error) console.error('Error fetching tenant pending contracts:', contractRes.error);
+        for (const result of [mrRes, laundryRes, newsRes, contractRes, openMRRes]) if (result.error) throw result.error;
 
+        if (disposed) return;
         setData({
           tenancy: tenancyData,
+          openMaintenanceCount: openMRRes.count || 0,
           maintenanceRequests: mrRes.error ? [] : mrRes.data || [],
           laundryBookings: laundryRes.error
             ? []
@@ -110,18 +114,19 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
           loading: false,
           error: null,
         });
-      } catch (err) {
-        console.error('Error fetching dashboard data:', err);
+      } catch {
+        if (disposed) return;
         setData((prev) => ({
           ...prev,
           loading: false,
-          error: 'Kunde inte hämta instrumentpanelsdata. Försök igen senare.',
+          error: 'Din boendeöversikt kunde inte hämtas. Kontrollera anslutningen och försök igen.',
         }));
       }
     };
 
     fetchDashboardData();
-  }, [user?.id]);
+    return () => { disposed = true; };
+  }, [user?.id, retry]);
 
   if (data.loading) return <LoadingPage />;
 
@@ -134,7 +139,7 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
               <AlertCircle className="h-6 w-6 text-red-600 mt-0.5 flex-shrink-0" />
               <div>
                 <h3 className="font-semibold text-red-900">Fel vid inläsning</h3>
-                <p className="text-red-800 mt-1">{data.error}</p>
+                <p role="alert" className="text-red-800 mt-1">{data.error}</p><Button variant="secondary" className="mt-3" onClick={() => { setData(previous => ({ ...previous, loading: true })); setRetry(value => value + 1); }}>Försök igen</Button>
               </div>
             </div>
           </Card>
@@ -148,13 +153,8 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
   const propertyName = (data.tenancy?.property as any)?.name || '—';
   const propertyAddress = (data.tenancy?.property as any)?.address || '—';
 
-  const today = new Date();
-  const nextDueDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-
   const monthlyRent = data.tenancy?.monthly_rent || 0;
-  const openMR = data.maintenanceRequests.filter(
-    (mr) => mr.status !== 'done' && mr.status !== 'closed'
-  ).length;
+  const openMR = data.openMaintenanceCount;
 
   const getMRStatusBadgeClass = (status: string) => {
     const map: Record<string, string> = {
@@ -180,16 +180,14 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
       <div className="max-w-6xl mx-auto px-3 sm:px-4 py-5 sm:py-8">
         {/* Header */}
         <div className="mb-6 sm:mb-8">
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
+          <div className="flex items-start justify-between gap-3 mb-6">
             <div className="min-w-0">
               <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-1 break-words">Hej, {tenantName}!</h1>
               <p className="text-sm sm:text-base text-slate-500 leading-relaxed break-words">
-                {propertyName} &mdash; Lägenhet {apartmentNumber} &mdash; {propertyAddress}
+                {data.tenancy ? `${propertyName} · Lägenhet ${apartmentNumber} · ${propertyAddress}` : 'Ingen aktiv bostad är kopplad till ditt konto.'}
               </p>
             </div>
-            <div className="w-11 h-11 sm:w-12 sm:h-12 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
-              <Home className="h-6 w-6 text-blue-600" />
-            </div>
+            <Avatar userId={user?.id} name={user?.name} src={user?.avatar_url} size="lg" />
           </div>
 
           {/* Pending contract alert — shown above everything else when relevant */}
@@ -217,64 +215,34 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
             </button>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            <StatCard
+          <div className={`grid grid-cols-2 gap-3 sm:gap-4 ${financeEnabled && data.laundryBookings.length > 0 ? 'md:grid-cols-4' : financeEnabled || data.laundryBookings.length > 0 ? 'md:grid-cols-3' : ''}`}>
+            <StatCard compactMobile
               label="Månadshyra"
-              value={formatCurrency(monthlyRent)}
+              value={data.tenancy ? formatCurrency(monthlyRent) : '—'}
               icon={<FileText className="h-5 w-5" />}
             />
-            <StatCard
-              label="Nästa förfallodatum"
-              value={formatDate(nextDueDate)}
-              icon={<Clock className="h-5 w-5" />}
-            />
-            <StatCard
+            {financeEnabled && <StatCard compactMobile label="Mina fakturor" value="Visa fakturor" icon={<FileText className="h-5 w-5" />} onClick={() => onNavigate('tenant-invoices')} />}
+            <StatCard compactMobile
               label="Öppna felanmälningar"
               value={openMR}
               icon={<Wrench className="h-5 w-5" />}
             />
-            <StatCard
+            {data.laundryBookings.length > 0 && <StatCard compactMobile
               label="Bokade tvätttider"
               value={data.laundryBookings.length}
               icon={<WashingMachine className="h-5 w-5" />}
-            />
+            />}
           </div>
 
-          <section className="mt-6 lg:hidden">
-            <button
-              onClick={() => onNavigate('news')}
-              className="mb-3 flex w-full items-center justify-between text-left"
-            >
-              <div className="flex items-center gap-2">
-                <Newspaper className="h-5 w-5 text-blue-600" />
-                <h2 className="text-lg font-bold text-slate-900">Nyheter</h2>
-              </div>
-              <ArrowRight className="h-5 w-5 text-slate-300" />
-            </button>
 
-            {data.news.length === 0 ? (
-              <Card className="p-5">
-                <div className="text-center py-3">
-                  <Newspaper className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-                  <p className="text-slate-500 text-sm">Inga nyheter</p>
-                </div>
-              </Card>
-            ) : (
-              <div className="space-y-3">
-                {data.news.slice(0, 3).map((item) => (
-                  <Card key={item.id} className="p-4 hover:shadow-md transition-shadow cursor-pointer" onClick={() => onNavigate('news')}>
-                    <h3 className="font-semibold text-slate-900 text-sm line-clamp-2">{item.title}</h3>
-                    <p className="mt-1 line-clamp-2 text-sm text-slate-500">{item.content}</p>
-                    {item.published_at && (
-                      <p className="text-xs text-slate-400 mt-2">{formatDate(new Date(item.published_at))}</p>
-                    )}
-                  </Card>
-                ))}
-              </div>
-            )}
-          </section>
         </div>
 
+        <section aria-label="Boendetjänster" className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Button onClick={() => onNavigate('maintenance')} className="gap-2"><Wrench className="h-4 w-4" />Felanmälan</Button>
+          <Button variant="secondary" onClick={() => onNavigate('laundry')} className="gap-2"><WashingMachine className="h-4 w-4" />Boka tvätt</Button>
+          <Button variant="secondary" onClick={() => onNavigate('chat')} className="gap-2"><MessageCircle className="h-4 w-4" />Kontakta oss</Button>
+          <Button variant="secondary" onClick={() => onNavigate('documents')} className="gap-2"><FileText className="h-4 w-4" />Dokument</Button>
+        </section>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             {/* Maintenance Requests */}
@@ -284,18 +252,13 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
                   <Wrench className="h-5 w-5 text-blue-600" />
                   <h2 className="text-lg font-bold text-slate-900">Mina felanmälningar</h2>
                 </div>
-                <button
-                  onClick={() => onNavigate('maintenance')}
-                  className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
-                >
-                  Visa alla <ArrowRight className="h-4 w-4" />
-                </button>
+                <Button variant="ghost" size="sm" onClick={() => onNavigate('maintenance')} className="gap-1">Visa alla <ArrowRight className="h-4 w-4" /></Button>
               </div>
 
               {data.maintenanceRequests.length === 0 ? (
-                <Card className="p-6">
-                  <div className="text-center py-4">
-                    <CheckCircle className="h-10 w-10 text-green-500 mx-auto mb-2" />
+                <Card className="p-4">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="h-5 w-5 shrink-0 text-slate-400" />
                     <p className="text-slate-700 font-medium">Inga aktiva felanmälningar</p>
                   </div>
                 </Card>
@@ -332,18 +295,13 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
                   <WashingMachine className="h-5 w-5 text-blue-600" />
                   <h2 className="text-lg font-bold text-slate-900">Kommande tvätttider</h2>
                 </div>
-                <button
-                  onClick={() => onNavigate('laundry')}
-                  className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
-                >
-                  Boka tid <ArrowRight className="h-4 w-4" />
-                </button>
+                <Button variant="ghost" size="sm" onClick={() => onNavigate('laundry')} className="gap-1">Boka tid <ArrowRight className="h-4 w-4" /></Button>
               </div>
 
               {data.laundryBookings.length === 0 ? (
-                <Card className="p-6">
-                  <div className="text-center py-4">
-                    <WashingMachine className="h-10 w-10 text-slate-300 mx-auto mb-2" />
+                <Card className="p-4">
+                  <div className="flex items-center gap-3">
+                    <WashingMachine className="h-5 w-5 shrink-0 text-slate-400" />
                     <p className="text-slate-600 font-medium text-sm">Inga bokade tvätttider</p>
                   </div>
                 </Card>
@@ -387,9 +345,9 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
               </div>
 
               {data.news.length === 0 ? (
-                <Card className="p-5">
-                  <div className="text-center py-3">
-                    <Newspaper className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                <Card className="p-4">
+                  <div className="flex items-center gap-3">
+                    <Newspaper className="h-5 w-5 shrink-0 text-slate-400" />
                     <p className="text-slate-500 text-sm">Inga nyheter</p>
                   </div>
                 </Card>
@@ -407,52 +365,7 @@ export const TenantDashboard: React.FC<TenantDashboardProps> = ({ onNavigate }) 
               )}
             </section>
 
-            {/* Quick Actions */}
-            <section>
-              <h3 className="text-base font-bold text-slate-900 mb-3">Snabbåtgärder</h3>
-              <div className="space-y-2">
-                <button
-                  onClick={() => onNavigate('maintenance')}
-                  className="w-full flex items-center justify-between px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-colors text-sm"
-                >
-                  <div className="flex items-center gap-2">
-                    <Wrench className="h-4 w-4" />
-                    <span>Ny felanmälan</span>
-                  </div>
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => onNavigate('laundry')}
-                  className="w-full flex items-center justify-between px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-colors text-sm"
-                >
-                  <div className="flex items-center gap-2">
-                    <WashingMachine className="h-4 w-4" />
-                    <span>Boka tvätt</span>
-                  </div>
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => onNavigate('documents')}
-                  className="w-full flex items-center justify-between px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-medium transition-colors text-sm"
-                >
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    <span>Dokument</span>
-                  </div>
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => onNavigate('chat')}
-                  className="w-full flex items-center justify-between px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-medium transition-colors text-sm"
-                >
-                  <div className="flex items-center gap-2">
-                    <MessageCircle className="h-4 w-4" />
-                    <span>Chatt</span>
-                  </div>
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-              </div>
-            </section>
+
           </div>
         </div>
       </div>

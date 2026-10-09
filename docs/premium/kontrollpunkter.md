@@ -124,3 +124,18 @@ RPC-integration med verkliga QA-JWT: två parallella likadana create gav en proj
 Autentiserad browser: Parkgården Testkund QA skapades och valdes i projektutkast; texten kvar. Premiumprojekt QA med Oscar som ledare/Christofer som personal: kontrollerat tilldelningsfel bevarade form, DB-count=0; retry efter triggerborttagning skapade projekt och rätt personal. Sökning och Enter på kortet öppnade sparat projekt. Planerat val sparades och återlästes. Faktiska skärmbilder av nytt-formulär/detalj 390/768/1440 samt synligt sparfel390. Desktop-formulärbild visar planeringsdelen efter intern scroll, iPad/mobil visar början. Alla tillhörande ekonomiska undersidor, kamera/bilagor, staff UI och 430/1024 återstår.
 
 QA-modulregistret var schema-klonat utan seed. Kundprojekt aktiverades i QA-registret för den syntetiska QA-organisationen; produktion orörd. Browser behövde logga in igen efter JWT-test, ordinarie inloggningsform användes.
+
+
+## Kontrollpunkt 5 – rollanpassade startsidor, 2026-10-09
+
+- Personal/admin: tydligare kompakt hero och genvägar, riktiga projekttotaler med separat begränsad förhandsvisning. Utkast/offert räknas inte som pågående projekt; aktiva projekt räknas inte som uppmärksamhetskrävande uppgifter. Tomma personal-/frånvaropaneler döljs. Arbetsorderrader är namngivna knappar med endast relevanta statusmarkeringar och verkliga datum. Två höjdanpassade kolumner från 768 px, utan nytt designsystem. Stale/unmount-guard och kontrollerade laddfel; realtime-refresh visar inte ny helsidesspinner.
+- Hyresgäst: exakt antal egna öppna felanmälningar separat från tre förhandsvisningar. Påhittat månadsslutsdatum borttaget; fakturaaktiverad organisation får faktisk navigering till Mina fakturor. Ingen bostad visar — istället för påstådd nollhyra. Boendetjänster samlade med riktiga knappar, nyheter visas bara en gång, tom tvätt/nyheter komprimerade. Noll bokade tvätttider får ingen konkurrerande statistikpanel. Egen Avatar. Laddfel har återförsök och sena svar efter unmount ignoreras.
+- Mobil screenshot visade brutet belopp/etiketter i små StatCard. Gemensam opt-in compactMobile staplar ikon och text på smal mobil, befintlig horisontell standard kvar för övriga användningar. Ny screenshot verifierar hela belopp och läsbara etiketter.
+
+### Verkligt provat och begränsningar
+
+Autentiserad admin och personal: tvåkolumnslayout och tilldelade order/projekt 390/768/1440. Personalens klick öppnade Ventilationskontroll QA med rätt detalj; native button Enter via browserverktyget gav inget synligt resultat och räknas därför inte som verifierad tangentbordsaktivering. Adminbilder är tidigare checkpoint före sista hero-/genvägsetikettförfiningen, personal768/1440 och tenant390/768/1440 är senaste layout.
+
+Tenant QA: först ingen aktiv bostad (desktopbild före tomlägesförfining), därefter syntetisk QA-bostad 1001, hyra6200, fyra egna mottagna ärenden. Översikten visar antal4, tre ärendeförhandsvisningar, inga adminpaneler. Kontakta oss öppnar behörig chattlista, Boka tvätt öppnar rätt vy med verkligt Ingen tvättstuga-tomläge. Ingen produktion eller externa utskick påverkade. Sparning/signering/bokning utfördes inte från startsidan. Fakturaaktiverad variant, pending-avtal, faktisk tvättbokning, nyheter, kontrollerat laddfel, native/screen och 430/1024 återstår. Tenant-startsidan saknar fortfarande egen realtime-synk; inget löfte om sådan verifiering.
+
+Efter senaste ändring: TypeScript, premiumtests (bildvalidering/osparade formulär), Vite build och mobil-bundleprov PASS. App-chunk ~2.66 MB / gzip680 kB och HEIC-chunk1.35 MB ger fortsatt storleksvarning. Ingen full system-/prestanda-/DoD-certifiering.

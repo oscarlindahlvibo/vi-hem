@@ -451,7 +451,7 @@ function AppInner() {
   const isSystemAdmin = isSuperadmin || (isAdmin && user.is_system_admin);
 
   const renderDashboard = () => {
-    if (isTenant) return <TenantDashboard onNavigate={navigate} />;
+    if (isTenant) return <TenantDashboard onNavigate={navigate} financeEnabled={enabledModules.finance} />;
     return <StaffDashboard onNavigate={navigate} notificationCount={notificationCount} />;
   };
 
