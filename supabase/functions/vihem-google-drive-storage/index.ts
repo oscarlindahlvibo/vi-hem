@@ -1,3 +1,4 @@
+import { getEncryptionSecret, decryptSettings, googleDriveToken as token } from "../_shared/google-drive-auth.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -14,8 +15,8 @@ Deno.serve(async (req) => {
     const db = createClient(url, serviceKey);
     const { data: { user } } = await userClient.auth.getUser();
     if (!user) return json({ error: "Unauthorized" }, 401);
-    const { data: profile } = await db.from("vihem_profiles").select("id,role,organisation_id").eq("id", user.id).maybeSingle();
-    if (!profile?.organisation_id || !["staff", "admin", "superadmin"].includes(profile.role)) return json({ error: "Endast personal kan använda dokumentlagringen." }, 403);
+    const { data: profile } = await db.from("vihem_profiles").select("id,role,organisation_id,active").eq("id", user.id).maybeSingle();
+    if (!profile?.active || !profile?.organisation_id || !["staff", "admin", "superadmin"].includes(profile.role)) return json({ error: "Endast personal kan använda dokumentlagringen." }, 403);
     const settings = await getSettings(db, profile.organisation_id);
     const { data: organisation } = await db.from("vihem_organisations").select("name").eq("id", profile.organisation_id).maybeSingle();
     const body = await req.json().catch(() => ({}));
@@ -27,6 +28,12 @@ Deno.serve(async (req) => {
       }
       const fileId = String(body.file_id || "");
       if (!fileId) return json({ error: "Drive-filen saknar id." }, 400);
+      const [registered, document] = await Promise.all([
+        db.from('vihem_google_drive_files').select('id').eq('organisation_id',profile.organisation_id).eq('drive_file_id',fileId).limit(1),
+        db.from('vihem_documents').select('id').eq('organisation_id',profile.organisation_id).eq('drive_file_id',fileId).limit(1),
+      ]);
+      if(registered.error||document.error||(!registered.data?.length&&!document.data?.length)) return json({error:'Filen är inte registrerad i din organisation.'},403);
+
       const credentials = await decryptSettings(settings, getEncryptionSecret(serviceKey));
       if (!credentials) return json({ ok: false, error_code: "GOOGLE_CREDENTIALS_MISSING", error: "Google service account saknas." }, 400);
       const parsed = JSON.parse(credentials);
@@ -64,12 +71,6 @@ Deno.serve(async (req) => {
 
 async function getSettings(db: any, organisationId: string) { const { data } = await db.from("vihem_google_workspace_settings").select("*").eq("organisation_id", organisationId).maybeSingle(); return data; }
 function publicSettings(settings: any) { return { enabled: Boolean(settings?.drive_storage_enabled), fallback_enabled: settings?.drive_fallback_enabled !== false, root_folder_id: settings?.drive_root_folder_id || "", shared_drive_id: settings?.drive_shared_drive_id || "", delegated_user: settings?.drive_delegated_user || "" }; }
-function getEncryptionSecret(serviceKey: string) { return Deno.env.get("VIHEM_GOOGLE_WORKSPACE_SECRET_KEY") || Deno.env.get("VIHEM_OCR_SECRET_KEY") || Deno.env.get("VIHEM_ACCOUNTING_SECRET_KEY") || serviceKey; }
-async function decryptSettings(settings: any, secret: string) { if (!settings?.encrypted_service_account_json) return ""; const bytes = Uint8Array.from(atob(settings.encrypted_service_account_json), c => c.charCodeAt(0)); const iv = bytes.slice(0, 12); const cipher = bytes.slice(12); const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)); const key = await crypto.subtle.importKey("raw", hash, "AES-GCM", false, ["decrypt"]); return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher)); }
-async function token(credentials: any, subject: string, scope: string) { const now = Math.floor(Date.now() / 1000); const assertion = await signJwt({ iss: credentials.client_email, scope, aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600, ...(subject ? { sub: subject } : {}) }, credentials.private_key); const response = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error_description || "Google token kunde inte skapas."); return data.access_token as string; }
-async function signJwt(payload: Record<string, unknown>, privateKey: string) { const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" })); const body = b64url(JSON.stringify(payload)); const keyData = pemToDer(privateKey); const key = await crypto.subtle.importKey("pkcs8", keyData, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]); const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(`${header}.${body}`)); return `${header}.${body}.${b64url(signature)}`; }
-function pemToDer(value: string) { const base64 = value.replace(/-----[^-]+-----/g, "").replace(/\s/g, ""); return Uint8Array.from(atob(base64), c => c.charCodeAt(0)); }
-function b64url(value: string | ArrayBuffer) { const bytes = typeof value === "string" ? new TextEncoder().encode(value) : new Uint8Array(value); return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
 async function ensureFolderPath(accessToken: string, path: string, parentId: string, sharedDriveId: string) {
   let currentId = parentId;
   for (const rawName of path.split("/").filter(Boolean)) {
@@ -80,6 +81,6 @@ async function ensureFolderPath(accessToken: string, path: string, parentId: str
 }
 async function ensureFolder(accessToken: string, name: string, parentId: string, sharedDriveId: string) { const query = `name='${name.replace(/'/g, "\\'")}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`; const params = new URLSearchParams({ q: query, fields: "files(id,name)", pageSize: "1", supportsAllDrives: "true", includeItemsFromAllDrives: "true" }); if (sharedDriveId) { params.set("corpora", "drive"); params.set("driveId", sharedDriveId); } const existing = await driveFetch(`/drive/v3/files?${params}`, accessToken); if (existing.files?.[0]?.id) return existing.files[0].id; const created = await driveFetch("/drive/v3/files?supportsAllDrives=true", accessToken, "POST", { name, mimeType: "application/vnd.google-apps.folder", parents: [parentId] }); return created.id as string; }
 async function uploadFile(accessToken: string, filename: string, mimeType: string, bytes: Uint8Array, folderId: string, sharedDriveId: string) { const boundary = `vihem-${crypto.randomUUID()}`; const metadata = JSON.stringify({ name: filename, parents: [folderId] }); const prefix = new TextEncoder().encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`); const suffix = new TextEncoder().encode(`\r\n--${boundary}--`); const payload = new Uint8Array(prefix.length + bytes.length + suffix.length); payload.set(prefix); payload.set(bytes, prefix.length); payload.set(suffix, prefix.length + bytes.length); const params = new URLSearchParams({ uploadType: "multipart", fields: "id,name,webViewLink", supportsAllDrives: "true" }); if (sharedDriveId) params.set("driveId", sharedDriveId); return await driveFetch(`/upload/drive/v3/files?${params}`, accessToken, "POST", payload, { "Content-Type": `multipart/related; boundary=${boundary}` }); }
-async function driveFetch(path: string, accessToken: string, method = "GET", body?: unknown, headers: Record<string, string> = {}) { const response = await fetch(`https://www.googleapis.com${path}`, { method, headers: { Authorization: `Bearer ${accessToken}`, ...(body instanceof Uint8Array ? {} : { "Content-Type": "application/json" }), ...headers }, body: body instanceof Uint8Array ? body : body ? JSON.stringify(body) : undefined }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error?.message || "Google Drive svarade med ett fel."); return data; }
+async function driveFetch(path: string, accessToken: string, method = "GET", body?: unknown, headers: Record<string, string> = {}) { const response = await fetch(`https://www.googleapis.com${path}`, { method, headers: { Authorization: `Bearer ${accessToken}`, ...(body instanceof Uint8Array ? {} : { "Content-Type": "application/json" }), ...headers }, body: body instanceof Uint8Array ? body.slice().buffer : body ? JSON.stringify(body) : undefined }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error?.message || "Google Drive svarade med ett fel."); return data; }
 function sanitizeFilename(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 180) || "dokument"; }
 function json(data: Record<string, unknown>, status = 200) { return new Response(JSON.stringify(data), { status, headers: { ...cors, "content-type": "application/json" } }); }

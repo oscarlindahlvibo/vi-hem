@@ -1,0 +1,13 @@
+import {createHash} from 'node:crypto';import fs from 'node:fs';import assert from 'node:assert/strict';import {createClient} from '@supabase/supabase-js';
+const c=JSON.parse(fs.readFileSync(process.env.CHAT_QA_CONFIG,'utf8')),url=c.url||'http://127.0.0.1:18880';assert.ok(['localhost','127.0.0.1'].includes(new URL(url).hostname));
+const client=createClient(url,c.anon,{auth:{persistSession:false}});const login=await client.auth.signInWithPassword({email:c.users.oscar.email,password:c.user_password});assert.equal(login.error,null);
+const base=url+'/functions/v1/vihem-inspection-archive';
+assert.equal((await fetch(base,{method:'POST',headers:{apikey:c.anon}})).status,401);
+const headers={apikey:c.anon,Authorization:'Bearer '+login.data.session.access_token};
+assert.equal((await fetch(base+'?action=invalid&job='+crypto.randomUUID(),{method:'POST',headers})).status,400);
+const inspection=await client.from('vihem_apartment_inspections').select('id').eq('organisation_id',c.org).eq('status','draft').limit(1).single();assert.equal(inspection.error,null);
+const bytes=fs.readFileSync(new URL('./fixtures/profile.jpg',import.meta.url)),id=crypto.randomUUID();
+const begin=await client.rpc('vihem_begin_inspection_file',{p_id:id,p_inspection:inspection.data.id,p_kind:'photo',p_room:'general',p_filename:'edge-qa.jpg',p_mime:'image/jpeg',p_size:bytes.length,p_sha256:createHash('sha256').update(bytes).digest('hex')});assert.equal(begin.error,null);
+const response=await fetch(base+'?action=archive&job='+id,{method:'POST',headers});assert.equal(response.status,409);
+assert.equal((await client.from('vihem_inspection_file_jobs').select('state,lease_token').eq('id',id).single()).data.lease_token,null,'missing settings cannot strand lease');
+console.log('PASS isolated real Edge: anonymous denied, invalid action rejected before lease, missing Drive configuration fails safely. No real Google requests.');
