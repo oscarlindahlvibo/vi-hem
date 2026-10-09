@@ -27,13 +27,13 @@ Ingen rad är modul-Klar. Gemensamma kontroller påverkar även orörda vyer; de
 | src/pages/AdminTerminationsPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/ApartmentPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/CalendarPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
-| src/pages/ChatPage.tsx | Plusmeny, layout, avatarer | Skicka/svar/reaktion/delning/utkast; 5 bredder | Intermittent rejoinprov; fysisk keyboard/voice och samtliga gruppflöden återstår |
+| src/pages/ChatPage.tsx | Plusmeny, layout, avatarer | Skicka/svar/reaktion/delning/utkast; 5 bredder | Observerat rejoinprov förklarat och 12 SDK-cykler provade; browser-/native-avbrott samt fysisk keyboard/voice och samtliga gruppflöden återstår |
 | src/pages/CustomerProjectsPage.tsx | Deltagaravatarer | Kod/bygge; ej full runtimeprov | Projektflöden, ekonomi, dokument och roller återstår |
 | src/pages/DocumentsPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/FinancePage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/FleetPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/GuestLaundryPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
-| src/pages/InspectionsPage.tsx | Tre steg, rum, progress, sparfooter | Utkast/återöppna/slutför/dokumentreferens; 5 bredder | Bilder/kamera/publik bucket, PDF-utseende och signering återstår |
+| src/pages/InspectionsPage.tsx | Tre steg, rum, progress, sparfooter, objektbaserad lista och hämtfel/återförsök | Utkast/återöppna/slutför/dokumentreferens; 5 rumsbredder; lista 390/768/1440 och sökning utan träff | Bilder/kamera/publik bucket, PDF-utseende och signering återstår |
 | src/pages/InstallmentPlansPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/InventoryPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/JourPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
@@ -64,7 +64,7 @@ Ingen rad är modul-Klar. Gemensamma kontroller påverkar även orörda vyer; de
 | src/pages/TenantInvoicesPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/TerminationPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/TimeTrackingPage.tsx | Gemensamma avatarer | Kod/bygge; ej full runtimeprov | Tidflöden, formulär och samtliga enheter återstår |
-| src/pages/WorkOrdersPage.tsx | Detaljhierarki, sparning, ansvariga | Status/tilldelning/redigering/kommentar/delad länk; 5 detaljbredder | Hela formulär, bulk/svep, tid, tabell-a11y och roller återstår |
+| src/pages/WorkOrdersPage.tsx | Detaljhierarki, grupperade formulär/fasta åtgärder, utkastskydd, kommentarutkast per order och tangentbordsöppning | Tidigare detaljflöden + ny/redigera 390/768/1440, kontrollerat sparfel/återförsök, utkastbyte mellan två order | Bilagor, fler bredder/feltillstånd, bulk/svep/tid och full rollmatris återstår |
 | src/pages/YearPlanningPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 
 Aktuell maskininventering finns i current/inventory.md. Kör `node scripts/premium/inventory.mjs` för aktuell JSON med kontrollernas fil/rad; JSON är genererad och inte versionerad i current/. Baslinje-JSON från projektstarten bevaras i inventory.json.

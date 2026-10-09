@@ -1,6 +1,6 @@
 # VI-HEM 3.0 – källkodsinventering
 
-Inventeringen omfattar 107 TSX-filer, 62 vy-/modulfiler, 55 route-val, 250 dialog-/sheet-/kamera-/signaturreferenser och 2621 interaktiva element/formulär/tabeller. Varje element har fil och rad i inventory.json. Dynamiska underflöden och runtime-behörigheter kräver separat prov.
+Inventeringen omfattar 107 TSX-filer, 62 vy-/modulfiler, 55 route-val, 251 dialog-/sheet-/kamera-/signaturreferenser och 2625 interaktiva element/formulär/tabeller. Varje element har fil och rad i inventory.json. Dynamiska underflöden och runtime-behörigheter kräver separat prov.
 
 **Detta är en kodinventering, inte en visuell eller funktionell verifiering.** Alla vyer börjar med ej verifierad status för varje bedömningsdimension. Ingen sida markeras klar genom gemensam CSS.
 
@@ -30,12 +30,12 @@ Inventeringen omfattar 107 TSX-filer, 62 vy-/modulfiler, 55 route-val, 250 dialo
 | src/pages/ApartmentPage.tsx | 814 | 3 | 1 native fields: inspect labels, sizing, validation; 3 native buttons: review purpose/states/touch size |
 | src/pages/CalendarPage.tsx | 656 | 2 | 3 native fields: inspect labels, sizing, validation; 3 native buttons: review purpose/states/touch size; Native confirmation: review shared dialog replacement |
 | src/pages/ChatPage.tsx | 842 | 6 | 2 native fields: inspect labels, sizing, validation; 4 native buttons: review purpose/states/touch size; Native confirmation: review shared dialog replacement |
-| src/pages/CustomerProjectsPage.tsx | 2322 | 40 | 11 native fields: inspect labels, sizing, validation; 5 native buttons: review purpose/states/touch size |
+| src/pages/CustomerProjectsPage.tsx | 2320 | 40 | 11 native fields: inspect labels, sizing, validation; 5 native buttons: review purpose/states/touch size |
 | src/pages/DocumentsPage.tsx | 823 | 1 | 3 native fields: inspect labels, sizing, validation; 3 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination; Native confirmation: review shared dialog replacement |
 | src/pages/FinancePage.tsx | 6800 | 20 | 15 native fields: inspect labels, sizing, validation; 4 native buttons: review purpose/states/touch size |
 | src/pages/FleetPage.tsx | 2192 | 22 | 6 native fields: inspect labels, sizing, validation; 19 native buttons: review purpose/states/touch size; Native confirmation: review shared dialog replacement |
 | src/pages/GuestLaundryPage.tsx | 283 | 0 | 2 native buttons: review purpose/states/touch size |
-| src/pages/InspectionsPage.tsx | 730 | 6 | 5 native fields: inspect labels, sizing, validation; 2 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination |
+| src/pages/InspectionsPage.tsx | 737 | 6 | 5 native fields: inspect labels, sizing, validation; 2 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination |
 | src/pages/InstallmentPlansPage.tsx | 94 | 0 | Gemensam UI finns; faktisk kvalitet måste granskas |
 | src/pages/InventoryPage.tsx | 497 | 10 | 4 native fields: inspect labels, sizing, validation; 9 native buttons: review purpose/states/touch size; Native confirmation: review shared dialog replacement |
 | src/pages/JourPage.tsx | 1415 | 6 | 5 native fields: inspect labels, sizing, validation; 9 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination; Sub-12px text: inspect legibility; Native confirmation: review shared dialog replacement |
@@ -66,7 +66,7 @@ Inventeringen omfattar 107 TSX-filer, 62 vy-/modulfiler, 55 route-val, 250 dialo
 | src/pages/TenantInvoicesPage.tsx | 147 | 0 | 1 native buttons: review purpose/states/touch size |
 | src/pages/TerminationPage.tsx | 388 | 0 | 1 native fields: inspect labels, sizing, validation |
 | src/pages/TimeTrackingPage.tsx | 3166 | 17 | 40 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination; Native confirmation: review shared dialog replacement |
-| src/pages/WorkOrdersPage.tsx | 2506 | 12 | 6 native fields: inspect labels, sizing, validation; 17 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination; Native confirmation: review shared dialog replacement |
+| src/pages/WorkOrdersPage.tsx | 2532 | 13 | 6 native fields: inspect labels, sizing, validation; 18 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination; Native confirmation: review shared dialog replacement |
 | src/pages/YearPlanningPage.tsx | 1369 | 2 | 1 native fields: inspect labels, sizing, validation; 8 native buttons: review purpose/states/touch size; Sub-12px text: inspect legibility; Native confirmation: review shared dialog replacement |
 
 ## Routes och befintliga frontendgrindar

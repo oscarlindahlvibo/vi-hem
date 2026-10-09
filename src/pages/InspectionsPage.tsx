@@ -215,6 +215,7 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
     photo_urls: [] as string[],
   });
   const [inspectionError, setInspectionError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [inspectionStep,setInspectionStep]=useState('object');
   const saveLock = useRef(false), uploadLock = useRef(false);
   const [savingInspection, setSavingInspection] = useState(false);
@@ -232,6 +233,7 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
 
   const fetchAll = async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const [inspRes, tenancyRes, propertyRes, apartmentRes] = await Promise.all([
         supabase
@@ -245,12 +247,16 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
         supabase.from('vihem_properties').select('id, name, address, city').order('name'),
         supabase.from('vihem_apartments').select('id, property_id, apartment_number, size').order('apartment_number'),
       ]);
+      for (const result of [inspRes, tenancyRes, propertyRes, apartmentRes]) {
+        if (result.error) throw result.error;
+      }
       setInspections(inspRes.data || []);
       setTenancies(tenancyRes.data || []);
       setProperties(propertyRes.data || []);
       setApartments(apartmentRes.data || []);
     } catch (err) {
       console.error(err);
+      setLoadError('Besiktningarna kunde inte hämtas. Kontrollera anslutningen och försök igen.');
     } finally {
       setLoading(false);
     }
@@ -508,7 +514,7 @@ Foton bifogade i systemet: ${photoCount}
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto px-4 py-8">
+      <div className="max-w-7xl mx-auto py-2 sm:py-4">
         <PageHeader
           title="Besiktningar"
           subtitle="Hantera besiktningsprotokoll"
@@ -528,37 +534,38 @@ Foton bifogade i systemet: ${photoCount}
           <SearchInput placeholder="Sök hyresgäst eller adress..." value={searchQuery} onChange={setSearchQuery} />
         </div>
 
+        {loadError && <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-4"><p className="text-sm text-vihem-danger">{loadError}</p><Button variant="secondary" onClick={fetchAll}>Försök igen</Button></div>}
         {/* INSPECTIONS LIST */}
         {(
-          filteredInspections.length === 0 ? (
-            <EmptyState icon={<ClipboardCheck className="w-12 h-12" />} title="Inga besiktningar" description="Skapa din första besiktning" />
+          loadError ? null : filteredInspections.length === 0 ? (
+            <EmptyState icon={<ClipboardCheck className="w-12 h-12" />} title={searchQuery ? 'Inga träffar' : 'Inga besiktningar ännu'} description={searchQuery ? 'Prova ett annat namn eller en annan adress.' : 'Skapa en besiktning för att dokumentera ett objekt.'} />
           ) : (
             <Card>
-              <div className="divide-y divide-slate-100 md:hidden">
+              <div className="divide-y divide-slate-100 xl:hidden">
                 {filteredInspections.map((insp) => {
                   const totalPhotos = (insp.photo_urls?.length || 0) + (insp.rooms || []).reduce((s: number, r: any) => s + (r.photos?.length || 0), 0);
                   return (
                     <div key={insp.id} className="p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="break-words text-sm font-semibold text-slate-900">{insp.tenancy?.tenant?.name || '—'}</p>
-                          <p className="mt-1 break-words text-sm text-slate-600">{getInspectionLocation(insp) || '—'}</p>
+                          <p className="break-words text-sm font-semibold text-vihem-ink">{getInspectionLocation(insp) || 'Besiktning'}</p>
+                          {insp.tenancy?.tenant?.name && <p className="mt-1 text-sm text-vihem-muted">{insp.tenancy.tenant.name}</p>}
                           <p className="mt-1 text-xs text-slate-500">{INSPECTION_TYPE_LABELS[insp.inspection_type] || insp.inspection_type}</p>
                         </div>
-                        <Button size="sm" variant="ghost" onClick={() => openEditInspection(insp)} className="flex-shrink-0 gap-1">
+                        <Button size="sm" variant="ghost" aria-label={`Öppna besiktning ${getInspectionLocation(insp)} ${formatDate(insp.inspection_date)}`} onClick={() => openEditInspection(insp)} className="flex-shrink-0 gap-1">
                           <Eye className="w-3.5 h-3.5" /> Öppna
                         </Button>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{formatDate(insp.inspection_date)}</span>
-                        <Badge className={CONDITION_CLASS[insp.overall_condition] || 'bg-slate-100 text-slate-600'}>
+                        <span className="py-1 text-xs font-medium text-vihem-muted">{formatDate(insp.inspection_date)}</span>
+                        <Badge className={insp.overall_condition === 'poor' ? 'bg-red-50 text-red-700' : 'bg-transparent text-vihem-muted'}>
                           {CONDITION_LABELS[insp.overall_condition] || insp.overall_condition}
                         </Badge>
-                        <Badge className={insp.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}>
+                        <Badge className={insp.status === 'completed' ? 'bg-transparent text-vihem-muted' : 'bg-slate-100 text-vihem-ink'}>
                           {insp.status === 'completed' ? 'Slutförd' : 'Utkast'}
                         </Badge>
                         {totalPhotos > 0 && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                          <span className="inline-flex items-center gap-1 py-1 text-xs font-medium text-vihem-muted">
                             <Image className="w-3.5 h-3.5" /> {totalPhotos}
                           </span>
                         )}
@@ -567,18 +574,18 @@ Foton bifogade i systemet: ${photoCount}
                   );
                 })}
               </div>
-              <div className="hidden overflow-x-auto md:block">
+              <div className="hidden overflow-x-auto xl:block">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-slate-200 bg-slate-50">
+                      <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Objekt</th>
                       <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Hyresgäst</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Adress / Lgh</th>
                       <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Typ</th>
                       <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Datum</th>
                       <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Skick</th>
                       <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Foton</th>
                       <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Status</th>
-                      <th className="py-3 px-4" />
+                      <th className="py-3 px-4"><span className="sr-only">Åtgärder</span></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -586,12 +593,12 @@ Foton bifogade i systemet: ${photoCount}
                       const totalPhotos = (insp.photo_urls?.length || 0) + (insp.rooms || []).reduce((s: number, r: any) => s + (r.photos?.length || 0), 0);
                       return (
                         <tr key={insp.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="py-3 px-4 font-medium text-slate-900 text-sm">{insp.tenancy?.tenant?.name || '—'}</td>
-                          <td className="py-3 px-4 text-sm text-slate-600">{getInspectionLocation(insp) || '—'}</td>
+                          <td className="py-3 px-4 font-medium text-vihem-ink text-sm">{getInspectionLocation(insp) || '—'}</td>
+                          <td className="py-3 px-4 text-sm text-vihem-muted">{insp.tenancy?.tenant?.name || '—'}</td>
                           <td className="py-3 px-4 text-sm text-slate-600">{INSPECTION_TYPE_LABELS[insp.inspection_type] || insp.inspection_type}</td>
                           <td className="py-3 px-4 text-sm text-slate-600">{formatDate(insp.inspection_date)}</td>
                           <td className="py-3 px-4">
-                            <Badge className={CONDITION_CLASS[insp.overall_condition] || 'bg-slate-100 text-slate-600'}>
+                            <Badge className={insp.overall_condition === 'poor' ? 'bg-red-50 text-red-700' : 'bg-transparent text-vihem-muted'}>
                               {CONDITION_LABELS[insp.overall_condition] || insp.overall_condition}
                             </Badge>
                           </td>
@@ -601,12 +608,12 @@ Foton bifogade i systemet: ${photoCount}
                             ) : '—'}
                           </td>
                           <td className="py-3 px-4">
-                            <Badge className={insp.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}>
+                            <Badge className={insp.status === 'completed' ? 'bg-transparent text-vihem-muted' : 'bg-slate-100 text-vihem-ink'}>
                               {insp.status === 'completed' ? 'Slutförd' : 'Utkast'}
                             </Badge>
                           </td>
                           <td className="py-3 px-4 text-right">
-                            <Button size="sm" variant="ghost" onClick={() => openEditInspection(insp)} className="gap-1">
+                            <Button size="sm" variant="ghost" aria-label={`Öppna besiktning ${getInspectionLocation(insp)} ${formatDate(insp.inspection_date)}`} onClick={() => openEditInspection(insp)} className="gap-1">
                               <Eye className="w-3.5 h-3.5" /> Öppna
                             </Button>
                           </td>

@@ -67,10 +67,23 @@ Isolerad self-hosted Supabase med syntetiska konton/data och avstängd extern di
 ## Nästa kontrollpunkt
 
 1. Läs PLAN, designsystem, denna fil och aktuell modulförteckning. Fetch/review main; behåll separat branch.
-2. Utred intermittent realtidsåteranslutning med diagnostik och upprepade tvåklientprov; ändra inte backend utifrån ett gissat problem.
+2. Läs security-and-realtime.md: observerat provfel reproducerat som socket/CDC-beredskapsgräns. Fortsätt verkliga browser-/native-avbrottsprov. Säkerhetshotfix för kommentarer rekommenderas separat, ännu inte applicerad i produktion.
 3. Färdigställ profilbildens browsercrop och fysisk kamera/keyboard när miljön medger det. Kontrollera säkra referenser vid byte/removal.
 4. Fortsätt etapp B/C: samtliga arbetsorderformulär och snabba åtgärder, rollanpassad startsida, tid/projekt samt besiktningars bilder/dokument/signering.
 5. Arbeta därefter systematiskt genom varje kvarvarande modul i modulstatus.md. För varje viktig vy dokumentera de tio revisionsdimensionerna, funktioner/roller, fem bredder och faktisk screenshot-/fel-/tom-/laddningskontroll. Ge inte en modul status Klar genom en CSS-ändring.
 6. Ta fram nytt releasepaket först efter dokumenterad QA, review och migrationsrepetition. Oscar deployar produktion.
 
 Arbetet fortsätter inte automatiskt när en aktiv utvecklingssession avslutas. Denna kontrollpunkt beskriver hur nästa session återupptar det befintliga uppdraget utan att starta om eller tappa återstående scope.
+
+
+## Kontrollpunkt 2 – fortsatt utveckling
+
+Läs `security-and-realtime.md` för reproducerad återanslutningsdiagnostik och separat hotfixbedömning. Production metadata lästes under READ ONLY; inga produktionsdata eller policyer ändrades. Tolv rejoincykler och korrigerad full chattintegration passerade. Kommentarproven utökades med inaktiv profil och explicit global superadminåtkomst; båda passerade, QA-identitet återställdes.
+
+Arbetsorder: ny/redigera har verksamhetssektioner, tvåkolumnsfält där det ryms och fasta footeråtgärder. Osparade ändringar följs i appens register och i gemensam discarddialog. Fält låses under sparning; edit/kommentar har samtidighetslås. Kommentar- och formulärfel behåller text; sparfeedback är explicit. Filval lägger till valda filer och kan nås med tangentbord. Privat chattfil behåller sitt befintliga återförsök på samma order. Tabelldetaljer kan öppnas via namngiven knapp med Enter. Kommentarutkast och intern/kundläge hålls per arbetsorder i minnet; UI-byte A → B → A verifierade att ett internt utkast inte flyttas till fel kund. Dessa utkast överlever inte omladdning/navigering till annan modul ännu.
+
+Besiktningslista: laddningsfrågor kontrollerar Supabasefel, erbjuder återförsök och visar inte falskt tomt tillstånd. Sökning utan träff har egen text. Objekt visas primärt; normala skick/slutförstatus är diskreta. Kort används på mobil/iPad, tabell på större desktop, öppningsknappar är namngivna. Inget bild-/PDF-/signeringsflöde ändrades.
+
+Faktisk visuell QA i detta pass: ny arbetsorder 390/768/1440, redigera 390/1440, besiktningslista 390/768/1440, sökning utan träff 390. Inte alla fem bredder/roller/tillstånd. Kontrollerat QA-sparfel (tillfällig QA-trigger, därefter borttagen), bevarad form och lyckat retry skapade exakt en order, redigering sparades och detail visade ny beskrivning. Discarddialog avbröts och uppgifter fanns kvar. Kommentarutkastets byte mellan två order verifierat i UI. Generella nya feltexter granskade i kod; full hämtfels-UI för besiktningar återstår. Inga bilagor/kamera/fysisk keyboard certifieras.
+
+TypeScript, premiumenhetsprov, chattinvarianter, full chattintegration, utökad kommentarintegration och bygge/mobilpaketkontroll passerade. Stora App-/HEIC-chunks kvarstår. Ingen modul är fullständigt Klar. Tid/projekt/startsidor och hela övriga modullistan återstår enligt ursprunglig omfattning. Prioritera nästa operativa pass på kvarvarande arbetsorderprov, besiktningens bild-/dokumentåtkomst och tidrapporteringens spar-/stämpelflöden, därefter kundprojekt och rollstartsidor. Detta är en kontrollpunkt, inte slutleverans eller deploygodkännande.
