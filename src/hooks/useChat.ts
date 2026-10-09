@@ -279,6 +279,7 @@ export function useChat(userId: string, org: string, initialThread?: string) {
   useEffect(() => {
     let disposed = false;
     const refresh = () => {
+      if (disposed) return;
       supabase.realtime.connect();
       void refreshInbox();
       if (selectedRef.current) void fetchRecent(selectedRef.current);
@@ -286,6 +287,7 @@ export function useChat(userId: string, org: string, initialThread?: string) {
     const channel = supabase
       .channel(`chat-inbox:${org}:${userId}`)
       .on("system", {}, (payload) => {
+        if (disposed) return;
         if (
           payload.extension === "postgres_changes" &&
           payload.status === "error"

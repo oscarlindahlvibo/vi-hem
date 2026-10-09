@@ -116,3 +116,19 @@ for (const payload of [
 console.log(
   "PASS: work-order comments preserve staff access; tenant, anonymous, foreign organisation and author spoofing denied.",
 );
+
+const service = createClient(url, c.service, {auth:{persistSession:false}});
+const original = await service.from("vihem_profiles").select("role,active").eq("id",c.users.christofer.id).single();
+assert.equal(original.error,null);
+try {
+  assert.equal((await service.from("vihem_profiles").update({active:false}).eq("id",c.users.christofer.id)).error,null);
+  assert.deepEqual((await clients.christofer.from("vihem_work_order_comments").select("id").eq("work_order_id",own)).data,[],"inactive staff denied");
+  assert.equal((await clients.christofer.from("vihem_work_order_comments").insert({work_order_id:own,user_id:c.users.christofer.id,comment:"Inactive must deny QA"})).error?.code,"42501");
+  assert.equal((await service.from("vihem_profiles").update({active:true,role:"superadmin"}).eq("id",c.users.christofer.id)).error,null);
+  const posted=await clients.christofer.from("vihem_work_order_comments").insert({work_order_id:foreign,user_id:c.users.christofer.id,comment:"Explicit superadmin QA"}).select("id").single();
+  assert.equal(posted.error,null,"existing global superadmin access preserved");
+  assert.equal((await clients.christofer.from("vihem_work_order_comments").select("id").eq("id",posted.data.id)).data?.length,1);
+} finally {
+  assert.equal((await service.from("vihem_profiles").update(original.data).eq("id",c.users.christofer.id)).error,null);
+}
+console.log("PASS: inactive account denied; explicit superadmin access preserved; QA identity restored.");

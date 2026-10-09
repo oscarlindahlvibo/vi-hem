@@ -644,7 +644,11 @@ assert.equal(
   1,
 );
 let rejoinedId;
-const rejoined = clients.christofer.channel("qa-rejoined").on(
+let rejoinedCdcReady = false;
+const rejoined = clients.christofer.channel("qa-rejoined")
+.on("system", {}, (payload) => {
+  if (payload.extension === "postgres_changes" && payload.status === "ok") rejoinedCdcReady = true;
+}).on(
   "postgres_changes",
   {
     event: "INSERT",
@@ -665,6 +669,12 @@ await new Promise((resolve, reject) => {
     }
   });
 });
+// SUBSCRIBED confirms a socket join, not the database changefeed.
+// The application catches history again on CDC-ready; mirror that boundary.
+for (let i = 0; i < 300 && !rejoinedCdcReady; i++)
+  await new Promise((r) => setTimeout(r, 100));
+assert.ok(rejoinedCdcReady, "rejoined postgres_changes ready");
+assert.equal((await rpc("christofer", "vihem_chat_history", { thread: group })).filter(m => m.id === missed).length, 1);
 const resumed = crypto.randomUUID();
 await rpc("oscar", "vihem_chat_send", {
   thread: group,
