@@ -15,7 +15,7 @@ Konkreta kodfynd före förändringar:
 - Tabs har inte fullständigt tangentbordsbeteende. Små knappar/statusar kan vara 10–12 px; touchytor behöver vara 44 px där lämpligt.
 - Avatar finns men stöder bara initialer; Profile.avatar_url används inte konsekvent. Ingen granskad egen profil-/beskärningsfunktion finns.
 - Chatten har fristående delningslänkar, permanent åtgärdsknapp per bubbla, stora radier och utdragen läsbredd. Backend/realtid/utkast/återförsök ska behållas.
-- Besiktningsmodellen har rum med condition good/remark/action_required, kommentarsfält, rumskopplade bilder, utkast/slutför och befintlig kamera. Inför inte ett nytt N/A-tillstånd eller andra signeringsregler utan datamodellsgranskning. Progress/sammanfattning och läsbara kontroller kan utvecklas ovanpå befintliga tillstånd.
+- Besiktningsmodellen har rum med condition excellent/good/fair/poor, kommentarsfält, rumskopplade bilder, utkast/slutför och befintlig kamera. Inför inte ett nytt N/A-tillstånd eller andra signeringsregler utan datamodellsgranskning. Progress/sammanfattning och läsbara kontroller kan utvecklas ovanpå befintliga tillstånd.
 - Många ekonomi-, avtal-, fordons-, fastighets- och administrativa undersidor använder egna tabeller/kontroller. De måste granskas per flöde, inte massersättas via regex eller generisk CSS.
 
 Bedömningens tio dimensioner finns per vy i inventory.json. Visuell kvalitet, mobil, klickflöde, funktion och premiumkänsla är **ej verifierade** tills autentiserad runtime-granskning gjorts. Kodfynd är indikatorer, inte påhittade användartestresultat.

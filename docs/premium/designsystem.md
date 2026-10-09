@@ -25,3 +25,28 @@ Ytor: en huvudcontainer per arbetsyta, minimera kort i kort. Primär knapp för 
 Använd :focus-visible. Hover får inte vara enda vägen till åtgärder; på touch finns långtryck och/eller tillgänglig menyknapp. Reducerad rörelse stoppar rörelseanimationer. Klickbara mål har disabled/loading/felåterkoppling. Ett fel får inte radera användarens utkast. Äldre API- och RLS-regler bevaras.
 
 En modul är inte verifierad genom delad komponent/CSS. Kontrollera varje list-/detalj-/formulär-/dialogflöde visuellt och funktionellt med rätt roller. Dokumentera faktisk skärmstorlek och kända begränsningar.
+
+## Implementerade API:er och sådant som återstår
+
+`Button`, `Input`, `Select`, `Textarea`, `Modal`/`BottomSheet`, `Avatar`, `Tabs` och `SegmentedControl` är verkliga gemensamma komponenter. `vihem-icon-button` är för närvarande en CSS-klass, inte en exporterad IconButton-komponent. FormSection/FieldGroup/ActionBar/SaveState ovan beskriver önskad struktur; de är ännu inte gemensamma exporterade komponenter. Inför dem först med ett verkligt användningsfall, inte oanvända demonstrationskomponenter.
+
+Modal tar `toolbar` och `footer` separat från den scrollande kroppen. Använd detta för flikar och sparåtgärder; bygg inte en ny fixed-inset-overlay. `fullscreen` finns för kameraflöden. Större dokument-/signeringsflöden ska granskas individuellt innan de flyttas. Öppna inte inmatning automatiskt på mobil utan tydligt behov.
+
+Avatar tar `name`, `userId`, valfri säker äldre `src` samt `size` (`xs`, `sm`, `md`, `lg`, `xl`). `userId` används för privat profilfoto; en organisationsrelation innebär inte rätt att se andra profiluppgifter. Inga godtyckliga tredjepartsbilder ska hämtas. Gruppbilder har separat chattkontroll och ska behålla den.
+
+`useUnsavedChanges(value, active)` följer ett öppet formulär och varnar före browserexit. Appens navigering använder ett gemensamt register av smutsiga formulär. Innehållet lagras inte i registret. Dialogens egen Avbryt/Stäng måste fortfarande kontrollera dirty-status och pågående sparning. Detta är ingen autosparning och ska aldrig publicera, signera eller fakturera.
+
+Card:s tangentbordsaktivering hanterar bara själva kortet. Underordnade interaktiva åtgärder måste stoppa click propagation eller ha en separat primär klickyta. Detta kontrakt behöver fortsatt runtimekontroll på äldre kort; ändringen är ingen tillgänglighetscertifiering av alla callers.
+
+## Formulär och informationshierarki
+
+- Ett tydligt nästa steg; små sidoåtgärder använder sekundär/ghost. Ange `type="button"` för åtgärder inne i form som inte ska submit:a.
+- Etikett beskriver fältets uppgift. `error` beskriver hur användaren kan rätta felet. Behåll ifyllda uppgifter när sparning misslyckas.
+- E-post/telefon/siffror använder relevant type/inputMode/autocomplete. Datumfält måste kontrolleras på fysisk enhet; en desktopviewport är inte iOS Safari.
+- Långa formulär organiseras efter verksamhetsuppgift. Besiktningens Objekt/Rum/Sammanfattning är referens; inför inte samma stegindelning i en enkel ekonomitabell.
+- Läsbar information ligger inom max-w-prose/max-w-3xl. Densitet i tabeller får vara högre, men ingen mikroskopisk text eller enbart färg som status.
+- Namn/person är en neutral Avatar + namn/roll, inte en färgad statusbadge. Varningar används där ett faktiskt beslut/åtgärd behövs.
+
+## Inför nästa utvecklingspass
+
+Läs kontrollpunkter.md och modulstatus.md. Hela systemets revision är pågående. Verifiera nya vyer med säker testdata, samtliga relevanta roller och faktiska fel-/laddnings-/tomtillstånd. Spara screenshots och dokumentera vilka tillstånd som faktiskt visades. Respektera reduced motion och prova tangentbord/fokus. Påstå inte fysisk kamera/keyboard/push/BankID-verifiering baserat på TypeScript eller smala browserfönster.
