@@ -12,5 +12,6 @@ export function useFormSubmission(failureMessage: string) {
     catch { if (live.current) setError(failureMessage); return false; }
     finally { lock.current = false; if (live.current) setSaving(false); }
   }, [failureMessage]);
-  return { saving, error, run };
+  const clearError = useCallback(() => { if (!lock.current && live.current) setError(''); }, []);
+  return { saving, error, run, clearError };
 }

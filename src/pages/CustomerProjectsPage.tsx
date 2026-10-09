@@ -1,5 +1,7 @@
+import { useFormSubmission } from '../hooks/useFormSubmission';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { ContextChatLauncher } from '../components/chat/ContextChatLauncher';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Briefcase,
@@ -167,6 +169,9 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const createProjectId = useRef(crypto.randomUUID());
+  const createProjectLock = useRef(false);
   const [projects, setProjects] = useState<CustomerProject[]>([]);
   const [customers, setCustomers] = useState<ProjectCustomer[]>([]);
   const [staff, setStaff] = useState<Profile[]>([]);
@@ -185,6 +190,8 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
   const [searchQuery, setSearchQuery] = useState('');
   const [projectListView, setProjectListView] = useState<ProjectListView>('active');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const statusSubmission = useFormSubmission('Statusen kunde inte sparas. Försök igen.');
+  useEffect(() => statusSubmission.clearError(), [selectedProjectId, statusSubmission.clearError]);
   const [tab, setTab] = useState<ProjectTabId>('overview');
   const [statDetail, setStatDetail] = useState<null | 'regular' | 'ata' | 'billable' | 'material' | 'changes'>(null);
   const [showProjectModal, setShowProjectModal] = useState(false);
@@ -446,6 +453,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
   async function fetchAll() {
     if (!user?.organisation_id) return;
     setLoading(true);
+    setLoadError('');
     try {
       const projectSelect = isAdmin
         ? '*'
@@ -459,6 +467,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
         supabase.from('vihem_profiles').select('*').eq('organisation_id', user.organisation_id).in('role', ['admin', 'staff']).eq('active', true).order('name'),
       ]);
 
+      for (const result of [projectRes, customerRes, staffRes]) if (result.error) throw result.error;
       const projectData = (projectRes.data || []) as unknown as CustomerProject[];
       const projectIds = projectData.map(project => project.id);
       setProjects(projectData);
@@ -505,6 +514,9 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
         isAdmin ? supabase.from('vihem_project_activity_log').select('*').in('project_id', projectIds).order('created_at', { ascending: false }) : Promise.resolve({ data: [] }),
       ]);
 
+      for (const result of [assignmentRes, timeRes, workOrderRes, materialRes, changeRes, quoteRes, templateRes, selfCheckRes, inspectionRes, deviationRes, invoiceRes, activityRes]) {
+        if ('error' in result && result.error) throw result.error;
+      }
       setAssignments((assignmentRes.data || []) as ProjectAssignment[]);
       setTimeEntries((timeRes.data || []) as unknown as TimeEntry[]);
       setWorkOrders((workOrderRes.data || []) as unknown as WorkOrder[]);
@@ -517,6 +529,8 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
       setDeviations((deviationRes.data || []) as ProjectDeviation[]);
       setInvoiceBases((invoiceRes.data || []) as ProjectInvoiceBasis[]);
       setActivity((activityRes.data || []) as ProjectActivityLog[]);
+    } catch {
+      setLoadError('Kundprojekten kunde inte hämtas. Kontrollera anslutningen och försök igen.');
     } finally {
       setLoading(false);
     }
@@ -538,6 +552,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
   }
 
   function openNewProject() {
+    createProjectId.current = crypto.randomUUID();
     setProjectForm(defaultProjectForm);
     setError('');
     setShowProjectModal(true);
@@ -654,63 +669,28 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
   }
 
   async function handleSaveProject() {
-    if (!user?.organisation_id) return;
-    setError('');
-    setSaving(true);
+    if (!user?.organisation_id || createProjectLock.current) return;
+    createProjectLock.current = true;
+    setError(''); setSaving(true);
     try {
       if (!projectForm.title.trim()) throw new Error('Ange projektnamn.');
       if (!projectForm.customer_id) throw new Error('Välj kund.');
-      const customer = customers.find(c => c.id === projectForm.customer_id);
-      const { data, error: insertError } = await supabase.from('vihem_customer_projects').insert({
-        organisation_id: user.organisation_id,
-        customer_id: projectForm.customer_id,
-        customer_name: customer?.name || '',
-        name: projectForm.title,
-        title: projectForm.title,
-        description: projectForm.description,
-        project_address: projectForm.project_address || customer?.project_address || '',
-        project_type: projectForm.project_type,
-        priority: projectForm.priority,
-        billing_type: projectForm.billing_type,
-        project_manager_id: projectForm.project_manager_id || null,
-        start_date: projectForm.start_date || null,
-        planned_end_date: projectForm.planned_end_date || null,
-        budget_amount: Number(projectForm.budget_amount) || 0,
-        hourly_rate: Number(projectForm.hourly_rate) || 0,
-        internal_reference: projectForm.internal_reference,
-        external_reference: projectForm.external_reference,
-        status: 'draft',
-        created_by: user.id,
-      }).select('*').single();
-      if (insertError) throw insertError;
-
-      const selectedUsers = Array.from(new Set([
-        projectForm.project_manager_id,
-        ...projectForm.assigned_user_ids,
-      ].filter(Boolean)));
-
-      if (selectedUsers.length > 0) {
-        await supabase.from('vihem_project_assignments').insert(selectedUsers.map(userId => ({
-          project_id: data.id,
-          user_id: userId,
-          role: userId === projectForm.project_manager_id ? 'project_manager' : 'staff',
-        })));
-      }
-
-      await logActivity(data.id, 'project_created', `Projektet "${projectForm.title}" skapades.`);
-      setShowProjectModal(false);
-      setSelectedProjectId(data.id);
+      if (projectForm.start_date && projectForm.planned_end_date && projectForm.planned_end_date < projectForm.start_date) throw new Error('Slutdatum får inte vara före startdatum.');
+      const { data, error: createError } = await supabase.rpc('vihem_create_customer_project', {
+        p_id: createProjectId.current, p_form: projectForm, p_assigned: projectForm.assigned_user_ids,
+      });
+      if (createError) throw new Error(createError.code === '22023' ? createError.message : 'Projektet kunde inte sparas. Uppgifterna finns kvar. Försök igen.');
+      setShowProjectModal(false); setSelectedProjectId(data); setTab('overview');
       await fetchAll();
     } catch (err: any) {
-      setError(err.message || 'Kunde inte skapa projekt.');
-    } finally {
-      setSaving(false);
-    }
+      setError(err.message || 'Kunde inte skapa projekt. Uppgifterna finns kvar.');
+    } finally { createProjectLock.current = false; setSaving(false); }
   }
 
   async function updateProjectStatus(status: CustomerProjectStatus) {
     if (!selectedProject) return;
-    await supabase.from('vihem_customer_projects').update({ status }).eq('id', selectedProject.id);
+    const { error: statusError } = await supabase.from('vihem_customer_projects').update({ status }).eq('id', selectedProject.id).select('id').single();
+    if (statusError) throw statusError;
     await logActivity(selectedProject.id, 'status_changed', `Status ändrades till ${STATUS_LABELS[status]}.`);
     await fetchAll();
   }
@@ -1200,6 +1180,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
   const budgetDeviation = selectedProject ? invoiceable - Number(selectedProject.budget_amount || 0) : 0;
 
   if (loading) return <LoadingPage />;
+  if (loadError) return <div className="space-y-4"><PageHeader title="Kundprojekt" /><div role="alert"><ErrorBox message={loadError} /></div><Button variant="secondary" onClick={() => void fetchAll()}>Försök igen</Button></div>;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -1207,7 +1188,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
         title="Kundprojekt"
         subtitle="Hantera kundjobb, offerter, tid, material och ÄTA"
         action={isAdmin && (
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="grid grid-cols-2 gap-2 sm:flex">
             <Button variant="secondary" onClick={openNewCustomer} className="gap-2">
               <Users className="w-4 h-4" /> Ny kund
             </Button>
@@ -1244,8 +1225,8 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
             <Card>
               <EmptyState
                 icon={<Briefcase className="w-12 h-12" />}
-                title="Inga kundprojekt"
-                description={isAdmin ? 'Skapa första projektet för att komma igång.' : 'Du har inga tilldelade kundprojekt.'}
+                title={searchQuery.trim() ? 'Inga träffar' : projectListView === 'active' ? 'Inga pågående projekt' : projectListView === 'quotes' ? 'Inga offerter' : 'Inga kundprojekt'}
+                description={searchQuery.trim() ? 'Prova ett annat namn, en kund eller adress.' : projects.length > 0 ? 'Välj Alla för att se projekt med andra statusar.' : isAdmin ? 'Skapa första projektet för att komma igång.' : 'Du har inga tilldelade kundprojekt.'}
               />
             </Card>
           ) : (
@@ -1261,7 +1242,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <h3 className="break-words text-sm font-bold text-slate-900">{project.title || project.name}</h3>
+                        <h3 className="break-words text-base font-semibold text-vihem-ink">{project.title || project.name}</h3>
                         <p className="mt-1 break-words text-sm text-slate-600">{customer?.name || project.customer_name || 'Ingen kund'}</p>
                       </div>
                       <Badge className={STATUS_CLASS[project.status] || 'bg-slate-100 text-slate-600'}>
@@ -1282,7 +1263,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
 
         {selectedProject ? (
           <div className="space-y-5">
-            <ContextChatLauncher type="project" id={selectedProject.id} name={selectedProject.title || selectedProject.name} suggestedIds={projectAssignments.map(a => a.user_id)} onNavigate={_onNavigate} />
+            <div className="flex items-center justify-between gap-3">
             <button
               type="button"
               onClick={() => setSelectedProjectId(null)}
@@ -1290,6 +1271,8 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
             >
               <ArrowLeft className="h-4 w-4" /> Alla kundprojekt
             </button>
+            <ContextChatLauncher type="project" id={selectedProject.id} name={selectedProject.title || selectedProject.name} suggestedIds={projectAssignments.map(a => a.user_id)} onNavigate={_onNavigate} />
+            </div>
             <Card className="p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0">
@@ -1309,8 +1292,10 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
                   <Select
+                    aria-label="Projektstatus"
+                    disabled={statusSubmission.saving}
                     value={selectedProject.status}
-                    onChange={e => updateProjectStatus(e.target.value as CustomerProjectStatus)}
+                    onChange={e => void statusSubmission.run(() => updateProjectStatus(e.target.value as CustomerProjectStatus))}
                     options={Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label }))}
                     className="min-w-[190px]"
                   />
@@ -1321,8 +1306,9 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
               </div>
             </Card>
 
-            {isAdmin ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+            {statusSubmission.error && <ErrorBox message={statusSubmission.error} />}
+            {projectTimeEntries.length + projectMaterials.length + projectChangeOrders.length === 0 ? <p className="text-sm text-vihem-muted">Ingen tid, material eller ÄTA har rapporterats ännu.</p> : isAdmin ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
                 <Stat label="Ordinarie tid" value={hours(regularMinutes)} icon={<Timer className="w-5 h-5" />} onClick={() => setStatDetail('regular')} />
                 <Stat label="ÄTA-tid" value={hours(ataMinutes)} icon={<Timer className="w-5 h-5 text-amber-600" />} onClick={() => setStatDetail('ata')} />
                 <Stat label="Fakturerbar tid" value={money(timeValue)} icon={<Coins className="w-5 h-5" />} onClick={() => setStatDetail('billable')} />
@@ -1782,6 +1768,11 @@ function ProjectModal({ open, onClose, form, setForm, customers, staff, onSave, 
   const [newCustomer, setNewCustomer] = useState(defaultCustomerForm);
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [customerError, setCustomerError] = useState('');
+  const [discard, setDiscard] = useState(false);
+  const dirty = useUnsavedChanges({ form, customerDraft: showNewCustomer ? newCustomer : null }, open);
+  const busy = saving || creatingCustomer;
+  function requestClose() { if (busy) return; if (dirty) setDiscard(true); else onClose(); }
+  useEffect(() => { if (!open) { setShowNewCustomer(false); setNewCustomer(defaultCustomerForm); setCustomerError(''); setDiscard(false); } }, [open]);
 
   function toggleUser(userId: string) {
     const next = form.assigned_user_ids.includes(userId)
@@ -1806,42 +1797,20 @@ function ProjectModal({ open, onClose, form, setForm, customers, staff, onSave, 
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Nytt kundprojekt" size="xl">
-      <div className="space-y-5">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Input label="Projektnamn" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          <div>
-            <Select label="Kund" value={form.customer_id} onChange={(e) => setForm({ ...form, customer_id: e.target.value })} options={[{ value: '', label: 'Välj kund' }, ...customers.map((c: ProjectCustomer) => ({ value: c.id, label: c.name }))]} />
-            <button
-              type="button"
-              onClick={() => { setCustomerError(''); setShowNewCustomer(value => !value); }}
-              className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-blue-700 hover:text-blue-900"
-            >
-              <UserPlus className="h-4 w-4" />
-              {showNewCustomer ? 'Stäng kundskapande' : 'Ny kund'}
-            </button>
+    <>
+    <Modal open={open} onClose={requestClose} title="Nytt kundprojekt" size="xl" footer={<div className="space-y-3">{error && <ErrorBox message={error} />}<ModalActions onClose={requestClose} onSave={onSave} saving={busy} saveLabel="Skapa projekt" /></div>}>
+      <fieldset disabled={busy} className="min-w-0 space-y-6">
+        <section className="space-y-3" aria-labelledby="new-project-basics">
+          <h3 id="new-project-basics" className="text-sm font-semibold text-vihem-ink">Projekt och kund</h3>
+          <Input label="Projektnamn" required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div><Select label="Kund" required value={form.customer_id} onChange={(e) => setForm({ ...form, customer_id: e.target.value })} options={[{ value: '', label: 'Välj kund' }, ...customers.map((c: ProjectCustomer) => ({ value: c.id, label: c.name }))]} />
+              <Button variant="ghost" size="sm" className="mt-1 gap-2" onClick={() => { setCustomerError(''); setShowNewCustomer(value => !value); }}><UserPlus className="h-4 w-4" />{showNewCustomer ? 'Stäng kundskapande' : 'Ny kund'}</Button>
+            </div>
+            <Input label="Projektadress" hint="Lämna tomt för att använda kundens projektadress." value={form.project_address} onChange={(e) => setForm({ ...form, project_address: e.target.value })} />
           </div>
-          <Input label="Projektadress" value={form.project_address} onChange={(e) => setForm({ ...form, project_address: e.target.value })} />
-          <Select label="Projektkategori" value={form.project_type} onChange={(e) => setForm({ ...form, project_type: e.target.value })} options={PROJECT_TYPES.map(type => ({ value: type, label: type }))} />
-          <Select label="Prioritet" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} options={[
-            { value: 'low', label: 'Låg' },
-            { value: 'normal', label: 'Normal' },
-            { value: 'high', label: 'Hög' },
-            { value: 'urgent', label: 'Akut' },
-          ]} />
-          <Select label="Debitering" value={form.billing_type} onChange={(e) => setForm({ ...form, billing_type: e.target.value })} options={[
-            { value: 'hourly', label: 'Löpande' },
-            { value: 'fixed_price', label: 'Fast pris' },
-            { value: 'mixed', label: 'Blandat' },
-          ]} />
-          <Select label="Projektledare" value={form.project_manager_id} onChange={(e) => setForm({ ...form, project_manager_id: e.target.value })} options={[{ value: '', label: 'Välj projektledare' }, ...staff.map((p: Profile) => ({ value: p.id, label: p.name }))]} />
-          <Input label="Timpris" type="number" value={form.hourly_rate} onChange={(e) => setForm({ ...form, hourly_rate: e.target.value })} />
-          <Input label="Startdatum" type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
-          <Input label="Planerat slutdatum" type="date" value={form.planned_end_date} onChange={(e) => setForm({ ...form, planned_end_date: e.target.value })} />
-          <Input label="Budget" type="number" value={form.budget_amount} onChange={(e) => setForm({ ...form, budget_amount: e.target.value })} />
-          <Input label="Intern referens" value={form.internal_reference} onChange={(e) => setForm({ ...form, internal_reference: e.target.value })} />
-          <Input label="Extern referens" value={form.external_reference} onChange={(e) => setForm({ ...form, external_reference: e.target.value })} />
-        </div>
+          <Textarea label="Beskrivning" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
+        </section>
         {showNewCustomer && (
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
             <p className="mb-3 text-xs font-bold uppercase tracking-wider text-blue-700">Ny kund</p>
@@ -1856,7 +1825,7 @@ function ProjectModal({ open, onClose, form, setForm, customers, staff, onSave, 
               <Input label="Namn" value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} />
               {newCustomer.customer_type !== 'private' && <Input label="Organisationsnummer" value={newCustomer.identity_number} onChange={(e) => setNewCustomer({ ...newCustomer, identity_number: e.target.value })} />}
               <Input label="Kontaktperson" value={newCustomer.contact_person} onChange={(e) => setNewCustomer({ ...newCustomer, contact_person: e.target.value })} />
-              <Input label="Telefon" value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} />
+              <Input label="Telefon" type="tel" value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} />
               <Input label="E-post" type="email" value={newCustomer.email} onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })} />
             </div>
             {customerError && <div className="mt-3"><ErrorBox message={customerError} /></div>}
@@ -1868,22 +1837,38 @@ function ProjectModal({ open, onClose, form, setForm, customers, staff, onSave, 
             </div>
           </div>
         )}
-        <Textarea label="Beskrivning" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
+        <section className="space-y-3" aria-labelledby="new-project-planning">
+          <h3 id="new-project-planning" className="text-sm font-semibold text-vihem-ink">Planering</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Select label="Projektkategori" value={form.project_type} onChange={(e) => setForm({ ...form, project_type: e.target.value })} options={PROJECT_TYPES.map(type => ({ value: type, label: type }))} />
+            <Select label="Prioritet" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} options={[{ value: 'low', label: 'Låg' }, { value: 'normal', label: 'Normal' }, { value: 'high', label: 'Hög' }, { value: 'urgent', label: 'Akut' }]} />
+            <Input label="Startdatum" type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
+            <Input label="Planerat slutdatum" type="date" min={form.start_date || undefined} value={form.planned_end_date} onChange={(e) => setForm({ ...form, planned_end_date: e.target.value })} />
+            <Select label="Projektledare" value={form.project_manager_id} onChange={(e) => setForm({ ...form, project_manager_id: e.target.value })} options={[{ value: '', label: 'Välj projektledare' }, ...staff.map((p: Profile) => ({ value: p.id, label: p.name }))]} />
+          </div>
+        </section>
+        <details className="rounded-xl border border-vihem-line p-4"><summary className="cursor-pointer text-sm font-semibold text-vihem-ink">Ekonomi och referenser</summary><div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Select label="Debitering" value={form.billing_type} onChange={(e) => setForm({ ...form, billing_type: e.target.value })} options={[{ value: 'hourly', label: 'Löpande' }, { value: 'fixed_price', label: 'Fast pris' }, { value: 'mixed', label: 'Blandat' }]} />
+          <Input label="Timpris" type="number" value={form.hourly_rate} onChange={(e) => setForm({ ...form, hourly_rate: e.target.value })} />
+          <Input label="Budget" type="number" value={form.budget_amount} onChange={(e) => setForm({ ...form, budget_amount: e.target.value })} />
+          <Input label="Intern referens" value={form.internal_reference} onChange={(e) => setForm({ ...form, internal_reference: e.target.value })} />
+          <Input label="Extern referens" value={form.external_reference} onChange={(e) => setForm({ ...form, external_reference: e.target.value })} />
+        </div></details>
         <div>
           <p className="mb-2 text-sm font-medium text-slate-700">Tilldelad personal</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {staff.map((person: Profile) => (
               <label key={person.id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
                 <input type="checkbox" checked={form.assigned_user_ids.includes(person.id)} onChange={() => toggleUser(person.id)} />
-                {person.name}
+                <Avatar userId={person.id} name={person.name} size="sm" /> {person.name}
               </label>
             ))}
           </div>
         </div>
-        {error && <ErrorBox message={error} />}
-        <ModalActions onClose={onClose} onSave={onSave} saving={saving} saveLabel="Skapa projekt" />
-      </div>
+      </fieldset>
     </Modal>
+    <Modal open={open && discard} onClose={() => setDiscard(false)} title="Kasta osparade ändringar?" size="sm" footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={() => { setDiscard(false); onClose(); }}>Kasta ändringar</Button></div>}><p className="text-sm text-vihem-muted">Projektuppgifterna har inte sparats. Fortsätt redigera för att behålla dem.</p></Modal>
+    </>
   );
 }
 
@@ -2306,13 +2291,13 @@ function InvoiceBasisModal({ open, onClose, form, setForm, onSave, saving, error
 }
 
 function ErrorBox({ message }: { message: string }) {
-  return <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{message}</div>;
+  return <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{message}</div>;
 }
 
 function ModalActions({ onClose, onSave, saving, saveLabel }: { onClose: () => void; onSave: () => void; saving: boolean; saveLabel: string }) {
   return (
     <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:justify-end">
-      <Button variant="secondary" onClick={onClose} className="w-full sm:w-auto">Avbryt</Button>
+      <Button variant="secondary" onClick={onClose} disabled={saving} className="w-full sm:w-auto">Avbryt</Button>
       <Button variant="primary" onClick={onSave} loading={saving} className="w-full sm:w-auto">{saveLabel}</Button>
     </div>
   );

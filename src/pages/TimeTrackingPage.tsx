@@ -1445,6 +1445,7 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
 }) {
   const { categories } = useTimeCategories();
   const submission = useFormSubmission('Stämplingen kunde inte sparas. Dina val finns kvar. Kontrollera anslutningen och försök igen.');
+  useEffect(() => { if (open) submission.clearError(); }, [open, submission.clearError]);
   const [category, setCategory] = useState<TimeCategory>('general');
   const [workOrderId, setWorkOrderId] = useState('');
   const [customerProjectId, setCustomerProjectId] = useState('');
@@ -1580,6 +1581,7 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
 }) {
   const { categories } = useTimeCategories();
   const submission = useFormSubmission('Tidposten kunde inte sparas. Uppgifterna finns kvar. Kontrollera anslutningen och försök igen.');
+  useEffect(() => { if (open) submission.clearError(); }, [open, submission.clearError]);
   const now = new Date();
   // An existing entry's own times always win, regardless of what a caller
   // passes as defaultDate -- AdminTimeView's edit modal always supplies a
@@ -1813,6 +1815,7 @@ function EndDayModal({ open, onClose, onSubmit, leavingLabel, commentRequired = 
   commentRequired?: boolean;
 }) {
   const submission = useFormSubmission('Utstämplingen kunde inte slutföras. Kommentaren finns kvar. Försök igen och kontrollera tidposten.');
+  useEffect(() => { if (open) submission.clearError(); }, [open, submission.clearError]);
   const [comment, setComment] = useState('');
   const [error, setError] = useState('');
 
@@ -1856,6 +1859,7 @@ function DayCommentModal({ open, onClose, onSubmit, defaultComment, dayKey }: {
   dayKey: string;
 }) {
   const submission = useFormSubmission('Kommentaren kunde inte sparas. Texten finns kvar så att du kan försöka igen.');
+  useEffect(() => { if (open) submission.clearError(); }, [open, submission.clearError]);
   const [comment, setComment] = useState(defaultComment);
 
   useEffect(() => {

@@ -28,7 +28,7 @@ Ingen rad är modul-Klar. Gemensamma kontroller påverkar även orörda vyer; de
 | src/pages/ApartmentPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/CalendarPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/ChatPage.tsx | Plusmeny, layout, avatarer | Skicka/svar/reaktion/delning/utkast; 5 bredder | Observerat rejoinprov förklarat och 12 SDK-cykler provade; browser-/native-avbrott samt fysisk keyboard/voice och samtliga gruppflöden återstår |
-| src/pages/CustomerProjectsPage.tsx | Deltagaravatarer | Kod/bygge; ej full runtimeprov | Projektflöden, ekonomi, dokument och roller återstår |
+| src/pages/CustomerProjectsPage.tsx | Grupperat projektformulär, utkastskydd/fasta åtgärder, kontextuella tomlägen, ladd-/statusfel, lugn nyprojektöversikt, atomisk skapande-RPC | Admin QA ny inline-kund → projekt/personer; kontrollerat tilldelningsfel/återförsök; sökning/Enter/planeringsstatus; form/detalj 390/768/1440; parallell RPC/rollback/org-gränser | Samtliga övriga projektflikar/modaler, staff-flöden, ekonomi-/dokument-/ÄTA-säkerhet, offline och hela DoD kvar |
 | src/pages/DocumentsPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/FinancePage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/FleetPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |

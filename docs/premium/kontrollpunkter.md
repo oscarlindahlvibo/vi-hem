@@ -108,3 +108,19 @@ Browserverktygets fill på datetime-local skickade inte Reacts change-event; tan
 ### Ej färdigt och viktig teknisk risk
 
 Jobbbyte/rast/återgång gör finishOpenEntries + INSERT i separata anrop. Utstämpling och dagskommentar sparas också separat. Vid fel efter första steget kan delvis sparad status uppstå. Ny UI-felhantering löser inte detta: transaktionell/idempotent RPC och offline-revision krävs. Ett lyckat online-adminprov ersätter inte personalens godkännandeflöde, frånvaro, nätverksavbrott, fysisk telefon eller säkerhetsmatris. Full modul-DoD kvar.
+
+
+## Kontrollpunkt 4 – kundprojektets grundflöde, 2026-10-09
+
+- Projektformulär grupperat i Projekt och kund, Planering, valbar Ekonomi/referenser samt personal med gemensamma avatarer. Fasta footeråtgärder, synligt sparfel vid knappen, låsta fält under sparning och skydd för osparade uppgifter. Ingen ny designfamilj.
+- Laddfel i alla projektfrågor visas med återförsök. Filtertomhet skiljs från tom organisation och sökning. Nya projekt har en lugn text om ännu orapporterat arbete istället för sex stora nollkort. Aktivitetens befintliga statistik finns kvar. Statuskontroll är namngiven, låst under mutation och kontrollerar faktisk uppdaterad rad innan logg/fetch.
+- Ny migration `20261009170000_atomic_customer_project_create.sql`: invoker-security RPC med befintlig RLS, aktiv admin/superadmin, egen organisation/kund, aktiv personal i samma organisation, datumkontroll. Projekt, unika deltagare/ledare och första historikpost skapas atomiskt. Klient-id + transaktionslås gör samtidiga återförsök idempotenta. UUID låses till ursprungligt skapande; återanvänt id uppdaterar inte innehåll. Ingen befintlig rad/behörighet ändras. Endast QA tillämpad. Frontend kräver denna RPC före användning; NOTIFY pgrst reload schema ingår.
+- Befintliga separata offert-/fakturerings-/ÄTA-flöden är inte omskrivna eller DoD-godkända. Statusändring + aktivitetslogg är fortsatt två anrop. Inline Ny kund är en verklig separat kundpost även om projektutkast senare kastas, enligt befintligt flöde.
+
+### Verifiering
+
+RPC-integration med verkliga QA-JWT: två parallella likadana create gav en projektid, två unika deltagare, en historikpost. Triggerfel i deltagarinsert rullade tillbaka projekt/deltagare/logg till noll. Staff, tenant, annan organisations admin och anon nekades; främmande deltagare och omvända datum nekades. `scripts/premium/project-integration.mjs` PASS. För att upprepa: applicera QA-only `scripts/premium/project-rollback-fixture.sql`, kör med CHAT_QA_CONFIG, ta sedan bort trigger och funktion via QA-helper; aldrig produktion. Båda provens tillfälliga feltriggers borttagna.
+
+Autentiserad browser: Parkgården Testkund QA skapades och valdes i projektutkast; texten kvar. Premiumprojekt QA med Oscar som ledare/Christofer som personal: kontrollerat tilldelningsfel bevarade form, DB-count=0; retry efter triggerborttagning skapade projekt och rätt personal. Sökning och Enter på kortet öppnade sparat projekt. Planerat val sparades och återlästes. Faktiska skärmbilder av nytt-formulär/detalj 390/768/1440 samt synligt sparfel390. Desktop-formulärbild visar planeringsdelen efter intern scroll, iPad/mobil visar början. Alla tillhörande ekonomiska undersidor, kamera/bilagor, staff UI och 430/1024 återstår.
+
+QA-modulregistret var schema-klonat utan seed. Kundprojekt aktiverades i QA-registret för den syntetiska QA-organisationen; produktion orörd. Browser behövde logga in igen efter JWT-test, ordinarie inloggningsform användes.
