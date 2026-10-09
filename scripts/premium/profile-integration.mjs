@@ -80,10 +80,36 @@ assert.deepEqual(
   [],
 );
 const otherPath = await upload("outsider");
-const invalidBody=new FormData();invalidBody.append('file',new File([new Uint8Array([255,216,255,217])],'invalid.jpg',{type:'image/jpeg'}));
-assert.ok((await clients.oscar.functions.invoke('vihem-profile-photo',{body:invalidBody})).error,'spoofed JPEG rejected by real Edge');
-const insertion=await clients.oscar.from('vihem_profiles').insert({id:c.users.oscar.id,organisation_id:c.org,name:'Synthetic duplicate',email:c.users.oscar.email,role:'admin',avatar_path:otherPath});
-assert.equal(insertion.error?.code,'42501','insert branch blocks avatar references before duplicate constraints');
+const invalidBody = new FormData();
+invalidBody.append(
+  "file",
+  new File([new Uint8Array([255, 216, 255, 217])], "invalid.jpg", {
+    type: "image/jpeg",
+  }),
+);
+assert.ok(
+  (
+    await clients.oscar.functions.invoke("vihem-profile-photo", {
+      body: invalidBody,
+    })
+  ).error,
+  "spoofed JPEG rejected by real Edge",
+);
+const insertion = await clients.oscar
+  .from("vihem_profiles")
+  .insert({
+    id: c.users.oscar.id,
+    organisation_id: c.org,
+    name: "Synthetic duplicate",
+    email: c.users.oscar.email,
+    role: "admin",
+    avatar_path: otherPath,
+  });
+assert.equal(
+  insertion.error?.code,
+  "42501",
+  "insert branch blocks avatar references before duplicate constraints",
+);
 
 assert.ok(
   (await clients.oscar.rpc("vihem_set_profile_photo", { path: otherPath }))
@@ -229,6 +255,7 @@ assert.ok(
   "removed reference stops access",
 );
 await upload("oscar");
+await upload("christofer");
 console.log(
   "PASS: own photo upload/removal, private storage, staff/tenant membership, cross-org denial, direct mutation denial, identity preserved.",
 );
