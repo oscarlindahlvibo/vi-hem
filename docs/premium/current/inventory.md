@@ -1,6 +1,6 @@
 # VI-HEM 3.0 – källkodsinventering
 
-Inventeringen omfattar 107 TSX-filer, 62 vy-/modulfiler, 55 route-val, 253 dialog-/sheet-/kamera-/signaturreferenser och 2630 interaktiva element/formulär/tabeller. Varje element har fil och rad i inventory.json. Dynamiska underflöden och runtime-behörigheter kräver separat prov.
+Inventeringen omfattar 107 TSX-filer, 62 vy-/modulfiler, 55 route-val, 252 dialog-/sheet-/kamera-/signaturreferenser och 2632 interaktiva element/formulär/tabeller. Varje element har fil och rad i inventory.json. Dynamiska underflöden och runtime-behörigheter kräver separat prov.
 
 **Detta är en kodinventering, inte en visuell eller funktionell verifiering.** Alla vyer börjar med ej verifierad status för varje bedömningsdimension. Ingen sida markeras klar genom gemensam CSS.
 
@@ -35,7 +35,7 @@ Inventeringen omfattar 107 TSX-filer, 62 vy-/modulfiler, 55 route-val, 253 dialo
 | src/pages/FinancePage.tsx | 6800 | 20 | 15 native fields: inspect labels, sizing, validation; 4 native buttons: review purpose/states/touch size |
 | src/pages/FleetPage.tsx | 2192 | 22 | 6 native fields: inspect labels, sizing, validation; 19 native buttons: review purpose/states/touch size; Native confirmation: review shared dialog replacement |
 | src/pages/GuestLaundryPage.tsx | 283 | 0 | 2 native buttons: review purpose/states/touch size |
-| src/pages/InspectionsPage.tsx | 737 | 6 | 5 native fields: inspect labels, sizing, validation; 2 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination |
+| src/pages/InspectionsPage.tsx | 712 | 5 | 2 native fields: inspect labels, sizing, validation; 2 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination |
 | src/pages/InstallmentPlansPage.tsx | 94 | 0 | Gemensam UI finns; faktisk kvalitet måste granskas |
 | src/pages/InventoryPage.tsx | 497 | 10 | 4 native fields: inspect labels, sizing, validation; 9 native buttons: review purpose/states/touch size; Native confirmation: review shared dialog replacement |
 | src/pages/JourPage.tsx | 1415 | 6 | 5 native fields: inspect labels, sizing, validation; 9 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination; Sub-12px text: inspect legibility; Native confirmation: review shared dialog replacement |
@@ -59,10 +59,10 @@ Inventeringen omfattar 107 TSX-filer, 62 vy-/modulfiler, 55 route-val, 253 dialo
 | src/pages/ShortStayPage.tsx | 2675 | 6 | 9 native fields: inspect labels, sizing, validation; 4 native buttons: review purpose/states/touch size; Sub-12px text: inspect legibility; Native confirmation: review shared dialog replacement |
 | src/pages/SkatteverketPage.tsx | 103 | 0 | Gemensam UI finns; faktisk kvalitet måste granskas |
 | src/pages/SmsPage.tsx | 115 | 0 | 2 native buttons: review purpose/states/touch size; Native confirmation: review shared dialog replacement |
-| src/pages/StaffDashboard.tsx | 918 | 0 | 23 native buttons: review purpose/states/touch size; Sub-12px text: inspect legibility |
+| src/pages/StaffDashboard.tsx | 854 | 0 | 23 native buttons: review purpose/states/touch size; Sub-12px text: inspect legibility |
 | src/pages/StaffDocumentScannerPage.tsx | 263 | 2 | Gemensam UI finns; faktisk kvalitet måste granskas |
 | src/pages/StaffSchedulePage.tsx | 699 | 1 | 3 native buttons: review purpose/states/touch size; Sub-12px text: inspect legibility; Native confirmation: review shared dialog replacement |
-| src/pages/TenantDashboard.tsx | 464 | 0 | 8 native buttons: review purpose/states/touch size |
+| src/pages/TenantDashboard.tsx | 377 | 0 | 1 native buttons: review purpose/states/touch size |
 | src/pages/TenantInvoicesPage.tsx | 147 | 0 | 1 native buttons: review purpose/states/touch size |
 | src/pages/TerminationPage.tsx | 388 | 0 | 1 native fields: inspect labels, sizing, validation |
 | src/pages/TimeTrackingPage.tsx | 3207 | 18 | 38 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination; Native confirmation: review shared dialog replacement |

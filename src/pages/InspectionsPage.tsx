@@ -15,6 +15,7 @@ import {
   SearchInput,
   Tabs,
 } from '../components/ui';
+import { useToast } from '../components/toast';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { InspectionRooms } from '../components/inspections/InspectionRooms';
 import { formatDate } from '../lib/utils';
@@ -191,6 +192,7 @@ function InspectionCamera({ open, roomName, onClose, onCapture }: InspectionCame
 
 export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProps) {
   const { user } = useAuth();
+  const toast = useToast();
   const [inspections, setInspections] = useState<any[]>([]);
   const [tenancies, setTenancies] = useState<any[]>([]);
   const [properties, setProperties] = useState<any[]>([]);
@@ -218,6 +220,8 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
   const [loadError, setLoadError] = useState('');
   const [inspectionStep,setInspectionStep]=useState('object');
   const saveLock = useRef(false), uploadLock = useRef(false);
+  const inspectionSaveId = useRef(crypto.randomUUID());
+  const inspectionDocumentId = useRef(crypto.randomUUID());
   const [savingInspection, setSavingInspection] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [inspectionCameraRoomIndex, setInspectionCameraRoomIndex] = useState<number | null>(null);
@@ -371,7 +375,7 @@ Foton bifogade i systemet: ${photoCount}
 `;
   };
 
-  const createOrUpdateInspectionDocument = async (inspection: any, tenancy: any, property: any, apartment: any) => {
+  const buildInspectionDocument = async (inspection: any, tenancy: any, property: any, apartment: any) => {
     const tenant = tenancy?.tenant as any;
     const apt = apartment || tenancy?.apartment as any;
     const prop = property || tenancy?.property as any;
@@ -393,15 +397,7 @@ Foton bifogade i systemet: ${photoCount}
       createdBy: user?.id,
     }, photoUrls);
 
-    if (inspection.document_id) {
-      const { error } = await supabase.from('vihem_documents').update(documentPayload).eq('id', inspection.document_id);
-      if (error) throw error;
-      return inspection.document_id;
-    }
-
-    const { data, error } = await supabase.from('vihem_documents').insert(documentPayload).select('id').single();
-    if (error) throw error;
-    return data.id;
+    return documentPayload;
   };
 
   // ─── Inspection save ──────────────────────────────────────────────────────
@@ -429,26 +425,19 @@ Foton bifogade i systemet: ${photoCount}
         photo_urls: inspectionForm.photo_urls,
         status,
       };
-      let savedInspection = selectedInspection ? { ...selectedInspection, ...payload } : null;
-      if (selectedInspection) {
-        const { data, error } = await supabase.from('vihem_apartment_inspections').update(payload).eq('id', selectedInspection.id).select('*').single();
-        if (error) throw error;
-        savedInspection = data;
-      } else {
-        const { data, error } = await supabase.from('vihem_apartment_inspections').insert(payload).select('*').single();
-        if (error) throw error;
-        savedInspection = data;
-      }
-
-      if (savedInspection) setSelectedInspection(savedInspection);
-      if (status === 'completed' && savedInspection) {
-        const documentId = await createOrUpdateInspectionDocument(savedInspection, tenancy, property, apartment);
-        setSelectedInspection({ ...savedInspection, document_id: documentId });
-        const {error:linkError}=await supabase.from('vihem_apartment_inspections').update({ document_id: documentId }).eq('id', savedInspection.id);
-        if(linkError)throw linkError;
-      }
+      const id = selectedInspection?.id || inspectionSaveId.current;
+      const documentId = selectedInspection?.document_id || inspectionDocumentId.current;
+      const document = status === 'completed'
+        ? await buildInspectionDocument({ ...selectedInspection, ...payload, id }, tenancy, property, apartment)
+        : null;
+      const { data: savedInspection, error } = await supabase.rpc('vihem_save_inspection', {
+        p_id: id, p_form: payload, p_document: document, p_document_id: status === 'completed' ? documentId : null,
+      });
+      if (error) throw error;
+      setSelectedInspection(savedInspection);
       setShowInspectionModal(false);
       resetInspectionForm();
+      toast.show(status === 'draft' ? 'Besiktningsutkastet är sparat' : 'Besiktningen och protokollet är sparade');
       fetchAll();
     } catch (err) {
       setInspectionError(status === 'draft' ? 'Utkastet kunde inte sparas. Dina uppgifter finns kvar här. Kontrollera anslutningen och försök igen.' : 'Besiktningen kunde inte färdigställas. Dina uppgifter finns kvar här. Kontrollera anslutningen och försök igen.');
@@ -459,6 +448,8 @@ Foton bifogade i systemet: ${photoCount}
   };
 
   const resetInspectionForm = () => {
+    inspectionSaveId.current = crypto.randomUUID();
+    inspectionDocumentId.current = crypto.randomUUID();
     setInspectionForm({
       tenancy_id: '',
       property_id: '',
@@ -629,7 +620,7 @@ Foton bifogade i systemet: ${photoCount}
       </div>
 
       {/* ═══ INSPECTION MODAL ═══════════════════════════════════════════════ */}
-      <Modal open={showInspectionModal} onClose={requestInspectionClose} title={selectedInspection ? 'Redigera besiktning' : 'Ny besiktning'} size="xl" toolbar={<nav aria-label="Besiktningssteg"><Tabs tabs={[{key:'object',label:'Objekt'},{key:'rooms',label:'Rum'},{key:'summary',label:'Sammanfattning'}]} active={inspectionStep} onChange={setInspectionStep}/></nav>} footer={<>
+      <Modal open={showInspectionModal} onClose={requestInspectionClose} title={selectedInspection ? 'Redigera besiktning' : 'Ny besiktning'} size="xl" toolbar={<nav aria-label="Besiktningssteg"><Tabs tabs={[{key:'object',label:'Objekt'},{key:'rooms',label:'Rum'},{key:'summary',label:'Sammanfattning'}]} active={inspectionStep} onChange={step=>{if(!savingInspection&&!uploadingPhoto)setInspectionStep(step);}}/></nav>} footer={<>
           {inspectionError&&<p role="alert" className="mb-3 text-sm text-red-700">{inspectionError}</p>}
           {uploadingPhoto&&<p role="status" className="mb-3 text-sm text-vihem-muted">Laddar upp bilder…</p>}
           <div className="flex flex-wrap justify-end gap-2">
@@ -640,39 +631,21 @@ Foton bifogade i systemet: ${photoCount}
             </Button>
           </div>
         </>}>
-        <div className="mx-auto max-w-3xl space-y-5">
+        <fieldset disabled={savingInspection||uploadingPhoto} className="mx-auto min-w-0 max-w-3xl space-y-5">
           {inspectionStep==='object'&&<>
           <h3 className="text-base font-semibold text-vihem-ink">Objekt och tid</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Byggnad</label>
-              <select aria-label="Byggnad" value={inspectionForm.property_id} onChange={(e) => setInspectionForm({ ...inspectionForm, property_id: e.target.value, apartment_id: '', tenancy_id: '' })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                <option value="">Välj byggnad</option>
-                {properties.map((property) => <option key={property.id} value={property.id}>{property.name} · {property.address}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Lägenhet</label>
-              <select aria-label="Lägenhet" value={inspectionForm.apartment_id} onChange={(e) => setInspectionForm({ ...inspectionForm, apartment_id: e.target.value, tenancy_id: '' })} disabled={!inspectionForm.property_id} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-50">
-                <option value="">Välj lägenhet</option>
-                {apartments.filter(apartment => apartment.property_id === inspectionForm.property_id).map((apartment) => <option key={apartment.id} value={apartment.id}>Lgh {apartment.apartment_number}</option>)}
-              </select>
-            </div>
+            <Select label="Byggnad" value={inspectionForm.property_id}
+              onChange={e=>setInspectionForm({...inspectionForm,property_id:e.target.value,apartment_id:'',tenancy_id:''})}
+              options={[{value:'',label:'Välj byggnad'},...properties.map(property=>({value:property.id,label:`${property.name} · ${property.address}`}))]} />
+            <Select label="Lägenhet" value={inspectionForm.apartment_id} disabled={!inspectionForm.property_id}
+              onChange={e=>setInspectionForm({...inspectionForm,apartment_id:e.target.value,tenancy_id:''})}
+              options={[{value:'',label:'Välj lägenhet'},...apartments.filter(apartment=>apartment.property_id===inspectionForm.property_id).map(apartment=>({value:apartment.id,label:`Lgh ${apartment.apartment_number}`}))]} />
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1">Hyresgäst (valfritt)</label>
-              <select aria-label="Hyresgäst (valfritt)" value={inspectionForm.tenancy_id} onChange={(e) => {
-                const tenancy = tenancies.find(item => item.id === e.target.value);
-                setInspectionForm({
-                  ...inspectionForm,
-                  tenancy_id: e.target.value,
-                  property_id: tenancy?.property_id || inspectionForm.property_id,
-                  apartment_id: tenancy?.apartment_id || inspectionForm.apartment_id,
-                });
-              }} disabled={!inspectionForm.apartment_id} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-50">
-                <option value="">Ingen hyresgäst kopplad ännu</option>
-                {tenancies.filter(t => t.property_id === inspectionForm.property_id && t.apartment_id === inspectionForm.apartment_id).map((t) => <option key={t.id} value={t.id}>{getTenancyLabel(t)}</option>)}
-              </select>
-              <p className="mt-1 text-xs text-slate-500">Hyresgästen kan kopplas senare genom att öppna protokollet igen.</p>
+              <Select label="Hyresgäst (valfritt)" value={inspectionForm.tenancy_id} disabled={!inspectionForm.apartment_id}
+                onChange={e=>setInspectionForm({...inspectionForm,tenancy_id:e.target.value})}
+                options={[{value:'',label:'Ingen hyresgäst kopplad ännu'},...tenancies.filter(t=>t.property_id===inspectionForm.property_id&&t.apartment_id===inspectionForm.apartment_id).map(t=>({value:t.id,label:getTenancyLabel(t)}))]} />
+              <p className="mt-2 text-sm text-vihem-muted">Hyresgästen kan kopplas senare genom att öppna protokollet igen.</p>
             </div>
             <Select label="Besiktningstyp" value={inspectionForm.inspection_type} onChange={(e) => setInspectionForm({ ...inspectionForm, inspection_type: e.target.value })} options={Object.entries(INSPECTION_TYPE_LABELS).map(([v, l]) => ({ value: v, label: l }))} />
             <Input label="Besiktningsdatum" type="date" value={inspectionForm.inspection_date} onChange={(e) => setInspectionForm({ ...inspectionForm, inspection_date: e.target.value })} />
@@ -691,6 +664,11 @@ Foton bifogade i systemet: ${photoCount}
           <div className="flex justify-end"><Button variant="secondary" onClick={()=>setInspectionStep('summary')}>Visa sammanfattning</Button></div>
           </>}
           {inspectionStep==='summary'&&<>
+            <section aria-label="Besiktningsobjekt" className="border-b border-vihem-line pb-4">
+              <h3 className="text-base font-semibold text-vihem-ink">{properties.find(p=>p.id===inspectionForm.property_id)?.name || 'Besiktningsobjekt'} · Lgh {apartments.find(a=>a.id===inspectionForm.apartment_id)?.apartment_number || '—'}</h3>
+              <p className="mt-1 text-sm text-vihem-muted">{INSPECTION_TYPE_LABELS[inspectionForm.inspection_type]} · {formatDate(inspectionForm.inspection_date)}</p>
+              {inspectionForm.rooms.some(room=>!room.reviewed) && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{inspectionForm.rooms.filter(room=>!room.reviewed).length} rum är ännu inte markerade som genomgångna. Kontrollera rummen eller spara ett utkast för att fortsätta senare.</p>}
+            </section>
             <Select label="Övergripande skick" value={inspectionForm.overall_condition} onChange={(e) => setInspectionForm({ ...inspectionForm, overall_condition: e.target.value })} options={Object.entries(CONDITION_LABELS).map(([v, l]) => ({ value: v, label: l }))} />
           {/* General photos */}
           <div>
@@ -698,19 +676,16 @@ Foton bifogade i systemet: ${photoCount}
             <div className="flex flex-wrap gap-2">
               {inspectionForm.photo_urls.map((url, pi) => (
                 <div key={pi} className="relative group">
-                  <img src={url} alt="" className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
-                  <button onClick={() => removePhoto(url)} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-8 h-8 text-xs flex items-center justify-center transition-opacity">✕</button>
+                  <a href={url} target="_blank" rel="noreferrer" aria-label={`Öppna allmän bild ${pi+1}`}><img src={url} alt={`Allmän bild ${pi+1}`} className="w-24 h-24 object-cover rounded-lg border border-slate-200" /></a>
+                  <button type="button" aria-label={`Ta bort allmän bild ${pi+1}`} onClick={() => removePhoto(url)} className="vihem-icon-button absolute -top-2 -right-2 rounded-full bg-white text-vihem-danger shadow-sm"><X className="h-4 w-4" /></button>
                 </div>
               ))}
-              <label className="w-20 h-20 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
-                {uploadingPhoto ? <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" /> : <>
-                  <Camera className="w-5 h-5 text-slate-400" />
-                  <span className="text-xs text-center leading-tight text-slate-400 mt-1">Lägg till<br />bilder</span>
-                </>}
-                <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handlePhotoFile(e)} />
+              <label className="vihem-touch-target vihem-focus relative flex cursor-pointer items-center gap-2 rounded-xl border border-vihem-line px-3 py-2 text-sm font-medium text-vihem-ink hover:bg-vihem-canvas focus-within:ring-2 focus-within:ring-vihem-blue">
+                <Image className="h-4 w-4" /> Välj bilder
+                <input ref={photoInputRef} type="file" accept="image/*" multiple aria-label="Välj allmänna bilder" className="sr-only" onChange={(e) => handlePhotoFile(e)} />
               </label>
             </div>
-            <p className="text-xs text-slate-400 mt-1">Välj flera bilder samtidigt. Spara utkastet för att behålla bilderna i besiktningen.</p>
+            <p className="text-sm text-vihem-muted mt-2">Välj flera bilder samtidigt, högst 10 MB per bild. Spara utkastet för att behålla bilderna i besiktningen.</p>
           </div>
 
           <Textarea label="Allmänna noteringar" value={inspectionForm.notes} onChange={(e) => setInspectionForm({ ...inspectionForm, notes: e.target.value })} placeholder="Övergripande noteringar om lägenheten..." rows={3} />
@@ -719,7 +694,7 @@ Foton bifogade i systemet: ${photoCount}
           <section className="rounded-xl bg-vihem-canvas p-4" aria-label="Sammanfattning"><h3 className="text-base font-semibold text-vihem-ink">Sammanfattning</h3><p className="mt-2 text-sm text-vihem-muted">{inspectionForm.rooms.filter(r=>r.reviewed).length} av {inspectionForm.rooms.length} rum markerade som genomgångna · {inspectionForm.rooms.filter(r=>r.condition==='poor').length} med dåligt skick · {inspectionForm.photo_urls.length+inspectionForm.rooms.reduce((n,r)=>n+r.photos.length,0)} bilder</p><p className="mt-2 text-sm text-vihem-muted">Spara ett utkast för att fortsätta senare. Slutför skapar protokollet enligt det befintliga besiktningsflödet.</p></section>
 
           </>}
-        </div>
+        </fieldset>
       </Modal>
 
       <Modal open={confirmDiscard} onClose={()=>setConfirmDiscard(false)} title="Lämna utan att spara?" size="sm"><p className="text-sm text-vihem-muted">Du har ändrat besiktningen. Spara ett utkast för att kunna fortsätta senare.</p><div className="mt-5 flex flex-wrap justify-end gap-2"><Button variant="secondary" onClick={()=>setConfirmDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={closeInspection}>Lämna utan att spara</Button></div></Modal>

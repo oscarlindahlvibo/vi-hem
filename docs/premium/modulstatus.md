@@ -33,7 +33,7 @@ Ingen rad är modul-Klar. Gemensamma kontroller påverkar även orörda vyer; de
 | src/pages/FinancePage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/FleetPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/GuestLaundryPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
-| src/pages/InspectionsPage.tsx | Tre steg, rum, progress, sparfooter, objektbaserad lista och hämtfel/återförsök | Utkast/återöppna/slutför/dokumentreferens; 5 rumsbredder; lista 390/768/1440 och sökning utan träff | Bilder/kamera/publik bucket, PDF-utseende och signering återstår |
+| src/pages/InspectionsPage.tsx | Rumsflöde, progress, gemensamt objektformulär, sammanfattning, utkastskydd, atomisk inspection/protokoll-RPC, sparfeedback | Staff utkast/återöppna/rum/notering/finaliseringsfel/retry; JWT rollback/org/tenant-protokoll; rum390/768, sammanfattning390/430/768/1024/1440; text-PDF renderad | Kamera/HEIC/filer, privat bildmigrering/äldre referenser, foton/lång-PDF/signering, konflikt/roll/native och hela DoD kvar |
 | src/pages/InstallmentPlansPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/InventoryPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/JourPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |

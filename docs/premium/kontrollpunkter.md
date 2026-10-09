@@ -139,3 +139,22 @@ Autentiserad admin och personal: tvåkolumnslayout och tilldelade order/projekt 
 Tenant QA: först ingen aktiv bostad (desktopbild före tomlägesförfining), därefter syntetisk QA-bostad 1001, hyra6200, fyra egna mottagna ärenden. Översikten visar antal4, tre ärendeförhandsvisningar, inga adminpaneler. Kontakta oss öppnar behörig chattlista, Boka tvätt öppnar rätt vy med verkligt Ingen tvättstuga-tomläge. Ingen produktion eller externa utskick påverkade. Sparning/signering/bokning utfördes inte från startsidan. Fakturaaktiverad variant, pending-avtal, faktisk tvättbokning, nyheter, kontrollerat laddfel, native/screen och 430/1024 återstår. Tenant-startsidan saknar fortfarande egen realtime-synk; inget löfte om sådan verifiering.
 
 Efter senaste ändring: TypeScript, premiumtests (bildvalidering/osparade formulär), Vite build och mobil-bundleprov PASS. App-chunk ~2.66 MB / gzip680 kB och HEIC-chunk1.35 MB ger fortsatt storleksvarning. Ingen full system-/prestanda-/DoD-certifiering.
+
+
+## Kontrollpunkt 6 – besiktningens sparning och sammanfattning, 2026-10-09
+
+### Ändringar
+
+Granskningen hittade ett verkligt delvis-sparningsproblem: inspection.status blev completed före genererat dokument och document_id-länk. Ny invoker-security RPC `vihem_save_inspection`, migration `20261009190000_atomic_inspection_save.sql`, sparar besiktning/protokoll/länk i en databastransaktion. Befintliga tabeller/RLS bevaras. Aktiv staff/admin/superadmin, egen organisation samt matchande fastighet/lägenhet/hyresavtal valideras. Ett befintligt protokoll måste tillhöra besiktningen; unrelated dokumentid avvisas. Frontend behåller UUID för nytt utkast och dokument vid återförsök; transaktionslås förhindrar två parallella nya rader. Det är idempotent skapande, inte en generell lösning på samtidiga redigerares konflikter. Migration tillämpad endast i QA och måste installeras innan denna frontend sätts i produktion.
+
+Formulärets innehåll/steg låses under sparning/uppladdning. Objektval använder gemensamma Select. Sammanfattning visar objekt/typ/datum och informerar om ännu ej genomgångna rum. Detta skapar ingen ny obligatorisk affärsregel eller signeringsregel. Allmänna bilder får tydlig filknapp, namngivna öppna-/ta bort-åtgärder och läsbar storlekshjälp. Framgång ger gemensam toast. Privat bildlagring är fortfarande inte löst.
+
+### Verklig QA
+
+`scripts/premium/inspection-integration.mjs` PASS med riktiga JWT: parallellt utkast/retry en rad; dokument-triggerfel lämnar utkast utan protokoll; efterföljande inspection-triggerfel rullar även tillbaka redan infört dokument; completed/retry behåller samma protokoll; samma-org staff tillåts; tenant/anon/foreign admin nekas skapande; ogiltigt objekt och unrelated dokumentid nekas; saknad protokoll-URL nekas. Tenant behåller läsåtkomst till sin egen besiktning och sitt protokoll; foreign admin får noll dokumentrader. Fixture `scripts/premium/inspection-rollback-fixture.sql` är QA-only och måste appliceras före provet. Båda feltriggers/funktioner därefter borttagna.
+
+Autentiserad Christofer/staff: byggnad/lägenhet/Tenant QA valdes, Hall bedömdes Dålig med notering, Rum genomgånget flyttade till Kök, utkast sparades och återöppnades med notering/progress kvar. Kontrollerat finaliseringsfel visade statiskt fel nära footer, alla formdata kvar; SQL bekräftade draft/document_id null och noll protokoll. Trigger borttagen, retry sparade completed+kopplat dokument för rätt tenant. Återöppning återläste notering/åtgärd. Andra Slutför sparade samma dokument och bekräftelsetoast; DB-count för UI-protokollet fortfarande1.
+
+Faktiska rumbilder390/768; sammanfattning390/430/768/1024/1440 visuellt granskad, fel390 och sparbekräftelse390 dokumenterade. Fysisk telefon/tangentbord ej verifierat. Befintligt genererat PDF utan foton hämtades från QA, renderades med Poppler och granskades: rätt QA-objekt/hyresgäst/inspektör/rum/notering/åtgärd, läsligt och utan avklippning. PDF-layouten är fortfarande enkel och inte premium-godkänd; flera svenska fasta etiketter saknar diakritik, långt innehåll och foton kvar att förbättra/prova. PDF-skill användes för läsande renderkontroll.
+
+Kamera/HEIC/filuppladdning (browserns filechooser-åtkomst är inte aktiverad), bildernas koppling och export, äldre publika referenser/privat bucket, full roll-/inaktiv-/konfliktmatris och signerings-/historikflöden återstår. Ingen modul är DoD-Klar.
