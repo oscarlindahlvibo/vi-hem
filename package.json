@@ -27,7 +27,8 @@
     "test:chat": "node scripts/chat-invariants-check.mjs",
     "test:chat:integration": "node scripts/chat-integration-check.mjs",
     "test:premium": "node scripts/premium/checks.mjs",
-    "test:premium:profile": "node scripts/premium/profile-integration.mjs"
+    "test:premium:profile": "node scripts/premium/profile-integration.mjs",
+    "test:premium:workorders": "node scripts/premium/workorder-integration.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

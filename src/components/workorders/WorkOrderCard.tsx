@@ -15,6 +15,7 @@ export interface WorkOrderCardProps {
   dueDate: string | null;
   overdue: boolean;
   assignees: string[];
+  assigneeIds?: string[];
   /** Markeringsläge: kryssruta visas, svep/långtryck avstängt. */
   selectMode: boolean;
   selected: boolean;
@@ -35,7 +36,7 @@ function statusBadge(status: WOStatus, overdue: boolean): { tone: StatusTone; la
   if (overdue) return { tone: 'danger', label: 'Försenad' };
   if (status === 'completed') return { tone: 'success', label: 'Klar' };
   if (status === 'cancelled') return { tone: 'neutral', label: WO_STATUS_LABELS[status] };
-  if (status === 'new') return { tone: 'info', label: 'Ny' };
+  if (status === 'new') return { tone: 'neutral', label: 'Ny' };
   if (status === 'assigned') return { tone: 'neutral', label: 'Tilldelad' };
   return { tone: 'warning', label: WO_STATUS_LABELS[status] };
 }
@@ -187,10 +188,10 @@ export function WorkOrderCard(props: WorkOrderCardProps) {
               {showPriority && <StatusBadge tone="priority">{priority === 'urgent' ? 'Akut' : WO_PRIORITY_LABELS[priority]}</StatusBadge>}
             </div>
           </div>
-          <p className="mt-0.5 truncate text-[13px] text-vihem-muted">{subtitle}</p>
+          {subtitle&&<p className="mt-0.5 truncate text-[13px] text-vihem-muted">{subtitle}</p>}
           <div className="mt-2.5 flex items-center gap-x-3 gap-y-1 text-xs text-vihem-muted">
             <span className="flex min-w-0 items-center gap-1.5">
-              {firstAssignee ? <Avatar name={firstAssignee} size="sm" /> : <Avatar name="–" size="sm" className="bg-slate-100 text-slate-400" />}
+              {firstAssignee ? <Avatar name={firstAssignee} userId={props.assigneeIds?.[0]} size="sm" /> : <Avatar name="–" size="sm" className="bg-slate-100 text-slate-400" />}
               <span className="truncate font-medium text-slate-600">{firstAssignee ? `${firstAssignee.split(' ')[0]}${assignees.length > 1 ? ` +${assignees.length - 1}` : ''}` : 'Ej tilldelad'}</span>
             </span>
             {category && <span className="hidden max-w-[7rem] truncate rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600 min-[380px]:inline">{category}</span>}

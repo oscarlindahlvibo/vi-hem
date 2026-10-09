@@ -1,9 +1,11 @@
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { WorkOrderChatFiles } from '../components/chat/WorkOrderChatFiles';
 import { ContextChatLauncher } from '../components/chat/ContextChatLauncher';
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
+  Avatar,
   Card,
   Badge,
   Button,
@@ -15,6 +17,7 @@ import {
   PageHeader,
   EmptyState,
   LoadingPage,
+  Tabs,
 } from '../components/ui';
 import {
   formatDate,
@@ -287,6 +290,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<WOWithRelations | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const openedInitialOrder = useRef<string | undefined>(undefined);
+  const detailSaveLock = useRef(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [properties, setProperties] = useState<Property[]>([]);
   const [apartments, setApartments] = useState<Apartment[]>([]);
@@ -381,9 +386,11 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
   }, [authLoading, user?.id, isStaff]);
 
   useEffect(() => {
-    if (!initialWorkOrderId || loading || workOrders.length === 0) return;
+    if (!initialWorkOrderId) { openedInitialOrder.current = undefined; return; }
+    if (openedInitialOrder.current === initialWorkOrderId || loading || workOrders.length === 0) return;
     const workOrder = workOrders.find((order) => order.id === initialWorkOrderId);
     if (workOrder) {
+      openedInitialOrder.current = initialWorkOrderId;
       setSelectedWorkOrder(workOrder);
       setNewDetailStatus(workOrder.status);
       setNewAssignedToIds(workOrder.assigned_to_ids?.length ? workOrder.assigned_to_ids : workOrder.assigned_to ? [workOrder.assigned_to] : []);
@@ -448,7 +455,9 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setWorkOrders((data || []) as unknown as WOWithRelations[]);
+      const refreshed = (data || []) as unknown as WOWithRelations[];
+      setWorkOrders(refreshed);
+      setSelectedWorkOrder(current => current ? refreshed.find(order => order.id === current.id) || current : current);
     } catch (err) {
       console.error('Error fetching work orders:', err);
     } finally {
@@ -776,7 +785,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
 
       if (error) throw error;
       await syncLinkedMaintenanceStatus(selectedWorkOrder.maintenance_request_id);
-      setSelectedWorkOrder({ ...selectedWorkOrder, status: newDetailStatus });
+      setSelectedWorkOrder(current => current ? { ...current, status: newDetailStatus } : current);
       await fetchWorkOrders();
     } catch (err) {
       console.error('Error updating status:', err);
@@ -844,7 +853,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
         .eq('id', selectedWorkOrder.id);
 
       if (error) throw error;
-      setSelectedWorkOrder({ ...selectedWorkOrder, assigned_to: assignedIds[0] || null, assigned_to_ids: assignedIds });
+      setSelectedWorkOrder(current => current ? { ...current, assigned_to: assignedIds[0] || null, assigned_to_ids: assignedIds } : current);
       await fetchWorkOrders();
     } catch (err) {
       console.error('Error updating assignment:', err);
@@ -1234,16 +1243,20 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
   const assignmentDirty = Boolean(isStaff && selectedWorkOrder
     && [...newAssignedToIds].sort().join(',') !== [...currentAssigneeIds].sort().join(','));
   const detailDirty = statusDirty || assignmentDirty;
+  useUnsavedChanges({ status: newDetailStatus, assignees: newAssignedToIds }, showDetailModal && isStaff);
   const resetDetailPending = () => {
     if (!selectedWorkOrder) return;
     setNewDetailStatus(selectedWorkOrder.status);
     setNewAssignedToIds(currentAssigneeIds);
   };
   const requestCloseDetail = () => {
+    if (detailSaveLock.current) return;
     if (detailDirty) setConfirmCloseOpen(true);
     else setShowDetailModal(false);
   };
   const saveAndCloseDetail = async () => {
+    if (detailSaveLock.current) return;
+    detailSaveLock.current = true;
     setSavingClose(true);
     try {
       if (statusDirty) await updateWorkOrderStatus();
@@ -1254,6 +1267,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
     } catch (err: any) {
       toast.show(err?.message || 'Kunde inte spara ändringarna.', { tone: 'error' });
     } finally {
+      detailSaveLock.current = false;
       setSavingClose(false);
     }
   };
@@ -1513,13 +1527,14 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                 key={wo.id}
                 id={wo.id}
                 title={wo.title}
-                subtitle={wo.property?.name || (wo.customer_project ? `Kundprojekt: ${wo.customer_project.title || wo.customer_project.name}` : 'Ingen fastighet')}
+                subtitle={wo.property?.name || (wo.customer_project ? `Kundprojekt: ${wo.customer_project.title || wo.customer_project.name}` : '')}
                 status={wo.status}
                 priority={wo.priority}
                 category={wo.category}
                 dueDate={wo.due_date}
                 overdue={isWorkOrderOverdue(wo)}
                 assignees={assigneeList(wo)}
+                assigneeIds={wo.assigned_to_ids?.length ? wo.assigned_to_ids : wo.assigned_to ? [wo.assigned_to] : []}
                 selectMode={selectMode}
                 selected={selectedWorkOrderIds.includes(wo.id)}
                 canAct={isStaff && !ARCHIVED_WO_STATUSES.includes(wo.status)}
@@ -1795,7 +1810,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                       onChange={() => toggleCreateAssignee(staff.id)}
                       className="rounded border-slate-300 accent-blue-600"
                     />
-                    <span>{staff.name}</span>
+                    <Avatar name={staff.name} userId={staff.id} size="sm"/><span>{staff.name}</span>
                   </label>
                 ))}
               </div>
@@ -2002,62 +2017,57 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
         onClose={requestCloseDetail}
         title={selectedWorkOrder?.title || 'Arbetsorder'}
         size="xl"
-      >
-        {selectedWorkOrder && (
-          <div className="space-y-6">
+        toolbar={selectedWorkOrder && <div className="space-y-3">
             {isStaff && (
               <div className="flex justify-end gap-2">
                 <ContextChatLauncher type="workorder" id={selectedWorkOrder.id} name={selectedWorkOrder.title} suggestedIds={selectedWorkOrder.assigned_to_ids || []} onNavigate={_onNavigate} />
-                <Button variant="secondary" size="sm" onClick={openEditModal}>
+                <Button variant="secondary" size="sm" onClick={openEditModal} disabled={detailDirty || savingClose}>
                   Redigera arbetsorder
                 </Button>
               </div>
             )}
-            {detailDirty && (
-              <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Du har ändringar som inte är sparade. Du får välja att spara när du stänger.</p>
-            )}
-            <div role="tablist" className="no-scrollbar -mx-1 flex gap-1 overflow-x-auto rounded-2xl bg-slate-100 p-1">
-              {([
-                { key: 'overview', label: 'Översikt' },
-                { key: 'comments', label: `Kommentarer${comments.length ? ` (${comments.length})` : ''}` },
-                ...(isStaff ? [{ key: 'time', label: 'Tid' }, { key: 'history', label: 'Historik' }] : []),
-              ] as { key: 'overview' | 'comments' | 'time' | 'history'; label: string }[]).map((t) => (
-                <button
-                  key={t.key}
-                  role="tab"
-                  aria-selected={detailTab === t.key}
-                  onClick={() => setDetailTab(t.key)}
-                  className={`min-h-9 flex-1 shrink-0 whitespace-nowrap rounded-xl px-3 text-sm font-semibold transition-all ${detailTab === t.key ? 'bg-white text-vihem-blue shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-                >{t.label}</button>
-              ))}
-            </div>
-
+          <Tabs active={detailTab} onChange={(key) => setDetailTab(key as typeof detailTab)} tabs={[
+            {key:'overview',label:'Översikt'},
+            {key:'comments',label:`Kommentarer${comments.length ? ` (${comments.length})` : ''}`},
+            ...(isStaff ? [{key:'time',label:'Tid'},{key:'history',label:'Historik'}] : []),
+          ]}/>
+        </div>}
+        footer={detailDirty && <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-vihem-muted" role="status">Osparade ändringar</p>
+          <Button onClick={saveAndCloseDetail} loading={savingClose} disabled={updatingStatus || updatingAssignment}>Spara och stäng</Button>
+        </div>}
+      >
+        {selectedWorkOrder && (
+          <div className="space-y-6">
             {detailTab === 'overview' && (
               <div className="space-y-6">
+            {selectedWorkOrder.description && (
+              <div>
+                <p className="text-sm font-semibold text-vihem-ink mb-2">Beskrivning</p>
+                <p className="text-sm leading-relaxed text-slate-700 whitespace-pre-wrap max-w-prose">{selectedWorkOrder.description}</p>
+              </div>
+            )}
+
             {/* Work order info */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <p className="text-xs font-medium text-slate-500 uppercase">Titel</p>
-                <p className="text-sm text-slate-800 font-medium">{selectedWorkOrder.title}</p>
-              </div>
-
-              <div>
-                <p className="text-xs font-medium text-slate-500 uppercase">Kategori</p>
+                <p className="text-xs font-medium text-vihem-muted">Kategori</p>
                 <p className="text-sm text-slate-800">{selectedWorkOrder.category}</p>
               </div>
 
               <div>
-                <p className="text-xs font-medium text-slate-500 uppercase">Prioritet</p>
+                <p className="text-xs font-medium text-vihem-muted">Prioritet</p>
                 <Badge className={getWOPriorityColor(selectedWorkOrder.priority)}>
                   {WO_PRIORITY_LABELS[selectedWorkOrder.priority]}
                 </Badge>
               </div>
 
               <div>
-                <p className="text-xs font-medium text-slate-500 uppercase">Status</p>
+                <p className="text-xs font-medium text-vihem-muted">Status</p>
                 {isStaff ? (
                   <div className="flex items-center gap-2 mt-1">
                     <Select
+                      aria-label="Arbetsorderns status"
                       options={WO_STATUSES.map((s) => ({ value: s, label: WO_STATUS_LABELS[s] }))}
                       value={newDetailStatus}
                       onChange={(e) => setNewDetailStatus(e.target.value as WOStatus)}
@@ -2086,26 +2096,32 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                 </div>
               )}
 
+              {selectedWorkOrder.property && (
               <div>
-                <p className="text-xs font-medium text-slate-500 uppercase">Fastighet</p>
+                <p className="text-xs font-medium text-vihem-muted">Fastighet</p>
                 <div className="flex items-center gap-2 text-sm text-slate-800 mt-1">
                   <Building2 className="w-4 h-4" />
                   {selectedWorkOrder.property?.name || '–'}
                 </div>
               </div>
+              )}
 
+              {selectedWorkOrder.apartment && (
               <div>
-                <p className="text-xs font-medium text-slate-500 uppercase">Lägenhet</p>
+                <p className="text-xs font-medium text-vihem-muted">Lägenhet</p>
                 <p className="text-sm text-slate-800">{selectedWorkOrder.apartment?.apartment_number || '–'}</p>
               </div>
+              )}
 
+              {selectedWorkOrder.tenant && (
               <div>
-                <p className="text-xs font-medium text-slate-500 uppercase">Hyresgäst</p>
+                <p className="text-xs font-medium text-vihem-muted">Hyresgäst</p>
                 <p className="text-sm text-slate-800">{selectedWorkOrder.tenant?.name || '–'}</p>
               </div>
+              )}
 
               <div>
-                <p className="text-xs font-medium text-slate-500 uppercase">Förfallodatum</p>
+                <p className="text-xs font-medium text-vihem-muted">Förfallodatum</p>
                 <div className="flex items-center gap-2 text-sm text-slate-800 mt-1">
                   <Calendar className="w-4 h-4" />
                   {selectedWorkOrder.due_date ? formatDate(selectedWorkOrder.due_date) : '–'}
@@ -2114,7 +2130,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
 
               {formatScheduleWindow(selectedWorkOrder) && (
                 <div>
-                  <p className="text-xs font-medium text-slate-500 uppercase">Planerad tid</p>
+                  <p className="text-xs font-medium text-vihem-muted">Planerad tid</p>
                   <div className="flex flex-wrap items-center gap-2 text-sm text-slate-800 mt-1">
                     <Clock className="w-4 h-4" />
                     {formatScheduleWindow(selectedWorkOrder)}
@@ -2125,19 +2141,12 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                 </div>
               )}
 
-              <div>
-                <p className="text-xs font-medium text-slate-500 uppercase">Skapad av</p>
-                <p className="text-sm text-slate-800">{selectedWorkOrder.creator?.name || '–'}</p>
-              </div>
-
-              <div>
-                <p className="text-xs font-medium text-slate-500 uppercase">Skapad</p>
-                <p className="text-sm text-slate-800">{formatDateTime(selectedWorkOrder.created_at)}</p>
-              </div>
-
               {isStaff && (
                 <div className="md:col-span-2">
-                  <p className="text-xs font-medium text-slate-500 uppercase">Tilldelad till</p>
+                  <details className="rounded-xl bg-slate-50 px-3 py-2">
+                    <summary className="vihem-touch-target flex cursor-pointer items-center justify-between gap-3 text-sm font-medium text-vihem-ink">
+                      <span>Ansvariga</span><span className="text-vihem-muted">{newAssignedToIds.length ? newAssignedToIds.map(assigneeName).join(', ') : 'Välj personal'}</span>
+                    </summary>
                   <div className="mt-2 space-y-3">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       {staffMembers.map((staff) => (
@@ -2148,37 +2157,46 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                             onChange={() => toggleDetailAssignee(staff.id)}
                             className="rounded border-slate-300 accent-blue-600"
                           />
-                          <span>{staff.name}</span>
+                          <Avatar name={staff.name} userId={staff.id} size="sm"/><span>{staff.name}</span>
                         </label>
                       ))}
                     </div>
                   </div>
+                  </details>
                 </div>
               )}
 
-              <div>
-                <p className="text-xs font-medium text-slate-500 uppercase">Tilldelad</p>
+              {!isStaff && <div>
+                <p className="text-xs font-medium text-vihem-muted">Tilldelad</p>
                 <div className="flex items-center gap-2 text-sm text-slate-800 mt-1">
                   <User className="w-4 h-4" />
                   {assigneeNames(selectedWorkOrder)}
                 </div>
-              </div>
+              </div>}
             </div>
 
-            {selectedWorkOrder.description && (
+            <details className="text-sm text-vihem-muted">
+              <summary className="vihem-touch-target cursor-pointer font-medium">Om arbetsordern</summary>
+              <div className="grid gap-3 py-2 sm:grid-cols-2">
               <div>
-                <p className="text-xs font-medium text-slate-500 uppercase mb-2">Beskrivning</p>
-                <p className="text-sm text-slate-600 whitespace-pre-wrap">{selectedWorkOrder.description}</p>
+                <p className="text-xs font-medium text-vihem-muted">Skapad av</p>
+                <p className="text-sm text-slate-800">{selectedWorkOrder.creator?.name || '–'}</p>
               </div>
-            )}
 
+              <div>
+                <p className="text-xs font-medium text-vihem-muted">Skapad</p>
+                <p className="text-sm text-slate-800">{formatDateTime(selectedWorkOrder.created_at)}</p>
+              </div>
+
+              </div>
+            </details>
             {isStaff && (
               <div>
                 <p className="mb-2 text-xs font-medium uppercase text-slate-500">Checklista</p>
                 <div className="space-y-2">
                   {selectedWorkOrder.checklist?.map((item) => (
                     <div key={item.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                      <button type="button" onClick={() => toggleChecklistItem(item.id)} disabled={savingChecklist} className="flex-shrink-0">
+                      <button type="button" onClick={() => toggleChecklistItem(item.id)} disabled={savingChecklist} aria-label={`${item.done ? 'Markera som ogjord' : 'Markera som klar'}: ${item.text}`} aria-pressed={item.done} className="vihem-icon-button flex-shrink-0">
                         <CheckSquare className={`h-4 w-4 ${item.done ? 'text-green-600' : 'text-slate-400'}`} />
                       </button>
                       <span className={`flex-1 ${item.done ? 'text-slate-400 line-through' : ''}`}>{item.text}</span>
@@ -2186,7 +2204,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                         type="button"
                         onClick={() => removeSavedChecklistItem(item.id)}
                         disabled={savingChecklist}
-                        className="flex-shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                        aria-label={`Ta bort checklistepunkt: ${item.text}`}
+                        className="vihem-icon-button flex-shrink-0 text-slate-400 hover:bg-red-50 hover:text-red-600"
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
@@ -2282,11 +2301,11 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                       }`}
                     >
                       <div className="mb-1 flex items-center justify-between gap-2">
-                        <p className="font-semibold text-vihem-ink">{comment.user?.name || 'Okänd'}</p>
+                        <div className="flex min-w-0 items-center gap-2"><Avatar name={comment.user?.name} userId={comment.user_id} size="xs"/><p className="truncate font-semibold text-vihem-ink">{comment.user?.name || 'Okänd'}</p></div>
                         {comment.internal ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800"><Lock className="h-3 w-3" />Intern anteckning</span>
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800"><Lock className="h-3 w-3" />Intern anteckning</span>
                         ) : (
-                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-blue-800">Synlig för kund</span>
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">Synlig för kund</span>
                         )}
                       </div>
                       <p className="whitespace-pre-wrap text-slate-700">{comment.comment}</p>
@@ -2299,6 +2318,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
               <div className="space-y-3 rounded-2xl bg-white p-3 ring-1 ring-slate-200">
                 {isStaff && <CommentModeToggle mode={commentInternal ? 'internal' : 'customer'} onChange={(m) => setCommentInternal(m === 'internal')} />}
                 <Textarea
+                  label={commentInternal ? 'Intern anteckning' : 'Meddelande till kund'}
                   value={commentText}
                   onChange={(e) => setCommentText(e.target.value)}
                   placeholder={commentInternal ? 'Skriv intern anteckning...' : 'Skriv ett meddelande...'}
