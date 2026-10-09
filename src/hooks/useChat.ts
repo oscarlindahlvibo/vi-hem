@@ -236,6 +236,7 @@ export function useChat(userId: string, org: string, initialThread?: string) {
   );
   useEffect(() => {
     inboxEpoch.current++;
+    setLoading(true);
     setThreads([]);
     const timer = window.setTimeout(() => void refreshInbox(), 200);
     return () => clearTimeout(timer);

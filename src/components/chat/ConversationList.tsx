@@ -23,8 +23,10 @@ export function ConversationList({
   hasMore,
   more,
   onAction,
+  loading = false,
 }: {
   threads: Conversation[];
+  loading?: boolean;
   userId: string;
   tenant: boolean;
   selected: string | null;
@@ -73,7 +75,9 @@ export function ConversationList({
         </div>
       </div>
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto py-2">
-        {!visible.length ? (
+        {loading && !visible.length ? (
+          <p role="status" aria-busy="true" className="p-5 text-sm text-vihem-muted">Laddar konversationer…</p>
+        ) : !visible.length ? (
           <p className="p-6 text-center text-sm text-slate-500">
             Inga konversationer här.
           </p>

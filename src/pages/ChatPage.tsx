@@ -329,6 +329,7 @@ function ChatWorkspace({
         >
           <ConversationList
             threads={chat.threads}
+            loading={chat.loading}
             userId={user.id}
             tenant={!staff}
             selected={chat.selected}
