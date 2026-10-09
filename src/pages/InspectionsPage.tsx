@@ -13,9 +13,13 @@ import {
   EmptyState,
   LoadingPage,
   SearchInput,
+  Tabs,
 } from '../components/ui';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { InspectionRooms } from '../components/inspections/InspectionRooms';
 import { formatDate } from '../lib/utils';
 import { buildGeneratedDocumentWithImages } from '../lib/generatedDocuments';
+import { prepareChatImage } from '../lib/chatMedia';
 import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
 import {
   ClipboardCheck,
@@ -51,11 +55,11 @@ const CONDITION_CLASS: Record<string, string> = {
 };
 
 const DEFAULT_ROOMS = [
-  { name: 'Hall/Entré', condition: 'good', notes: '', photos: [] as string[] },
-  { name: 'Kök', condition: 'good', notes: '', photos: [] as string[] },
-  { name: 'Vardagsrum', condition: 'good', notes: '', photos: [] as string[] },
-  { name: 'Sovrum 1', condition: 'good', notes: '', photos: [] as string[] },
-  { name: 'Badrum', condition: 'good', notes: '', photos: [] as string[] },
+  { name: 'Hall/Entré', condition: 'good', notes: '', photos: [] as string[], reviewed: false },
+  { name: 'Kök', condition: 'good', notes: '', photos: [] as string[], reviewed: false },
+  { name: 'Vardagsrum', condition: 'good', notes: '', photos: [] as string[], reviewed: false },
+  { name: 'Sovrum 1', condition: 'good', notes: '', photos: [] as string[], reviewed: false },
+  { name: 'Badrum', condition: 'good', notes: '', photos: [] as string[], reviewed: false },
 ];
 
 interface InspectionCameraProps {
@@ -142,7 +146,7 @@ function InspectionCamera({ open, roomName, onClose, onCapture }: InspectionCame
   };
 
   return (
-    <div className="fixed inset-0 z-[100] bg-slate-950 text-white">
+    <Modal open={open} onClose={closeWithoutSaving} title={`Fota ${roomName}`} size="fullscreen"><div className="relative h-full bg-slate-950 text-white">
       <canvas ref={canvasRef} className="hidden" />
       <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-slate-950/80 px-4 py-3 backdrop-blur">
         <div>
@@ -181,7 +185,7 @@ function InspectionCamera({ open, roomName, onClose, onCapture }: InspectionCame
           </div>
         </div>
       </div>
-    </div>
+    </div></Modal>
   );
 }
 
@@ -207,12 +211,19 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
     overall_condition: 'good',
     notes: '',
     action_required: '',
-    rooms: DEFAULT_ROOMS.map(r => ({ ...r, photos: [] as string[] })),
+    rooms: DEFAULT_ROOMS.map(r => ({ ...r, photos: [] as string[], reviewed: false })),
     photo_urls: [] as string[],
   });
+  const [inspectionError, setInspectionError] = useState('');
+  const [inspectionStep,setInspectionStep]=useState('object');
+  const saveLock = useRef(false), uploadLock = useRef(false);
   const [savingInspection, setSavingInspection] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [inspectionCameraRoomIndex, setInspectionCameraRoomIndex] = useState<number | null>(null);
+  const inspectionDirty = useUnsavedChanges(inspectionForm, showInspectionModal);
+  const [confirmDiscard,setConfirmDiscard]=useState(false);
+  const closeInspection=()=>{setInspectionCameraRoomIndex(null);setShowInspectionModal(false);setConfirmDiscard(false);resetInspectionForm();};
+  const requestInspectionClose=()=>{if(savingInspection||uploadingPhoto)return;if(inspectionDirty)setConfirmDiscard(true);else closeInspection();};
   const photoInputRef = useRef<HTMLInputElement>(null);
   const roomPhotoRefs = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -262,10 +273,14 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
 
   // ─── Photo upload ─────────────────────────────────────────────────────────
   const uploadPhotos = async (files: File[], roomIndex?: number) => {
-    if (files.length === 0) return;
+    if (files.length === 0 || uploadLock.current) return;
+    uploadLock.current=true;setInspectionError('');
     setUploadingPhoto(true);
     try {
-      const uploadedUrls = await Promise.all(files.map(async (file, index) => {
+      const results = await Promise.allSettled(files.map(async (original, index) => {
+        if(original.size>10*1024*1024)throw Error('Bilden är större än 10 MB.');
+        if(!['image/jpeg','image/png','image/webp','image/gif','image/heic','image/heif','image/avif'].includes(original.type)&&!/\.(heic|heif)$/i.test(original.name))throw Error('Välj en bildfil.');
+        const file=await prepareChatImage(original);
         const ext = file.name.split('.').pop() || 'jpg';
         const path = `inspections/${Date.now()}-${index}-${Math.random().toString(36).slice(2)}.${ext}`;
         const { error } = await supabase.storage.from('vihem-inspection-photos').upload(path, file, { upsert: false });
@@ -281,6 +296,8 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
         return urlData.publicUrl;
       }));
 
+      const uploadedUrls = results.flatMap(result=>result.status==='fulfilled'?[result.value]:[]);
+      if(results.some(result=>result.status==='rejected'))setInspectionError('Vissa bilder kunde inte laddas upp. De som lyckades finns kvar. Försök igen med de saknade bilderna (högst 10 MB per bild).');
       setInspectionForm(previous => {
         if (roomIndex !== undefined) {
           const rooms = [...previous.rooms];
@@ -290,8 +307,9 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
         return { ...previous, photo_urls: [...previous.photo_urls, ...uploadedUrls] };
       });
     } catch (err) {
-      console.error('Photo upload failed:', err);
+      setInspectionError('Bilderna kunde inte laddas upp. Kontrollera anslutningen och försök igen.');
     } finally {
+      uploadLock.current=false;
       setUploadingPhoto(false);
     }
   };
@@ -382,7 +400,9 @@ Foton bifogade i systemet: ${photoCount}
 
   // ─── Inspection save ──────────────────────────────────────────────────────
   const handleSaveInspection = async (status: 'draft' | 'completed') => {
-    if (!inspectionForm.property_id || !inspectionForm.apartment_id) return;
+    if (saveLock.current) return;
+    if (!inspectionForm.property_id || !inspectionForm.apartment_id) {setInspectionError('Välj byggnad och lägenhet innan du sparar.');return;}
+    saveLock.current=true;setInspectionError('');
     setSavingInspection(true);
     try {
       const tenancy = tenancies.find((t) => t.id === inspectionForm.tenancy_id);
@@ -414,16 +434,20 @@ Foton bifogade i systemet: ${photoCount}
         savedInspection = data;
       }
 
+      if (savedInspection) setSelectedInspection(savedInspection);
       if (status === 'completed' && savedInspection) {
         const documentId = await createOrUpdateInspectionDocument(savedInspection, tenancy, property, apartment);
-        await supabase.from('vihem_apartment_inspections').update({ document_id: documentId }).eq('id', savedInspection.id);
+        setSelectedInspection({ ...savedInspection, document_id: documentId });
+        const {error:linkError}=await supabase.from('vihem_apartment_inspections').update({ document_id: documentId }).eq('id', savedInspection.id);
+        if(linkError)throw linkError;
       }
       setShowInspectionModal(false);
       resetInspectionForm();
       fetchAll();
     } catch (err) {
-      console.error(err);
+      setInspectionError(status === 'draft' ? 'Utkastet kunde inte sparas. Dina uppgifter finns kvar här. Kontrollera anslutningen och försök igen.' : 'Besiktningen kunde inte färdigställas. Dina uppgifter finns kvar här. Kontrollera anslutningen och försök igen.');
     } finally {
+      saveLock.current=false;
       setSavingInspection(false);
     }
   };
@@ -443,10 +467,13 @@ Foton bifogade i systemet: ${photoCount}
       photo_urls: [],
     });
     setSelectedInspection(null);
+    setInspectionStep('object');
+    setInspectionError('');
   };
 
   const openEditInspection = (insp: any) => {
     setSelectedInspection(insp);
+    setInspectionStep('rooms');
     setInspectionForm({
       tenancy_id: insp.tenancy_id || '',
       property_id: insp.property_id || insp.tenancy?.property_id || '',
@@ -457,20 +484,14 @@ Foton bifogade i systemet: ${photoCount}
       overall_condition: insp.overall_condition,
       notes: insp.notes || '',
       action_required: insp.action_required || '',
-      rooms: Array.isArray(insp.rooms) && insp.rooms.length > 0 ? insp.rooms.map((r: any) => ({ ...r, photos: r.photos || [] })) : DEFAULT_ROOMS.map(r => ({ ...r, photos: [] })),
+      rooms: Array.isArray(insp.rooms) && insp.rooms.length > 0 ? insp.rooms.map((r: any) => ({ ...r, photos: r.photos || [], reviewed: Boolean(r.reviewed) })) : DEFAULT_ROOMS.map(r => ({ ...r, photos: [] })),
       photo_urls: Array.isArray(insp.photo_urls) ? insp.photo_urls : [],
     });
     setShowInspectionModal(true);
   };
 
-  const updateRoomField = (index: number, field: string, value: string) => {
-    const updated = [...inspectionForm.rooms];
-    updated[index] = { ...updated[index], [field]: value };
-    setInspectionForm({ ...inspectionForm, rooms: updated });
-  };
-
   const addRoom = () => {
-    setInspectionForm({ ...inspectionForm, rooms: [...inspectionForm.rooms, { name: '', condition: 'good', notes: '', photos: [] }] });
+    setInspectionForm({ ...inspectionForm, rooms: [...inspectionForm.rooms, { name: '', condition: 'good', notes: '', photos: [], reviewed: false }] });
   };
 
   const removeRoom = (index: number) => {
@@ -601,26 +622,38 @@ Foton bifogade i systemet: ${photoCount}
       </div>
 
       {/* ═══ INSPECTION MODAL ═══════════════════════════════════════════════ */}
-      <Modal open={showInspectionModal} onClose={() => { setInspectionCameraRoomIndex(null); setShowInspectionModal(false); resetInspectionForm(); }} title={selectedInspection ? 'Redigera besiktning' : 'Ny besiktning'} size="xl">
-        <div className="space-y-5">
+      <Modal open={showInspectionModal} onClose={requestInspectionClose} title={selectedInspection ? 'Redigera besiktning' : 'Ny besiktning'} size="xl" toolbar={<nav aria-label="Besiktningssteg"><Tabs tabs={[{key:'object',label:'Objekt'},{key:'rooms',label:'Rum'},{key:'summary',label:'Sammanfattning'}]} active={inspectionStep} onChange={setInspectionStep}/></nav>} footer={<>
+          {inspectionError&&<p role="alert" className="mb-3 text-sm text-red-700">{inspectionError}</p>}
+          {uploadingPhoto&&<p role="status" className="mb-3 text-sm text-vihem-muted">Laddar upp bilder…</p>}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="secondary" disabled={savingInspection||uploadingPhoto} onClick={requestInspectionClose} size="sm" className="flex-1 sm:flex-none">Avbryt</Button>
+            <Button variant="secondary" onClick={() => handleSaveInspection('draft')} loading={savingInspection} disabled={!inspectionForm.apartment_id||uploadingPhoto} size="sm" className="flex-1 sm:flex-none">Spara utkast</Button>
+            <Button variant="primary" onClick={() => inspectionStep==='summary' ? handleSaveInspection('completed') : setInspectionStep('summary')} loading={savingInspection} disabled={!inspectionForm.apartment_id||uploadingPhoto} size="sm" className="gap-1 flex-1 sm:flex-none">
+              <CheckCircle className="w-4 h-4" />{inspectionStep==='summary' ? 'Slutför' : 'Granska'}
+            </Button>
+          </div>
+        </>}>
+        <div className="mx-auto max-w-3xl space-y-5">
+          {inspectionStep==='object'&&<>
+          <h3 className="text-base font-semibold text-vihem-ink">Objekt och tid</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Byggnad</label>
-              <select value={inspectionForm.property_id} onChange={(e) => setInspectionForm({ ...inspectionForm, property_id: e.target.value, apartment_id: '', tenancy_id: '' })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              <select aria-label="Byggnad" value={inspectionForm.property_id} onChange={(e) => setInspectionForm({ ...inspectionForm, property_id: e.target.value, apartment_id: '', tenancy_id: '' })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
                 <option value="">Välj byggnad</option>
                 {properties.map((property) => <option key={property.id} value={property.id}>{property.name} · {property.address}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Lägenhet</label>
-              <select value={inspectionForm.apartment_id} onChange={(e) => setInspectionForm({ ...inspectionForm, apartment_id: e.target.value, tenancy_id: '' })} disabled={!inspectionForm.property_id} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-50">
+              <select aria-label="Lägenhet" value={inspectionForm.apartment_id} onChange={(e) => setInspectionForm({ ...inspectionForm, apartment_id: e.target.value, tenancy_id: '' })} disabled={!inspectionForm.property_id} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-50">
                 <option value="">Välj lägenhet</option>
                 {apartments.filter(apartment => apartment.property_id === inspectionForm.property_id).map((apartment) => <option key={apartment.id} value={apartment.id}>Lgh {apartment.apartment_number}</option>)}
               </select>
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-slate-700 mb-1">Hyresgäst (valfritt)</label>
-              <select value={inspectionForm.tenancy_id} onChange={(e) => {
+              <select aria-label="Hyresgäst (valfritt)" value={inspectionForm.tenancy_id} onChange={(e) => {
                 const tenancy = tenancies.find(item => item.id === e.target.value);
                 setInspectionForm({
                   ...inspectionForm,
@@ -636,7 +669,7 @@ Foton bifogade i systemet: ${photoCount}
             </div>
             <Select label="Besiktningstyp" value={inspectionForm.inspection_type} onChange={(e) => setInspectionForm({ ...inspectionForm, inspection_type: e.target.value })} options={Object.entries(INSPECTION_TYPE_LABELS).map(([v, l]) => ({ value: v, label: l }))} />
             <Input label="Besiktningsdatum" type="date" value={inspectionForm.inspection_date} onChange={(e) => setInspectionForm({ ...inspectionForm, inspection_date: e.target.value })} />
-            <Select label="Övergripande skick" value={inspectionForm.overall_condition} onChange={(e) => setInspectionForm({ ...inspectionForm, overall_condition: e.target.value })} options={Object.entries(CONDITION_LABELS).map(([v, l]) => ({ value: v, label: l }))} />
+
           </div>
 
           <label className="flex items-center gap-2 cursor-pointer">
@@ -644,51 +677,14 @@ Foton bifogade i systemet: ${photoCount}
             <span className="text-sm text-slate-700">Hyresgäst närvarande vid besiktning</span>
           </label>
 
-          {/* Room observations */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-semibold text-slate-700">Rumsobservationer</p>
-              <button onClick={addRoom} className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
-                <Plus className="w-3.5 h-3.5" /> Lägg till rum
-              </button>
-            </div>
-            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
-              {inspectionForm.rooms.map((room, i) => (
-                <div key={i} className="border border-slate-200 rounded-lg p-3 bg-slate-50">
-                  <div className="flex items-center justify-between gap-2 mb-2 min-w-0">
-                    <input type="text" value={room.name} onChange={(e) => updateRoomField(i, 'name', e.target.value)} placeholder="Rumsnamn" className="min-w-0 text-sm font-medium text-slate-800 bg-transparent border-0 focus:outline-none flex-1" />
-                    <button onClick={() => removeRoom(i)} className="text-slate-300 hover:text-red-400 ml-2 text-xs">✕</button>
-                  </div>
-                  <div className="flex flex-col gap-2 mb-2 sm:flex-row">
-                    <select value={room.condition} onChange={(e) => updateRoomField(i, 'condition', e.target.value)} className="w-full sm:w-auto text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
-                      {Object.entries(CONDITION_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                    </select>
-                    <input type="text" value={room.notes} onChange={(e) => updateRoomField(i, 'notes', e.target.value)} placeholder="Noteringar..." className="min-w-0 flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                  </div>
-                  {/* Room photos */}
-                  <div className="flex flex-wrap gap-2 mt-1">
-                    {(room.photos || []).map((url: string, pi: number) => (
-                      <div key={pi} className="relative group">
-                        <img src={url} alt="" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                        <button onClick={() => removePhoto(url, i)} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
-                      </div>
-                    ))}
-                    <button type="button" onClick={() => setInspectionCameraRoomIndex(i)} className="h-16 w-16 rounded-lg border-2 border-blue-200 bg-blue-50 flex flex-col items-center justify-center hover:border-blue-400 hover:bg-blue-100 transition-colors">
-                      <Camera className="w-4 h-4 text-blue-600" />
-                      <span className="text-[10px] text-center leading-tight text-blue-700 mt-0.5">Fota<br />flera</span>
-                    </button>
-                    <label className="w-16 h-16 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
-                      <Image className="w-4 h-4 text-slate-400" />
-                      <span className="text-[10px] text-center leading-tight text-slate-400 mt-0.5">Välj<br />bilder</span>
-                      <input ref={el => { roomPhotoRefs.current[i] = el; }} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handlePhotoFile(e, i)} />
-                    </label>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-2">Fota flera i samma kamerafönster eller välj flera från bildbiblioteket.</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
+          <div className="flex justify-end"><Button onClick={()=>setInspectionStep('rooms')}>Till rummen</Button></div>
+          </>}
+          {inspectionStep==='rooms'&&<>
+          <InspectionRooms rooms={inspectionForm.rooms} change={(index,patch)=>setInspectionForm(previous=>({...previous,rooms:previous.rooms.map((room,i)=>i===index?{...room,...patch}:room)}))} add={addRoom} remove={removeRoom} camera={setInspectionCameraRoomIndex} upload={(files,index)=>void uploadPhotos(files,index)} removePhoto={removePhoto} busy={uploadingPhoto||savingInspection}/>
+          <div className="flex justify-end"><Button variant="secondary" onClick={()=>setInspectionStep('summary')}>Visa sammanfattning</Button></div>
+          </>}
+          {inspectionStep==='summary'&&<>
+            <Select label="Övergripande skick" value={inspectionForm.overall_condition} onChange={(e) => setInspectionForm({ ...inspectionForm, overall_condition: e.target.value })} options={Object.entries(CONDITION_LABELS).map(([v, l]) => ({ value: v, label: l }))} />
           {/* General photos */}
           <div>
             <p className="text-sm font-semibold text-slate-700 mb-2">Allmänna bilder</p>
@@ -696,33 +692,30 @@ Foton bifogade i systemet: ${photoCount}
               {inspectionForm.photo_urls.map((url, pi) => (
                 <div key={pi} className="relative group">
                   <img src={url} alt="" className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
-                  <button onClick={() => removePhoto(url)} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                  <button onClick={() => removePhoto(url)} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-8 h-8 text-xs flex items-center justify-center transition-opacity">✕</button>
                 </div>
               ))}
               <label className="w-20 h-20 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
                 {uploadingPhoto ? <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" /> : <>
                   <Camera className="w-5 h-5 text-slate-400" />
-                  <span className="text-[10px] text-center leading-tight text-slate-400 mt-1">Lägg till<br />bilder</span>
+                  <span className="text-xs text-center leading-tight text-slate-400 mt-1">Lägg till<br />bilder</span>
                 </>}
                 <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handlePhotoFile(e)} />
               </label>
             </div>
-            <p className="text-xs text-slate-400 mt-1">Välj flera bilder samtidigt. Bilderna sparas automatiskt när de laddats upp.</p>
+            <p className="text-xs text-slate-400 mt-1">Välj flera bilder samtidigt. Spara utkastet för att behålla bilderna i besiktningen.</p>
           </div>
 
           <Textarea label="Allmänna noteringar" value={inspectionForm.notes} onChange={(e) => setInspectionForm({ ...inspectionForm, notes: e.target.value })} placeholder="Övergripande noteringar om lägenheten..." rows={3} />
           <Textarea label="Åtgärder krävs" value={inspectionForm.action_required} onChange={(e) => setInspectionForm({ ...inspectionForm, action_required: e.target.value })} placeholder="Beskriv åtgärder som behöver genomföras..." rows={2} />
 
-          <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:justify-end">
-            <Button variant="secondary" onClick={() => { setShowInspectionModal(false); resetInspectionForm(); }} className="w-full sm:w-auto">Avbryt</Button>
-            <Button variant="secondary" onClick={() => handleSaveInspection('draft')} loading={savingInspection} disabled={!inspectionForm.apartment_id} className="w-full sm:w-auto">Spara utkast</Button>
-            <Button variant="primary" onClick={() => handleSaveInspection('completed')} loading={savingInspection} disabled={!inspectionForm.apartment_id} className="gap-1 w-full sm:w-auto">
-              <CheckCircle className="w-4 h-4" /> Slutför besiktning
-            </Button>
-          </div>
+          <section className="rounded-xl bg-vihem-canvas p-4" aria-label="Sammanfattning"><h3 className="text-base font-semibold text-vihem-ink">Sammanfattning</h3><p className="mt-2 text-sm text-vihem-muted">{inspectionForm.rooms.filter(r=>r.reviewed).length} av {inspectionForm.rooms.length} rum markerade som genomgångna · {inspectionForm.rooms.filter(r=>r.condition==='poor').length} med dåligt skick · {inspectionForm.photo_urls.length+inspectionForm.rooms.reduce((n,r)=>n+r.photos.length,0)} bilder</p><p className="mt-2 text-sm text-vihem-muted">Spara ett utkast för att fortsätta senare. Slutför skapar protokollet enligt det befintliga besiktningsflödet.</p></section>
+
+          </>}
         </div>
       </Modal>
 
+      <Modal open={confirmDiscard} onClose={()=>setConfirmDiscard(false)} title="Lämna utan att spara?" size="sm"><p className="text-sm text-vihem-muted">Du har ändrat besiktningen. Spara ett utkast för att kunna fortsätta senare.</p><div className="mt-5 flex flex-wrap justify-end gap-2"><Button variant="secondary" onClick={()=>setConfirmDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={closeInspection}>Lämna utan att spara</Button></div></Modal>
       <InspectionCamera
         open={inspectionCameraRoomIndex !== null}
         roomName={inspectionCameraRoomIndex === null ? 'rum' : inspectionForm.rooms[inspectionCameraRoomIndex]?.name || 'rum'}

@@ -47,11 +47,15 @@ function restoreBackground() {
 export function DialogSurface({
   title,
   children,
+  footer,
+  toolbar,
   onClose,
   size,
 }: {
   title: string;
   children: ReactNode;
+  footer?: ReactNode;
+  toolbar?: ReactNode;
   onClose: () => void;
   size: "sm" | "md" | "lg" | "xl" | "xxl" | "fullscreen";
 }) {
@@ -162,7 +166,9 @@ export function DialogSurface({
             <X size={20} />
           </button>
         </header>
+        {toolbar && <div className="vihem-dialog-toolbar">{toolbar}</div>}
         <div className="vihem-dialog-body">{children}</div>
+        {footer && <footer className="vihem-dialog-footer">{footer}</footer>}
       </div>
     </div>,
     document.body,

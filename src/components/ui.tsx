@@ -159,12 +159,14 @@ interface ModalProps {
   title: string;
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'xxl' | 'fullscreen';
+  footer?: React.ReactNode;
+  toolbar?: React.ReactNode;
 }
 
-export function Modal({ open, onClose, title, children, size = 'md' }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, toolbar, size = 'md' }: ModalProps) {
   useScrollLock(open);
   if (!open) return null;
-  return <DialogSurface title={title} onClose={onClose} size={size}>{children}</DialogSurface>;
+  return <DialogSurface title={title} onClose={onClose} size={size} footer={footer} toolbar={toolbar}>{children}</DialogSurface>;
 }
 
 /** Samma som Modal men med smalare standardbredd -- används för snabbåtgärder (datum, ansvarig, status). */

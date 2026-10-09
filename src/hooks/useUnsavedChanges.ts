@@ -12,13 +12,16 @@ export function useUnsavedChanges(value: unknown, active: boolean) {
   const dirty = active && baseline !== serialized;
   useEffect(() => {
     if (!dirty) return;
-    const unregister=registerUnsavedForm();
+    const unregister = registerUnsavedForm();
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
-    return () => {unregister();window.removeEventListener("beforeunload", warn);};
+    return () => {
+      unregister();
+      window.removeEventListener("beforeunload", warn);
+    };
   }, [dirty]);
   return dirty;
 }
