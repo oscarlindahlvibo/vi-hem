@@ -19,9 +19,10 @@ import { useToast } from '../components/toast';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { InspectionRooms } from '../components/inspections/InspectionRooms';
 import { formatDate } from '../lib/utils';
-import { buildGeneratedDocumentWithImages } from '../lib/generatedDocuments';
-import { prepareChatImage } from '../lib/chatMedia';
-import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
+import { archiveInspectionFile, prepareInspectionPhoto, inspectionFile } from '../lib/inspections/archive';
+import { storeQueuedPhoto, queuedPhotos, removeQueuedPhoto, inspectionFormKey as stableInspectionFormKey } from '../lib/inspections/uploadQueue';
+import { InspectionArchive } from '../components/inspections/InspectionArchive';
+import { InspectionImage } from '../components/inspections/InspectionImage';
 import {
   ClipboardCheck,
   Plus,
@@ -208,20 +209,23 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
     property_id: '',
     apartment_id: '',
     inspection_type: 'routine',
-    inspection_date: new Date().toISOString().split('T')[0],
+    inspection_date: new Date().toLocaleDateString('sv-SE'),
     tenant_present: false,
     overall_condition: 'good',
     notes: '',
     action_required: '',
-    rooms: DEFAULT_ROOMS.map(r => ({ ...r, photos: [] as string[], reviewed: false })),
+    rooms: DEFAULT_ROOMS.map(r => ({ ...r, id: crypto.randomUUID() as string, photos: [] as string[], reviewed: false })),
     photo_urls: [] as string[],
   });
+  const inspectionFormKey = stableInspectionFormKey(inspectionForm);
+  const [archiveRevision, setArchiveRevision] = useState(0);
   const [inspectionError, setInspectionError] = useState('');
   const [loadError, setLoadError] = useState('');
   const [inspectionStep,setInspectionStep]=useState('object');
   const saveLock = useRef(false), uploadLock = useRef(false);
   const inspectionSaveId = useRef(crypto.randomUUID());
-  const inspectionDocumentId = useRef(crypto.randomUUID());
+  const protocolAttempt = useRef<{ id: string; file: File; form: string } | null>(null);
+  const [pendingPhotos, setPendingPhotos] = useState<{id:string;file:File;room:number|undefined;error:boolean;progress:number}[]>([]);
   const [savingInspection, setSavingInspection] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [inspectionCameraRoomIndex, setInspectionCameraRoomIndex] = useState<number | null>(null);
@@ -234,6 +238,18 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
 
 
   useEffect(() => { fetchAll(); }, []);
+  useEffect(() => {
+    if (!showInspectionModal || !selectedInspection?.id || !user?.id || uploadLock.current) return;
+    let active = true;
+    queuedPhotos(user.id, selectedInspection.id).then(items => {
+      if (active) {
+        const protocol = items.find(item => item.roomKey === 'protocol' && item.form === inspectionFormKey);
+        if (protocol) protocolAttempt.current = { id: protocol.id, file: protocol.file, form: protocol.form! };
+        setPendingPhotos(items.filter(item => item.roomKey !== 'protocol').map(item => ({ id: item.id, file: item.file, room: item.roomKey === 'general' ? undefined : inspectionForm.rooms.findIndex(room => room.id === item.roomKey), error: true, progress: 0 })));
+      }
+    }).catch(() => { if (active) setInspectionError('Lokala väntande bilder kunde inte läsas.'); });
+    return () => { active = false; };
+  }, [showInspectionModal, selectedInspection?.id, user?.id, inspectionForm.rooms, inspectionFormKey]);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -281,47 +297,47 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
     return `${property?.address || property?.name || ''} ${apartment?.apartment_number ? `Lgh ${apartment.apartment_number}` : ''}`.trim();
   };
 
-  // ─── Photo upload ─────────────────────────────────────────────────────────
+  const saveDraft = async () => {
+    if (!inspectionForm.property_id || !inspectionForm.apartment_id) throw Error('Välj byggnad och lägenhet först.');
+    const { data, error } = await supabase.rpc('vihem_save_inspection', {
+      p_id: selectedInspection?.id || inspectionSaveId.current,
+      p_form: { ...inspectionForm, tenancy_id: inspectionForm.tenancy_id || null, inspector_id: user!.id, status: 'draft' },
+      p_document: null, p_document_id: null,
+    });
+    if (error) throw error;
+    setSelectedInspection(data); return data;
+  };
   const uploadPhotos = async (files: File[], roomIndex?: number) => {
-    if (files.length === 0 || uploadLock.current) return;
-    uploadLock.current=true;setInspectionError('');
-    setUploadingPhoto(true);
+    if (!files.length || uploadLock.current) return;
+    uploadLock.current = true; setUploadingPhoto(true); setInspectionError('');
     try {
-      const results = await Promise.allSettled(files.map(async (original, index) => {
-        if(original.size>10*1024*1024)throw Error('Bilden är större än 10 MB.');
-        if(!['image/jpeg','image/png','image/webp','image/gif','image/heic','image/heif','image/avif'].includes(original.type)&&!/\.(heic|heif)$/i.test(original.name))throw Error('Välj en bildfil.');
-        const file=await prepareChatImage(original);
-        const ext = file.name.split('.').pop() || 'jpg';
-        const path = `inspections/${Date.now()}-${index}-${Math.random().toString(36).slice(2)}.${ext}`;
-        const { error } = await supabase.storage.from('vihem-inspection-photos').upload(path, file, { upsert: false });
-        if (error) throw error;
-        const { data: urlData } = supabase.storage.from('vihem-inspection-photos').getPublicUrl(path);
-        if (user?.organisation_id) {
-          try {
-            await archiveFileInGoogleDrive({ file, folder: 'Besiktningar/Foton', organisation_id: user.organisation_id, source_type: 'inspection_photo', source_key: path, created_by: user.id });
-          } catch (driveError) {
-            console.warn('Kunde inte arkivera besiktningsfotot i Google Drive:', driveError);
-          }
-        }
-        return urlData.publicUrl;
-      }));
-
-      const uploadedUrls = results.flatMap(result=>result.status==='fulfilled'?[result.value]:[]);
-      if(results.some(result=>result.status==='rejected'))setInspectionError('Vissa bilder kunde inte laddas upp. De som lyckades finns kvar. Försök igen med de saknade bilderna (högst 10 MB per bild).');
-      setInspectionForm(previous => {
-        if (roomIndex !== undefined) {
-          const rooms = [...previous.rooms];
-          rooms[roomIndex] = { ...rooms[roomIndex], photos: [...(rooms[roomIndex].photos || []), ...uploadedUrls] };
-          return { ...previous, rooms };
-        }
-        return { ...previous, photo_urls: [...previous.photo_urls, ...uploadedUrls] };
+      const saved = await saveDraft();
+      for (const original of files) {
+        const file = await prepareInspectionPhoto(original), id = crypto.randomUUID();
+        await storeQueuedPhoto({ id, file, owner: user!.id, inspection: saved.id, roomKey: roomIndex === undefined ? 'general' : inspectionForm.rooms[roomIndex].id, created: Date.now() });
+        setPendingPhotos(previous => [...previous, { id, file, room: roomIndex, error: false, progress: 0 }]);
+        await uploadOnePhoto(id, file, roomIndex, saved.id);
+      }
+    } catch (error) { setInspectionError(error instanceof Error ? error.message : 'Bilderna kunde inte sparas. Utkastet finns kvar.'); }
+    finally { uploadLock.current = false; setUploadingPhoto(false); }
+  };
+  const uploadOnePhoto = async (id: string, file: File, room: number | undefined, inspection: string) => {
+    try {
+      const reference = await archiveInspectionFile(id, inspection, 'photo', room === undefined ? 'general' : inspectionForm.rooms[room].id, file,
+        progress => setPendingPhotos(previous => previous.map(item => item.id === id ? { ...item, progress, error: false } : item)));
+      setInspectionForm(previous => room === undefined ? { ...previous, photo_urls: [...new Set([...previous.photo_urls, reference])] } : {
+        ...previous, rooms: previous.rooms.map((value, i) => i === room ? { ...value, photos: [...new Set([...value.photos, reference])] } : value),
       });
-    } catch (err) {
-      setInspectionError('Bilderna kunde inte laddas upp. Kontrollera anslutningen och försök igen.');
-    } finally {
-      uploadLock.current=false;
-      setUploadingPhoto(false);
-    }
+      await removeQueuedPhoto(id);
+      setPendingPhotos(previous => previous.filter(item => item.id !== id));
+    } catch { setPendingPhotos(previous => previous.map(item => item.id === id ? { ...item, error: true } : item)); }
+  };
+  const retryPhoto = async (item: typeof pendingPhotos[number]) => {
+    if (item.room !== undefined && item.room < 0) { setInspectionError('Bildens rum saknas. Återställ rummet innan du försöker igen.'); return; }
+    if (uploadLock.current) return;
+    uploadLock.current = true; setUploadingPhoto(true);
+    try { await uploadOnePhoto(item.id, item.file, item.room, selectedInspection?.id || inspectionSaveId.current); }
+    finally { uploadLock.current = false; setUploadingPhoto(false); }
   };
 
   const handlePhotoFile = async (e: React.ChangeEvent<HTMLInputElement>, roomIndex?: number) => {
@@ -341,126 +357,56 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
     }
   };
 
-  const buildInspectionDocumentBody = (inspection: any, tenancy: any, property: any, apartment: any) => {
-    const tenant = tenancy?.tenant as any;
-    const apt = apartment || tenancy?.apartment as any;
-    const prop = property || tenancy?.property as any;
-    const rooms = Array.isArray(inspection.rooms) ? inspection.rooms : [];
-    const roomRows = rooms.map((room: any) =>
-      `${room.name || 'Rum'}: ${CONDITION_LABELS[room.condition] || room.condition || '-'}${room.notes ? ` - ${room.notes}` : ''}`
-    ).join('\n');
-    const photoCount = (inspection.photo_urls?.length || 0) + rooms.reduce((sum: number, room: any) => sum + (room.photos?.length || 0), 0);
-
-    return `BESIKTNINGSPROTOKOLL
-
-Hyresgast: ${tenant?.name || '-'}
-Fastighet: ${prop?.address || '-'}${prop?.city ? `, ${prop.city}` : ''}
-Lagenhet: ${apt?.apartment_number || '-'}
-Typ: ${INSPECTION_TYPE_LABELS[inspection.inspection_type] || inspection.inspection_type}
-Datum: ${formatDate(inspection.inspection_date)}
-Hyresgast narvarande: ${inspection.tenant_present ? 'Ja' : 'Nej'}
-Overgripande skick: ${CONDITION_LABELS[inspection.overall_condition] || inspection.overall_condition}
-Besiktad av: ${user?.name || ''}
-
-RUM OCH SKICK
-${roomRows || 'Inga rum registrerade.'}
-
-ANTECKNINGAR
-${inspection.notes || 'Inga anteckningar.'}
-
-ATGARD KRAVS
-${inspection.action_required || 'Ingen atgard registrerad.'}
-
-Foton bifogade i systemet: ${photoCount}
-`;
-  };
-
-  const buildInspectionDocument = async (inspection: any, tenancy: any, property: any, apartment: any) => {
-    const tenant = tenancy?.tenant as any;
-    const apt = apartment || tenancy?.apartment as any;
-    const prop = property || tenancy?.property as any;
-    const title = `${INSPECTION_TYPE_LABELS[inspection.inspection_type] || 'Besiktning'} - ${tenant?.name || 'Hyresgast'}`;
-    const photoUrls = [
-      ...(Array.isArray(inspection.photo_urls) ? inspection.photo_urls : []),
-      ...(Array.isArray(inspection.rooms) ? inspection.rooms.flatMap((room: any) => Array.isArray(room.photos) ? room.photos : []) : []),
-    ];
-    const documentPayload = await buildGeneratedDocumentWithImages({
-      title,
-      fileName: `besiktning-${apt?.apartment_number || inspection.id}.pdf`,
-      documentType: 'inspection',
-      description: `Besiktningsprotokoll for ${prop?.address || 'fastighet'}${apt?.apartment_number ? `, lgh ${apt.apartment_number}` : ''}.`,
-      body: buildInspectionDocumentBody(inspection, tenancy, prop, apt),
-      organisationId: user?.organisation_id,
-      tenantId: tenant?.id,
-      propertyId: inspection.property_id || tenancy?.property_id,
-      apartmentId: inspection.apartment_id || tenancy?.apartment_id,
-      createdBy: user?.id,
-    }, photoUrls);
-
-    return documentPayload;
-  };
-
-  // ─── Inspection save ──────────────────────────────────────────────────────
   const handleSaveInspection = async (status: 'draft' | 'completed') => {
-    if (saveLock.current) return;
-    if (!inspectionForm.property_id || !inspectionForm.apartment_id) {setInspectionError('Välj byggnad och lägenhet innan du sparar.');return;}
-    saveLock.current=true;setInspectionError('');
-    setSavingInspection(true);
+    if (saveLock.current || uploadLock.current) return;
+    if (status === 'completed' && pendingPhotos.length) { setInspectionError('Försök igen med väntande bilder innan protokollet färdigställs.'); return; }
+    saveLock.current = true; setSavingInspection(true); setInspectionError('');
     try {
-      const tenancy = tenancies.find((t) => t.id === inspectionForm.tenancy_id);
-      const property = properties.find((item) => item.id === inspectionForm.property_id);
-      const apartment = apartments.find((item) => item.id === inspectionForm.apartment_id);
-      const payload = {
-        apartment_id: inspectionForm.apartment_id,
-        property_id: inspectionForm.property_id,
-        tenancy_id: inspectionForm.tenancy_id || null,
-        inspection_type: inspectionForm.inspection_type,
-        inspection_date: inspectionForm.inspection_date,
-        inspector_id: user!.id,
-        tenant_present: inspectionForm.tenant_present,
-        overall_condition: inspectionForm.overall_condition,
-        rooms: inspectionForm.rooms,
-        notes: inspectionForm.notes,
-        action_required: inspectionForm.action_required,
-        photo_urls: inspectionForm.photo_urls,
-        status,
-      };
-      const id = selectedInspection?.id || inspectionSaveId.current;
-      const documentId = selectedInspection?.document_id || inspectionDocumentId.current;
-      const document = status === 'completed'
-        ? await buildInspectionDocument({ ...selectedInspection, ...payload, id }, tenancy, property, apartment)
-        : null;
-      const { data: savedInspection, error } = await supabase.rpc('vihem_save_inspection', {
-        p_id: id, p_form: payload, p_document: document, p_document_id: status === 'completed' ? documentId : null,
-      });
-      if (error) throw error;
-      setSelectedInspection(savedInspection);
-      setShowInspectionModal(false);
-      resetInspectionForm();
-      toast.show(status === 'draft' ? 'Besiktningsutkastet är sparat' : 'Besiktningen och protokollet är sparade');
-      fetchAll();
-    } catch (err) {
-      setInspectionError(status === 'draft' ? 'Utkastet kunde inte sparas. Dina uppgifter finns kvar här. Kontrollera anslutningen och försök igen.' : 'Besiktningen kunde inte färdigställas. Dina uppgifter finns kvar här. Kontrollera anslutningen och försök igen.');
-    } finally {
-      saveLock.current=false;
-      setSavingInspection(false);
-    }
+      const saved = await saveDraft();
+      if (status === 'completed') {
+        const formKey = stableInspectionFormKey(inspectionForm);
+        if (!protocolAttempt.current || protocolAttempt.current.form !== formKey) {
+          const { inspectionProtocol } = await import('../lib/inspections/protocol');
+          const property = properties.find(item => item.id === inspectionForm.property_id);
+          const apartment = apartments.find(item => item.id === inspectionForm.apartment_id);
+          const tenancy = tenancies.find(item => item.id === inspectionForm.tenancy_id);
+          const id = crypto.randomUUID();
+          const bytes = await inspectionProtocol({
+            id: saved.id, version: id, organisation: 'VI-HEM', address: property?.address || property?.name || '', apartment: apartment?.apartment_number || '',
+            type: INSPECTION_TYPE_LABELS[inspectionForm.inspection_type] || inspectionForm.inspection_type, date: inspectionForm.inspection_date,
+            inspector: user!.name, tenant: (tenancy?.tenant as any)?.name, tenantPresent: inspectionForm.tenant_present,
+            condition: CONDITION_LABELS[inspectionForm.overall_condition], notes: inspectionForm.notes, action: inspectionForm.action_required,
+            rooms: inspectionForm.rooms.map(room => ({ ...room, condition: CONDITION_LABELS[room.condition] })), photos: inspectionForm.photo_urls,
+          }, async reference => new Uint8Array(await (await inspectionFile(reference)).arrayBuffer()));
+          protocolAttempt.current = { id, file: new File([bytes.slice().buffer], `besiktningsprotokoll-${saved.id.slice(0, 8)}.pdf`, { type: 'application/pdf' }), form: formKey };
+          await storeQueuedPhoto({ id, file: protocolAttempt.current.file, owner: user!.id, inspection: saved.id, roomKey: 'protocol', created: Date.now(), form: formKey });
+        }
+        await archiveInspectionFile(protocolAttempt.current.id, saved.id, 'protocol', 'general', protocolAttempt.current.file);
+        await removeQueuedPhoto(protocolAttempt.current.id);
+      }
+      setShowInspectionModal(false); resetInspectionForm();
+      toast.show(status === 'draft' ? 'Besiktningsutkastet är sparat' : 'Protokollet är verifierat och sparat i Google Drive');
+      void fetchAll();
+    } catch (error) {
+      setInspectionError(error instanceof Error && (error.message.startsWith('Protokollet') || error.message.startsWith('Google Drive')) ? error.message : 'Kunde inte färdigställa eller spara. Utkastets uppgifter finns kvar. Kontrollera anslutningen och försök igen.');
+    } finally { saveLock.current = false; setSavingInspection(false); setArchiveRevision(value => value + 1); }
   };
 
   const resetInspectionForm = () => {
     inspectionSaveId.current = crypto.randomUUID();
-    inspectionDocumentId.current = crypto.randomUUID();
+    protocolAttempt.current = null;
+    setPendingPhotos([]);
     setInspectionForm({
       tenancy_id: '',
       property_id: '',
       apartment_id: '',
       inspection_type: 'routine',
-      inspection_date: new Date().toISOString().split('T')[0],
+      inspection_date: new Date().toLocaleDateString('sv-SE'),
       tenant_present: false,
       overall_condition: 'good',
       notes: '',
       action_required: '',
-      rooms: DEFAULT_ROOMS.map(r => ({ ...r, photos: [] })),
+      rooms: DEFAULT_ROOMS.map(r => ({ ...r, id: crypto.randomUUID() as string, photos: [] })),
       photo_urls: [],
     });
     setSelectedInspection(null);
@@ -481,14 +427,14 @@ Foton bifogade i systemet: ${photoCount}
       overall_condition: insp.overall_condition,
       notes: insp.notes || '',
       action_required: insp.action_required || '',
-      rooms: Array.isArray(insp.rooms) && insp.rooms.length > 0 ? insp.rooms.map((r: any) => ({ ...r, photos: r.photos || [], reviewed: Boolean(r.reviewed) })) : DEFAULT_ROOMS.map(r => ({ ...r, photos: [] })),
+      rooms: Array.isArray(insp.rooms) && insp.rooms.length > 0 ? insp.rooms.map((r: any) => ({ ...r, id: crypto.randomUUID() as string, photos: r.photos || [], reviewed: Boolean(r.reviewed) })) : DEFAULT_ROOMS.map(r => ({ ...r, id: crypto.randomUUID() as string, photos: [] })),
       photo_urls: Array.isArray(insp.photo_urls) ? insp.photo_urls : [],
     });
     setShowInspectionModal(true);
   };
 
   const addRoom = () => {
-    setInspectionForm({ ...inspectionForm, rooms: [...inspectionForm.rooms, { name: '', condition: 'good', notes: '', photos: [], reviewed: false }] });
+    setInspectionForm({ ...inspectionForm, rooms: [...inspectionForm.rooms, { id: crypto.randomUUID(), name: '', condition: 'good', notes: '', photos: [], reviewed: false }] });
   };
 
   const removeRoom = (index: number) => {
@@ -660,7 +606,8 @@ Foton bifogade i systemet: ${photoCount}
           <div className="flex justify-end"><Button onClick={()=>setInspectionStep('rooms')}>Till rummen</Button></div>
           </>}
           {inspectionStep==='rooms'&&<>
-          <InspectionRooms rooms={inspectionForm.rooms} change={(index,patch)=>setInspectionForm(previous=>({...previous,rooms:previous.rooms.map((room,i)=>i===index?{...room,...patch}:room)}))} add={addRoom} remove={removeRoom} camera={setInspectionCameraRoomIndex} upload={(files,index)=>void uploadPhotos(files,index)} removePhoto={removePhoto} busy={uploadingPhoto||savingInspection}/>
+          {pendingPhotos.length > 0 && <section aria-label="Bildarkivering" className="space-y-2 rounded-xl border border-vihem-line p-4"><h3 className="text-sm font-semibold">Bilder som väntar på arkivering</h3><p className="text-sm text-vihem-muted">Bilderna behålls lokalt i denna webbläsare för samma konto tills arkiveringen lyckas. 100 % överföring betyder att arkivering fortfarande kontrolleras.</p>{pendingPhotos.map(item => <div key={item.id} className="flex items-center justify-between gap-3 text-sm"><span className="truncate">{item.file.name} · {item.error ? 'Uppladdningen misslyckades' : item.progress < 100 ? `Laddar upp ${item.progress} %` : 'Verifierar Google Drive…'}</span>{item.error && <Button size="sm" variant="secondary" disabled={uploadingPhoto} onClick={() => void retryPhoto(item)}>Försök igen</Button>}</div>)}</section>}
+          <InspectionRooms rooms={inspectionForm.rooms} change={(index,patch)=>setInspectionForm(previous=>({...previous,rooms:previous.rooms.map((room,i)=>i===index?{...room,...patch}:room)}))} add={addRoom} remove={removeRoom} camera={setInspectionCameraRoomIndex} upload={(files,index)=>void uploadPhotos(files,index)} removePhoto={removePhoto} busy={uploadingPhoto||savingInspection||pendingPhotos.length>0}/>
           <div className="flex justify-end"><Button variant="secondary" onClick={()=>setInspectionStep('summary')}>Visa sammanfattning</Button></div>
           </>}
           {inspectionStep==='summary'&&<>
@@ -676,7 +623,7 @@ Foton bifogade i systemet: ${photoCount}
             <div className="flex flex-wrap gap-2">
               {inspectionForm.photo_urls.map((url, pi) => (
                 <div key={pi} className="relative group">
-                  <a href={url} target="_blank" rel="noreferrer" aria-label={`Öppna allmän bild ${pi+1}`}><img src={url} alt={`Allmän bild ${pi+1}`} className="w-24 h-24 object-cover rounded-lg border border-slate-200" /></a>
+                  <InspectionImage reference={url} label={`Allmän bild ${pi+1}`} />
                   <button type="button" aria-label={`Ta bort allmän bild ${pi+1}`} onClick={() => removePhoto(url)} className="vihem-icon-button absolute -top-2 -right-2 rounded-full bg-white text-vihem-danger shadow-sm"><X className="h-4 w-4" /></button>
                 </div>
               ))}
@@ -691,10 +638,11 @@ Foton bifogade i systemet: ${photoCount}
           <Textarea label="Allmänna noteringar" value={inspectionForm.notes} onChange={(e) => setInspectionForm({ ...inspectionForm, notes: e.target.value })} placeholder="Övergripande noteringar om lägenheten..." rows={3} />
           <Textarea label="Åtgärder krävs" value={inspectionForm.action_required} onChange={(e) => setInspectionForm({ ...inspectionForm, action_required: e.target.value })} placeholder="Beskriv åtgärder som behöver genomföras..." rows={2} />
 
-          <section className="rounded-xl bg-vihem-canvas p-4" aria-label="Sammanfattning"><h3 className="text-base font-semibold text-vihem-ink">Sammanfattning</h3><p className="mt-2 text-sm text-vihem-muted">{inspectionForm.rooms.filter(r=>r.reviewed).length} av {inspectionForm.rooms.length} rum markerade som genomgångna · {inspectionForm.rooms.filter(r=>r.condition==='poor').length} med dåligt skick · {inspectionForm.photo_urls.length+inspectionForm.rooms.reduce((n,r)=>n+r.photos.length,0)} bilder</p><p className="mt-2 text-sm text-vihem-muted">Spara ett utkast för att fortsätta senare. Slutför skapar protokollet enligt det befintliga besiktningsflödet.</p></section>
+          <section className="rounded-xl bg-vihem-canvas p-4" aria-label="Sammanfattning"><h3 className="text-base font-semibold text-vihem-ink">Sammanfattning</h3><p className="mt-2 text-sm text-vihem-muted">{inspectionForm.rooms.filter(r=>r.reviewed).length} av {inspectionForm.rooms.length} rum markerade som genomgångna · {inspectionForm.rooms.filter(r=>r.condition==='poor').length} med dåligt skick · {inspectionForm.photo_urls.length+inspectionForm.rooms.reduce((n,r)=>n+r.photos.length,0)} bilder</p><p className="mt-2 text-sm text-vihem-muted">Spara ett utkast för att fortsätta senare. Slutför skapar en ny PDF-version. Besiktningen färdigställs först när protokollet har verifierats i Google Drive.</p></section>
 
           </>}
         </fieldset>
+        {selectedInspection?.id && <div className="mx-auto mt-5 max-w-3xl"><InspectionArchive key={`${selectedInspection.id}:${archiveRevision}`} inspection={selectedInspection.id} canRetry={true}/></div>}
       </Modal>
 
       <Modal open={confirmDiscard} onClose={()=>setConfirmDiscard(false)} title="Lämna utan att spara?" size="sm"><p className="text-sm text-vihem-muted">Du har ändrat besiktningen. Spara ett utkast för att kunna fortsätta senare.</p><div className="mt-5 flex flex-wrap justify-end gap-2"><Button variant="secondary" onClick={()=>setConfirmDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={closeInspection}>Lämna utan att spara</Button></div></Modal>

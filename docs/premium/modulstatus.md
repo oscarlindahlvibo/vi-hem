@@ -68,3 +68,7 @@ Ingen rad är modul-Klar. Gemensamma kontroller påverkar även orörda vyer; de
 | src/pages/YearPlanningPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 
 Aktuell maskininventering finns i current/inventory.md. Kör `node scripts/premium/inventory.mjs` för aktuell JSON med kontrollernas fil/rad; JSON är genererad och inte versionerad i current/. Baslinje-JSON från projektstarten bevaras i inventory.json.
+
+## 2026-10-10 – besiktningsarkiv
+
+Besiktningar har nu första Drive-jobbflödet, lokal filkö, filarkiv/versioner och lazy PDF-generator. QA JWT/DB, mockad Google-transport och verklig Edge-felväg provade. Browser sparning/återöppning och konfigurationsfel samt fem viewports dokumenterade. Riktig Drive, browserfoto (extension-behörighet), fysisk mobil, full migrering/gallring och samtidig redigering återstår. DocumentsPage får säker inspection-jobb-hämtning; full dokumentmodul-UX/roller ej genomgångna. Ingen modul ändras till Klar. Se inspection-drive-verification.md.

@@ -8,8 +8,10 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button, Input, Textarea, Modal } from "../ui";
+import { InspectionImage } from "./InspectionImage";
 import { useState } from "react";
 export type InspectionRoom = {
+  id: string;
   name: string;
   condition: string;
   notes: string;
@@ -174,18 +176,7 @@ export function InspectionRooms({
                 <div className="flex flex-wrap gap-3">
                   {room.photos.map((url, pi) => (
                     <div key={url + pi} className="relative">
-                      <a
-                        href={url}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={`Öppna bild ${pi + 1} för ${room.name}`}
-                      >
-                        <img
-                          src={url}
-                          alt={`${room.name}, bild ${pi + 1}`}
-                          className="h-24 w-24 rounded-lg object-cover"
-                        />
-                      </a>
+                      <InspectionImage reference={url} label={`${room.name}, bild ${pi+1}`} />
                       <button
                         type="button"
                         aria-label={`Ta bort bild ${pi + 1} för ${room.name}`}

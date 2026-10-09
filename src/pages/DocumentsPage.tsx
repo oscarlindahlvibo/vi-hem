@@ -1,3 +1,4 @@
+import { inspectionFile, driveReference } from '../lib/inspections/archive';
 import React, { useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { supabase } from '../lib/supabase';
@@ -286,6 +287,18 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
 
   const downloadDocument = async (doc: Document) => {
     try {
+      if (doc.document_type === 'inspection') {
+        const { data: archived, error } = await supabase.from('vihem_inspection_file_jobs').select('id').eq('document_id', doc.id).eq('state', 'verified').maybeSingle();
+        // Older deployments can still open legacy documents before the archive migration exists.
+        if (error && (doc.storage_provider === 'google_drive')) throw error;
+        if (archived) {
+          const data = await inspectionFile(driveReference(archived.id));
+          const blob = new Blob([data], { type: 'application/pdf' });
+          if (Capacitor.isNativePlatform()) await saveOrShareFile(blob, doc.file_name || doc.title);
+          else { const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.target = '_blank'; link.rel = 'noopener'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000); }
+          return;
+        }
+      }
       if ((doc as Document & { drive_web_url?: string }).drive_web_url) {
         window.open((doc as Document & { drive_web_url: string }).drive_web_url, '_blank', 'noopener,noreferrer');
         return;
@@ -545,7 +558,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
                   </p>
 
                   <div className="flex flex-col gap-2">
-                    {doc.file_url || doc.storage_path ? (
+                    {doc.file_url || doc.storage_path || doc.storage_provider === 'google_drive' ? (
                       <Button
                         variant="primary"
                         size="sm"
@@ -624,7 +637,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
                       <td className="px-4 py-3 text-sm text-slate-500">{formatDate(doc.created_at)}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-2">
-                          {doc.file_url || doc.storage_path ? (
+                          {doc.file_url || doc.storage_path || doc.storage_provider === 'google_drive' ? (
                             <Button
                               variant="secondary"
                               size="sm"
