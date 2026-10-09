@@ -59,6 +59,7 @@ export interface Profile {
   /** Admin-only: unlocks API/integration settings (AI/OCR, Google Workspace, BankID, Cellsynt) within their own org. */
   is_system_admin: boolean;
   avatar_url: string;
+  avatar_path?: string | null;
   organisation_id: string | null;
   /** 'password' | 'bankid' | 'both' */
   auth_method: string;

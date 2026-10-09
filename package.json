@@ -25,7 +25,9 @@
     "ekangen:dev": "npm --prefix apps/ekangen run dev",
     "ekangen:build": "npm --prefix apps/ekangen install --no-audit --no-fund && npm --prefix apps/ekangen run build",
     "test:chat": "node scripts/chat-invariants-check.mjs",
-    "test:chat:integration": "node scripts/chat-integration-check.mjs"
+    "test:chat:integration": "node scripts/chat-integration-check.mjs",
+    "test:premium": "node scripts/premium/checks.mjs",
+    "test:premium:profile": "node scripts/premium/profile-integration.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

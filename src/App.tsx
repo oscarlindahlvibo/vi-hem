@@ -7,9 +7,11 @@ import { ToastProvider } from './components/toast';
 import { TimeCategoriesProvider } from './contexts/TimeCategoriesContext';
 import { WorkOrderCategoriesProvider } from './contexts/WorkOrderCategoriesContext';
 import { Layout } from './components/Layout';
+import { ProfilePage } from './pages/ProfilePage';
 import { LoginPage } from './components/LoginPage';
 import { ResetPasswordPage } from './components/ResetPasswordPage';
-import { LoadingPage } from './components/ui';
+import { hasUnsavedForms } from './lib/unsavedForms';
+import { Button, Modal, LoadingPage } from './components/ui';
 import { supabase } from './lib/supabase';
 import { registerNativePush, unregisterNativePush, syncNativeBadge, addPushNavigationListener } from './lib/nativePush';
 import { scrollAppTo } from './lib/utils';
@@ -182,6 +184,8 @@ function AppInner() {
   const isAgreementSignPath = isAgreementSignRoute();
   const isAgreementVerifyPath = isAgreementVerifyRoute();
   const [currentPage, setCurrentPage] = useState('dashboard');
+  const [pendingPage,setPendingPage]=useState<string|null>(null);
+  const navigate=useCallback((page:string)=>{if(hasUnsavedForms()){setPendingPage(page);return;}setCurrentPage(page);if(page==='notifications')setNotificationCount(0);scrollAppTo(0);},[]);
   const [notificationCount, setNotificationCount] = useState(0);
   const [chatNotificationCount, setChatNotificationCount] = useState(0);
   const [enabledModules, setEnabledModules] = useState<ModuleState>(DEFAULT_MODULE_STATE);
@@ -408,12 +412,9 @@ function AppInner() {
   // guaranteed non-null) rather than reordering it just for this.
   useEffect(() => {
     return addPushNavigationListener((link) => {
-      setCurrentPage(link);
-      if (link === 'notifications') setNotificationCount(0);
-
-      scrollAppTo(0);
+      navigate(link);
     });
-  }, []);
+  }, [navigate]);
 
   if (loading) {
     return (
@@ -436,12 +437,7 @@ function AppInner() {
 
   if (!user) return <LoginPage />;
 
-  const navigate = (page: string) => {
-    setCurrentPage(page);
-    if (page === 'notifications') setNotificationCount(0);
 
-    scrollAppTo(0);
-  };
 
   const isAdmin = user.role === 'admin';
   const isSuperadmin = user.role === 'superadmin';
@@ -460,6 +456,7 @@ function AppInner() {
   };
 
   function renderPage() {
+    if (currentPage === 'profile') return <ProfilePage />;
     // Superadmin sees only the organisations page
     if (isSuperadmin) {
       return <AdminOrganisationsPage onNavigate={navigate} />;
@@ -748,6 +745,7 @@ function AppInner() {
       enabledModules={enabledModules}
     >
       {renderPage()}
+      <Modal open={pendingPage!==null} onClose={()=>setPendingPage(null)} title="Lämna utan att spara?" size="sm"><p className="text-sm text-vihem-muted">Det finns osparade ändringar. Fortsätt redigera för att spara dem innan du byter vy.</p><div className="mt-5 flex flex-wrap justify-end gap-2"><Button variant="secondary" onClick={()=>setPendingPage(null)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{if(pendingPage){setCurrentPage(pendingPage);if(pendingPage==='notifications')setNotificationCount(0);scrollAppTo(0);}setPendingPage(null);}}>Lämna utan att spara</Button></div></Modal>
     </Layout>
   );
 }

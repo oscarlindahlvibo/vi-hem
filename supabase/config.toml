@@ -488,3 +488,6 @@ verify_jwt = false
 
 [functions.vihem-chat-to-workorder]
 verify_jwt = false
+
+[functions.vihem-profile-photo]
+verify_jwt = false

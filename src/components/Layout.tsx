@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import type { ModuleKey, Role } from '../types';
 import { AppLogo } from './AppLogo';
 import { OfflineStatus } from './OfflineStatus';
-import { Button, Input, Modal } from './ui';
+import { Avatar, Button, Input, Modal } from './ui';
 import { useBankIdFlow } from '../hooks/useBankIdFlow';
 import { initiateBankIDLink, formatPersonalNumber } from '../lib/bankid';
 import { useScrollLock, isMobileBrowser } from '../lib/utils';
@@ -80,6 +80,17 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
   const [passwordError, setPasswordError] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState('');
   const [bankIdModalOpen, setBankIdModalOpen] = useState(false);
+  useEffect(() => {
+    const open = (event: Event) => {
+      const action = (event as CustomEvent<string>).detail;
+      if (action === 'password') setPasswordModalOpen(true);
+      if (action === 'notifications') setNotificationSettingsModalOpen(true);
+      if (action === 'bankid' && bankIDAvailable) setBankIdModalOpen(true);
+    };
+    window.addEventListener('vihem-profile-security', open);
+    return () => window.removeEventListener('vihem-profile-security', open);
+  }, [bankIDAvailable]);
+
   const [bankIdLinkedNotice, setBankIdLinkedNotice] = useState(false);
   const bankIdLink = useBankIdFlow('link');
   const bankIdBusy = bankIdLink.status === 'starting' || bankIdLink.status === 'redirecting' || bankIdLink.status === 'pending';
@@ -286,9 +297,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
         </nav>
         <div className="border-t border-slate-200/80 px-3 py-4">
           <div className="mb-2 flex items-center gap-3 rounded-xl bg-slate-50/90 px-3 py-3 ring-1 ring-slate-200">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold text-white shadow-sm shadow-blue-600/20">
-              {user?.name?.charAt(0) ?? '?'}
-            </div>
+            <Avatar name={user?.name} userId={user?.id} src={user?.avatar_url} />
             <div className="flex-1 min-w-0">
               <p className="truncate text-sm font-bold text-slate-950">{user?.name}</p>
               <p className="text-xs font-medium text-slate-500">{roleLabel}</p>
@@ -300,6 +309,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
               </button>
             )}
           </div>
+          <button type="button" onClick={() => navigate('profile')} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"><Avatar size="xs" name={user?.name} userId={user?.id} />Din profil</button>
           <button
             onClick={() => setPasswordModalOpen(true)}
             className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950"
@@ -343,6 +353,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
             <Bell className="w-5 h-5 text-slate-500" />
             {notificationCount > 0 && <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-vihem-danger px-1 text-[10px] font-bold text-white">{notificationCount > 9 ? '9+' : notificationCount}</span>}
           </button>
+          <button type="button" onClick={()=>navigate('profile')} className="vihem-icon-button" aria-label="Din profil"><Avatar name={user?.name} userId={user?.id} src={user?.avatar_url} size="sm"/></button>
           {user?.role === 'superadmin' && (
             <button onClick={() => setMobileMenuOpen(true)} className="rounded-xl p-2 hover:bg-slate-100" aria-label="Meny">
               <Menu className="w-5 h-5 text-slate-600" />
@@ -368,13 +379,12 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
               </button>
             </div>
             <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 font-bold text-white shadow-sm shadow-blue-600/20">
-                {user?.name?.charAt(0) ?? '?'}
-              </div>
+              <Avatar name={user?.name} userId={user?.id} src={user?.avatar_url} />
               <div>
                 <p className="text-sm font-semibold text-slate-800">{user?.name}</p>
                 <p className="text-xs text-slate-500">{roleLabel}</p>
               </div>
+              <button type="button" onClick={() => navigate('profile')} className="vihem-icon-button" aria-label="Öppna din profil"><ChevronRight size={20}/></button>
             </div>
             <nav className="flex-1 px-3 py-3 overflow-y-auto overscroll-contain space-y-0.5">
               {visibleGroups.map(group => {
