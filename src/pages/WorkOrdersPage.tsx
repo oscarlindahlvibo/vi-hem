@@ -325,6 +325,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
   const [createForm, setCreateForm] = useState<CreateWorkOrderForm>(defaultCreateForm);
   const [submittingCreate, setSubmittingCreate] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [discardForm, setDiscardForm] = useState<'create' | 'edit' | null>(null);
+  const createDirty = useUnsavedChanges({ ...createForm, files: createForm.files.map(f => [f.name, f.size, f.lastModified]), includeChatFile }, showCreateModal);
 
   // Detail modal state
   const [updatingStatus, setUpdatingStatus] = useState(false);
@@ -342,6 +344,26 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
   const [editForm, setEditForm] = useState<EditWorkOrderForm>(defaultEditForm);
   const [submittingEdit, setSubmittingEdit] = useState(false);
   const [editError, setEditError] = useState('');
+  const editDirty = useUnsavedChanges(editForm, showEditModal);
+  const editSubmission = useRef(false);
+  const commentSubmission = useRef(false);
+  const [commentError, setCommentError] = useState('');
+  // Keep unfinished comments attached to their order; never carry text into
+  // another customer's order while navigating between detail views.
+  const commentDrafts = useRef(new Map<string, { text: string; internal: boolean }>());
+  const previousCommentOrder = useRef<string | null>(null);
+  const latestCommentDraft = useRef({ text: commentText, internal: commentInternal });
+  latestCommentDraft.current = { text: commentText, internal: commentInternal };
+  useEffect(() => {
+    if (previousCommentOrder.current) commentDrafts.current.set(previousCommentOrder.current, latestCommentDraft.current);
+    const id = selectedWorkOrder?.id || null;
+    previousCommentOrder.current = id;
+    const draft = id ? commentDrafts.current.get(id) : undefined;
+    setCommentText(draft?.text || '');
+    setCommentInternal(draft?.internal || false);
+    setCommentError('');
+  }, [selectedWorkOrder?.id]);
+
 
   // Stamp-in state (inline, tied to work order detail)
   const [showStampInModal, setShowStampInModal] = useState(false);
@@ -583,7 +605,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
 
   const createSubmission = useRef(false);
   async function createWorkOrder() {
-    if (!user || !createForm.title || createSubmission.current) return;
+    if (!user || !createForm.title.trim() || createSubmission.current) return;
     createSubmission.current = true;
 
     try {
@@ -623,10 +645,11 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
       createdFromChat.current=null;setChatSourceFile(null);
       setCreateForm(defaultCreateForm);
       setShowCreateModal(false);
+      toast.show('Arbetsordern är skapad');
       await fetchWorkOrders();
     } catch (err: any) {
       console.error('Error creating work order:', err);
-      setCreateError(err.message || 'Kunde inte skapa arbetsordern. Kontrollera fälten och försök igen.');
+      setCreateError(createdFromChat.current ? 'Arbetsordern är skapad, men chattbilagan kunde inte kopieras. Försök igen så kopieras bilagan till samma arbetsorder.' : 'Arbetsordern kunde inte sparas. Uppgifterna finns kvar. Kontrollera anslutningen och försök igen.');
     } finally {
       createSubmission.current = false;
       setSubmittingCreate(false);
@@ -714,7 +737,9 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
   }
 
   async function addComment() {
-    if (!user || !selectedWorkOrder || !commentText.trim()) return;
+    if (!user || !selectedWorkOrder || !commentText.trim() || commentSubmission.current) return;
+    commentSubmission.current = true;
+    setCommentError('');
 
     try {
       setPostingComment(true);
@@ -729,11 +754,14 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
 
       if (error) throw error;
       setCommentText('');
+      toast.show(commentInternal ? 'Intern anteckning sparad' : 'Meddelande skickat till kund');
       setCommentInternal(false);
       await fetchComments();
     } catch (err) {
       console.error('Error posting comment:', err);
+      setCommentError('Kommentaren kunde inte sparas. Texten finns kvar så att du kan försöka igen.');
     } finally {
+      commentSubmission.current = false;
       setPostingComment(false);
     }
   }
@@ -898,7 +926,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
   }
 
   function openEditModal() {
-    if (!selectedWorkOrder) return;
+    if (!selectedWorkOrder || commentSubmission.current) return;
     setEditForm({
       title: selectedWorkOrder.title,
       description: selectedWorkOrder.description || '',
@@ -916,14 +944,30 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
     setShowEditModal(true);
   }
 
+  function finishCloseCreate() {
+    setShowCreateModal(false);
+    createdFromChat.current = null; setChatSourceFile(null); setIncludeChatFile(false);
+    setCreateError(''); setDiscardForm(null);
+  }
+  function closeCreateModal() {
+    if (createSubmission.current) return;
+    if (createDirty) setDiscardForm('create'); else finishCloseCreate();
+  }
   function closeEditModal() {
+    if (editSubmission.current) return;
+    if (editDirty) { setDiscardForm('edit'); return; }
+    finishCloseEdit();
+  }
+  function finishCloseEdit() {
+    setDiscardForm(null);
     setShowEditModal(false);
     setEditError('');
     setShowDetailModal(true);
   }
 
   async function updateWorkOrderDetails() {
-    if (!selectedWorkOrder || !editForm.title.trim()) return;
+    if (!selectedWorkOrder || !editForm.title.trim() || editSubmission.current) return;
+    editSubmission.current = true;
 
     try {
       setSubmittingEdit(true);
@@ -947,11 +991,13 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
       setSelectedWorkOrder({ ...selectedWorkOrder, ...payload });
       setShowEditModal(false);
       setShowDetailModal(true);
+      toast.show('Ändringarna är sparade');
       await fetchWorkOrders();
     } catch (err: any) {
       console.error('Error updating work order:', err);
-      setEditError(err.message || 'Kunde inte spara ändringarna. Kontrollera fälten och försök igen.');
+      setEditError('Ändringarna kunde inte sparas. Uppgifterna finns kvar så att du kan försöka igen.');
     } finally {
+      editSubmission.current = false;
       setSubmittingEdit(false);
     }
   }
@@ -1250,7 +1296,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
     setNewAssignedToIds(currentAssigneeIds);
   };
   const requestCloseDetail = () => {
-    if (detailSaveLock.current) return;
+    if (detailSaveLock.current || commentSubmission.current) return;
     if (detailDirty) setConfirmCloseOpen(true);
     else setShowDetailModal(false);
   };
@@ -1599,7 +1645,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                           />
                         </td>
                       )}
-                      <td className="px-4 py-3 text-sm font-medium text-slate-900">{wo.title}</td>
+                      <td className="px-4 py-3 text-sm font-medium text-vihem-ink"><button type="button" className="min-h-10 text-left hover:text-vihem-blue focus-visible:rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-vihem-blue" onClick={event => { event.stopPropagation(); openWorkOrder(wo); }} aria-label={`Öppna ${wo.title}`}>{wo.title}</button></td>
                       <td className="px-4 py-3 text-sm text-slate-600">{wo.category}</td>
                       <td className="px-4 py-3 text-sm">
                         <Badge className={getWOPriorityColor(wo.priority)}>
@@ -1709,17 +1755,14 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
       {isStaff && (
         <Modal
           open={showCreateModal}
-          onClose={() => {
-            setShowCreateModal(false);
-            createdFromChat.current=null;setChatSourceFile(null);setIncludeChatFile(false);
-            setCreateError('');
-          }}
+          onClose={closeCreateModal}
           title="Ny arbetsorder"
           size="lg"
+          footer={<div className="flex items-center justify-between gap-3"><span className="text-sm text-vihem-muted" role="status">{createError ? 'Kunde inte spara' : createDirty ? 'Osparat utkast' : 'Titel är obligatorisk'}</span><div className="flex shrink-0 gap-2"><Button variant="secondary" onClick={closeCreateModal} disabled={submittingCreate}>Avbryt</Button><Button className="whitespace-nowrap" onClick={createWorkOrder} loading={submittingCreate} disabled={!createForm.title.trim()}>{createdFromChat.current ? 'Försök kopiera bilagan igen' : 'Skapa arbetsorder'}</Button></div></div>}
         >
-          <div className="space-y-4">
+          <fieldset disabled={submittingCreate} aria-label="Arbetsorderuppgifter" className="min-w-0 space-y-6">
             {createError && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {createError}
               </div>
             )}
@@ -1739,6 +1782,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
               rows={4}
             />
 
+            <section aria-label="Planering" className="space-y-3"><h3 className="font-semibold text-vihem-ink">Planering</h3><div className="grid gap-4 sm:grid-cols-2">
             <Select
               label="Kategori"
               options={categoryOptions}
@@ -1765,6 +1809,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
               onChange={(e) => setCreateForm({ ...createForm, status: e.target.value as WOStatus })}
             />
 
+            </div></section>
+            <section aria-label="Plats och datum" className="space-y-3"><h3 className="font-semibold text-vihem-ink">Plats och datum</h3><div className="grid gap-4 sm:grid-cols-2">
             <Select
               label="Fastighet"
               options={[{ value: '', label: '- Ingen -' }, ...properties.map((p) => ({ value: p.id, label: p.name }))]}
@@ -1798,6 +1844,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
               value={createForm.due_date}
               onChange={(e) => setCreateForm({ ...createForm, due_date: e.target.value })}
             />
+            </div></section>
 
             <div className="space-y-2">
               <p className="text-sm font-medium text-slate-700">Tilldela till</p>
@@ -1817,7 +1864,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
               <p className="text-xs text-slate-500">Första valda person blir primärt ansvarig, men alla valda visas som tilldelade.</p>
             </div>
 
-            <div className="space-y-2">
+            <details className="group space-y-3 border-t border-vihem-border pt-4"><summary className="cursor-pointer font-semibold text-vihem-ink">Checklista <span className="text-sm font-normal text-vihem-muted">· valfritt</span></summary>
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-medium text-slate-700">Checklista</p>
                 <Button
@@ -1833,6 +1880,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                 {createForm.checklist.map((item, index) => (
                   <div key={index} className="flex items-center gap-2">
                     <Input
+                      aria-label={`Checklistepunkt ${index + 1}`}
                       value={item}
                       onChange={(event) => updateChecklistItem(index, event.target.value)}
                       placeholder="Ex. Kontrollera lås, dokumentera före/efter..."
@@ -1841,7 +1889,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                       <button
                         type="button"
                         onClick={() => removeChecklistItem(index)}
-                        className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        aria-label={`Ta bort checklistepunkt ${index + 1}`}
+                        className="vihem-icon-button text-vihem-muted"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -1849,7 +1898,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                   </div>
                 ))}
               </div>
-            </div>
+            </details>
 
             <div className="space-y-2">
               <p className="text-sm font-medium text-slate-700">Bilder/filer</p>
@@ -1859,8 +1908,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                 <input
                   type="file"
                   multiple
-                  className="hidden"
-                  onChange={(event) => setCreateForm({ ...createForm, files: Array.from(event.target.files || []) })}
+                  className="sr-only"
+                  onChange={(event) => { const chosen = Array.from(event.target.files || []); setCreateForm(current => ({ ...current, files: [...current.files, ...chosen] })); event.target.value = ""; }}
                 />
               </label>
               {chatSourceFile&&<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeChatFile} disabled={!!createdFromChat.current} onChange={e=>setIncludeChatFile(e.target.checked)}/>Kopiera {chatSourceFile.name} från chatten till arbetsordern (privat bilaga)</label>}
@@ -1887,25 +1936,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
               )}
             </div>
 
-            <div className="flex gap-2 pt-4">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setShowCreateModal(false);
-                  setCreateError('');
-                }}
-              >
-                Avbryt
-              </Button>
-              <Button
-                onClick={createWorkOrder}
-                loading={submittingCreate}
-                disabled={!createForm.title.trim()}
-              >
-                Skapa
-              </Button>
-            </div>
-          </div>
+
+          </fieldset>
         </Modal>
       )}
 
@@ -1918,10 +1950,11 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
           onClose={closeEditModal}
           title="Redigera arbetsorder"
           size="lg"
+          footer={<div className="flex items-center justify-between gap-3"><span className="text-sm text-vihem-muted" role="status">{editError ? 'Kunde inte spara' : editDirty ? 'Osparade ändringar' : 'Alla ändringar sparade'}</span><div className="flex shrink-0 gap-2"><Button variant="secondary" onClick={closeEditModal} disabled={submittingEdit}>Avbryt</Button><Button onClick={updateWorkOrderDetails} loading={submittingEdit} disabled={!editForm.title.trim() || !editDirty}>Spara</Button></div></div>}
         >
-          <div className="space-y-4">
+          <fieldset disabled={submittingEdit} aria-label="Arbetsorderuppgifter" className="min-w-0 space-y-6">
             {editError && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {editError}
               </div>
             )}
@@ -1939,6 +1972,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
               rows={4}
             />
 
+            <section aria-label="Planering" className="space-y-3"><h3 className="font-semibold text-vihem-ink">Planering</h3><div className="grid gap-4 sm:grid-cols-2">
             <Select
               label="Kategori"
               options={categoryOptions}
@@ -1958,6 +1992,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
               onChange={(e) => setEditForm({ ...editForm, priority: e.target.value as WOPriority })}
             />
 
+            </div></section>
+            <section aria-label="Plats och datum" className="space-y-3"><h3 className="font-semibold text-vihem-ink">Plats och datum</h3><div className="grid gap-4 sm:grid-cols-2">
             <Select
               label="Fastighet"
               options={[{ value: '', label: '- Ingen -' }, ...properties.map((p) => ({ value: p.id, label: p.name }))]}
@@ -1991,25 +2027,14 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
               value={editForm.due_date}
               onChange={(e) => setEditForm({ ...editForm, due_date: e.target.value })}
             />
+            </div></section>
 
-            <div className="flex gap-2 pt-4">
-              <Button
-                variant="secondary"
-                onClick={closeEditModal}
-              >
-                Avbryt
-              </Button>
-              <Button
-                onClick={updateWorkOrderDetails}
-                loading={submittingEdit}
-                disabled={!editForm.title.trim()}
-              >
-                Spara ändringar
-              </Button>
-            </div>
-          </div>
+
+          </fieldset>
         </Modal>
       )}
+
+      <Modal open={!!discardForm} onClose={() => setDiscardForm(null)} title="Kasta osparade ändringar?" size="sm" footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setDiscardForm(null)}>Fortsätt redigera</Button><Button variant="danger" onClick={() => discardForm === 'create' ? finishCloseCreate() : finishCloseEdit()}>Kasta ändringar</Button></div>}><p className="text-sm text-vihem-muted">Uppgifterna i formuläret har inte sparats. Fortsätt redigera för att behålla dem.</p></Modal>
 
       {/* Detail Modal */}
       <Modal
@@ -2324,6 +2349,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                   placeholder={commentInternal ? 'Skriv intern anteckning...' : 'Skriv ett meddelande...'}
                   rows={3}
                 />
+                {commentError && <p role="alert" className="text-sm text-vihem-danger">{commentError}</p>}
                 <Button onClick={addComment} loading={postingComment} disabled={!commentText.trim()} className="w-full">
                   {commentInternal ? 'Spara intern anteckning' : 'Skicka meddelande'}
                 </Button>
