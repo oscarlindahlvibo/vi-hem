@@ -40,4 +40,4 @@ export class DriveArchiveClient {
  }
 }
 export async function sha256(bytes:Uint8Array){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes.slice().buffer)),b=>b.toString(16).padStart(2,'0')).join('');}
-export function archiveLabel(value:string){return value.normalize('NFC').replace(/[\/\\\u0000-\u001f]/g,'–').trim().slice(0,100)||'Objekt';}
+export function archiveLabel(value:string){return Array.from(value.normalize('NFC')).map(character => character.charCodeAt(0)<32 || character==='/' || character==='\\' ? '–' : character).join('').trim().slice(0,100)||'Objekt';}

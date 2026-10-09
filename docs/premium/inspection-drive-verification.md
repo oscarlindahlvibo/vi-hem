@@ -7,7 +7,7 @@ Isolerad self-hosted QA, syntetiska användare/objekt. Inga produktionsfiler ell
 | TypeScript | PASS | npm run typecheck |
 | Build | PASS | Vite; PDF separat lazy chunk ~433 kB; App fortfarande ~2.67 MB |
 | Mobilbundle | PASS | Befintligt releaseprov; publik vibofast ingår inte |
-| Scope-lint | PASS med varningar | Inga errors; hook-varningar dokumenterade, full-repo lint inte körd i detta pass |
+| Scope-lint | PASS med varningar | Inga errors; hook-varningar dokumenterade; full-repo lint körd och FAIL, se kontrollpunkt 9 |
 | Edge typkontroll | PASS | Deno check archive + generell storage; låsta frontendpaket återställda efter Deno |
 | Databas/JWT/RLS | PASS | inspection-drive-db: own/foreign org, tenant, anon, concurrent begin/lease, immutable retry, staging denied, commit/retry, gamla versioner, snapshot/rollback. Drive-ID:n syntetiska |
 | Google-transport mock | PASS | Stabil mapp, chunking, förlorat success-svar, retry samma ID, size/parent/job/SHA, 401/429/500/503. Ingen verklig Drive |
@@ -23,10 +23,10 @@ Isolerad self-hosted QA, syntetiska användare/objekt. Inga produktionsfiler ell
 | Native kamera/HEIC/keyboard | EJ KÖRT | Viewports är inte fysisk iOS/Android-verifiering |
 | Full 40-punkts Drive-matris | EJ KÖRT | Ovanstående är en delmängd |
 | Full migrering/gallring/reconciliation | EJ IMPLEMENTERAT | Read-only inventering provad |
-| Atomiska tidsövergångar | EJ IMPLEMENTERAT I DENNA KONTROLLPUNKT | Nästa prioritet efter arkivets säkerhet/färdigkriterier |
+| Atomiska tidsövergångar | IMPLEMENTERAT / DELVIS VERIFIERAT | Efterföljande kontrollpunkt 8–9; se clock-transitions.md |
 
 Browserprovet stördes först av utvecklingsomladdning vid återställning av npm-paket. Sparning/återöppning och felväg kördes om när miljön var stabil; dessa är provresultaten ovan.
 
 Kvarvarande obligatoriska prov: riktiga JPEG/PNG/HEIC-filer på olika rum/general, quota och appstängning, samtidigt upload/retry, backendtimeout/authexpiry/badfolder, Drive-success/DB-fail, DB-pending/Drive-fail, gamla kopior/dubbletter, faktisk tenant-file-fetch och removed-membership, signerade versioner, full PDF sidgranskning, stor fil/antal, kontobyte/utloggning/cache, lokal/staging-gallring. Mock får inte ersätta slutligt verkligt Drive-prov.
 
-Återuppta från branchens senaste commit, fetch remote först. Börja med revisionskontroll för drafts och beständiga/resumable jobb, säker avstämning/migrering samt riktig QA-Drive. Fortsätt sedan atomisk tidrapportering och kvarvarande moduler enligt modulstatus. Ingen modul-Klar eller deploy-rekommendation i denna kontrollpunkt.
+Återuppta från branchens senaste commit, fetch remote först. Börja med revisionskontroll för drafts och beständiga/resumable jobb, säker avstämning/migrering samt riktig QA-Drive. Fortsätt sedan tidsroll-/offline-/midnattsprov och kvarvarande moduler enligt modulstatus. Ingen modul-Klar eller deploy-rekommendation i denna kontrollpunkt.

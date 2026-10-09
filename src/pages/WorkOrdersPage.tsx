@@ -77,7 +77,7 @@ import { WorkOrderCard } from '../components/workorders/WorkOrderCard';
 import { AssigneeSheet, CommentModeToggle, CommentSheet, DueDateSheet, SwitchJobSheet, WorkOrderActionSheet, actionIcons, type QuickAction } from '../components/workorders/WorkOrderSheets';
 import { SkeletonList } from '../components/ui';
 import { useToast } from '../components/toast';
-import { fetchOpenTimeEntries, startOrSwitchToWorkOrder, type OpenTimeEntry } from '../lib/timeClock';
+import { fetchOpenTimeEntries, startOrSwitchToWorkOrder, stopWorkOrderClock, type OpenTimeEntry } from '../lib/timeClock';
 
 type FilterView = 'all' | 'mine' | 'unassigned' | 'overdue';
 type WorkOrderListTab = 'active' | 'archived';
@@ -1035,32 +1035,13 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
     if (!user || !activeTimeEntry) return;
     try {
       setStampingIn(true);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const { data: openEntries } = await supabase
-        .from('vihem_time_entries')
-        .select('id, start_time, break_minutes, entry_type')
-        .eq('user_id', user.id)
-        .eq('status', 'draft')
-        .gte('start_time', today.toISOString())
-        .is('end_time', null);
-      const endTime = new Date().toISOString();
-      await Promise.all((openEntries || []).map(async entry => {
-        const breakMinutes = entry.entry_type === 'break' ? 0 : entry.break_minutes || 0;
-        const totalMinutes = Math.max(
-          Math.floor((Date.now() - new Date(entry.start_time).getTime()) / 60000) - breakMinutes,
-          0
-        );
-        await supabase
-          .from('vihem_time_entries')
-          .update({ end_time: endTime, total_minutes: totalMinutes, status: 'submitted' })
-          .eq('id', entry.id);
-      }));
+      await stopWorkOrderClock(user);
       setActiveTimeEntry(null);
       await checkActiveTimeEntry();
       await fetchTimeLogged();
     } catch (err) {
       console.error('Failed to stamp out:', err);
+      toast.show(err instanceof Error ? err.message : 'Kunde inte bekräfta utstämplingen.', { tone: 'error' });
     } finally {
       setStampingIn(false);
     }
@@ -1203,6 +1184,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
     return grouped;
   }
 
+  useUnsavedChanges({ status: newDetailStatus, assignees: newAssignedToIds }, showDetailModal && isStaff);
+
   if (authLoading) return <LoadingPage />;
 
   const filtered = filteredWorkOrders();
@@ -1289,7 +1272,6 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
   const assignmentDirty = Boolean(isStaff && selectedWorkOrder
     && [...newAssignedToIds].sort().join(',') !== [...currentAssigneeIds].sort().join(','));
   const detailDirty = statusDirty || assignmentDirty;
-  useUnsavedChanges({ status: newDetailStatus, assignees: newAssignedToIds }, showDetailModal && isStaff);
   const resetDetailPending = () => {
     if (!selectedWorkOrder) return;
     setNewDetailStatus(selectedWorkOrder.status);

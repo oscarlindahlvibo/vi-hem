@@ -170,3 +170,11 @@ Se inspection-drive-architecture/migration/verification för faktisk status och 
 Ny självregistrerings-RPC med användarlås, förväntad öppen post, stabilt operations-ID, klienttid/servermottagning, validering före skrivning och atomiskt passbyte/kommentar/kvitto. Frontend behåller osäker operation med återförsök och serveravstämning. Pauser återgår till exakt pass via operationskvittot; projektets faktureringsscope bevaras.
 
 Riktig QA-databas och staff-JWT: dubbelbegäran, konkurrerande jobbbyten, cross-user/target denial, rollback, rast/lunch/återgång/out, totalsummor, kommentar-isolering och idempotent dagskommentar PASS. Verkligt UI-flöde in/rast/återgång/out PASS; inga öppna QA-pass kvar. 390/430/768/1024/1440-bilder tagna, 390/1440 granskade. TypeScript/build/mobilbundle/premiumtests PASS. Full native-/offline-/admin-/midnattsmatris återstår. Se clock-transitions.md. Ingen ny modul DoD-Klar; main/produktion oförändrade.
+
+## Kontrollpunkt 9 – arbetsordervyns klocka och slutkontroller
+
+Även den gemensamma timeClock-hjälparen och arbetsordervyns utstämpling använder nu samma atomiska RPC och väntande konto-/organisationskö. Arbetsordervyns submitted-status och öppningskommentar bevaras i kompatibilitetsmigration 20261010140000. QA-databasprov för dessa egenskaper PASS. Arbetsordervyns hook-ordningsfel rättat; säkerhetsprov (staff/tenant/anonymous/foreign org/spoofing/inactive/explicit superadmin) repeterat PASS. Inget UI-prov av arbetsorderns specifika stämplingsknapp ännu. Ingen ny modul räknas Klar.
+
+Full-repo lint körd: FAIL med kvarvarande fel utanför den nya archive-transporten. Transportens två nya lintfel rättade; ändrade komponenters avgränsade lint har inga errors men befintliga hook-varningar. Full lint-fel ska behandlas i nästa etapp, inte döljas bakom scope-lint.
+
+Återuppta med draft-revisioner (samtidiga formulär kan fortfarande skriva över bilder), full äldre-fil-migrator, faktisk QA-Drive, avstämning/gallring och full besiktningsmatris. Därefter tidsroll-/offline-/midnattsprov och systematiska återstående moduler. Main och produktion oförändrade. Detta är ett implementationspass och verifierad kodkontrollpunkt, inte en deployklar premiumrelease.

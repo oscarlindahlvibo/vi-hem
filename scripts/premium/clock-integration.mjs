@@ -32,6 +32,17 @@ try {
  await perform('clockin',135,{category:'customer_project',customer_project_id:cp.data.id,project_billing_scope:'outside_quote'},'QA ÄTA');
  await perform('break',140);const resumed=await perform('resume',145);assert.equal(resumed.r.data.current.project_billing_scope,'outside_quote');assert.equal(resumed.r.data.current.customer_project_id,cp.data.id);
  await perform('clockout',150,{},'QA ÄTA avklarad');
+ await perform('clockin',155,{category:'work_order',work_order_id:wo,opening_comment:'Kommentar på nya passet'});
+ const firstOrder=current;
+ await perform('switch',160,{category:'work_order',work_order_id:wo,opening_comment:'Nästa arbetspass'});
+ assert.equal((await staff.from('vihem_time_entries').select('comment').eq('id',firstOrder).single()).data.comment,'Kommentar på nya passet');
+ const orderOut=current;await perform('clockout',165,{completion_status:'submitted'});
+ const submitted=await staff.from('vihem_time_entries').select('status,approved_at,comment').eq('id',orderOut).single();assert.equal(submitted.data.status,'submitted');assert.equal(submitted.data.approved_at,null);assert.equal(submitted.data.comment,'Nästa arbetspass');
+ const projectOrder=await perform('clockin',170,{category:'customer_project',work_order_id:wo,customer_project_id:cp.data.id,project_billing_scope:'outside_quote',opening_comment:'Projektorder QA'});
+ assert.equal(projectOrder.r.data.current.project_billing_scope,'outside_quote');
+ await perform('clockout',175,{completion_status:'submitted'});
+ assert.equal((await staff.from('vihem_time_entries').select('status').eq('id',projectOrder.r.data.current.id).single()).data.status,'submitted');
+ console.log('PASS work-order opening comment belongs to new pass; work-order clock-out retains submitted status.');
  console.log('PASS project pause/resume keeps billing scope; status reconciliation and day comment idempotency.');
  console.log('PASS clock QA: double request, immutable ID, cross-user/target denial, no partial close, competing devices, break/lunch/resume/out, totals, comment isolation, delayed event time.');
 } finally {
