@@ -4,8 +4,10 @@ import { supabase } from "../../lib/supabase";
 export function ChatAvatar({
   name,
   path,
+  userId,
 }: {
   name: string;
+  userId?: string;
   path?: string | null;
 }) {
   const [url, setUrl] = useState("");
@@ -35,6 +37,6 @@ export function ChatAvatar({
       onError={() => setUrl("")}
     />
   ) : (
-    <Avatar name={name} />
+    <Avatar name={name} userId={userId} />
   );
 }

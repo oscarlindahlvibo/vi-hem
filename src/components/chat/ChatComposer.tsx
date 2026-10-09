@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { Mic, Paperclip, Send, Square, X } from "lucide-react";
-import { Button } from "../ui";
+import {
+  Mic,
+  Plus,
+  Camera,
+  ImagePlus,
+  FileText,
+  ClipboardList,
+  FolderKanban,
+  Send,
+  Square,
+  X,
+} from "lucide-react";
+import { Button, Modal } from "../ui";
 import { CommunicationMessage } from "../../lib/chat";
 export function ChatComposer({
   text,
@@ -14,7 +25,9 @@ export function ChatComposer({
   onTyping,
   members,
   onMention,
+  onShare,
 }: {
+  onShare?: (type: "workorder" | "project") => void;
   text: string;
   setText: (text: string) => void;
   disabled: boolean;
@@ -29,20 +42,38 @@ export function ChatComposer({
 }) {
   const textarea = useRef<HTMLTextAreaElement>(null),
     file = useRef<HTMLInputElement>(null),
+    camera = useRef<HTMLInputElement>(null),
+    photos = useRef<HTMLInputElement>(null),
     recorder = useRef<MediaRecorder | null>(null),
     stream = useRef<MediaStream | null>(null),
     start = useRef(0),
     timer = useRef<ReturnType<typeof setTimeout>>();
+  const [plusOpen, setPlusOpen] = useState(false);
   const [recording, setRecording] = useState(false),
     [error, setError] = useState(""),
     [seconds, setSeconds] = useState(0),
     [uploading, setUploading] = useState(false);
   useEffect(() => {
     const node = textarea.current;
-    if (node) {
+    if (!node) return;
+    const resize = () => {
       node.style.height = "auto";
       node.style.height = Math.min(node.scrollHeight, 140) + "px";
-    }
+    };
+    resize();
+    let width = node.clientWidth,
+      frame = 0;
+    const observer = new ResizeObserver(() => {
+      if (node.clientWidth === width) return;
+      width = node.clientWidth;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(resize);
+    });
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [text]);
   useEffect(() => {
     if (!recording) return;
@@ -137,7 +168,7 @@ export function ChatComposer({
           .slice(0, 8);
   return (
     <div
-      className="shrink-0 border-t bg-white px-3 pt-2 pb-[max(env(safe-area-inset-bottom),0.75rem)]"
+      className="shrink-0 border-t border-vihem-line bg-white px-3 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] sm:px-5"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -210,7 +241,7 @@ export function ChatComposer({
         </div>
       )}
       <form
-        className="flex items-end gap-2"
+        className="mx-auto flex max-w-3xl items-end gap-1 sm:gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           if (!disabled && !uploading && !recording) send();
@@ -228,12 +259,14 @@ export function ChatComposer({
         />
         <button
           type="button"
-          aria-label="Bifoga fil"
+          aria-label="Lägg till i meddelande"
+          aria-haspopup="dialog"
+          aria-expanded={plusOpen}
           disabled={disabled || uploading || recording}
-          onClick={() => file.current?.click()}
+          onClick={() => setPlusOpen(true)}
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-vihem-blue disabled:opacity-40"
         >
-          <Paperclip size={22} />
+          <Plus size={22} />
         </button>
         <textarea
           ref={textarea}
@@ -287,6 +320,85 @@ export function ChatComposer({
           <Send size={20} />
         </Button>
       </form>
+      <input
+        ref={photos}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          const value = e.target.files?.[0];
+          e.target.value = "";
+          if (value) void upload(value);
+        }}
+      />
+      <input
+        ref={camera}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        hidden
+        onChange={(e) => {
+          const value = e.target.files?.[0];
+          e.target.value = "";
+          if (value) void upload(value);
+        }}
+      />
+      <Modal
+        open={plusOpen}
+        onClose={() => setPlusOpen(false)}
+        title="Lägg till i meddelande"
+        size="sm"
+      >
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            {
+              label: "Bilder",
+              icon: ImagePlus,
+              choose: () => photos.current?.click(),
+            },
+            {
+              label: "Ta foto",
+              icon: Camera,
+              choose: () => camera.current?.click(),
+            },
+            {
+              label: "Dokument & filer",
+              icon: FileText,
+              choose: () => file.current?.click(),
+            },
+            ...(onShare
+              ? [
+                  {
+                    label: "Arbetsorder",
+                    icon: ClipboardList,
+                    choose: () => onShare("workorder"),
+                  },
+                  {
+                    label: "Kundprojekt",
+                    icon: FolderKanban,
+                    choose: () => onShare("project"),
+                  },
+                ]
+              : []),
+          ].map(({ label, icon: Icon, choose }) => (
+            <button
+              type="button"
+              key={label}
+              className="flex min-h-24 flex-col items-start justify-center gap-2 rounded-xl bg-vihem-canvas px-4 py-3 text-left text-sm font-medium text-vihem-ink transition-colors hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
+              onClick={() => {
+                setPlusOpen(false);
+                choose();
+              }}
+            >
+              <Icon size={22} className="text-vihem-blue" />
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-4 text-sm text-vihem-muted">
+          Bifogade objekt granskas innan du skickar meddelandet.
+        </p>
+      </Modal>
       {uploading && (
         <p role="status" className="pt-1 text-xs text-slate-500">
           Laddar upp bilaga…

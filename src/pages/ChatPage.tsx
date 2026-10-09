@@ -325,7 +325,7 @@ function ChatWorkspace({
         }
       >
         <aside
-          className={`${chat.selected ? "hidden md:block" : "block"} h-full w-full shrink-0 border-r md:w-80 xl:w-96`}
+          className={`${chat.selected ? "hidden md:block" : "block"} h-full w-full shrink-0 border-r md:w-72 xl:w-80`}
         >
           <ConversationList
             threads={chat.threads}
@@ -358,6 +358,7 @@ function ChatWorkspace({
                 <ChatAvatar
                   name={chatTitle(current, user.id, !staff)}
                   path={current.group_image_path}
+                  userId={current.chat_type === "direct" ? current.participants.find(p=>p.user_id!==user.id)?.user_id : undefined}
                 />
                 <div className="min-w-0 flex-1">
                   <h2 className="truncate font-semibold text-vihem-ink">
@@ -423,28 +424,6 @@ function ChatWorkspace({
                   skriver…
                 </p>
               )}
-              {staff && (
-                <div className="flex gap-2 bg-white px-3 pt-1">
-                  <button
-                    className="py-1 text-xs text-blue-600"
-                    onClick={() => {
-                      setShareType("workorder");
-                      setShareOpen(true);
-                    }}
-                  >
-                    Dela arbetsorder
-                  </button>
-                  <button
-                    className="py-1 text-xs text-blue-600"
-                    onClick={() => {
-                      setShareType("project");
-                      setShareOpen(true);
-                    }}
-                  >
-                    Dela projekt
-                  </button>
-                </div>
-              )}
               {link && (
                 <div className="flex items-center justify-between px-3 py-2 text-xs text-blue-600">
                   <span>
@@ -482,6 +461,7 @@ function ChatWorkspace({
                 </div>
               )}
               <ChatComposer
+                onShare={staff ? type => {setShareType(type);setShareOpen(true);} : undefined}
                 text={chat.draft}
                 setText={chat.setDraft}
                 disabled={current.status !== "open"}

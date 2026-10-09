@@ -5,7 +5,7 @@ import {
   messageReceipt,
   Reaction,
 } from "../../lib/chat";
-import { Button } from "../ui";
+import { Avatar, Button } from "../ui";
 import { ChatEntityCard } from "./ChatEntityCard";
 import { ChatAttachment } from "./ChatAttachment";
 function dayLabel(date: string) {
@@ -112,15 +112,22 @@ export function MessageTimeline({
     requestAnimationFrame(() => {
       const node = document.getElementById(`chat-message-${id}`);
       if (node) {
-        node.scrollIntoView({ block: "center", behavior: "smooth" });
-        node.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 600 });
+        const reduced = window.matchMedia(
+          "(prefers-reduced-motion: reduce)",
+        ).matches;
+        node.scrollIntoView({
+          block: "center",
+          behavior: reduced ? "instant" : "smooth",
+        });
+        if (!reduced)
+          node.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 600 });
       }
     });
   }
   return (
     <div
       ref={viewport}
-      className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain bg-slate-50 p-3 sm:p-4"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-vihem-canvas px-3 py-4 sm:px-5"
       onScroll={() => {
         if (viewport.current)
           previous.current.height = viewport.current.scrollHeight;
@@ -159,17 +166,36 @@ export function MessageTimeline({
           reference = messages.find((value) => value.id === m.reply_to),
           emojis = reactions.filter((r) => r.message_id === m.id && r.active);
         return (
-          <div key={m.id} id={`chat-message-${m.id}`} data-message-id={m.id}>
+          <div
+            className="mx-auto max-w-3xl"
+            key={m.id}
+            id={`chat-message-${m.id}`}
+            data-message-id={m.id}
+          >
             {!sameDay && (
-              <div className="py-3 text-center text-xs font-medium text-slate-400">
+              <div className="py-3 text-center text-xs font-medium text-vihem-muted">
                 {dayLabel(m.created_at)}
               </div>
             )}
             <div
-              className={`group flex ${own ? "justify-end" : "justify-start"} ${grouped ? "mt-1" : "mt-3"}`}
+              className={`group flex items-end gap-2 ${own ? "justify-end" : "justify-start"} ${grouped ? "mt-1" : "mt-3"}`}
             >
+              {group && !own && (
+                <div className="w-8 shrink-0">
+                  {!grouped && (
+                    <Avatar
+                      name={
+                        members.find((p) => p.user_id === m.sender_id)?.name ||
+                        "Tidigare deltagare"
+                      }
+                      userId={m.sender_id}
+                      size="sm"
+                    />
+                  )}
+                </div>
+              )}
               <div
-                className={`relative max-w-[88%] rounded-2xl px-3 py-2 text-sm sm:max-w-[75%] ${own ? "bg-vihem-blue text-white rounded-br-md" : "border border-slate-100 bg-white text-vihem-ink shadow-sm rounded-bl-md"}`}
+                className={`relative ${group && !own ? "max-w-[calc(100%-84px)]" : "max-w-[82%]"} rounded-2xl px-3 py-2 text-sm sm:max-w-[75%] ${own ? "bg-vihem-blue text-white rounded-br-md" : "bg-white text-vihem-ink rounded-bl-md"}`}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   action(m);
@@ -278,7 +304,7 @@ export function MessageTimeline({
                   </>
                 )}
                 <div
-                  className={`mt-1 flex items-center justify-end gap-2 text-[10px] ${own ? "text-blue-100" : "text-slate-400"}`}
+                  className={`mt-1 flex items-center justify-end gap-2 text-xs ${own ? "text-white" : "text-vihem-muted"}`}
                 >
                   <time>
                     {new Date(m.created_at).toLocaleTimeString("sv-SE", {
@@ -302,7 +328,7 @@ export function MessageTimeline({
                 {!m.deleted_at && (
                   <button
                     aria-label="Meddelandeåtgärder"
-                    className={`absolute -top-2 ${own ? "-left-7" : "-right-7"} rounded-full bg-white p-1 px-2 text-slate-500 shadow-sm sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100`}
+                    className={`vihem-icon-button absolute top-0 ${own ? "-left-10" : "-right-10"} text-vihem-muted opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100`}
                     onClick={() => action(m)}
                   >
                     ⋯

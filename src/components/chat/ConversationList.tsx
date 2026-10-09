@@ -63,6 +63,7 @@ export function ConversationList({
           {filters.map(([value, label]) => (
             <button
               key={value}
+              aria-pressed={filter === value}
               onClick={() => setFilter(value)}
               className={`shrink-0 rounded-full px-3 py-2 text-sm ${filter === value ? "bg-vihem-blue text-white" : "bg-slate-100 text-slate-600"}`}
             >
@@ -71,7 +72,7 @@ export function ConversationList({
           ))}
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto py-2">
         {!visible.length ? (
           <p className="p-6 text-center text-sm text-slate-500">
             Inga konversationer här.
@@ -85,7 +86,7 @@ export function ConversationList({
             return (
               <div
                 key={t.id}
-                className={`relative ${selected === t.id ? "bg-blue-50" : "hover:bg-slate-50"}`}
+                className={`group relative mx-2 rounded-xl transition-colors ${selected === t.id ? "bg-blue-50" : "hover:bg-slate-50"}`}
               >
                 <button
                   className="flex w-full items-center gap-3 px-3 py-3 pr-10 text-left"
@@ -136,7 +137,16 @@ export function ConversationList({
                     onAction(t);
                   }}
                 >
-                  <ChatAvatar name={title} path={t.group_image_path} />
+                  <ChatAvatar
+                    name={title}
+                    path={t.group_image_path}
+                    userId={
+                      t.chat_type === "direct"
+                        ? t.participants.find((p) => p.user_id !== userId)
+                            ?.user_id
+                        : undefined
+                    }
+                  />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <span
@@ -146,7 +156,7 @@ export function ConversationList({
                         {title}
                       </span>
                       <time
-                        className={`shrink-0 text-[11px] ${unread ? "font-semibold text-blue-600" : "text-slate-400"}`}
+                        className={`shrink-0 text-xs ${unread ? "font-semibold text-blue-600" : "text-slate-400"}`}
                       >
                         {stamp.toLocaleString(
                           "sv-SE",
@@ -176,7 +186,7 @@ export function ConversationList({
                 </button>
                 <button
                   aria-label={`Åtgärder för ${title}`}
-                  className="absolute right-1 top-4 rounded-lg px-2 py-2 text-slate-500"
+                  className="vihem-icon-button absolute right-0 top-4 text-slate-500 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100"
                   onClick={() => onAction(t)}
                 >
                   ⋯
