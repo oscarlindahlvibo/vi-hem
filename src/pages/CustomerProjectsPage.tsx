@@ -28,6 +28,7 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   Badge,
   Button,
+  Avatar,
   Card,
   EmptyState,
   Input,
@@ -1405,9 +1406,10 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
                         {projectAssignments.length === 0 ? (
                           <span className="text-sm text-slate-400">Ingen tilldelad personal.</span>
                         ) : projectAssignments.map(assignment => (
-                          <Badge key={assignment.id} className="bg-blue-50 text-blue-700">
-                            {staff.find(s => s.id === assignment.user_id)?.name || 'Användare'} · {assignment.role === 'project_manager' ? 'Projektledare' : 'Personal'}
-                          </Badge>
+                          <div key={assignment.id} className="inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm">
+                            <Avatar name={staff.find(s=>s.id===assignment.user_id)?.name} userId={assignment.user_id} size="sm"/>
+                            <span><span className="block font-medium text-vihem-ink">{staff.find(s => s.id === assignment.user_id)?.name || 'Användare'}</span><span className="block text-xs text-vihem-muted">{assignment.role === 'project_manager' ? 'Projektledare' : 'Personal'}</span></span>
+                          </div>
                         ))}
                       </div>
                     </div>

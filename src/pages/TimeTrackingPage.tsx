@@ -5,6 +5,7 @@ import { queueOfflineMutation } from '../lib/offlineQueue';
 import { useAuth } from '../contexts/AuthContext';
 import { useTimeCategories, type TimeCategoryOption } from '../contexts/TimeCategoriesContext';
 import {
+  Avatar,
   Card,
   Badge,
   Button,
@@ -2698,9 +2699,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                       <tr key={staff.id} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => openStaffModal(staff)}>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3 min-w-0">
-                            <div className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold text-white ${activeEntry ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                              {staff.name.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase()}
-                            </div>
+                            <span className="relative"><Avatar name={staff.name} userId={staff.id} src={staff.avatar_url}/>{activeEntry&&<span aria-label="Instämplad" className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-600 ring-2 ring-white"/>}</span>
                             <div className="min-w-0">
                               <p className="font-semibold text-slate-800 truncate">{staff.name}</p>
                               <p className="text-xs text-slate-400 truncate">{staff.email}</p>

@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { createUserAccount, resetUserPassword, sendUserPasswordResetEmail } from '../lib/userAdmin';
 import { normalizePersonalNumber } from '../lib/bankid';
 import {
+  Avatar,
   Card,
   Badge,
   Button,
@@ -404,8 +405,8 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   if (loading) return <LoadingPage />;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto px-4 py-8">
+    <div>
+      <div className="max-w-7xl mx-auto">
         <PageHeader
           title="Personal"
           subtitle="Hantera personal och administratörer"
@@ -433,11 +434,13 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
           />
         </div>
 
-        <Card className="mb-6 p-4">
+        <details className="mb-6 rounded-xl border border-vihem-line bg-white">
+          <summary className="vihem-touch-target cursor-pointer px-4 py-3 text-sm font-medium text-vihem-ink">Organisationens notisinställningar</summary>
+          <div className="px-4 pb-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h2 className="text-sm font-bold text-slate-800">Notisinställningar</h2>
-              <p className="mt-1 text-xs text-slate-500">
+              <h2 className="sr-only">Organisationens notisinställningar</h2>
+              <p className="mt-1 text-sm text-vihem-muted">
                 Styr vilka systemnotiser organisationen ska använda. Schemapåminnelser använder personalens arbetsschema och lunchinställningar.
               </p>
             </div>
@@ -471,7 +474,8 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
               />
             </div>
           </div>
-        </Card>
+        </div>
+        </details>
 
         {filteredStaff.length === 0 ? (
           <EmptyState
@@ -486,7 +490,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                 <div key={staffMember.id} className="p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-semibold text-slate-900 break-words">{staffMember.name}</p>
+                      <div className="flex items-center gap-3"><Avatar name={staffMember.name} userId={staffMember.id} src={staffMember.avatar_url}/><p className="font-semibold text-slate-900 break-words">{staffMember.name}</p></div>
                       <p className="mt-1 text-sm text-slate-600 break-all">{staffMember.email}</p>
                       {staffMember.phone && <p className="mt-0.5 text-sm text-slate-500">{staffMember.phone}</p>}
                     </div>
@@ -495,7 +499,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                         onClick={() => handleResetPassword(staffMember)}
                         title="Skicka lösenordsåterställning"
                         disabled={resettingUserId === staffMember.id}
-                        className="p-2 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+                        className="vihem-icon-button disabled:opacity-50"
                       >
                         <KeyRound className="w-4 h-4 text-slate-500" />
                       </button>
@@ -503,13 +507,15 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                         onClick={() => handleGeneratePassword(staffMember)}
                         title="Generera nytt lösenord"
                         disabled={resettingUserId === staffMember.id}
-                        className="p-2 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+                        className="vihem-icon-button disabled:opacity-50"
                       >
                         <RefreshCw className="w-4 h-4 text-slate-500" />
                       </button>
                       <button
+                        type="button"
+                        aria-label={`Redigera ${staffMember.name}`}
                         onClick={() => openEditStaffModal(staffMember)}
-                        className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                        className="vihem-icon-button"
                       >
                         <Edit2 className="w-4 h-4 text-slate-600" />
                       </button>
@@ -546,7 +552,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                 <tbody className="divide-y divide-slate-100">
                   {filteredStaff.map((staffMember) => (
                     <tr key={staffMember.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="py-3 px-4 font-medium text-slate-900">{staffMember.name}</td>
+                      <td className="py-3 px-4 font-medium text-slate-900"><div className="flex items-center gap-3"><Avatar name={staffMember.name} userId={staffMember.id} src={staffMember.avatar_url} size="sm"/>{staffMember.name}</div></td>
                       <td className="py-3 px-4 text-sm text-slate-600">{staffMember.email}</td>
                       <td className="py-3 px-4 text-sm text-slate-600">{staffMember.phone}</td>
                       <td className="py-3 px-4">
@@ -572,7 +578,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                             onClick={() => handleResetPassword(staffMember)}
                             title="Skicka lösenordsåterställning"
                             disabled={resettingUserId === staffMember.id}
-                            className="p-2 hover:bg-slate-100 rounded-lg inline-block transition-colors disabled:opacity-50"
+                            className="vihem-icon-button disabled:opacity-50"
                           >
                             <KeyRound className="w-4 h-4 text-slate-500" />
                           </button>
@@ -580,13 +586,15 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                             onClick={() => handleGeneratePassword(staffMember)}
                             title="Generera nytt lösenord"
                             disabled={resettingUserId === staffMember.id}
-                            className="p-2 hover:bg-slate-100 rounded-lg inline-block transition-colors disabled:opacity-50"
+                            className="vihem-icon-button disabled:opacity-50"
                           >
                             <RefreshCw className="w-4 h-4 text-slate-500" />
                           </button>
                           <button
-                            onClick={() => openEditStaffModal(staffMember)}
-                            className="p-2 hover:bg-slate-100 rounded-lg inline-block transition-colors"
+                            type="button"
+                        aria-label={`Redigera ${staffMember.name}`}
+                        onClick={() => openEditStaffModal(staffMember)}
+                            className="vihem-icon-button"
                           >
                             <Edit2 className="w-4 h-4 text-slate-600" />
                           </button>

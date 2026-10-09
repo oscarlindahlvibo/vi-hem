@@ -7,11 +7,11 @@ import { OfflineStatus } from './OfflineStatus';
 import { Avatar, Button, Input, Modal } from './ui';
 import { useBankIdFlow } from '../hooks/useBankIdFlow';
 import { initiateBankIDLink, formatPersonalNumber } from '../lib/bankid';
-import { useScrollLock, isMobileBrowser } from '../lib/utils';
+import { isMobileBrowser } from '../lib/utils';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
-  Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu, X,
+  Newspaper, MessageCircle, LogOut, Bell, Building2, Users, Menu,
   ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase,
   BedDouble, CalendarDays, Landmark, MessageSquareText, Monitor, ScanLine, SlidersHorizontal,
   Truck, Package, FileSpreadsheet, Mail, FileSignature, ShieldCheck, ShieldAlert, Car, Sparkles, BookOpen, ReceiptText,
@@ -64,7 +64,6 @@ function useKeyboardOpen() {
 export function Layout({ children, currentPage, onNavigate, notificationCount = 0, chatNotificationCount = 0, enabledModules = {} }: LayoutProps) {
   const { user, signOut, bankIDAvailable, refreshProfile } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  useScrollLock(mobileMenuOpen);
   const keyboardOpen = useKeyboardOpen();
   const [chatFocused, setChatFocused] = useState(false);
   useLayoutEffect(() => {
@@ -295,48 +294,18 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
             </div>;
           })}
         </nav>
-        <div className="border-t border-slate-200/80 px-3 py-4">
-          <div className="mb-2 flex items-center gap-3 rounded-xl bg-slate-50/90 px-3 py-3 ring-1 ring-slate-200">
-            <Avatar name={user?.name} userId={user?.id} src={user?.avatar_url} />
-            <div className="flex-1 min-w-0">
-              <p className="truncate text-sm font-bold text-slate-950">{user?.name}</p>
-              <p className="text-xs font-medium text-slate-500">{roleLabel}</p>
-            </div>
-            {notificationCount > 0 && (
-              <button type="button" onClick={() => navigate('notifications')} className="relative" aria-label="Öppna aviseringar" title="Öppna aviseringar">
-                <Bell className="w-5 h-5 text-slate-400 hover:text-slate-600" />
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">{notificationCount}</span>
-              </button>
-            )}
-          </div>
-          <button type="button" onClick={() => navigate('profile')} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"><Avatar size="xs" name={user?.name} userId={user?.id} />Din profil</button>
-          <button
-            onClick={() => setPasswordModalOpen(true)}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950"
-          >
-            <KeyRound className="w-4 h-4" />
-            Byt lösenord
-          </button>
-          <button
-            onClick={() => setNotificationSettingsModalOpen(true)}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950"
-          >
-            <Bell className="w-4 h-4" />
-            Notisinställningar
-          </button>
-          {bankIDAvailable && (
-            <button
-              onClick={() => { setBankIdLinkedNotice(false); setBankIdModalOpen(true); }}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              {user?.bankid_personal_number ? 'BankID kopplat' : 'Koppla BankID'}
+        <div className="border-t border-vihem-line px-3 py-3">
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => navigate('profile')} aria-label="Din profil" className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-slate-50">
+              <Avatar name={user?.name} userId={user?.id} src={user?.avatar_url} />
+              <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-vihem-ink">{user?.name}</span><span className="block text-xs text-vihem-muted">{roleLabel} · Profil & inställningar</span></span>
             </button>
-          )}
-          <button onClick={signOut} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950">
-            <LogOut className="w-4 h-4" />
-            Logga ut
-          </button>
+            <button type="button" onClick={() => navigate('notifications')} className="vihem-icon-button relative" aria-label="Öppna aviseringar" title="Aviseringar">
+              <Bell className="h-5 w-5" />
+              {notificationCount > 0 && <span className="absolute right-0 top-0 flex min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-semibold text-white">{notificationCount > 99 ? '99+' : notificationCount}</span>}
+            </button>
+          </div>
+          <button type="button" onClick={signOut} className="vihem-touch-target mt-1 flex w-full items-center gap-3 rounded-xl px-3 text-sm text-vihem-muted hover:bg-slate-50"><LogOut className="h-4 w-4" />Logga ut</button>
         </div>
       </aside>
 
@@ -363,78 +332,21 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       </div>
 
       {/* Mobile menu overlay */}
-      {mobileMenuOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
-          <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
-          <div className="relative flex h-full w-72 flex-col bg-white shadow-2xl shadow-slate-950/20">
-            <div className="flex items-center justify-between px-5 pb-4 pt-[max(1rem,env(safe-area-inset-top,0px))] border-b border-slate-200">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg shadow-sm overflow-hidden">
-                  <AppLogo className="w-full h-full" />
-                </div>
-                <span className="font-bold text-slate-800">VI-HEM</span>
-              </div>
-              <button onClick={() => setMobileMenuOpen(false)} className="p-1.5 rounded-xl hover:bg-slate-100">
-                <X className="w-5 h-5 text-slate-600" />
-              </button>
-            </div>
-            <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
-              <Avatar name={user?.name} userId={user?.id} src={user?.avatar_url} />
-              <div>
-                <p className="text-sm font-semibold text-slate-800">{user?.name}</p>
-                <p className="text-xs text-slate-500">{roleLabel}</p>
-              </div>
-              <button type="button" onClick={() => navigate('profile')} className="vihem-icon-button" aria-label="Öppna din profil"><ChevronRight size={20}/></button>
-            </div>
-            <nav className="flex-1 px-3 py-3 overflow-y-auto overscroll-contain space-y-0.5">
+      <Modal open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} title="Mer" size="md"
+        toolbar={<button type="button" onClick={() => navigate('profile')} className="flex w-full items-center gap-3 rounded-xl p-2 text-left hover:bg-slate-50">
+          <Avatar name={user?.name} userId={user?.id} src={user?.avatar_url}/>
+          <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-vihem-ink">{user?.name}</span><span className="block text-xs text-vihem-muted">Profil & inställningar</span></span><ChevronRight className="h-4 w-4 text-vihem-muted"/>
+        </button>}
+        footer={<Button variant="ghost" onClick={signOut}><LogOut className="h-4 w-4"/>Logga ut</Button>}
+      >
+            <nav className="space-y-1">
               {visibleGroups.map(group => {
                 const active = group.items.some(item => currentPage === item.page || currentPage.startsWith(`${item.page}/`));
                 if (group.items.length === 1) { const item = group.items[0]; return <button key={group.label} onClick={() => navigate(item.page)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold ${active ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-100' : 'text-slate-600 hover:bg-slate-100'}`}><span className={active ? 'text-blue-600' : 'text-slate-400'}>{group.icon}</span>{group.label}<ChevronRight className="ml-auto h-4 w-4 text-slate-300" /></button>; }
                 return <div key={group.label} className="space-y-0.5"><button type="button" onClick={() => toggleGroup(group.label)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold ${active ? 'text-slate-950' : 'text-slate-600 hover:bg-slate-100'}`}><span className={active ? 'text-blue-600' : 'text-slate-400'}>{group.icon}</span>{group.label}<ChevronRight className={`ml-auto h-4 w-4 text-slate-300 transition-transform ${groupOpen(group.label) ? 'rotate-90' : ''}`} /></button>{groupOpen(group.label) && <div className="ml-3 space-y-0.5 border-l border-slate-200 pl-3">{group.items.map(item => { const itemActive = currentPage === item.page || currentPage.startsWith(`${item.page}/`); return <button key={item.page} onClick={() => navigate(item.page)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold ${itemActive ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-100'}`}><span className={itemActive ? 'text-blue-600' : 'text-slate-400'}>{item.icon}</span>{item.label}</button>; })}</div>}</div>;
               })}
             </nav>
-            <div className="px-3 py-4 border-t border-slate-200">
-              <button
-                onClick={() => {
-                  setPasswordModalOpen(true);
-                  setMobileMenuOpen(false);
-                }}
-                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm text-slate-600 hover:bg-slate-100"
-              >
-                <KeyRound className="w-4 h-4" />
-                Byt lösenord
-              </button>
-              <button
-                onClick={() => {
-                  setNotificationSettingsModalOpen(true);
-                  setMobileMenuOpen(false);
-                }}
-                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm text-slate-600 hover:bg-slate-100"
-              >
-                <Bell className="w-4 h-4" />
-                Notisinställningar
-              </button>
-              {bankIDAvailable && (
-                <button
-                  onClick={() => {
-                    setBankIdLinkedNotice(false);
-                    setBankIdModalOpen(true);
-                    setMobileMenuOpen(false);
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm text-slate-600 hover:bg-slate-100"
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  {user?.bankid_personal_number ? 'BankID kopplat' : 'Koppla BankID'}
-                </button>
-              )}
-              <button onClick={signOut} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm text-slate-600 hover:bg-slate-100">
-                <LogOut className="w-4 h-4" />
-                Logga ut
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* Main content */}
       <main className="vihem-mobile-main min-w-0 flex-1 overflow-x-hidden pb-32 pt-16 lg:ml-[17rem] lg:pb-0 lg:pt-0">

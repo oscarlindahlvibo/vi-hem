@@ -343,7 +343,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
       <section className="vihem-surface overflow-hidden rounded-card p-4 sm:p-5">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <Avatar name={user?.name} size="lg" className="bg-vihem-navy text-white" />
+            <Avatar userId={user?.id} src={user?.avatar_url} name={user?.name} size="lg" className="bg-vihem-navy text-white" />
             <div className="min-w-0">
               <h1 className="truncate text-xl font-bold tracking-tight text-vihem-ink sm:text-2xl">{getGreeting()}, {firstName}</h1>
               <p className="truncate text-sm text-vihem-muted">
@@ -510,7 +510,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
           <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
         </button>
         <div id="staff-dashboard-attention-items" className="divide-y divide-slate-100 border-t border-slate-100">
-          {(user?.role === 'admin' || user?.role === 'staff') && (
+          {newMRCount > 0 && (user?.role === 'admin' || user?.role === 'staff') && (
             <button
               onClick={() => onNavigate('maintenance')}
               className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 sm:px-6"
@@ -520,7 +520,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
                   <Wrench className="h-6 w-6 sm:h-7 sm:w-7" />
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-sm font-black leading-5 text-slate-950 sm:text-base">
+                  <span className="block text-sm font-semibold leading-5 text-slate-950 sm:text-base">
                     {newMRCount} inkommande felanmälningar
                   </span>
                   <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500">
@@ -531,16 +531,16 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
               <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
             </button>
           )}
-          <button
-            onClick={() => onNavigate(myWorkOrdersCount > 0 ? 'workorders' : 'maintenance')}
+          {attentionWorkOrdersCount > 0 && <button
+            onClick={() => onNavigate('workorders')}
             className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 sm:px-6"
           >
             <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 shadow-sm sm:h-14 sm:w-14">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-vihem-blue sm:h-14 sm:w-14">
                 <ClipboardList className="h-6 w-6 sm:h-7 sm:w-7" />
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-black leading-5 text-slate-950 sm:text-base">
+                <span className="block text-sm font-semibold leading-5 text-slate-950 sm:text-base">
                   {attentionWorkOrdersCount} arbetsordrar
                 </span>
                 <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500">
@@ -549,9 +549,9 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
               </span>
             </div>
             <span className="hidden shrink-0 rounded-full border border-slate-200 px-4 py-2 text-sm font-bold text-blue-500 sm:inline-flex">Öppna</span>
-          </button>
+          </button>}
 
-          <button
+          {shortStayAttentionCount > 0 && <button
             onClick={() => onNavigate('short-stay')}
             className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 sm:px-6"
           >
@@ -560,7 +560,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
                 <BedDouble className="h-6 w-6 sm:h-7 sm:w-7" />
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-black leading-5 text-slate-950 sm:text-base">
+                <span className="block text-sm font-semibold leading-5 text-slate-950 sm:text-base">
                   {shortStayAttentionCount} in- och utcheckningar idag
                 </span>
                 <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500">
@@ -597,9 +597,9 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
               </span>
             </div>
             <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
-          </button>
+          </button>}
 
-          <button
+          {ongoingCustomerProjects.length > 0 && <button
             onClick={() => onNavigate('customer-projects')}
             className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 sm:px-6"
           >
@@ -608,7 +608,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
                 <Briefcase className="h-6 w-6 sm:h-7 sm:w-7" />
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-black leading-5 text-slate-950 sm:text-base">
+                <span className="block text-sm font-semibold leading-5 text-slate-950 sm:text-base">
                   {ongoingCustomerProjects.length} pågående kundprojekt
                 </span>
                 <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500">
@@ -626,7 +626,7 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
               </span>
             </div>
             <ArrowRight className="h-5 w-5 shrink-0 text-slate-300" />
-          </button>
+          </button>}
         </div>
       </section>
 
