@@ -87,3 +87,24 @@ Besiktningslista: laddningsfrågor kontrollerar Supabasefel, erbjuder återförs
 Faktisk visuell QA i detta pass: ny arbetsorder 390/768/1440, redigera 390/1440, besiktningslista 390/768/1440, sökning utan träff 390. Inte alla fem bredder/roller/tillstånd. Kontrollerat QA-sparfel (tillfällig QA-trigger, därefter borttagen), bevarad form och lyckat retry skapade exakt en order, redigering sparades och detail visade ny beskrivning. Discarddialog avbröts och uppgifter fanns kvar. Kommentarutkastets byte mellan två order verifierat i UI. Generella nya feltexter granskade i kod; full hämtfels-UI för besiktningar återstår. Inga bilagor/kamera/fysisk keyboard certifieras.
 
 TypeScript, premiumenhetsprov, chattinvarianter, full chattintegration, utökad kommentarintegration och bygge/mobilpaketkontroll passerade. Stora App-/HEIC-chunks kvarstår. Ingen modul är fullständigt Klar. Tid/projekt/startsidor och hela övriga modullistan återstår enligt ursprunglig omfattning. Prioritera nästa operativa pass på kvarvarande arbetsorderprov, besiktningens bild-/dokumentåtkomst och tidrapporteringens spar-/stämpelflöden, därefter kundprojekt och rollstartsidor. Detta är en kontrollpunkt, inte slutleverans eller deploygodkännande.
+
+
+## Kontrollpunkt 3 – tidrapportering, 2026-10-09
+
+Samma premiumbranch, main/produktion oförändrade. Ingen modul förklaras Klar.
+
+- Min tid visar aktivitet/dagens datum som standard, med explicit val att visa tomma dagar; kalendern kvar. Mobilverktygsraden och inaktiv stämpelklocka komprimerade efter bildgranskning.
+- Manuell registrering, stämpling, dagskommentar och utstämpling väntar på faktisk mutation, låser dubbeltryck och behåller innehåll vid fel. Admins sparväg kontrollerar nu Supabase-fel före stängning (tidigare ignorerades dessa).
+- Adminens egna och administrativt registrerade tidposter visar Spara som godkänd enligt befintlig affärsregel. Staffens utkast/granskningsväg kvar. Datumintervall och rastlängd valideras; manuell registrering har skydd för osparade ändringar.
+- Aktiv stämpling och avslutande kommentar visar verklig arbetsordertitel. Timern uppdateras direkt vid jobbbyte. Dagsrader har större namngivna redigeringsåtgärder, läsbar flerradig kommentar och diskret faktisk status. Kalenderns månadspilar har namn; avslutad nollminuterspost visas inte längre felaktigt som Pågående.
+- Den gemensamma dialogens fot följer dialogens hörnradie även på desktop/iPad; ingen ny dialogstil.
+
+### Verkligt provat
+
+Autentiserad Oscar QA/admin i isolerad Supabase: avsiktlig INSERT-trigger gav stämpelfel; val och kommentar kvar; trigger borttagen; återförsök skapade stämpling. Byt jobb mellan två QA-order bevarade föregående passkommentar i rätt rad; utstämpling stängde nya passet med rätt kommentar. Manuell 09–10/rast15 sparade en synlig godkänd 45min-post. Slut08 före start09 blockerade knappen med förklaring. Ändrad kommentar öppnade kasta-dialog vid Avbryt, Fortsätt redigera återöppnade formuläret, Kasta stängde det. Översikt och manuell dialog skärmbildsgranskade 390/768/1440; mobil därefter komprimerad och ny bild tagen. Inga öppna QA-stämplingar lämnades.
+
+Browserverktygets fill på datetime-local skickade inte Reacts change-event; tangentbordsändring bekräftade värdet före sparning. Den begränsningen är inte ett påstående om en produktbugg. Fysisk datumväljare/tangentbord återstår.
+
+### Ej färdigt och viktig teknisk risk
+
+Jobbbyte/rast/återgång gör finishOpenEntries + INSERT i separata anrop. Utstämpling och dagskommentar sparas också separat. Vid fel efter första steget kan delvis sparad status uppstå. Ny UI-felhantering löser inte detta: transaktionell/idempotent RPC och offline-revision krävs. Ett lyckat online-adminprov ersätter inte personalens godkännandeflöde, frånvaro, nätverksavbrott, fysisk telefon eller säkerhetsmatris. Full modul-DoD kvar.

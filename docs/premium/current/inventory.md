@@ -1,6 +1,6 @@
 # VI-HEM 3.0 – källkodsinventering
 
-Inventeringen omfattar 107 TSX-filer, 62 vy-/modulfiler, 55 route-val, 251 dialog-/sheet-/kamera-/signaturreferenser och 2625 interaktiva element/formulär/tabeller. Varje element har fil och rad i inventory.json. Dynamiska underflöden och runtime-behörigheter kräver separat prov.
+Inventeringen omfattar 107 TSX-filer, 62 vy-/modulfiler, 55 route-val, 252 dialog-/sheet-/kamera-/signaturreferenser och 2627 interaktiva element/formulär/tabeller. Varje element har fil och rad i inventory.json. Dynamiska underflöden och runtime-behörigheter kräver separat prov.
 
 **Detta är en kodinventering, inte en visuell eller funktionell verifiering.** Alla vyer börjar med ej verifierad status för varje bedömningsdimension. Ingen sida markeras klar genom gemensam CSS.
 
@@ -65,7 +65,7 @@ Inventeringen omfattar 107 TSX-filer, 62 vy-/modulfiler, 55 route-val, 251 dialo
 | src/pages/TenantDashboard.tsx | 464 | 0 | 8 native buttons: review purpose/states/touch size |
 | src/pages/TenantInvoicesPage.tsx | 147 | 0 | 1 native buttons: review purpose/states/touch size |
 | src/pages/TerminationPage.tsx | 388 | 0 | 1 native fields: inspect labels, sizing, validation |
-| src/pages/TimeTrackingPage.tsx | 3166 | 17 | 40 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination; Native confirmation: review shared dialog replacement |
+| src/pages/TimeTrackingPage.tsx | 3203 | 18 | 38 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination; Native confirmation: review shared dialog replacement |
 | src/pages/WorkOrdersPage.tsx | 2532 | 13 | 6 native fields: inspect labels, sizing, validation; 18 native buttons: review purpose/states/touch size; Table: review mobile presentation, density, pagination; Native confirmation: review shared dialog replacement |
 | src/pages/YearPlanningPage.tsx | 1369 | 2 | 1 native fields: inspect labels, sizing, validation; 8 native buttons: review purpose/states/touch size; Sub-12px text: inspect legibility; Native confirmation: review shared dialog replacement |
 

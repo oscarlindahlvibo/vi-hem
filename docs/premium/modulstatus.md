@@ -63,7 +63,7 @@ Ingen rad är modul-Klar. Gemensamma kontroller påverkar även orörda vyer; de
 | src/pages/TenantDashboard.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/TenantInvoicesPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/TerminationPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
-| src/pages/TimeTrackingPage.tsx | Gemensamma avatarer | Kod/bygge; ej full runtimeprov | Tidflöden, formulär och samtliga enheter återstår |
+| src/pages/TimeTrackingPage.tsx | Kompakt mobilöversikt, aktiva dagar, arbetsorderkontext, skyddad formulärsparning/utkast, datumvalidering och rollriktiga åtgärder | Admin QA stämpla in → byt jobb → stämpla ut; avsiktligt INSERT-fel/återförsök; manuell 45min-post; felaktig sluttid; osparat-dialog; 390/768/1440 skärmbilder | Transaktionella jobbbyten/utstämpling, offline/dublettsäkerhet, staff-/admin-granskning, frånvaro och fysisk enhet återstår |
 | src/pages/WorkOrdersPage.tsx | Detaljhierarki, grupperade formulär/fasta åtgärder, utkastskydd, kommentarutkast per order och tangentbordsöppning | Tidigare detaljflöden + ny/redigera 390/768/1440, kontrollerat sparfel/återförsök, utkastbyte mellan två order | Bilagor, fler bredder/feltillstånd, bulk/svep/tid och full rollmatris återstår |
 | src/pages/YearPlanningPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 

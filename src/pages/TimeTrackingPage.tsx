@@ -1,3 +1,5 @@
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useFormSubmission } from '../hooks/useFormSubmission';
 import { useTimeWorkOrders } from '../hooks/useTimeWorkOrders';
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
@@ -321,6 +323,7 @@ type CustomerProjectSummary = Pick<CustomerProject, 'id' | 'title' | 'name' | 'c
 function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?: TimeTrackingInitialAction }) {
   const { labelFor } = useTimeCategories();
   const [tab, setTab] = useState<StaffTab>('list');
+  const [showEmptyDays, setShowEmptyDays] = useState(false);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [currentEntry, setCurrentEntry] = useState<TimeEntry | null>(null);
   // Passet man var på INNAN en pågående rast/lunch. Byter man jobb eller
@@ -376,6 +379,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
 
   useEffect(() => {
     if (currentEntry && !currentEntry.end_time) {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - new Date(currentEntry.start_time).getTime()) / 1000)));
       timerRef.current = setInterval(() => {
         setElapsedSeconds(Math.floor((Date.now() - new Date(currentEntry.start_time).getTime()) / 1000));
       }, 1000);
@@ -415,7 +419,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       // even if they started before midnight or have already been submitted.
       const { data: current } = await supabase
         .from('vihem_time_entries')
-        .select('*, customer_project:customer_project_id(id, title, name, customer_name)')
+        .select('*, work_order:work_order_id(id, title), customer_project:customer_project_id(id, title, name, customer_name)')
         .eq('user_id', user.id)
         .is('end_time', null)
         .order('start_time', { ascending: false })
@@ -549,12 +553,13 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
   }
 
   async function saveDayComment(workDate: string, comment: string) {
-    await supabase.from('vihem_daily_work_summaries').upsert({
+    const { error } = await supabase.from('vihem_daily_work_summaries').upsert({
       user_id: user.id,
       work_date: workDate,
       comment,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id,work_date' });
+    if (error) throw error;
   }
 
   // Passet en kommentar vid byte/utstämpling faktiskt gäller: pågående pass,
@@ -562,7 +567,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
   const commentSubject: TimeEntry | null = currentEntry && isBreakLike(currentEntry.entry_type) ? workBeforeBreak : currentEntry;
 
   function entryDescription(entry: TimeEntry) {
-    const project = timeEntryProjectLabel(entry);
+    const project = entry.work_order?.title || timeEntryProjectLabel(entry);
     return `${labelFor(entry.category)}${entry.category === 'customer_project' && entry.project_billing_scope === 'outside_quote' ? ' (ÄTA)' : ''}${project ? ` · ${project}` : ''}`;
   }
 
@@ -859,26 +864,25 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     { length: new Date(listYear, listMonthNumber, 0).getDate() },
     (_, i) => localDateKey(new Date(listYear, listMonthNumber - 1, i + 1))
   ).reverse();
+  const visibleDayKeys = showEmptyDays ? monthDayKeys : monthDayKeys.filter(day =>
+    (entriesByDay[day]?.length || 0) > 0 || (absencesByDay[day]?.length || 0) > 0 ||
+    Boolean(dailySummaries[day]?.comment?.trim()) || day === localDateKey(new Date()));
   const selectedDayAbsences = selectedDay ? absencesByDay[selectedDay] || [] : [];
 
   return (
-    <div className="space-y-6 min-h-screen bg-slate-50 -m-4 lg:-m-6 p-4 lg:p-6">
+    <div className="space-y-4 sm:space-y-6 min-h-screen bg-slate-50 -m-4 lg:-m-6 p-4 lg:p-6">
       <PageHeader
         title="Tidrapportering"
         subtitle="Stämpla in, rapportera tid och se din månadsöversikt"
         action={
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="grid grid-cols-2 gap-2 sm:flex">
             <Button onClick={() => setShowManualModal(true)} variant="secondary" className="gap-2 w-full sm:w-auto">
               <Plus className="w-4 h-4" /> Registrera tid
             </Button>
             <Button onClick={() => setShowAbsenceModal(true)} variant="secondary" className="gap-2 w-full sm:w-auto">
               <Calendar className="w-4 h-4" /> Frånvaro
             </Button>
-            {!currentEntry && (
-              <Button onClick={() => { setStampMode('start'); setShowStampModal(true); }} variant="primary" className="gap-2 w-full sm:w-auto">
-                <Play className="w-4 h-4" /> Stämpla in
-              </Button>
-            )}
+
           </div>
         }
       />
@@ -910,7 +914,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
                     {String(elapsedSeconds % 60).padStart(2, '0')}
                   </p>
                   <p className={`text-xs mt-0.5 ${toneStyle.sub}`}>
-                    {labelFor(currentEntry.category)}{currentEntry.category === 'customer_project' && currentEntry.project_billing_scope === 'outside_quote' ? ' · ÄTA-tid' : ''} · Startade {new Date(currentEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
+                    {entryDescription(currentEntry)} · Startade {new Date(currentEntry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
                     {timeEntryProjectLabel(currentEntry) && ` · ${timeEntryProjectLabel(currentEntry)}`}
                   </p>
                 </div>
@@ -941,18 +945,18 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
           </Card>
         );
       })() : (
-        <Card className="p-5 border-dashed border-slate-300 bg-slate-50">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between min-w-0">
+        <Card className="p-3 sm:p-5 border-dashed border-slate-300 bg-slate-50">
+          <div className="flex items-center justify-between gap-3 min-w-0">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="p-3 bg-slate-100 rounded-xl">
+              <div className="hidden sm:block p-3 bg-slate-100 rounded-xl">
                 <Timer className="w-6 h-6 text-slate-400" />
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-medium text-slate-600">Ingen aktiv stämpling</p>
-                <p className="text-xs text-slate-400">Tryck Stämpla in för att börja</p>
+                <p className="hidden sm:block text-xs text-slate-400">Tryck Stämpla in för att börja</p>
               </div>
             </div>
-            <Button onClick={() => { setStampMode('start'); setShowStampModal(true); }} variant="primary" className="gap-2 w-full sm:w-auto">
+            <Button onClick={() => { setStampMode('start'); setShowStampModal(true); }} variant="primary" className="gap-2 shrink-0">
               <Play className="w-4 h-4" /> Stämpla in
             </Button>
           </div>
@@ -984,8 +988,9 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       {/* ── LIST TAB ── */}
       {tab === 'list' && (
         <>
-          <div className="flex items-center gap-3">
-            <Input type="month" value={listMonth} onChange={e => setListMonth(e.target.value)} className="w-44" />
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <Input label="Månad" type="month" value={listMonth} onChange={e => setListMonth(e.target.value)} className="w-44" />
+            <Button variant="ghost" size="sm" aria-pressed={showEmptyDays} onClick={() => setShowEmptyDays(value => !value)}>{showEmptyDays ? 'Dölj tomma dagar' : 'Visa tomma dagar'}</Button>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -995,7 +1000,8 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
 
           {loading ? <LoadingPage /> : (
             <div className="space-y-3">
-              {monthDayKeys.map(dayKey => (
+              {visibleDayKeys.length === 0 && <EmptyState icon={<Clock className="h-8 w-8" />} title="Ingen registrerad tid denna månad" description="Registrera tid eller öppna månadsvyn för att välja en dag." />}
+              {visibleDayKeys.map(dayKey => (
                 <DayWorkCard
                   key={dayKey}
                   dayKey={dayKey}
@@ -1018,11 +1024,11 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
         <>
           {/* Month nav + stats */}
           <div className="flex items-center justify-between">
-            <button onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); }} className="p-2 rounded-lg hover:bg-slate-100 transition-colors">
+            <button aria-label="Föregående månad" onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); }} className="p-2 rounded-lg hover:bg-slate-100 transition-colors">
               <ChevronLeft className="w-5 h-5 text-slate-600" />
             </button>
             <h2 className="text-lg font-bold text-slate-800 capitalize">{monthName}</h2>
-            <button onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); }} className="p-2 rounded-lg hover:bg-slate-100 transition-colors">
+            <button aria-label="Nästa månad" onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); }} className="p-2 rounded-lg hover:bg-slate-100 transition-colors">
               <ChevronRight className="w-5 h-5 text-slate-600" />
             </button>
           </div>
@@ -1089,7 +1095,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
                       </div>
                     )}
                     {dayEntries.length > 0 && work === 0 && (
-                      <p className="text-xs text-green-600 font-medium">Pågående</p>
+                      <p className={`text-xs font-medium ${hasActive ? 'text-blue-600' : 'text-slate-500'}`}>{hasActive ? 'Pågående' : '0min'}</p>
                     )}
                     {dayAbsences.length > 0 && (
                       <p className="mt-1 truncate text-xs font-medium text-blue-700">
@@ -1206,6 +1212,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
         customerProjects={customerProjects}
         defaultDate={selectedDay}
         title="Registrera tid"
+        approvedEditMode={user.role === 'admin' || user.role === 'superadmin' ? 'admin' : 'request'}
       />
 
       {/* ── Edit modal ── */}
@@ -1218,6 +1225,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
           customerProjects={customerProjects}
           entry={editingEntry}
           title="Redigera tidpost"
+          approvedEditMode={user.role === 'admin' || user.role === 'superadmin' ? 'admin' : 'request'}
         />
       )}
 
@@ -1311,11 +1319,12 @@ function DayWorkCard({ dayKey, entries, absences, summary, onEditEntry, onAddEnt
                       {entry.work_order?.title && <span className="text-xs text-slate-500 truncate">· {entry.work_order.title}</span>}
                       {projectLabel && <span className="text-xs text-slate-500 truncate">· Projekt: {projectLabel}</span>}
                     </div>
-                    {entry.comment && <p className="text-xs text-slate-500 mt-0.5">{entry.comment}</p>}
+                    {entry.comment && <p className="text-sm text-slate-500 mt-1 whitespace-pre-wrap">{entry.comment}</p>}
+                    <p className={`mt-1 text-xs ${entry.status === 'rejected' ? 'text-vihem-danger' : 'text-vihem-muted'}`}>{STATUS_LABEL[entry.status]}</p>
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="text-sm font-bold text-slate-800">{formatMinutes(entry.total_minutes || 0)}</p>
-                    <button onClick={() => onEditEntry(entry)} className="text-xs text-blue-600 hover:text-blue-700 font-medium">Redigera</button>
+                    <Button variant="ghost" size="sm" onClick={() => onEditEntry(entry)} aria-label={`Redigera tid ${dayLabel} ${new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}`}>Redigera</Button>
                   </div>
                 </div>
                 );
@@ -1331,9 +1340,9 @@ function DayWorkCard({ dayKey, entries, absences, summary, onEditEntry, onAddEnt
                   {summary?.comment || 'Ingen kommentar ännu'}
                 </p>
               </div>
-              <button onClick={onEditComment} className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 flex-shrink-0">
-                <MessageSquare className="w-3.5 h-3.5" /> Kommentar
-              </button>
+              <Button variant="ghost" size="sm" onClick={onEditComment} aria-label={`Redigera dagskommentar ${dayLabel}`} className="gap-1 shrink-0">
+                <MessageSquare className="w-4 h-4" /> Kommentar
+              </Button>
             </div>
           </div>
 
@@ -1435,6 +1444,7 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
   leavingLabel?: string;
 }) {
   const { categories } = useTimeCategories();
+  const submission = useFormSubmission('Stämplingen kunde inte sparas. Dina val finns kvar. Kontrollera anslutningen och försök igen.');
   const [category, setCategory] = useState<TimeCategory>('general');
   const [workOrderId, setWorkOrderId] = useState('');
   const [customerProjectId, setCustomerProjectId] = useState('');
@@ -1446,10 +1456,9 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
 
   function reset() { setCategory('general'); setWorkOrderId(''); setCustomerProjectId(''); setProjectBillingScope('included_in_quote'); setChangeOrderId(''); setComment(''); setCommentError(''); }
 
-  function submit() {
+  async function submit() {
     if (commentMode !== 'none' && commentRequired && comment.trim().length < MIN_COMMENT_LENGTH) { setCommentError(`Skriv en kommentar om vad du har gjort (minst ${MIN_COMMENT_LENGTH} tecken).`); return; }
-    onSubmit(category, workOrderId || undefined, commentMode === 'none' ? '' : comment, selectedProject?.customer_name || '', customerProjectId || undefined, projectBillingScope, changeOrderId || undefined);
-    reset();
+    if (await submission.run(() => onSubmit(category, workOrderId || undefined, commentMode === 'none' ? '' : comment, selectedProject?.customer_name || '', customerProjectId || undefined, projectBillingScope, changeOrderId || undefined))) reset();
   }
 
   // ÄTA-listan hör till ett specifikt kundprojekt -- hämtas när projektet
@@ -1468,8 +1477,8 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
   const requiresProject = category === 'customer_project';
 
   return (
-    <Modal open={open} onClose={() => { onClose(); reset(); }} title={title}>
-      <div className="space-y-4">
+    <Modal open={open} onClose={() => { if (!submission.saving) { onClose(); reset(); } }} title={title}>
+      <fieldset disabled={submission.saving} className="min-w-0 space-y-4">
         {commentMode === 'leaving' && (
           <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3">
             <Textarea
@@ -1537,18 +1546,20 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
             error={commentError}
           />
         )}
+        {submission.error && <p role="alert" className="text-sm text-vihem-danger">{submission.error}</p>}
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={() => { onClose(); reset(); }} className="flex-1">Avbryt</Button>
           <Button
             variant="primary"
             onClick={submit}
+            loading={submission.saving}
             disabled={requiresProject && !customerProjectId}
             className="flex-1 gap-2"
           >
             <Play className="w-4 h-4" /> {submitLabel}
           </Button>
         </div>
-      </div>
+      </fieldset>
     </Modal>
   );
 }
@@ -1568,6 +1579,7 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
   approvedEditMode?: 'request' | 'admin';
 }) {
   const { categories } = useTimeCategories();
+  const submission = useFormSubmission('Tidposten kunde inte sparas. Uppgifterna finns kvar. Kontrollera anslutningen och försök igen.');
   const now = new Date();
   // An existing entry's own times always win, regardless of what a caller
   // passes as defaultDate -- AdminTimeView's edit modal always supplies a
@@ -1598,6 +1610,13 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
   // be manually cleared/corrected even when there was no break at all.
   const [breakMins, setBreakMins] = useState<number | ''>(entry?.break_minutes ?? '');
   const [comment, setComment] = useState(entry?.comment || '');
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [formReady, setFormReady] = useState(false);
+  const dirty = useUnsavedChanges({ category, entryType, workOrderId, customerProjectId, projectBillingScope, changeOrderId, startTime, endTime, breakMins, comment }, open && formReady);
+  function requestClose() {
+    if (submission.saving) return;
+    if (dirty) setConfirmDiscard(true); else onClose();
+  }
 
   // Reset when modal opens with new entry
   useEffect(() => {
@@ -1612,6 +1631,10 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
       setEndTime(defaultEnd);
       setBreakMins(entry?.break_minutes ?? '');
       setComment(entry?.comment || '');
+      setFormReady(true);
+    } else {
+      setFormReady(false);
+      setConfirmDiscard(false);
     }
   }, [open, entry?.id]);
 
@@ -1624,11 +1647,16 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
     }
   }, [category, projectBillingScope, customerProjectId]);
 
-  const previewMins = startTime && endTime
-    ? calcMinutes(new Date(startTime).toISOString(), new Date(endTime).toISOString(), entryType === 'break' ? 0 : Number(breakMins) || 0)
+  const startMillis = Date.parse(startTime), endMillis = Date.parse(endTime);
+  const dateError = !Number.isFinite(startMillis) ? 'Ange en giltig starttid.'
+    : endTime && (!Number.isFinite(endMillis) || endMillis <= startMillis) ? 'Sluttiden måste vara senare än starttiden.'
+    : endTime && entryType === 'work' && Number(breakMins) > (endMillis - startMillis) / 60000 ? 'Rasten får inte vara längre än passet.' : '';
+  const previewMins = !dateError && endTime
+    ? calcMinutes(new Date(startMillis).toISOString(), new Date(endMillis).toISOString(), entryType === 'break' ? 0 : Number(breakMins) || 0)
     : null;
 
-  const isValid = !!startTime;
+  const isValid = !dateError;
+  const savesApproved = approvedEditMode === 'admin';
   const isRejected = entry?.status === 'rejected';
   const isApproved = entry?.status === 'approved';
   const isDraft = !entry || entry.status === 'draft';
@@ -1653,8 +1681,21 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={title} size="lg">
-      <div className="space-y-4">
+    <>
+    <Modal open={open} onClose={requestClose} title={title} size="lg" footer={<div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+          <Button variant="secondary" disabled={submission.saving} onClick={requestClose} className="whitespace-nowrap">Avbryt</Button>
+          {!savesApproved && (isDraft || isRejected) && (
+            <Button variant="secondary" onClick={() => submission.run(() => onSubmit(buildPayload(false)))} loading={submission.saving} disabled={!isValid || (requiresProject && !customerProjectId)} className="whitespace-nowrap">
+              Spara utkast
+            </Button>
+          )}
+          <Button variant="primary" onClick={() => submission.run(() => onSubmit(buildPayload(true)))} loading={submission.saving} disabled={!isValid || (!savesApproved && !endTime) || (requiresProject && !customerProjectId)} className="col-span-2 gap-2 sm:col-span-1">
+            <Send className="w-4 h-4" />
+            {savesApproved ? 'Spara som godkänd' : isApproved ? 'Skicka ändring' : isRejected ? 'Skicka in igen' : 'Skicka för godkännande'}
+          </Button>
+        </div>}>
+      <fieldset disabled={submission.saving} className="min-w-0 space-y-5">
+        {submission.error && <p role="alert" className="text-sm text-vihem-danger">{submission.error}</p>}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Select label="Typ" value={entryType} onChange={e => setEntryType(e.target.value as TimeEntryKind)}
             options={[
@@ -1717,7 +1758,7 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input label="Start" type="datetime-local" value={startTime} onChange={e => setStartTime(e.target.value)} />
-          <Input label="Slut (valfritt om pågående)" type="datetime-local" value={endTime} onChange={e => setEndTime(e.target.value)} />
+          <Input label="Slut (valfritt om pågående)" type="datetime-local" value={endTime} min={startTime || undefined} onChange={e => setEndTime(e.target.value)} />
         </div>
 
         {entryType === 'work' && (
@@ -1726,6 +1767,8 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
             onChange={e => setBreakMins(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value) || 0))} />
         )}
 
+        {dateError && <p role="alert" className="text-sm text-vihem-danger">{dateError}</p>}
+        {savesApproved && !isApproved && <p className="text-sm text-vihem-muted">Som administratör sparar du posten direkt som godkänd.</p>}
         {previewMins !== null && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between">
             <span className="text-sm text-blue-700 font-medium">Beräknad arbetstid</span>
@@ -1751,20 +1794,11 @@ function EntryFormModal({ open, onClose, onSubmit, workOrders, customerProjects,
           </div>
         )}
 
-        <div className="flex gap-3 pt-2">
-          <Button variant="secondary" onClick={onClose} className="flex-1">Avbryt</Button>
-          {(isDraft || isRejected) && (
-            <Button variant="secondary" onClick={() => onSubmit(buildPayload(false))} disabled={!isValid || (requiresProject && !customerProjectId)} className="flex-1">
-              Spara utkast
-            </Button>
-          )}
-          <Button variant="primary" onClick={() => onSubmit(buildPayload(true))} disabled={!isValid || !endTime || (requiresProject && !customerProjectId)} className="flex-1 gap-2">
-            <Send className="w-4 h-4" />
-            {isApproved && approvedEditMode === 'admin' ? 'Spara som godkänd' : isApproved ? 'Skicka ändring' : isRejected ? 'Skicka in igen' : 'Skicka för godkännande'}
-          </Button>
-        </div>
-      </div>
+
+      </fieldset>
     </Modal>
+    <Modal open={open && confirmDiscard} onClose={() => setConfirmDiscard(false)} title="Kasta osparade ändringar?" size="sm" footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setConfirmDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={() => { setConfirmDiscard(false); onClose(); }}>Kasta ändringar</Button></div>}><p className="text-sm text-vihem-muted">Tidposten har inte sparats. Fortsätt redigera för att behålla dina uppgifter.</p></Modal>
+    </>
   );
 }
 
@@ -1778,6 +1812,7 @@ function EndDayModal({ open, onClose, onSubmit, leavingLabel, commentRequired = 
    * sig själv -- se isCommentRequiredForEntry. */
   commentRequired?: boolean;
 }) {
+  const submission = useFormSubmission('Utstämplingen kunde inte slutföras. Kommentaren finns kvar. Försök igen och kontrollera tidposten.');
   const [comment, setComment] = useState('');
   const [error, setError] = useState('');
 
@@ -1787,12 +1822,12 @@ function EndDayModal({ open, onClose, onSubmit, leavingLabel, commentRequired = 
 
   function submit() {
     if (commentRequired && comment.trim().length < MIN_COMMENT_LENGTH) { setError(`Skriv en kommentar om vad du har gjort innan du stämplar ut (minst ${MIN_COMMENT_LENGTH} tecken).`); return; }
-    onSubmit(comment);
+    void submission.run(() => onSubmit(comment));
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Stämpla ut för dagen">
-      <div className="space-y-4">
+    <Modal open={open} onClose={() => { if (!submission.saving) onClose(); }} title="Stämpla ut för dagen">
+      <fieldset disabled={submission.saving} className="min-w-0 space-y-4">
         <Textarea
           label={`${leavingLabel ? `Vad har du gjort på ${leavingLabel}?` : 'Vad har du gjort?'}${commentRequired ? '' : ' (valfritt)'}`}
           value={comment}
@@ -1801,13 +1836,14 @@ function EndDayModal({ open, onClose, onSubmit, leavingLabel, commentRequired = 
           placeholder="Kommentaren sparas på det pass du stämplar ut från"
           error={error}
         />
+        {submission.error && <p role="alert" className="text-sm text-vihem-danger">{submission.error}</p>}
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={onClose} className="flex-1">Avbryt</Button>
-          <Button variant="danger" onClick={submit} className="flex-1 gap-2">
+          <Button variant="danger" onClick={submit} loading={submission.saving} className="flex-1 gap-2">
             <Square className="w-4 h-4" /> Stämpla ut
           </Button>
         </div>
-      </div>
+      </fieldset>
     </Modal>
   );
 }
@@ -1819,6 +1855,7 @@ function DayCommentModal({ open, onClose, onSubmit, defaultComment, dayKey }: {
   defaultComment: string;
   dayKey: string;
 }) {
+  const submission = useFormSubmission('Kommentaren kunde inte sparas. Texten finns kvar så att du kan försöka igen.');
   const [comment, setComment] = useState(defaultComment);
 
   useEffect(() => {
@@ -1826,8 +1863,8 @@ function DayCommentModal({ open, onClose, onSubmit, defaultComment, dayKey }: {
   }, [open, defaultComment]);
 
   return (
-    <Modal open={open} onClose={onClose} title={dayKey ? `Dagens kommentar ${formatDate(dayKey)}` : 'Dagens kommentar'}>
-      <div className="space-y-4">
+    <Modal open={open} onClose={() => { if (!submission.saving) onClose(); }} title={dayKey ? `Dagens kommentar ${formatDate(dayKey)}` : 'Dagens kommentar'}>
+      <fieldset disabled={submission.saving} className="min-w-0 space-y-4">
         <Textarea
           label="Vad utfördes den här dagen?"
           value={comment}
@@ -1835,11 +1872,12 @@ function DayCommentModal({ open, onClose, onSubmit, defaultComment, dayKey }: {
           rows={4}
           placeholder="Sammanfatta arbete, avvikelser eller annat viktigt..."
         />
+        {submission.error && <p role="alert" className="text-sm text-vihem-danger">{submission.error}</p>}
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={onClose} className="flex-1">Avbryt</Button>
-          <Button variant="primary" onClick={() => onSubmit(comment)} className="flex-1">Spara kommentar</Button>
+          <Button variant="primary" loading={submission.saving} onClick={() => submission.run(() => onSubmit(comment))} className="flex-1">Spara kommentar</Button>
         </div>
-      </div>
+      </fieldset>
     </Modal>
   );
 }
@@ -2254,11 +2292,10 @@ function AdminTimeView({ user }: { user: Profile }) {
       approved_by: user.id,
       approved_at: new Date().toISOString(),
     };
-    if (entryId) {
-      await supabase.from('vihem_time_entries').update({ ...data, user_id: undefined, organisation_id: undefined }).eq('id', entryId);
-    } else {
-      await supabase.from('vihem_time_entries').insert(data);
-    }
+    const { error } = entryId
+      ? await supabase.from('vihem_time_entries').update({ ...data, user_id: undefined, organisation_id: undefined }).eq('id', entryId)
+      : await supabase.from('vihem_time_entries').insert(data);
+    if (error) throw error;
     setAdminEditingEntry(null);
     setAdminEditModalOpen(false);
     setAdminEntryModalTitle('Redigera tidpost');
@@ -3086,11 +3123,11 @@ function AdminTimeView({ user }: { user: Profile }) {
           {adminTab === 'calendar' && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <button onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); }} className="p-1.5 rounded-lg hover:bg-slate-100">
+                <button aria-label="Föregående månad" onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); }} className="p-1.5 rounded-lg hover:bg-slate-100">
                   <ChevronLeft className="w-4 h-4 text-slate-600" />
                 </button>
                 <span className="text-sm font-semibold text-slate-700 capitalize">{calMonthName}</span>
-                <button onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); }} className="p-1.5 rounded-lg hover:bg-slate-100">
+                <button aria-label="Nästa månad" onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); }} className="p-1.5 rounded-lg hover:bg-slate-100">
                   <ChevronRight className="w-4 h-4 text-slate-600" />
                 </button>
               </div>
