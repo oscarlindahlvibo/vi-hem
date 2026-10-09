@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { clearAvatarPhotos } from '../lib/avatarPhotos';
 import { supabase } from '../lib/supabase';
 import { BANKID_ENABLED } from '../lib/bankid';
@@ -82,6 +82,8 @@ function readLocalUsers(): LocalTestUser[] {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const authGeneration = useRef(0);
+  const signingOut = useRef(false);
   const [passwordRecovery, setPasswordRecovery] = useState(
     window.location.pathname === '/reset-password' ||
       window.location.hash.includes('type=recovery')
@@ -126,18 +128,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // chance to actually process the redirect.
     const hasPendingUrlSession = /[#?&](access_token|token_hash)=/.test(window.location.hash + window.location.search);
 
+    let live = true;
+    const initialGeneration = authGeneration.current;
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!live || initialGeneration !== authGeneration.current) return;
       if(session?.access_token)await supabase.realtime.setAuth(session.access_token);
       if (session?.user) {
         fetchProfile(session.user.id)
           .then(profile => {
+            if (!live || initialGeneration !== authGeneration.current) return;
             setUser(profile);
             setLoading(false);
           })
           .catch(error => {
+            if (!live || initialGeneration !== authGeneration.current) return;
             console.error('Error fetching profile:', error);
             clearAvatarPhotos();
-        setUser(null);
+            setUser(null);
             setLoading(false);
           });
       } else if (!hasPendingUrlSession) {
@@ -158,20 +165,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setPasswordRecovery(true);
         setLoading(false);
       } else if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+        if (signingOut.current) return;
+        const generation = ++authGeneration.current;
         (async () => {
           try {
             await supabase.realtime.setAuth(session.access_token);
             const profile = await fetchProfile(session.user.id);
-            setUser(profile);
+            if (live && generation === authGeneration.current) setUser(profile);
           } catch (error) {
+            if (!live || generation !== authGeneration.current) return;
             console.error('Error fetching profile after sign in:', error);
             clearAvatarPhotos();
-        setUser(null);
+            setUser(null);
           } finally {
-            setLoading(false);
+            if (live && generation === authGeneration.current) setLoading(false);
           }
         })();
       } else if (event === 'SIGNED_OUT') {
+        authGeneration.current++;
         void supabase.removeAllChannels();
         for(const key of Object.keys(localStorage))if(key.startsWith('vihem-chat:'))localStorage.removeItem(key);
         clearAvatarPhotos();
@@ -181,12 +192,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
+      live = false;
+      authGeneration.current++;
       subscription.unsubscribe();
       if (pendingUrlSessionTimeout) window.clearTimeout(pendingUrlSessionTimeout);
     };
   }, []);
 
   async function signIn(email: string, password: string) {
+    signingOut.current = false;
+    authGeneration.current++;
     if (
       localSuperadminEnabled &&
       email.trim().toLowerCase() === localSuperadminEmail.toLowerCase() &&
@@ -218,8 +233,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) return { error: 'Inloggningen lyckades inte.' };
 
+    const generation = authGeneration.current;
     try {
       const profile = await fetchProfile(authUser.id);
+      if (generation !== authGeneration.current) return { error: 'Inloggningen avbröts. Försök igen.' };
       if (!profile) {
         await supabase.auth.signOut();
         clearAvatarPhotos();
@@ -228,6 +245,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       setUser(profile);
     } catch (profileError) {
+      if (generation !== authGeneration.current) return { error: 'Inloggningen avbröts. Försök igen.' };
       await supabase.auth.signOut();
       clearAvatarPhotos();
         setUser(null);
@@ -238,9 +256,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function refreshProfile(): Promise<{ error: string | null }> {
     if (!user) return { error: 'Inte inloggad.' };
+    const generation = authGeneration.current;
     try {
       const updated = await fetchProfile(user.id);
-      if (updated) setUser(updated);
+      if (updated && generation === authGeneration.current) setUser(updated);
       return { error: null };
     } catch (error) {
       return { error: profileFetchErrorMessage(error) };
@@ -248,11 +267,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signOut() {
+    signingOut.current = true;
+    authGeneration.current++;
     localStorage.removeItem(LOCAL_SUPERADMIN_STORAGE_KEY);
     localStorage.removeItem(LOCAL_USER_STORAGE_KEY);
-    await supabase.auth.signOut();
     clearAvatarPhotos();
-        setUser(null);
+    setUser(null);
+    setLoading(false);
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      signingOut.current = false;
+    }
   }
 
   async function finishPasswordRecovery() {
