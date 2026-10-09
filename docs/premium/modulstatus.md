@@ -72,3 +72,7 @@ Aktuell maskininventering finns i current/inventory.md. Kör `node scripts/premi
 ## 2026-10-10 – besiktningsarkiv
 
 Besiktningar har nu första Drive-jobbflödet, lokal filkö, filarkiv/versioner och lazy PDF-generator. QA JWT/DB, mockad Google-transport och verklig Edge-felväg provade. Browser sparning/återöppning och konfigurationsfel samt fem viewports dokumenterade. Riktig Drive, browserfoto (extension-behörighet), fysisk mobil, full migrering/gallring och samtidig redigering återstår. DocumentsPage får säker inspection-jobb-hämtning; full dokumentmodul-UX/roller ej genomgångna. Ingen modul ändras till Klar. Se inspection-drive-verification.md.
+
+### Pass 3 / kontrollpunkt 8
+
+Tidrapportering: atomiska självregistreringsövergångar implementerade och verifierade med riktiga QA-databasresultat; browser in/rast/återgång/out provat. Inte DoD-Klar: fysisk offline/omstart, rollmatris, midnatt/DST, administrativ korrigering och äldre klienters kö återstår. Drive/besiktningar är fortsatt implementerade delvis, inte fullt verifierade. Övriga moduler har inte fått individuell slutgranskning i detta pass. Gemensamma ändringar räknas inte som färdig modul.

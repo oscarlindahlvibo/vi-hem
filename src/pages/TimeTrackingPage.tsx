@@ -1,3 +1,4 @@
+import { pendingClockOperation, saveClockOperation, executeClockOperation, reconcileClockOperation, type ClockOperation, type ClockAction } from '../lib/clockTransitions';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useFormSubmission } from '../hooks/useFormSubmission';
 import { useTimeWorkOrders } from '../hooks/useTimeWorkOrders';
@@ -329,6 +330,10 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
   // Passet man var på INNAN en pågående rast/lunch. Byter man jobb eller
   // stämplar ut direkt från rasten är det det passet kommentaren gäller.
   const [workBeforeBreak, setWorkBeforeBreak] = useState<TimeEntry | null>(null);
+  const [clockInitial] = useState(() => { try { return { operation: pendingClockOperation(user.id, user.organisation_id || ''), error: '' }; } catch { return { operation: null, error: 'Den lokala stämplingskön kunde inte läsas. Kontrollera tiderna med administratören innan du registrerar en ny åtgärd.' }; } });
+  const [clockPending, setClockPending] = useState<ClockOperation | null>(clockInitial.operation);
+  const [clockBusy, setClockBusy] = useState(false), [clockError, setClockError] = useState(clockInitial.error);
+  const clockLock = useRef(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [loading, setLoading] = useState(false);
   const [customerProjects, setCustomerProjects] = useState<CustomerProjectSummary[]>([]);
@@ -479,78 +484,18 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
   /** `closingComment` är kommentaren om det pass som avslutas (det man faktiskt
    * har arbetat med) -- den sparas på just det passet, aldrig på det nya man
    * byter till. Ignoreras för rast/lunch. */
-  async function finishOpenEntries(closingComment?: string) {
-    const end = new Date().toISOString();
-    const closing = closingComment?.trim() || '';
-    const withClosingComment = (entry: Pick<TimeEntry, 'entry_type' | 'comment'>) => {
-      if (!closing || isBreakLike(entry.entry_type)) return {};
-      return { comment: entry.comment?.trim() ? `${entry.comment.trim()}\n${closing}` : closing };
-    };
-    // Closed purely by the stämpelklocka (start_time set by handleStampIn/
-    // handleSwitchJob/etc at the moment of clocking in, end_time set here
-    // at the moment of clocking out) -- nothing about it was typed in by
-    // hand, so it's approved automatically instead of sitting as
-    // 'submitted' pending review. Any later edit still needs review: see
-    // handleSaveEntry's previousStatus === 'approved' check.
-    if (!navigator.onLine && currentEntry) {
-      const breakMinutes = isBreakLike(currentEntry.entry_type) ? 0 : currentEntry.break_minutes;
-      await queueOfflineMutation('time_entry_update', {
-        id: currentEntry.id,
-        data: { end_time: end, total_minutes: calcMinutes(currentEntry.start_time, end, breakMinutes), status: 'approved', approved_by: null, approved_at: end, ...withClosingComment(currentEntry) },
-      }, `time-entry:${currentEntry.id}`);
-      return;
-    }
-    const { data: openEntries, error } = await supabase
-      .from('vihem_time_entries')
-      .select('*')
-      .eq('user_id', user.id)
-      .is('end_time', null)
-      .order('start_time', { ascending: true });
-
-    if (error) throw error;
-
-    await Promise.all((openEntries || []).map(async entry => {
-      const breakMinutes = isBreakLike(entry.entry_type) ? 0 : entry.break_minutes;
-      const total = calcMinutes(entry.start_time, end, breakMinutes);
-      const { error: updateError } = await supabase.from('vihem_time_entries').update({
-        end_time: end,
-        total_minutes: total,
-        status: 'approved',
-        approved_by: null,
-        approved_at: end,
-        ...withClosingComment(entry),
-      }).eq('id', entry.id);
-      if (updateError) throw updateError;
-    }));
-  }
-
   useEffect(() => {
     if (!currentEntry || !isBreakLike(currentEntry.entry_type)) { setWorkBeforeBreak(null); return; }
     let cancelled = false;
-    supabase
-      .from('vihem_time_entries')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('entry_type', 'work')
-      .lte('end_time', currentEntry.start_time)
-      .order('end_time', { ascending: false })
-      .limit(1)
-      .then(({ data }) => { if (!cancelled) setWorkBeforeBreak((data?.[0] as TimeEntry | undefined) || null); });
+    void (async () => {
+      const receipt = await supabase.from('vihem_clock_operations').select('result').eq('id', currentEntry.id).maybeSingle();
+      const predecessor = receipt.data?.result?.closed;
+      const query = supabase.from('vihem_time_entries').select('*').eq('user_id', user.id).eq('entry_type', 'work');
+      const result = predecessor ? await query.eq('id', predecessor).limit(1) : receipt.data ? { data: [] } : await query.lte('end_time', currentEntry.start_time).order('end_time', { ascending: false }).limit(1);
+      if (!cancelled) setWorkBeforeBreak((result.data?.[0] as TimeEntry | undefined) || null);
+    })();
     return () => { cancelled = true; };
-  }, [currentEntry?.id, currentEntry?.entry_type]);
-
-  /** Kommentar från en rast: gäller passet före rasten, inte rasten själv. */
-  async function commentOnWorkBeforeBreak(comment?: string) {
-    const text = comment?.trim();
-    if (!text || !workBeforeBreak) return;
-    const merged = workBeforeBreak.comment?.trim() ? `${workBeforeBreak.comment.trim()}\n${text}` : text;
-    if (!navigator.onLine) {
-      await queueOfflineMutation('time_entry_update', { id: workBeforeBreak.id, data: { comment: merged } }, `time-entry:${workBeforeBreak.id}`);
-      return;
-    }
-    const { error } = await supabase.from('vihem_time_entries').update({ comment: merged }).eq('id', workBeforeBreak.id);
-    if (error) throw error;
-  }
+  }, [currentEntry, user.id]);
 
   async function saveDayComment(workDate: string, comment: string) {
     const { error } = await supabase.from('vihem_daily_work_summaries').upsert({
@@ -575,149 +520,42 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     return customerProjects.find(project => project.id === projectId);
   }
 
-  async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope: TimeEntry['project_billing_scope'] = 'included_in_quote', changeOrderId?: string) {
-    const project = getCustomerProject(customerProjectId);
-    await finishOpenEntries();
-    const payload = {
-      user_id: user.id, work_order_id: workOrderId || null, category,
-      organisation_id: user.organisation_id || null,
-      entry_type: 'work',
-      customer_project_id: category === 'customer_project' ? customerProjectId || null : null,
-      customer_name: category === 'customer_project' ? project?.customer_name || customerName || null : customerName || null,
-      project_billing_scope: category === 'customer_project' ? projectBillingScope : 'internal',
-      project_change_order_id: category === 'customer_project' && projectBillingScope === 'outside_quote' ? changeOrderId || null : null,
-      start_time: new Date().toISOString(), end_time: null,
-      break_minutes: 0, total_minutes: 0, comment: comment || '', status: 'draft',
-    };
-    if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', payload, `time-entry-open:${user.id}`);
-    else {
-      const { error } = await supabase.from('vihem_time_entries').insert(payload);
-      if (error) throw error;
-    }
-    setShowStampModal(false);
-    fetchData();
+  async function runClock(action: ClockAction, job: Record<string, unknown> = {}, comment = '') {
+    if (clockInitial.error) throw Error(clockInitial.error);
+    if (clockLock.current) throw Error('En stämplingsåtgärd behandlas redan.');
+    if (clockPending) throw Error('Synkronisera eller kontrollera den väntande stämplingen först.');
+    const operation: ClockOperation = { p_id: crypto.randomUUID(), p_action: action, p_expected: currentEntry?.id || null, p_event: new Date().toISOString(), p_job: job, p_comment: comment, p_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Stockholm' };
+    clockLock.current = true; setClockBusy(true); setClockError('');
+    try {
+      saveClockOperation(user.id, user.organisation_id || '', operation); setClockPending(operation);
+      await executeClockOperation(user.id, user.organisation_id || '', operation); setClockPending(null); await fetchData();
+    } catch (error) { const message = error instanceof Error ? error.message : 'Stämplingen kunde inte sparas.'; setClockError(message); throw Error(message); }
+    finally { clockLock.current = false; setClockBusy(false); }
   }
-
-  async function handleSwitchJob(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string, projectBillingScope: TimeEntry['project_billing_scope'] = 'included_in_quote', changeOrderId?: string) {
-    if (!currentEntry) return;
-    const project = getCustomerProject(customerProjectId);
-    // Kommentaren beskriver det man precis arbetat med -- den hör till passet
-    // som avslutas här, inte till det nya. Byter man från en rast är det
-    // passet före rasten.
-    if (isBreakLike(currentEntry.entry_type)) await commentOnWorkBeforeBreak(comment);
-    await finishOpenEntries(isBreakLike(currentEntry.entry_type) ? undefined : comment);
-    const payload = {
-      user_id: user.id,
-      organisation_id: user.organisation_id || null,
-      work_order_id: workOrderId || null,
-      category,
-      entry_type: 'work',
-      customer_project_id: category === 'customer_project' ? customerProjectId || null : null,
-      customer_name: category === 'customer_project' ? project?.customer_name || customerName || null : customerName || null,
-      project_billing_scope: category === 'customer_project' ? projectBillingScope : 'internal',
-      project_change_order_id: category === 'customer_project' && projectBillingScope === 'outside_quote' ? changeOrderId || null : null,
-      start_time: new Date().toISOString(),
-      end_time: null,
-      break_minutes: 0,
-      total_minutes: 0,
-      comment: '',
-      status: 'draft',
-    };
-    if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', payload, `time-entry-open:${user.id}`);
-    else {
-      const { error } = await supabase.from('vihem_time_entries').insert(payload);
-      if (error) throw error;
-    }
-    setShowStampModal(false);
-    fetchData();
+  async function retryClock(checkOnly = false) {
+    if (!clockPending || clockLock.current) return;
+    clockLock.current = true; setClockBusy(true); setClockError('');
+    try {
+      if (checkOnly) {
+        const registered = await reconcileClockOperation(user.id, user.organisation_id || '', clockPending);
+        if (!registered) setClockError('Åtgärden registrerades inte på servern. Den har sparats som lokal historik. Kontrollera tiderna och registrera rätt åtgärd.');
+      } else await executeClockOperation(user.id, user.organisation_id || '', clockPending);
+      setClockPending(null); await fetchData();
+    } catch (error) { setClockError(error instanceof Error ? error.message : 'Stämplingen kunde inte kontrolleras.'); }
+    finally { clockLock.current = false; setClockBusy(false); }
   }
-
-  async function handleStartBreak(kind: 'break' | 'lunch' = 'break') {
-    if (!currentEntry) return;
-    await finishOpenEntries();
-    const payload = {
-      user_id: user.id,
-      organisation_id: user.organisation_id || null,
-      category: 'general',
-      entry_type: kind,
-      start_time: new Date().toISOString(),
-      end_time: null,
-      break_minutes: 0,
-      total_minutes: 0,
-      comment: kind === 'lunch' ? 'Lunch' : 'Rast',
-      status: 'draft',
-    };
-    if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', payload, `time-entry-open:${user.id}`);
-    else {
-      const { error } = await supabase.from('vihem_time_entries').insert(payload);
-      if (error) throw error;
-    }
-    fetchData();
+  function clockJob(category: TimeCategory, workOrderId?: string, customerName?: string, customerProjectId?: string, scope: TimeEntry['project_billing_scope'] = 'included_in_quote', changeOrderId?: string) {
+    return { category, work_order_id: workOrderId || null, customer_project_id: category === 'customer_project' ? customerProjectId || null : null, customer_name: getCustomerProject(customerProjectId)?.customer_name || customerName || null, project_billing_scope: category === 'customer_project' ? scope : 'internal', project_change_order_id: category === 'customer_project' && scope === 'outside_quote' ? changeOrderId || null : null };
   }
-
-  async function handleReturnFromBreak() {
-    if (!currentEntry || !isBreakLike(currentEntry.entry_type)) return;
-
-    const { data: previousEntries, error } = await supabase
-      .from('vihem_time_entries')
-      .select('category, work_order_id, customer_project_id, customer_name, project_billing_scope')
-      .eq('user_id', user.id)
-      .eq('entry_type', 'work')
-      .lte('end_time', currentEntry.start_time)
-      .order('end_time', { ascending: false })
-      .limit(1);
-
-    if (error) throw error;
-
-    const previous = previousEntries?.[0];
-    if (!previous) {
-      setStampMode('switch');
-      setShowStampModal(true);
-      return;
-    }
-
-    await finishOpenEntries();
-    const payload = {
-      user_id: user.id,
-      organisation_id: user.organisation_id || null,
-      work_order_id: previous.work_order_id || null,
-      category: previous.category || 'general',
-      entry_type: 'work',
-      customer_project_id: previous.category === 'customer_project' ? previous.customer_project_id || null : null,
-      customer_name: previous.customer_name || null,
-      project_billing_scope: previous.category === 'customer_project' ? previous.project_billing_scope || 'internal' : 'internal',
-      start_time: new Date().toISOString(),
-      end_time: null,
-      break_minutes: 0,
-      total_minutes: 0,
-      comment: '',
-      status: 'draft',
-    };
-    if (!navigator.onLine) await queueOfflineMutation('time_entry_insert', payload, `time-entry-open:${user.id}`);
-    else {
-      const { error: insertError } = await supabase.from('vihem_time_entries').insert(payload);
-      if (insertError) throw insertError;
-    }
-    fetchData();
+  async function handleStampIn(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string, scope: TimeEntry['project_billing_scope'] = 'included_in_quote', changeOrderId?: string) {
+    await runClock('clockin', clockJob(category, workOrderId, customerName, customerProjectId, scope, changeOrderId), comment); setShowStampModal(false);
   }
-
-  async function handleStampOut(dayComment?: string) {
-    if (!currentEntry) return;
-    // Kommentaren gäller passet man stämplar ut från; dagssammanfattningen
-    // får den som tillägg (inte ersättning) så tidigare utstämplingar samma
-    // dag inte skrivs över.
-    if (isBreakLike(currentEntry.entry_type)) await commentOnWorkBeforeBreak(dayComment);
-    await finishOpenEntries(isBreakLike(currentEntry.entry_type) ? undefined : dayComment);
-    const comment = dayComment?.trim();
-    if (comment) {
-      const today = localDateKey(new Date());
-      const existing = dailySummaries[today]?.comment?.trim();
-      await saveDayComment(today, existing ? `${existing}\n${comment}` : comment);
-    }
-    setCurrentEntry(null);
-    setShowEndDayModal(false);
-    fetchData();
+  async function handleSwitchJob(category: TimeCategory, workOrderId?: string, comment?: string, customerName?: string, customerProjectId?: string, scope: TimeEntry['project_billing_scope'] = 'included_in_quote', changeOrderId?: string) {
+    await runClock('switch', clockJob(category, workOrderId, customerName, customerProjectId, scope, changeOrderId), comment); setShowStampModal(false);
   }
+  async function handleStartBreak(kind: 'break' | 'lunch' = 'break') { try { await runClock(kind); } catch { /* Error is visible next to the clock. */ } }
+  async function handleReturnFromBreak() { try { await runClock('resume'); } catch { /* Preserve server state and show retry. */ } }
+  async function handleStampOut(comment?: string) { await runClock('clockout', {}, comment); setShowEndDayModal(false); }
 
   async function handleSaveEntry(payload: Partial<TimeEntry> & { submitNow?: boolean }, entryId?: string) {
     const isNew = !entryId;
@@ -889,6 +727,12 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
 
       {workOrderOptionsError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{workOrderOptionsError}</p>}
       {/* Active clock */}
+      {(clockPending || clockError) && <section role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <p className="text-sm font-semibold text-amber-950">{clockPending ? 'Stämpling väntar på bekräftelse' : 'Kontrollera stämplingen'}</p>
+        {clockPending && <p className="mt-1 text-sm text-amber-900">Händelse {new Date(clockPending.p_event).toLocaleString('sv-SE')} · Serverns senaste bekräftade läge visas nedan.</p>}
+        {clockError && <p role="alert" className="mt-2 text-sm text-amber-900">{clockError}</p>}
+        {clockPending && <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="secondary" disabled={clockBusy} onClick={() => void retryClock()}>Försök igen</Button><Button size="sm" variant="ghost" disabled={clockBusy} onClick={() => void retryClock(true)}>Kontrollera serverstatus</Button></div>}
+      </section>}
       {currentEntry ? (() => {
         const tone = clockTone(currentEntry.entry_type, elapsedSeconds);
         const toneStyle = CLOCK_TONE_STYLES[tone];
@@ -920,22 +764,22 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
                 </div>
               </div>
               <div className={`grid w-full gap-2 lg:max-w-2xl ${isBreakLike(currentEntry.entry_type) ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'}`}>
-                <Button onClick={() => { setStampMode('switch'); setShowStampModal(true); }} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
+                <Button disabled={clockBusy || !!clockPending} onClick={() => { setStampMode('switch'); setShowStampModal(true); }} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
                   <Repeat2 className="w-4 h-4" /> Byt jobb
                 </Button>
-                <Button onClick={() => setShowEndDayModal(true)} variant="danger" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
+                <Button disabled={clockBusy || !!clockPending} onClick={() => setShowEndDayModal(true)} variant="danger" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
                   <Square className="w-4 h-4" /> Stämpla ut
                 </Button>
                 {isBreakLike(currentEntry.entry_type) ? (
-                  <Button onClick={handleReturnFromBreak} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
+                  <Button disabled={clockBusy || !!clockPending} onClick={handleReturnFromBreak} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
                     <Timer className="w-4 h-4" /> Återgå till jobb
                   </Button>
                 ) : (
                   <>
-                    <Button onClick={() => handleStartBreak('break')} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
+                    <Button disabled={clockBusy || !!clockPending} onClick={() => handleStartBreak('break')} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
                       <Coffee className="w-4 h-4" /> Gå på rast
                     </Button>
-                    <Button onClick={() => handleStartBreak('lunch')} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
+                    <Button disabled={clockBusy || !!clockPending} onClick={() => handleStartBreak('lunch')} variant="secondary" className="min-h-14 w-full gap-1 px-2 text-xs sm:gap-2 sm:px-4 sm:text-sm">
                       <Utensils className="w-4 h-4" /> Gå på lunch
                     </Button>
                   </>
@@ -956,7 +800,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
                 <p className="hidden sm:block text-xs text-slate-400">Tryck Stämpla in för att börja</p>
               </div>
             </div>
-            <Button onClick={() => { setStampMode('start'); setShowStampModal(true); }} variant="primary" className="gap-2 shrink-0">
+            <Button disabled={clockBusy || !!clockPending} onClick={() => { setStampMode('start'); setShowStampModal(true); }} variant="primary" className="gap-2 shrink-0">
               <Play className="w-4 h-4" /> Stämpla in
             </Button>
           </div>
