@@ -6,7 +6,7 @@ Ingen rad är modul-Klar. Gemensamma kontroller påverkar även orörda vyer; de
 |---|---|---|---|
 | src/components/LoginPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/components/ResetPasswordPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
-| src/modules/agreements-v2/pages/AgreementsV2Page.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
+| src/modules/agreements-v2/pages/AgreementsV2Page.tsx | Implementerad men inte fullständigt verifierad: mobilarkiv, namngivna filter, sökdebounce och svarsrace-skydd, generellt utkastflöde i DialogSurface med osparat-skydd | Admin QA skapar Offert, rubrikblock sparas/återläses och förhandsvisas; API personal får läsa, tenant/annan org nekas. Arkiv/form fem screenshotsbredder. Laddfel/återförsök och osparat-dialog provade | Hela blockredigeraren, malladministration, signer-/partsflöden, bilagor och publika BankID-/verifieringssidor återstår; inga signerings-/utskicksprov |
 | src/modules/agreements-v2/pages/PublicAgreementSignPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/modules/agreements-v2/pages/PublicAgreementVerifyPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/modules/ekangen/EkangenAdmin.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |

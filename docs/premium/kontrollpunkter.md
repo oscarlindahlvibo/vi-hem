@@ -198,3 +198,11 @@ TypeScript PASS, riktad ESLint PASS. property-integration.mjs körd med CHAT_QA_
 Mobil har egna hyresgästrader med Avatar och aktuell bostad, desktop behåller tabell. Sökningen inkluderar telefon och statusfilter finns. Nytt konto har Kontakt/Boende, befintliga pris-/rabatt-/momsval bevarade. Kontaktredigering har fasta sparåtgärder och osparat-dialog. Laddfel syns med återförsök; UPDATE kräver returnerad rad för att inte rapportera noll uppdateringar som framgång.
 
 QA admin öppnade profil, ändrade telefon lokalt, avbryt gav utkastvarning, fortsatte och återställde telefon innan sparning: toast och stängning verifierade. Ingen lösenords-/rolländring och inget konto skapades. Screenshots lista/profil fem bredder. TypeScript/riktad ESLint PASS. Konto+hyresförhållande är fortsatt ett äldre flerstegsflöde, ingen atomisk backend införd i detta designpass; nyregistrering/ekonomiflöden inte verifierade. Ingen migration/produktion.
+
+## Kontrollpunkt 11C – Avtalsarkiv och generella utkast, 2026-10-10
+
+Gemensamma filter, mobilarkivrader, tangentbordsåtkomlig dokumentöppning och ny utkastdialog. Avtal/Offert/Övrigt bevarade. Sökning debounce 250 ms och sekvenskontroll så gamla svar inte ersätter nya filterresultat. Backend, blockmodell och signeringsregler oförändrade.
+
+QA router saknade vihem-agreements-admin (404 Unknown QA function). Kopierade samma admin-funktion och två rena databashelpers ENDAST till /var/tmp/vihem-chat-qa-20261008; QA-router tillåter list/get/create/update/save_blocks/save_parties/save_signers/save_entity_links/preview/list_entity_agreements/list_templates/get_template, övriga action nekas. Endast vihem-chat-qa-edge omstartad. Inget workflow/public/utskick aktiverat och produktion orörd.
+
+Browser admin: skapade syntetisk serviceoffert, lade till och sparade rubrik med Å/ä, förhandsvisade och återgick till arkiv. Backend återläsning bekräftade offer/draft och innehåll. Personal får läsa, tenant och annan organisation nekas. Exakt QA-utkast borttaget efter verifiering, inga signaturer eller hyresförhållanden skapade. Screenshots arkiv/form 390/430/768/1024/1440. TypeScript/riktad lint PASS. Full avtalmodul inte klar: mallar, alla block/dialoger och signerade/publika flöden kvar.

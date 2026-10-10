@@ -1,7 +1,7 @@
 // Avtal V2 (BETA) — central archive + editor. Single-file module page,
 // same pattern as src/modules/finance-v2/pages/FinanceV2Page.tsx (several
 // internal components in one file rather than a deep folder tree).
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
 import {
@@ -56,8 +56,8 @@ import { BlockRenderer } from '../components/BlockRenderer';
 import { blockTypeDef, createBlock } from '../blocks/blockTypes';
 import { BLOCK_CATEGORIES } from '../blocks/blockCategories';
 import { resolveBlocksForPreview } from '../blocks/dynamicFields';
-import { Modal } from '../../../components/ui';
-import { useScrollLock } from '../../../lib/utils';
+import { Modal, Button, Input, Select, SearchInput, Tabs, Card } from '../../../components/ui';
+import { useUnsavedChanges } from '../../../hooks/useUnsavedChanges';
 import { ArchiveIcon, ArrowLeft, Bell, ChevronDown, Download, Edit3, FileSignature, FileText, Fingerprint, Globe, Link2, MoreHorizontal, Paperclip, PenLine, Plus, RefreshCw, Send, Trash2, Users, XCircle } from 'lucide-react';
 
 function describeError(err: unknown): string {
@@ -173,17 +173,7 @@ export function AgreementsV2Page({ initialPrefill }: { initialPrefill?: Agreemen
         <p className="mt-1 text-sm text-slate-500">Ett centralt arkiv för avtal, offerter och andra dokument — kopplade eller fristående.</p>
       </div>
 
-      <div className="flex gap-1 border-b border-slate-200">
-        {([['archive', 'Arkiv'], ['templates', 'Mallar']] as const).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${tab === key ? 'border-b-2 border-blue-600 text-blue-700' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <Tabs tabs={[{key:'archive',label:'Arkiv'},{key:'templates',label:'Mallar'}]} active={tab} onChange={key=>setTab(key as 'archive'|'templates')}/>
 
       {tab === 'archive' && <ArchiveTab organisationId={user.organisation_id} onOpen={setSelectedAgreementId} />}
       {tab === 'templates' && <TemplatesTab organisationId={user.organisation_id} />}
@@ -203,24 +193,28 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
   const [typeFilter, setTypeFilter] = useState<'all' | AgreementDocumentType>('all');
   const [search, setSearch] = useState('');
   const [newOpen, setNewOpen] = useState(false);
+  const [settledSearch,setSettledSearch]=useState('');
+  const requestRevision=useRef(0);
+  useEffect(()=>{const timer=setTimeout(()=>setSettledSearch(search),250);return()=>clearTimeout(timer);},[search]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    const revision=++requestRevision.current;
     setLoading(true);
     setError('');
     try {
       const data = await listAgreements({
         status: statusFilter === 'all' ? undefined : statusFilter,
         document_type: typeFilter === 'all' ? undefined : typeFilter,
-        search: search || undefined,
+        search: settledSearch || undefined,
       });
-      setItems(data);
+      if(revision===requestRevision.current)setItems(data);
     } catch (err) {
-      setError(describeError(err));
+      if(revision===requestRevision.current)setError(describeError(err));
     } finally {
-      setLoading(false);
+      if(revision===requestRevision.current)setLoading(false);
     }
-  }, [statusFilter, typeFilter, search]);
+  }, [statusFilter, typeFilter, settledSearch]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -243,41 +237,21 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Sök dokument, motpart, nummer..."
-            className="w-64 rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-          />
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
-            <option value="all">Alla statusar</option>
-            {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
-            <option value="all">Alla typer</option>
-            <option value="agreement">Avtal</option>
-            <option value="offer">Offert</option>
-            <option value="other">Övrigt</option>
-          </select>
-        </div>
-        <button onClick={() => setNewOpen(true)} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700">
-          <Plus className="h-4 w-4" /> Nytt dokument
-        </button>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+        <div className="min-w-0 flex-1"><SearchInput placeholder="Sök dokument, motpart, nummer…" value={search} onChange={setSearch}/></div>
+        <div className="grid grid-cols-2 gap-3"><Select aria-label="Dokumentstatus" value={statusFilter} onChange={e=>setStatusFilter(e.target.value as 'all'|AgreementStatus)} options={[{value:'all',label:'Alla statusar'},...Object.entries(STATUS_LABELS).map(([value,label])=>({value,label}))]}/><Select aria-label="Dokumenttyp" value={typeFilter} onChange={e=>setTypeFilter(e.target.value as 'all'|AgreementDocumentType)} options={[{value:'all',label:'Alla typer'},{value:'agreement',label:'Avtal'},{value:'offer',label:'Offert'},{value:'other',label:'Övrigt'}]}/></div>
+        <Button onClick={()=>setNewOpen(true)} className="shrink-0 gap-2"><Plus size={18}/>Nytt dokument</Button>
       </div>
-
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      {error&&<div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4"><p className="text-sm text-red-800">Dokumenten kunde inte hämtas. Försök igen.</p><Button variant="secondary" className="mt-3" onClick={()=>void load()}>Försök igen</Button></div>}
       {loading && <p className="text-sm text-slate-500">Laddar...</p>}
 
-      {!loading && items.length === 0 ? (
+      {!loading && !error && items.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 px-6 py-12 text-center">
           <FileText className="mx-auto h-8 w-8 text-slate-300" />
           <p className="mt-2 text-sm text-slate-500">Inga dokument matchar filtret ännu.</p>
         </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
+      ) : items.length>0 ? (
+        <><div className="space-y-2 lg:hidden">{items.map(item=><Card key={item.id} className="p-4"><button className="vihem-focus w-full rounded-lg text-left" onClick={()=>onOpen(item.id)}><span className="flex items-start justify-between gap-3"><span className="min-w-0"><span className="block font-semibold text-vihem-ink">{item.title||'Namnlöst dokument'}</span><span className="mt-1 block text-sm text-vihem-muted">{item.document_number}</span></span><Badge status={item.status}/></span><span className="mt-3 block text-sm text-vihem-muted">{item.document_type==='agreement'?'Avtal':item.document_type==='offer'?'Offert':'Övrigt'} · {new Date(item.updated_at).toLocaleDateString('sv-SE')}</span></button>{canDelete&&<button aria-label={`Radera ${item.title||item.document_number} permanent`} onClick={event=>void handleDelete(item,event)} disabled={deletingId===item.id} className="vihem-icon-button mt-2 text-red-600"><Trash2 size={18}/></button>}</Card>)}</div><div className="hidden overflow-x-auto rounded-xl border border-vihem-line bg-white lg:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
@@ -293,7 +267,7 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
               {items.map((item) => (
                 <tr key={item.id} onClick={() => onOpen(item.id)} className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50">
                   <td className="px-4 py-2.5">
-                    <p className="font-medium text-slate-900">{item.title || '(namnlöst dokument)'}</p>
+                    <button onClick={e=>{e.stopPropagation();onOpen(item.id);}} className="vihem-focus rounded-lg text-left font-medium text-vihem-ink">{item.title||'Namnlöst dokument'}</button>
                     <p className="text-xs text-slate-400">{item.document_number}</p>
                   </td>
                   <td className="px-4 py-2.5 text-slate-600">{item.document_type === 'agreement' ? 'Avtal' : item.document_type === 'offer' ? 'Offert' : 'Övrigt'}</td>
@@ -316,8 +290,8 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
               ))}
             </tbody>
           </table>
-        </div>
-      )}
+        </div></>
+      ) : null}
 
       {newOpen && (
         <NewDocumentModal
@@ -338,13 +312,16 @@ function NewDocumentModal({ organisationId, onClose, onCreated, prefill }: { org
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  useScrollLock(true);
+  const [discard,setDiscard]=useState(false);
+  const dirty=useUnsavedChanges({documentType,title,templateId},true);
+  const close=()=>{if(saving)return;if(dirty){setDiscard(true);return;}onClose();};
 
   useEffect(() => {
     listTemplates({ status: 'active' }).then((t) => setTemplates(t.filter((x) => x.document_type === documentType))).catch(() => setTemplates([]));
   }, [documentType]);
 
   const handleCreate = async () => {
+    if(saving)return;
     setSaving(true);
     setError('');
     try {
@@ -363,51 +340,21 @@ function NewDocumentModal({ organisationId, onClose, onCreated, prefill }: { org
   };
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold text-slate-900">Nytt dokument</h2>
-        <div className="mt-4 space-y-4">
+    <><Modal open mobileFullscreen onClose={close} title="Nytt dokument" size="md" footer={<><Button variant="secondary" disabled={saving} onClick={close}>Avbryt</Button><Button loading={saving} onClick={handleCreate}>Skapa utkast</Button></>}>
+        <fieldset disabled={saving} className="space-y-5">
           {prefill && (
             <div className="flex items-start gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
               <Link2 className="mt-0.5 h-4 w-4 shrink-0" />
               <span>Kopplas automatiskt till: <strong>{prefill.summary}</strong></span>
             </div>
           )}
-          <div>
-            <p className="mb-1.5 text-sm font-medium text-slate-700">Vad vill du skapa?</p>
-            <div className="grid grid-cols-3 gap-2">
-              {([['agreement', 'Avtal'], ['offer', 'Offert'], ['other', 'Övrigt']] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  onClick={() => { setDocumentType(value); setTemplateId(''); }}
-                  className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${documentType === value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">Titel</label>
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="T.ex. Hyresavtal lgh 12A" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">Utgångspunkt</label>
-            <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
-              <option value="">Tomt dokument</option>
-              {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
+          <div><p className="mb-2 text-sm font-medium text-vihem-ink">Vad vill du skapa?</p><Tabs tabs={[{key:'agreement',label:'Avtal'},{key:'offer',label:'Offert'},{key:'other',label:'Övrigt'}]} active={documentType} onChange={key=>{setDocumentType(key as AgreementDocumentType);setTemplateId('');}}/></div>
+          <Input label="Titel" value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ge dokumentet ett tydligt namn"/>
+          <Select label="Utgångspunkt" value={templateId} onChange={e=>setTemplateId(e.target.value)} options={[{value:'',label:'Tomt dokument'},...templates.map(t=>({value:t.id,label:t.name}))]}/>
+          <p className="text-sm text-vihem-muted">Du kan redigera innehållet, lägga till parter och förhandsgranska innan dokumentet skickas.</p>
           {error && <p className="text-sm text-red-700">{error}</p>}
-          <div className="flex justify-end gap-2 pt-2">
-            <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">Avbryt</button>
-            <button onClick={handleCreate} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
-              {saving ? 'Skapar...' : 'Skapa'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+        </fieldset>
+    </Modal><Modal open={discard} onClose={()=>setDiscard(false)} title="Lämna osparade ändringar?" footer={<><Button variant="secondary" onClick={()=>setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={onClose}>Lämna utan att spara</Button></>}><p>Dokumentutkastet har inte skapats ännu.</p></Modal></>
   );
 }
 
