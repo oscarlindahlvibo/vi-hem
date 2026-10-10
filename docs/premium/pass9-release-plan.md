@@ -67,3 +67,7 @@ Alla rader nedan: DDL PASS på isolerad klon. “Befintligt schema” betyder in
 ## Återuppta
 
 Kontrollera remote/main och production schema read-only på nytt. Upprepa staging från färsk export om schema ändrats. Kör nya samt befintliga QA-testskript, låt auth-/dispatch-externaler vara avstängda enbart i disponibel staging. Välj en konkret liten releasekandidat med alla beroenden; få separat godkännande först när matris och rollback är granskade.
+
+## Pass10-tillägg
+
+Migration 20261012100000 är premiummigration 33: befintliga termination/tenancy/profile-tabeller och RLS behövs; nullable metadata + SECURITY INVOKER-RPC är additiva. Backend före AdminTerminations-frontend. Äldre appar kan fortsätta direktflödet men får inte dess nya atomiska garanti; full äldre-klientmatris återstår. QA RPC concurrency/replay/rollback/rollprov passerar; inget nytt installationsprov på produktionsschemaklon utfört/påstås. Åtkomst-Edge har en separat säkerhetskandidat utan premiummigrationsberoende, se access-entry-hotfix.md. Ingen deployment godkänd eller utförd.
