@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FileX, Calendar, CheckCircle, Plus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,7 +12,9 @@ import {
   PageHeader,
   EmptyState,
   LoadingPage,
+  Select, SearchInput, Avatar,
 } from '../components/ui';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { formatDate } from '../lib/utils';
 import { TerminationRequest, Tenancy, Profile, Apartment, Property } from '../types';
 
@@ -59,6 +61,19 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
     update_tenancy: true,
   });
 
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [search, setSearch] = useState('');
+  const [savingDetail, setSavingDetail] = useState(false);
+  const createLock = useRef(false);
+  const detailLock = useRef(false);
+  const requestId = useRef(crypto.randomUUID());
+  const [discard, setDiscard] = useState<'create' | 'detail' | null>(null);
+  const createDirty = useUnsavedChanges(createForm, showCreateModal);
+  const detailDirty = useUnsavedChanges({internalNotes, newStatus}, showDetailModal, {internalNotes:selectedRequest?.internal_notes || '',newStatus:selectedRequest?.status || ''});
+  const closeCreate = () => { if (savingCreate) return; if (createDirty) setDiscard('create'); else { setShowCreateModal(false); resetCreateForm(); } };
+  const closeDetail = () => { if (savingDetail) return; if (detailDirty && (internalNotes !== (selectedRequest?.internal_notes || '') || newStatus !== selectedRequest?.status)) setDiscard('detail'); else setShowDetailModal(false); };
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -66,6 +81,7 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
   const fetchData = async () => {
     try {
       setLoading(true);
+      setError('');
       const [reqRes, tenanciesRes, profilesRes, aptsRes, propsRes] = await Promise.all([
         supabase.from('vihem_termination_requests').select('*').order('created_at', { ascending: false }),
         supabase.from('vihem_tenancies').select('*'),
@@ -73,20 +89,21 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
         supabase.from('vihem_apartments').select('*'),
         supabase.from('vihem_properties').select('*'),
       ]);
+      for (const result of [reqRes, tenanciesRes, profilesRes, aptsRes, propsRes]) if (result.error) throw result.error;
       if (reqRes.data) setTerminationRequests(reqRes.data);
       if (tenanciesRes.data) setTenancies(tenanciesRes.data);
       if (profilesRes.data) setProfiles(profilesRes.data);
       if (aptsRes.data) setApartments(aptsRes.data);
       if (propsRes.data) setProperties(propsRes.data);
     } catch (error) {
-      console.error('Error fetching data:', error);
+      setError('Kunde inte hämta uppsägningar. Försök igen.');
     } finally {
       setLoading(false);
     }
   };
 
   const filteredRequests = terminationRequests.filter(
-    (r) => !statusFilter || r.status === statusFilter
+    (r) => (!statusFilter || r.status === statusFilter) && (!search.trim() || [profiles.find(p => p.id === r.tenant_id)?.name, r.message, apartments.find(a => a.id === tenancies.find(t => t.id === r.tenancy_id)?.apartment_id)?.apartment_number].some(value => value?.toLocaleLowerCase('sv-SE').includes(search.trim().toLocaleLowerCase('sv-SE'))))
   );
 
   const getTenancyInfo = (tenancyId: string | null) =>
@@ -119,6 +136,7 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
       status: 'received',
       update_tenancy: true,
     });
+    requestId.current = crypto.randomUUID();
     setCreateError('');
     setSavingCreate(false);
   };
@@ -131,6 +149,7 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
   };
 
   const handleCreateTermination = async () => {
+    if (createLock.current) return;
     const tenancy = getTenancyInfo(createForm.tenancy_id);
     if (!user || !tenancy) {
       setCreateError('Välj ett hyresförhållande.');
@@ -146,35 +165,16 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
       setSavingCreate(true);
       setCreateError('');
 
-      const { error: insertError } = await supabase
-        .from('vihem_termination_requests')
-        .insert({
-          organisation_id: user.organisation_id,
-          tenant_id: tenancy.tenant_id,
-          tenancy_id: tenancy.id,
-          requested_move_out_date: createForm.requested_move_out_date,
-          new_address: createForm.new_address,
-          message: createForm.message || 'Uppsägning registrerad av admin efter besked utanför appen.',
-          status: createForm.status,
-          internal_notes: createForm.internal_notes,
-          confirmed_by: user.id,
-          confirmed_at: new Date().toISOString(),
-        });
-
-      if (insertError) throw insertError;
-
-      if (createForm.update_tenancy) {
-        const { error: tenancyError } = await supabase
-          .from('vihem_tenancies')
-          .update({
-            status: 'terminated',
-            end_date: createForm.requested_move_out_date,
-          })
-          .eq('id', tenancy.id);
-
-        if (tenancyError) throw tenancyError;
-      }
-
+      createLock.current = true;
+      const { error: saveError } = await supabase.rpc('vihem_register_termination', {
+        p_request_id: requestId.current, p_tenancy_id: tenancy.id,
+        p_move_out_date: createForm.requested_move_out_date, p_new_address: createForm.new_address,
+        p_message: createForm.message || 'Uppsägning registrerad av admin efter besked utanför appen.',
+        p_internal_notes: createForm.internal_notes, p_status: createForm.status,
+        p_update_tenancy: createForm.update_tenancy,
+      });
+      if (saveError) throw saveError;
+      setNotice('Uppsägningen har registrerats.');
       resetCreateForm();
       setShowCreateModal(false);
       fetchData();
@@ -182,36 +182,37 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
       console.error('Error creating termination:', error);
       setCreateError(error.message || 'Kunde inte skapa uppsägningen.');
     } finally {
+      createLock.current = false;
       setSavingCreate(false);
     }
   };
 
   const handleSaveNotes = async () => {
-    if (!selectedRequest) return;
+    if (!selectedRequest || detailLock.current) return;
+    detailLock.current = true; setSavingDetail(true); setError('');
     try {
-      await supabase
-        .from('vihem_termination_requests')
-        .update({ internal_notes: internalNotes })
-        .eq('id', selectedRequest.id);
-      setSelectedRequest({ ...selectedRequest, internal_notes: internalNotes });
-      fetchData();
-    } catch (error) {
-      console.error('Error saving notes:', error);
-    }
+      const { data, error: saveError } = await supabase.from('vihem_termination_requests')
+        .update({ internal_notes: internalNotes }).eq('id', selectedRequest.id).select().single();
+      if (saveError) throw saveError;
+      setSelectedRequest(data as TerminationRequest);
+      setTerminationRequests(current => current.map(row => row.id === data.id ? data as TerminationRequest : row));
+      setNotice('Ändringarna har sparats.');
+    } catch { setError('Kunde inte spara. Dina ändringar finns kvar.'); }
+    finally { detailLock.current = false; setSavingDetail(false); }
   };
 
   const handleStatusChange = async () => {
-    if (!selectedRequest) return;
+    if (!selectedRequest || detailLock.current) return;
+    detailLock.current = true; setSavingDetail(true); setError('');
     try {
-      await supabase
-        .from('vihem_termination_requests')
-        .update({ status: newStatus })
-        .eq('id', selectedRequest.id);
-      setSelectedRequest({ ...selectedRequest, status: newStatus as TerminationRequest['status'] });
-      fetchData();
-    } catch (error) {
-      console.error('Error updating status:', error);
-    }
+      const { data, error: saveError } = await supabase.from('vihem_termination_requests')
+        .update({ status: newStatus }).eq('id', selectedRequest.id).select().single();
+      if (saveError) throw saveError;
+      setSelectedRequest(data as TerminationRequest);
+      setTerminationRequests(current => current.map(row => row.id === data.id ? data as TerminationRequest : row));
+      setNotice('Ändringarna har sparats.');
+    } catch { setError('Kunde inte spara. Dina ändringar finns kvar.'); }
+    finally { detailLock.current = false; setSavingDetail(false); }
   };
 
   if (loading) return <LoadingPage />;
@@ -230,30 +231,13 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
           }
         />
 
-        <div className="flex items-center gap-3 mb-6">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-          >
-            <option value="">Alla status</option>
-            <option value="submitted">Inlämnad</option>
-            <option value="received">Mottagen</option>
-            <option value="processing">Under handläggning</option>
-            <option value="approved">Godkänd</option>
-            <option value="closed">Stängd</option>
-          </select>
-
-          {statusFilter && (
-            <button
-              onClick={() => setStatusFilter('')}
-              className="text-sm text-slate-500 hover:text-slate-700"
-            >
-              Rensa filter
-            </button>
-          )}
+        {error && <div role="alert" className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}<Button variant="ghost" onClick={fetchData}>Försök igen</Button></div>}
+        {notice && <p role="status" className="mb-4 text-sm text-green-700">{notice}</p>}
+        <div className="mb-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
+          <SearchInput value={search} onChange={setSearch} placeholder="Sök hyresgäst, lägenhet eller meddelande" />
+          <Select label="Status" value={statusFilter} onChange={event => setStatusFilter(event.target.value)} options={[{value:'',label:'Alla statusar'},...Object.entries(TERMINATION_STATUS_LABELS).map(([value,label]) => ({value,label}))]} />
         </div>
-
+        <div className="mb-4 flex flex-wrap gap-4 text-sm text-slate-500"><span>{terminationRequests.filter(r => ['submitted','received','processing'].includes(r.status)).length} under handläggning</span><span>{filteredRequests.length} i urvalet</span></div>
         {filteredRequests.length === 0 ? (
           <EmptyState
             icon={<FileX className="w-12 h-12" />}
@@ -262,7 +246,11 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
           />
         ) : (
           <Card>
-            <div className="overflow-x-auto">
+            <div className="divide-y divide-slate-100 md:hidden">{filteredRequests.map(request => {
+              const tenant = getProfileInfo(request.tenant_id); const tenancy = getTenancyInfo(request.tenancy_id); const apt = tenancy ? getApartmentInfo(tenancy.apartment_id) : null;
+              return <button key={request.id} onClick={() => handleOpenDetail(request)} className="flex w-full items-start gap-3 py-4 text-left focus-visible:ring-2 focus-visible:ring-blue-600"><Avatar userId={request.tenant_id} name={tenant?.name || 'Hyresgäst'} size="sm" /><span className="min-w-0 flex-1"><span className="block font-semibold text-slate-900">{tenant?.name || 'Hyresgäst'}</span><span className="block text-sm text-slate-500">{apt?.apartment_number} · {formatDate(request.requested_move_out_date)}</span><Badge className="mt-2 bg-slate-100 text-slate-700">{TERMINATION_STATUS_LABELS[request.status]}</Badge></span><span className="text-sm text-blue-700">Öppna</span></button>;
+            })}</div>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50">
@@ -306,7 +294,7 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
                         <td className="py-3 px-4 text-right">
                           <button
                             onClick={() => handleOpenDetail(request)}
-                            className="text-blue-600 hover:text-blue-700 font-medium text-sm"
+                            className="vihem-icon-button text-blue-700 text-sm"
                           >
                             Visa detaljer
                           </button>
@@ -323,15 +311,29 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
 
       <Modal
         open={showCreateModal}
-        onClose={() => { setShowCreateModal(false); resetCreateForm(); }}
+        onClose={closeCreate}
+        mobileFullscreen
         title="Registrera uppsägning"
+        footer={<div className="flex gap-3 justify-end pt-2">
+            <Button variant="secondary" onClick={closeCreate}>
+              Avbryt
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleCreateTermination}
+              loading={savingCreate}
+              disabled={activeTenancies.length === 0}
+            >
+              Registrera
+            </Button>
+          </div>}
         size="lg"
       >
         <div className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Hyresförhållande</label>
+            <label htmlFor="termination-tenancy" className="block text-sm font-medium text-slate-700 mb-1">Hyresförhållande</label>
             <select
-              value={createForm.tenancy_id}
+              id="termination-tenancy" value={createForm.tenancy_id}
               onChange={(e) => setCreateForm({ ...createForm, tenancy_id: e.target.value })}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             >
@@ -360,9 +362,9 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
               onChange={(e) => setCreateForm({ ...createForm, requested_move_out_date: e.target.value })}
             />
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
+              <label htmlFor="termination-status" className="block text-sm font-medium text-slate-700 mb-1">Status</label>
               <select
-                value={createForm.status}
+                id="termination-status" value={createForm.status}
                 onChange={(e) => setCreateForm({ ...createForm, status: e.target.value })}
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               >
@@ -415,25 +417,13 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
             </div>
           )}
 
-          <div className="flex gap-3 justify-end pt-2">
-            <Button variant="secondary" onClick={() => { setShowCreateModal(false); resetCreateForm(); }}>
-              Avbryt
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleCreateTermination}
-              loading={savingCreate}
-              disabled={activeTenancies.length === 0}
-            >
-              Registrera
-            </Button>
-          </div>
+
         </div>
       </Modal>
 
       <Modal
         open={showDetailModal}
-        onClose={() => { setShowDetailModal(false); setSelectedRequest(null); setInternalNotes(''); setNewStatus(''); }}
+        onClose={closeDetail}
         title="Uppsägningsdetaljer"
         size="lg"
       >
@@ -504,6 +494,7 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
                   <Button
                     variant={newStatus === selectedRequest.status ? 'secondary' : 'primary'}
                     disabled={newStatus === selectedRequest.status}
+                    loading={savingDetail}
                     onClick={handleStatusChange}
                   >
                     Spara status
@@ -513,14 +504,16 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
 
               <div className="border-t border-slate-200 pt-5">
                 <h3 className="text-sm font-semibold text-slate-700 uppercase mb-3">Interna anteckningar</h3>
+                {error && <p role="alert" className="mb-3 text-sm text-red-700">{error}</p>}
                 <Textarea
+                  label="Intern anteckning"
                   value={internalNotes}
                   onChange={(e) => setInternalNotes(e.target.value)}
                   placeholder="Lägg till noteringar om denna uppsägning..."
                   rows={4}
                 />
                 <div className="flex justify-end pt-3">
-                  <Button variant="primary" onClick={handleSaveNotes} className="gap-2">
+                  <Button variant="primary" onClick={handleSaveNotes} loading={savingDetail} className="gap-2">
                     <CheckCircle className="w-4 h-4" />
                     Spara anteckningar
                   </Button>
@@ -530,6 +523,7 @@ export function AdminTerminationsPage({ onNavigate: _onNavigate }: AdminTerminat
           );
         })()}
       </Modal>
+      <Modal open={Boolean(discard)} onClose={() => setDiscard(null)} title="Lämna osparade ändringar?" footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setDiscard(null)}>Fortsätt redigera</Button><Button variant="danger" onClick={() => { if (discard === 'create') { setShowCreateModal(false); resetCreateForm(); } else setShowDetailModal(false); setDiscard(null); }}>Kasta ändringar</Button></div>}>Ändringarna har inte sparats.</Modal>
     </div>
   );
 }

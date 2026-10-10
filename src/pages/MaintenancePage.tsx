@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { supabase } from '../lib/supabase';
 import { queueOfflineMutation } from '../lib/offlineQueue';
 import { useAuth } from '../contexts/AuthContext';
 import { useTimeCategories } from '../contexts/TimeCategoriesContext';
 import {
   Card,
+  Avatar,
   Badge,
   Button,
   Modal,
@@ -101,6 +103,13 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
   });
   const [submittingRequest, setSubmittingRequest] = useState(false);
 
+  const [loadError, setLoadError] = useState('');
+  const [formError, setFormError] = useState('');
+  const [discard, setDiscard] = useState(false);
+  const requestLock = useRef(false);
+  const dirty = useUnsavedChanges(newRequestForm, showNewRequestModal);
+  const closeNew = () => { if (submittingRequest) return; if (dirty) setDiscard(true); else setShowNewRequestModal(false); };
+
   // Staff-specific state
   const [staffMembers, setStaffMembers] = useState<Profile[]>([]);
   const [internalNotes, setInternalNotes] = useState('');
@@ -155,7 +164,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
 
   async function fetchRequests() {
     try {
-      setLoading(true);
+      setLoading(true); setLoadError('');
       let query = supabase.from('vihem_maintenance_requests').select(
         `
         id,
@@ -195,7 +204,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
       if (error) throw error;
       setRequests((data || []) as unknown as MRWithRelations[]);
     } catch (err) {
-      console.error('Error fetching requests:', err);
+      setLoadError('Kunde inte hämta felanmälningar. Försök igen.');
     } finally {
       setLoading(false);
     }
@@ -252,8 +261,8 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
 
   async function handleCreateRequest(e: React.FormEvent) {
     e.preventDefault();
-    if (!user) return;
-
+    if (!user || requestLock.current) return;
+    requestLock.current = true; setFormError('');
     try {
       setSubmittingRequest(true);
       let tenancy: { organisation_id: string | null; property_id: string | null; apartment_id: string | null } | null = null;
@@ -307,9 +316,9 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
       await fetchRequests();
     } catch (err) {
       console.error('Error creating request:', err);
-      alert('Kunde inte skapa felanmälan. Försök igen senare.');
+      setFormError('Kunde inte skapa felanmälan. Dina uppgifter finns kvar för ett nytt försök.');
     } finally {
-      setSubmittingRequest(false);
+      requestLock.current = false; setSubmittingRequest(false);
     }
   }
 
@@ -590,6 +599,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
 
   return (
     <div className="space-y-6">
+      {loadError && <p role="alert" className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{loadError}<Button variant="secondary" onClick={fetchRequests}>Försök igen</Button></p>}
       {/* Tenant View */}
       {isTenant ? (
         <>
@@ -646,9 +656,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                       <Badge className={`text-xs ${req.category === 'water' ? 'text-blue-600 bg-blue-100' : req.category === 'electricity' ? 'text-yellow-600 bg-yellow-100' : 'text-slate-600 bg-slate-100'}`}>
                         {MR_CATEGORY_LABELS[req.category]}
                       </Badge>
-                      <Badge className={getMRPriorityColor(req.priority)}>
-                        {MR_PRIORITY_LABELS[req.priority]}
-                      </Badge>
+                      {req.priority !== 'normal' && <Badge className={getMRPriorityColor(req.priority)}>{MR_PRIORITY_LABELS[req.priority]}</Badge>}
                     </div>
 
                     <div className="flex items-center gap-4 text-xs text-slate-500">
@@ -672,11 +680,15 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
           {/* New Request Modal */}
           <Modal
             open={showNewRequestModal}
-            onClose={() => setShowNewRequestModal(false)}
+            onClose={closeNew}
             title="Ny felanmälan"
-            size="md"
+            mobileFullscreen
+            footer={<div className="flex justify-end gap-3"><Button variant="secondary" disabled={submittingRequest} onClick={closeNew}>Avbryt</Button><Button type="submit" form="new-maintenance-request" loading={submittingRequest}>Skicka felanmälan</Button></div>}
+            size="lg"
           >
-            <form onSubmit={handleCreateRequest} className="space-y-4">
+            <form id="new-maintenance-request" onSubmit={handleCreateRequest} className="space-y-4">
+              <p className="text-sm leading-6 text-slate-500">Beskriv vad som inte fungerar och var felet finns. Anmälan kopplas till din bostad.</p>
+              {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{formError}</p>}
               <Input
                 label="Titel"
                 value={newRequestForm.title}
@@ -779,24 +791,6 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                 placeholder="Din telefonnummer"
               />
 
-              <div className="flex gap-2 pt-2">
-                <Button
-                  type="submit"
-                  variant="primary"
-                  loading={submittingRequest}
-                  className="flex-1"
-                >
-                  Skapa felanmälan
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setShowNewRequestModal(false)}
-                  className="flex-1"
-                >
-                  Avbryt
-                </Button>
-              </div>
             </form>
           </Modal>
 
@@ -827,7 +821,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                     <h3 className="text-xs font-semibold text-slate-500 uppercase mb-2">
                       Beskrivning
                     </h3>
-                    <p className="text-sm text-slate-700">
+                    <p className="max-w-prose whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
                       {selectedRequest.description}
                     </p>
                   </div>
@@ -1016,16 +1010,11 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
             </button>
           </div>
 
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Sök titel eller beskrivning" /></div><Button variant={filterAssignee === 'mine' ? 'primary' : 'secondary'} aria-pressed={filterAssignee === 'mine'} onClick={() => setFilterAssignee(value => value === 'mine' ? 'all' : 'mine')}>Tilldelade mig</Button></div>
           {/* Filter Panel */}
           {showFilters && (
             <Card className="p-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                <SearchInput
-                  value={searchQuery}
-                  onChange={setSearchQuery}
-                  placeholder="Sök titel..."
-                />
-
                 <Select
                   label="Status"
                   value={filterStatus}
@@ -1097,7 +1086,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                 {filteredRequests.map(req => (
                   <Card
                     key={req.id}
-                    className="p-4 cursor-pointer hover:shadow-md transition-all"
+                    className="p-4 cursor-pointer hover:bg-slate-50 transition-colors"
                     onClick={() => {
                       setSelectedRequest(req);
                       setShowDetailModal(true);
@@ -1107,7 +1096,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                       <div className="min-w-0 flex-1">
                         <h3 className="font-semibold text-slate-900 leading-snug break-words">{req.title}</h3>
                         <p className="mt-1 text-sm text-slate-500 break-words">
-                          {req.property?.name || 'Ingen fastighet'}
+                          {req.property?.name || ''}
                         </p>
                       </div>
                       <ChevronDown className="-rotate-90 w-4 h-4 text-slate-400 shrink-0 mt-1" />
@@ -1117,14 +1106,12 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                       <Badge className={getMRStatusColor(req.status)}>
                         {MR_STATUS_LABELS[req.status]}
                       </Badge>
-                      <Badge className={getMRPriorityColor(req.priority)}>
-                        {MR_PRIORITY_LABELS[req.priority]}
-                      </Badge>
+                      {req.priority !== 'normal' && <Badge className={getMRPriorityColor(req.priority)}>{MR_PRIORITY_LABELS[req.priority]}</Badge>}
                     </div>
 
                     <div className="mt-4 grid gap-2 text-sm text-slate-600">
                       <div className="flex items-center gap-2 min-w-0">
-                        <User className="w-4 h-4 text-slate-400 shrink-0" />
+                        <Avatar userId={req.tenant_id} name={req.tenant?.name || "Hyresgäst"} size="xs" />
                         <span className="truncate">{req.tenant?.name || 'Okänd hyresgäst'}</span>
                       </div>
                       <div className="flex items-center gap-2 min-w-0">
@@ -1240,7 +1227,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
                     <h3 className="text-xs font-semibold text-slate-500 uppercase mb-1">
                       Beskrivning
                     </h3>
-                    <p className="text-sm text-slate-700">
+                    <p className="max-w-prose whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
                       {selectedRequest.description}
                     </p>
                   </div>
@@ -1638,6 +1625,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
           )}
         </>
       ) : null}
+      <Modal open={discard} onClose={() => setDiscard(false)} title="Lämna osparad felanmälan?" footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={() => { setDiscard(false); setShowNewRequestModal(false); }}>Lämna formuläret</Button></div>}>Uppgifterna är inte skickade. De finns kvar om du öppnar formuläret igen under denna session.</Modal>
     </div>
   );
 }

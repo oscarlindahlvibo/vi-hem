@@ -1,7 +1,7 @@
 import { registerUnsavedForm } from "../lib/unsavedForms";
 import { useEffect, useRef, useState } from "react";
 /** Tracks only an open form. No content is persisted or published. */
-export function useUnsavedChanges(value: unknown, active: boolean) {
+export function useUnsavedChanges(value: unknown, active: boolean, savedValue?: unknown) {
   const serialized = JSON.stringify(value),
     latest = useRef(serialized);
   latest.current = serialized;
@@ -9,7 +9,7 @@ export function useUnsavedChanges(value: unknown, active: boolean) {
   useEffect(() => {
     if (active) setBaseline(latest.current);
   }, [active]);
-  const dirty = active && baseline !== serialized;
+  const dirty = active && (savedValue === undefined ? baseline : JSON.stringify(savedValue)) !== serialized;
   useEffect(() => {
     if (!dirty) return;
     const unregister = registerUnsavedForm();
