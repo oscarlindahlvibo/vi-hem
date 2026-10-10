@@ -1,5 +1,5 @@
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Users, Plus, Edit2, ShieldCheck, KeyRound, RefreshCw, Clock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -70,6 +70,13 @@ type ScheduleFormRow = {
 };
 
 
+function scheduleMinutes(row:ScheduleFormRow) {
+  if(!row.active||!row.work_start||!row.work_end||row.work_end<=row.work_start)return 0;
+  const minutes=(time:string)=>Number(time.slice(0,2))*60+Number(time.slice(3,5));
+  return Math.max(0,minutes(row.work_end)-minutes(row.work_start)-(row.lunch_start?Math.max(0,parseInt(row.lunch_minutes,10)||0):0));
+}
+function formatScheduleMinutes(minutes:number){return `${Math.floor(minutes/60)} h${minutes%60?` ${minutes%60} min`:''}`;}
+
 function isMissingSchemaError(error: any) {
   return error?.code === 'PGRST205' || String(error?.message || '').includes('schema cache');
 }
@@ -107,6 +114,10 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   const [resetCredentials, setResetCredentials] = useState<{ email: string } | null>(null);
   const [generatedCredentials, setGeneratedCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
   const [resettingUserId, setResettingUserId] = useState('');
+  const saveOperation=useRef<{body:string;id:string}|null>(null);
+  const saveLock=useRef(false);
+  const [copyTargets,setCopyTargets]=useState<number[]>([]);
+  const [copySource,setCopySource]=useState<number|null>(null);
   const [scheduleRows, setScheduleRows] = useState<ScheduleFormRow[]>([]);
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(defaultNotificationSettings);
   const [savingNotificationSettings, setSavingNotificationSettings] = useState(false);
@@ -187,7 +198,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   );
 
   const handleSaveStaff = async () => {
-    if(saving||openingStaff)return;
+    if(saveLock.current||saving||openingStaff)return;
     if(!staffFormData.name.trim()){setSaveError('Ange medarbetarens namn.');setEditorStep('contact');return;}
     const rawPno = staffFormData.bankid_personal_number.trim();
     const normalizedPno = rawPno ? normalizePersonalNumber(rawPno) : null;
@@ -196,25 +207,22 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       return;
     }
     setSaveError('');
+    saveLock.current=true;
     setSaving(true);
     try {
       if (editingStaff) {
         validateStaffSchedule();
-        // Update existing profile — no auth changes needed
-        const { error } = await supabase
-          .from('vihem_profiles')
-          .update({
-            name: staffFormData.name,
-            phone: staffFormData.phone,
-            role: staffFormData.role,
-            active: staffFormData.active,
-            bankid_personal_number: normalizedPno,
-            is_system_admin: canManageSystemAdminFlag ? staffFormData.is_system_admin : editingStaff.is_system_admin,
-          })
-          .eq('id', editingStaff.id).select('id').single();
-        if (error) throw error;
-        await saveStaffSchedule(editingStaff.id);
-        if (staffFormData.role === 'staff') await saveModuleAccess(editingStaff.id);
+        const payload={
+          p_target:editingStaff.id,
+          p_profile:{name:staffFormData.name,phone:staffFormData.phone,role:staffFormData.role,active:staffFormData.active,bankid_personal_number:normalizedPno,is_system_admin:canManageSystemAdminFlag?staffFormData.is_system_admin:editingStaff.is_system_admin===true},
+          p_schedule:scheduleRows.map(row=>({...row,work_start:row.work_start||'08:00',work_end:row.work_end||'17:00',lunch_start:row.active&&row.lunch_start?row.lunch_start:null,lunch_minutes:row.active&&row.lunch_start&&row.lunch_minutes?Math.max(0,parseInt(row.lunch_minutes,10)||0):0})),
+          p_grant:staffFormData.role==='staff'?[...moduleAccess].filter(key=>!initialModuleAccess.has(key)):[],
+          p_revoke:staffFormData.role==='staff'?[...initialModuleAccess].filter(key=>!moduleAccess.has(key)):[],
+        };
+        const body=JSON.stringify(payload);
+        if(saveOperation.current?.body!==body)saveOperation.current={body,id:crypto.randomUUID()};
+        const {error}=await supabase.rpc('vihem_save_staff_editor',{...payload,p_operation:saveOperation.current.id});
+        if(error)throw error;
         setShowStaffModal(false);
         setEditingStaff(null);
         resetForm();
@@ -243,11 +251,13 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     } catch (err: any) {
       setSaveError(err.message || 'Ett fel inträffade');
     } finally {
+      saveLock.current=false;
       setSaving(false);
     }
   };
 
   const resetForm = () => {
+    saveOperation.current=null;setCopySource(null);setCopyTargets([]);
     setStaffFormData({ name: '', email: '', phone: '', role: 'staff', active: true, bankid_personal_number: '', is_system_admin: false });
     setScheduleRows(defaultScheduleRows());
     setModuleAccess(new Set());
@@ -303,31 +313,6 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     }
   }
 
-  async function saveStaffSchedule(staffId: string) {
-    if (!user?.organisation_id) return;
-    validateStaffSchedule();
-    const rows = scheduleRows.map((row) => ({
-      organisation_id: user.organisation_id,
-      user_id: staffId,
-      weekday: row.weekday,
-      active: row.active,
-      work_start: row.work_start || '08:00',
-      work_end: row.work_end || '17:00',
-      lunch_start: row.active && row.lunch_start ? row.lunch_start : null,
-      lunch_minutes: row.active && row.lunch_start && row.lunch_minutes ? Math.max(0, parseInt(row.lunch_minutes, 10) || 0) : 0,
-      updated_at: new Date().toISOString(),
-    }));
-    const { error } = await supabase
-      .from('vihem_staff_work_schedules')
-      .upsert(rows, { onConflict: 'user_id,weekday' });
-    if (error) {
-      if (isMissingSchemaError(error)) {
-        throw new Error('Arbetsschema-tabellen saknas i databasen. Kör senaste Supabase-migrationerna på miljön först.');
-      }
-      throw error;
-    }
-  }
-
   function updateScheduleRow(weekday: number, patch: Partial<ScheduleFormRow>) {
     setScheduleRows((rows) => rows.map((row) => row.weekday === weekday ? { ...row, ...patch } : row));
   }
@@ -338,6 +323,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     const results=await Promise.allSettled([fetchStaffSchedule(staffMember.id),fetchModuleAccess(staffMember.id)]);
     setOpeningStaff(false);
     if(results.some(result=>result.status==='rejected')){setEditorLoadError('Schema och behörigheter kunde inte hämtas. Försök öppna medarbetaren igen.');return;}
+    saveOperation.current=null;setCopySource(null);setCopyTargets([]);
     setEditorStep('contact');
     setStaffFormData({
       name: staffMember.name || '',
@@ -367,25 +353,6 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
-  }
-
-  // Grants a staff member never had access to don't need a row deleted;
-  // only diff what actually changed since the modal opened, matching
-  // scheduleRows' own "only touch what changed" pattern in this file.
-  async function saveModuleAccess(staffId: string) {
-    if (!user?.organisation_id) return;
-    const toGrant = [...moduleAccess].filter((key) => !initialModuleAccess.has(key));
-    const toRevoke = [...initialModuleAccess].filter((key) => !moduleAccess.has(key));
-    if (toGrant.length) {
-      const {error}=await supabase.from('vihem_permission_grants').insert(
-        toGrant.map((key) => ({ organisation_id: user.organisation_id, user_id: staffId, permission_key: `module.${key}`, granted_by: user.id }))
-      );
-      if(error)throw error;
-    }
-    if (toRevoke.length) {
-      const {error}=await supabase.from('vihem_permission_grants').delete().eq('user_id', staffId).in('permission_key', toRevoke.map((key) => `module.${key}`));
-      if(error)throw error;
-    }
   }
 
   const handleResetPassword = async (staffMember: Profile) => {
@@ -714,14 +681,14 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
           )}
           </div>
           {editingStaff && (
-            <div hidden={editorStep!=='schedule'} className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="flex items-center gap-2">
+            <div hidden={editorStep!=='schedule'} className="space-y-4">
+              <div className="flex items-center gap-3">
                 <Clock className="h-4 w-4 text-slate-500" />
-                <p className="text-sm font-semibold text-slate-800">Arbetsschema och lunch</p>
+                <div><p className="text-sm font-semibold text-slate-800">Veckoschema</p><p className="text-sm text-vihem-muted">{formatScheduleMinutes(scheduleRows.reduce((sum,row)=>sum+scheduleMinutes(row),0))} arbete / vecka · lunch avdragen</p></div>
               </div>
-              <div className="space-y-2">
+              <div className="divide-y divide-vihem-line">
                 {scheduleRows.map((row) => (
-                  <details key={row.weekday} open={activeScheduleDay===row.weekday} className="rounded-xl border border-vihem-line bg-white"><summary onClick={e=>{e.preventDefault();setActiveScheduleDay(current=>current===row.weekday?null:row.weekday);}} className="vihem-touch-target vihem-focus cursor-pointer px-4 py-3 text-sm font-medium"><span>{WEEKDAYS.find(day=>day.weekday===row.weekday)?.label}</span><span className="ml-3 font-normal text-vihem-muted">{row.active?`${row.work_start}–${row.work_end}`:'Ledig'}</span></summary><div className="grid grid-cols-2 gap-3 border-t border-vihem-line p-4">
+                  <details key={row.weekday} open={activeScheduleDay===row.weekday} className="bg-white"><summary onClick={e=>{e.preventDefault();setActiveScheduleDay(current=>current===row.weekday?null:row.weekday);}} className="vihem-touch-target vihem-focus cursor-pointer px-4 py-3 text-sm font-medium"><span>{WEEKDAYS.find(day=>day.weekday===row.weekday)?.label}</span><span className="ml-3 font-normal text-vihem-muted">{row.active?`${row.work_start}–${row.work_end} · ${formatScheduleMinutes(scheduleMinutes(row))}`:'Ledig'}</span></summary><div className="grid grid-cols-2 gap-3 border-t border-vihem-line p-4">
                     <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                       <input
                         type="checkbox"
@@ -746,6 +713,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                       onChange={(event) => updateScheduleRow(row.weekday, { lunch_minutes: event.target.value })}
                       disabled={!row.active || !row.lunch_start}
                     />
+                    <div className="col-span-2 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between"><span className="text-sm text-vihem-muted">Tider och lunch kopieras tillsammans.</span><Button variant="secondary" className="whitespace-nowrap" onClick={()=>{setCopySource(row.weekday);setCopyTargets(scheduleRows.filter(day=>day.weekday!==row.weekday&&day.active).map(day=>day.weekday));}}>Kopiera dagen</Button></div>
                   </div></details>
                 ))}
               </div>
@@ -763,6 +731,10 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
         </fieldset>
       </Modal>
 
+      <Modal open={copySource!==null} onClose={()=>setCopySource(null)} title={`Kopiera ${WEEKDAYS.find(day=>day.weekday===copySource)?.label.toLowerCase()||'dag'}`} footer={<><Button variant="secondary" onClick={()=>setCopySource(null)}>Avbryt</Button><Button disabled={!copyTargets.length} onClick={()=>{const source=scheduleRows.find(row=>row.weekday===copySource);if(source)setScheduleRows(rows=>rows.map(row=>copyTargets.includes(row.weekday)?{...source,weekday:row.weekday}:row));setCopySource(null);}}>Kopiera till {copyTargets.length} dagar</Button></>}>
+        <p className="mb-3 text-sm text-vihem-muted">Välj dagar som ska få samma arbetstid, lunch och aktiv status. Ändringen sparas först med personalprofilen.</p>
+        <div className="divide-y divide-vihem-line">{WEEKDAYS.filter(day=>day.weekday!==copySource).map(day=><label key={day.weekday} className="flex min-h-11 items-center gap-3"><input type="checkbox" checked={copyTargets.includes(day.weekday)} onChange={e=>setCopyTargets(days=>e.target.checked?[...days,day.weekday]:days.filter(value=>value!==day.weekday))}/>{day.label}</label>)}</div>
+      </Modal>
       <Modal open={discard} onClose={()=>setDiscard(false)} title="Lämna osparade ändringar?" footer={<><Button variant="secondary" onClick={()=>setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscard(false);setShowStaffModal(false);setEditingStaff(null);resetForm();}}>Lämna utan att spara</Button></>}><p>Kontaktuppgifter, schema och behörigheter har inte sparats.</p></Modal>
       {/* Show temporary credentials after creation */}
       <Modal
