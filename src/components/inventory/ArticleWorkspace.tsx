@@ -1,6 +1,8 @@
 import { ArrowDownLeft, ArrowRightLeft, Package, QrCode } from "lucide-react";
 import { Button, Modal, Tabs } from "../ui";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../contexts/AuthContext";
 interface Article {
   id: string;
   name: string;
@@ -38,7 +40,6 @@ const number = (n: number) =>
 export function ArticleWorkspace({
   article,
   balances,
-  movements,
   locationName,
   onClose,
   onMove,
@@ -46,20 +47,93 @@ export function ArticleWorkspace({
 }: {
   article: Article | null;
   balances: { item_id: string; location_id: string; quantity: number }[];
-  movements: Movement[];
   locationName: (id: string | null) => string;
   onClose: () => void;
   onMove: (id: string, type: string, source?: string) => void;
   onPrint: (item: Article) => void;
 }) {
   const [tab, setTab] = useState("stock");
+  const { user } = useAuth();
+  const [history, setHistory] = useState<Movement[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [hasMore, setHasMore] = useState(false);
+  const generation = useRef(0),
+    busy = useRef(false);
+  const cursor = useRef<Movement | null>(null);
+  const loadHistory = useCallback(
+    async (reset = false) => {
+      if (!article?.id || !user?.organisation_id || busy.current) return;
+      busy.current = true;
+      const current = generation.current;
+      setHistoryLoading(true);
+      setHistoryError("");
+      try {
+        let query = supabase
+          .from("vihem_inventory_transactions")
+          .select(
+            "id,item_id,quantity,transaction_type,source_location_id,destination_location_id,notes,created_at",
+          )
+          .eq("organisation_id", user.organisation_id)
+          .eq("item_id", article.id)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+          .limit(51);
+        const last = reset ? null : cursor.current;
+        if (last)
+          query = query.or(
+            `created_at.lt.${last.created_at},and(created_at.eq.${last.created_at},id.lt.${last.id})`,
+          );
+        const result = await query;
+        if (current !== generation.current) return;
+        if (result.error) throw result.error;
+        const rows = (result.data || []) as Movement[];
+        const page = rows.slice(0, 50);
+        cursor.current = page[page.length - 1] || last;
+        setHistory((old) =>
+          reset
+            ? page
+            : [
+                ...old,
+                ...page.filter(
+                  (m) => !old.some((existing) => existing.id === m.id),
+                ),
+              ],
+        );
+        setHasMore(rows.length > 50);
+      } catch {
+        if (current === generation.current)
+          setHistoryError("Historiken kunde inte hämtas. Försök igen.");
+      } finally {
+        if (current === generation.current) {
+          busy.current = false;
+          setHistoryLoading(false);
+        }
+      }
+    },
+    [article?.id, user?.organisation_id],
+  );
+  useEffect(() => {
+    generation.current++;
+    busy.current = false;
+    cursor.current = null;
+    setHistory([]);
+    setHasMore(false);
+    setHistoryError("");
+    setHistoryLoading(false);
+    const activeGeneration = generation.current;
+    if (article?.id) void loadHistory(true);
+    return () => {
+      generation.current = activeGeneration + 1;
+      busy.current = false;
+    };
+  }, [loadHistory, article?.id]);
   useEffect(() => {
     setTab("stock");
   }, [article?.id]);
   if (!article) return null;
   const stock = balances.filter((b) => b.item_id === article.id),
-    total = stock.reduce((n, b) => n + Number(b.quantity), 0),
-    history = movements.filter((m) => m.item_id === article.id);
+    total = stock.reduce((n, b) => n + Number(b.quantity), 0);
   return (
     <Modal
       mobileFullscreen
@@ -88,10 +162,10 @@ export function ArticleWorkspace({
           <img
             src={article.image_url}
             alt={article.name}
-            className="h-16 w-16 sm:h-28 sm:w-28 rounded-2xl object-contain bg-vihem-soft"
+            className="h-16 w-16 sm:h-28 sm:w-28 rounded-2xl object-contain bg-slate-50"
           />
         ) : (
-          <div className="flex h-16 w-16 sm:h-28 sm:w-28 items-center justify-center rounded-2xl bg-vihem-soft text-vihem-muted">
+          <div className="flex h-16 w-16 sm:h-28 sm:w-28 items-center justify-center rounded-2xl bg-slate-50 text-vihem-muted">
             <Package className="h-9 w-9" />
           </div>
         )}
@@ -127,7 +201,7 @@ export function ArticleWorkspace({
         />
       </div>
       {tab === "stock" && (
-        <div className="mt-4 divide-y divide-vihem-line">
+        <div className="mt-4 divide-y divide-slate-200">
           {stock.map((b) => (
             <div
               key={b.location_id}
@@ -163,9 +237,9 @@ export function ArticleWorkspace({
       {tab === "history" && (
         <section className="mt-4">
           <p className="mb-3 text-xs text-vihem-muted">
-            Visar artikelns rörelser bland de 100 senaste i organisationen.
+            Artikelns historik, senast först. Äldre rörelser hämtas i omgångar.
           </p>
-          <div className="divide-y divide-vihem-line">
+          <div className="divide-y divide-slate-200">
             {history.map((m) => (
               <article key={m.id} className="py-3">
                 <div className="flex justify-between gap-4">
@@ -196,12 +270,27 @@ export function ArticleWorkspace({
                 </time>
               </article>
             ))}
-            {!history.length && (
+            {!history.length && !historyLoading && !historyError && (
               <p className="py-8 text-sm text-vihem-muted">
-                Inga rörelser i den hämtade historiken.
+                Inga rörelser registrerade för artikeln.
               </p>
             )}
           </div>
+          {historyError && (
+            <p role="alert" className="mt-4 text-sm text-red-700">
+              {historyError}
+            </p>
+          )}
+          {(hasMore || historyError || historyLoading) && (
+            <Button
+              className="mt-4"
+              variant="secondary"
+              loading={historyLoading}
+              onClick={() => void loadHistory(history.length === 0)}
+            >
+              {historyError ? "Försök igen" : "Visa äldre rörelser"}
+            </Button>
+          )}
         </section>
       )}
       {tab === "info" && (
