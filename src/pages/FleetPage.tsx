@@ -103,9 +103,10 @@ export function FleetPage({ onNavigate, initialVehicleId }: { onNavigate: (page:
   const [vehicleModal, setVehicleModal] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<FleetVehicle | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
     if (!user?.organisation_id) return;
-    setLoading(true);setLoadError('');
+    if (!background) setLoading(true);
+    setLoadError('');
     const [vehiclesRes, companiesRes, propertiesRes, profilesRes, damageRes, scheduleRes, inspectionRes, woRes] = await Promise.all([
       supabase.from('vihem_fleet_vehicles').select('*').eq('organisation_id', user.organisation_id).eq('active', true).order('name'),
       supabase.from('vihem_companies').select('id,name').eq('organisation_id', user.organisation_id).order('name'),
@@ -191,7 +192,7 @@ export function FleetPage({ onNavigate, initialVehicleId }: { onNavigate: (page:
         profiles={profiles}
         profilesById={profilesById}
         onBack={() => setView('list')}
-        onChanged={load}
+        onChanged={() => void load(true)}
         onNavigate={onNavigate}
       />
       {isAdmin && (
@@ -1458,11 +1459,11 @@ function ServiceTab({ vehicle, schedules, records, isAdmin, organisationId, user
   };
 
   return (
-    <div className="min-w-0 space-y-5">
+    <div className="min-w-0 grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
       <Card className="overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-200 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
           <h3 className="font-semibold text-slate-900">Serviceplaner</h3>
-          <div className="flex gap-2">
+          <div className="flex shrink-0 gap-2 whitespace-nowrap">
             {isAdmin && <Button size="sm" variant="secondary" onClick={() => setScheduleModal(true)}><Plus className="h-4 w-4" /> Ny plan</Button>}
             <Button size="sm" onClick={() => setRecordModal('adhoc')}>Registrera service</Button>
           </div>
@@ -1476,7 +1477,7 @@ function ServiceTab({ vehicle, schedules, records, isAdmin, organisationId, user
                 <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                   <div className="min-w-0">
                     <p className="font-semibold text-slate-800">{s.name}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-sm text-vihem-muted">
                       {[s.interval_km ? `${formatNumber(s.interval_km)} ${vehicle.odometer_unit}` : null, s.interval_hours ? `${formatNumber(s.interval_hours)} h` : null, s.interval_months ? `${s.interval_months} mån` : null].filter(Boolean).join(' · ')}
                       {s.next_due_date && ` -- nästa: ${fmtDate(s.next_due_date)}`}
                       {kmRemaining !== null && ` (${formatNumber(kmRemaining)} ${vehicle.odometer_unit} kvar)`}
@@ -1499,7 +1500,7 @@ function ServiceTab({ vehicle, schedules, records, isAdmin, organisationId, user
           <div className="divide-y divide-slate-100">
             {records.map((r) => (
               <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
-                <div className="min-w-0"><p className="font-medium text-slate-800">{r.description || 'Service'}</p><p className="text-xs text-slate-500">{fmtDate(r.performed_at)} · {r.performed_by_text || '-'}{r.odometer ? ` · ${formatNumber(r.odometer)} ${vehicle.odometer_unit}` : ''}</p></div>
+                <div className="min-w-0"><p className="font-medium text-slate-800">{r.description || 'Service'}</p><p className="text-sm text-vihem-muted">{fmtDate(r.performed_at)} · {r.performed_by_text || '-'}{r.odometer ? ` · ${formatNumber(r.odometer)} ${vehicle.odometer_unit}` : ''}</p></div>
                 {r.cost != null && <span className="text-sm font-semibold text-slate-700">{formatNumber(r.cost)} kr</span>}
               </div>
             ))}
@@ -1515,58 +1516,51 @@ function ServiceTab({ vehicle, schedules, records, isAdmin, organisationId, user
             <Input label="Intervall (maskintimmar)" type="number" value={scheduleForm.interval_hours} onChange={(e) => setScheduleForm({ ...scheduleForm, interval_hours: e.target.value })} />
             <Input label="Intervall (månader)" type="number" value={scheduleForm.interval_months} onChange={(e) => setScheduleForm({ ...scheduleForm, interval_months: e.target.value })} />
           </div>
-          <p className="text-xs text-slate-500">Villkoret som inträffar först utlöser servicebehov.</p>
+          <p className="text-sm text-vihem-muted">Villkoret som inträffar först utlöser servicebehov.</p>
           <Textarea label="Anteckningar" value={scheduleForm.notes} onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })} />
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setScheduleModal(false)}>Avbryt</Button><Button onClick={saveSchedule} loading={saving}>Spara</Button></div>
         </div>
       </Modal>
 
-      <ServiceRecordModal open={recordModal !== null} onClose={() => setRecordModal(null)} vehicle={vehicle} schedule={recordModal === 'adhoc' ? null : recordModal} organisationId={organisationId} userId={userId} onSaved={() => { setRecordModal(null); onChanged(); }} />
+      <ServiceRecordModal key={recordModal==='adhoc'?'adhoc':recordModal?.id||'closed'} open={recordModal !== null} onClose={() => setRecordModal(null)} vehicle={vehicle} schedule={recordModal === 'adhoc' ? null : recordModal} organisationId={organisationId} userId={userId} onSaved={() => { setRecordModal(null); onChanged(); }} />
     </div>
   );
 }
 
-function ServiceRecordModal({ open, onClose, vehicle, schedule, organisationId, userId, onSaved }: {
+function ServiceRecordModal({ open, onClose, vehicle, schedule, onSaved }: {
   open: boolean; onClose: () => void; vehicle: FleetVehicle; schedule: FleetServiceSchedule | null; organisationId: string; userId: string; onSaved: () => void;
 }) {
   const [performedAt, setPerformedAt] = useState(new Date().toISOString().slice(0, 10));
-  const [odometer, setOdometer] = useState('');
+  const [odometer, setOdometer] = useState(String(vehicle.current_odometer || ''));
   const [performedBy, setPerformedBy] = useState('');
   const [cost, setCost] = useState('');
-  const [description, setDescription] = useState('');
+  const [description, setDescription] = useState(schedule?.name || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const {user}=useAuth();
+  const admin=user?.role==='admin'||user?.role==='superadmin';
+  const lock=useRef(false), operation=useRef<{body:string;id:string}|null>(null);
+  const [discard,setDiscard]=useState(false);
+  const dirty=useUnsavedChanges({performedAt,odometer,performedBy,cost,description},open);
+  const close=()=>{if(lock.current)return;if(dirty){setDiscard(true);return;}onClose();};
 
-  useEffect(() => { if (open) { setPerformedAt(new Date().toISOString().slice(0, 10)); setOdometer(String(vehicle.current_odometer || '')); setPerformedBy(''); setCost(''); setDescription(schedule?.name || ''); setError(''); } }, [open, schedule, vehicle.current_odometer]);
+  useEffect(() => { if (open) { setPerformedAt(new Date().toISOString().slice(0, 10)); setOdometer(String(vehicle.current_odometer || '')); setPerformedBy(''); setCost(''); setDescription(schedule?.name || ''); setError('');operation.current=null; } }, [open, schedule, vehicle.current_odometer]);
 
   const save = async () => {
-    setSaving(true); setError('');
-    try {
-      const odo = odometer ? Number(odometer) : null;
-      const { error: err } = await supabase.from('vihem_fleet_service_records').insert({
-        organisation_id: organisationId, vehicle_id: vehicle.id, schedule_id: schedule?.id || null, performed_at: performedAt, odometer: odo,
-        performed_by_text: performedBy.trim(), cost: cost ? Number(cost) : null, description: description.trim(), created_by: userId,
-      });
-      if (err) throw err;
-      if (schedule) {
-        const next_due_date = schedule.interval_months ? new Date(new Date(performedAt).getTime() + schedule.interval_months * 30 * 86400000).toISOString().slice(0, 10) : null;
-        const next_due_odometer = schedule.interval_km && odo != null ? odo + schedule.interval_km : null;
-        await supabase.from('vihem_fleet_service_schedules').update({ last_done_at: performedAt, last_done_odometer: odo, next_due_date, next_due_odometer }).eq('id', schedule.id);
-      }
-      if (odo != null && odo >= vehicle.current_odometer) await supabase.from('vihem_fleet_vehicles').update({ current_odometer: odo }).eq('id', vehicle.id);
-      if (cost) await supabase.from('vihem_fleet_costs').insert({ organisation_id: organisationId, vehicle_id: vehicle.id, cost_type: 'service', amount: Number(cost), cost_date: performedAt, description: description.trim(), created_by: userId });
-      await supabase.from('vihem_fleet_events').insert({ organisation_id: organisationId, vehicle_id: vehicle.id, event_type: 'service_recorded', summary: description.trim() || 'Service registrerad', actor_id: userId });
-      onSaved();
-    } catch (err) {
-      setError(describeError(err));
-    } finally {
-      setSaving(false);
-    }
+    if(lock.current)return;
+    if(!performedAt || (odometer && (!Number.isFinite(Number(odometer))||Number(odometer)<0)) || (cost && (!Number.isFinite(Number(cost))||Number(cost)<0))){setError('Kontrollera datum och ange positiva tal eller noll.');return;}
+    const request={p_vehicle:vehicle.id,p_revision:vehicle.updated_at,p_schedule:schedule?.id||null,p_schedule_revision:schedule?.updated_at||null,p_date:performedAt,p_odometer:odometer?Number(odometer):null,p_performer:performedBy.trim(),p_cost:cost?Number(cost):null,p_description:description.trim()};
+    const body=JSON.stringify(request);if(!operation.current||operation.current.body!==body)operation.current={body,id:crypto.randomUUID()};
+    lock.current=true;setSaving(true);setError('');
+    try{const result=await supabase.rpc('vihem_record_fleet_service',{...request,p_operation:operation.current.id});if(result.error)throw result.error;operation.current=null;onSaved();}
+    catch(err){setError(`${describeError(err)} Uppgifterna finns kvar. Försök igen.`);}
+    finally{lock.current=false;setSaving(false);}
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Registrera utförd service">
+    <><Modal mobileFullscreen open={open} onClose={close} title={schedule?`Utförd service – ${schedule.name}`:'Registrera utförd service'} toolbar={error && <p role="alert" className="bg-red-50 p-3 text-sm text-red-700">{error}</p>} footer={<><Button variant="secondary" onClick={close} disabled={saving}>Avbryt</Button><Button onClick={save} loading={saving}>Registrera service</Button></>}>
+      <fieldset disabled={saving}><p className="mb-5 text-sm text-vihem-muted">{vehicle.name} · {schedule?'Servicehistorik, plan och tillhörande uppgifter sparas tillsammans.':'Dokumentera arbetet i tillgångens servicehistorik.'}</p>
       <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <Input label="Utfört datum" type="date" value={performedAt} onChange={(e) => setPerformedAt(e.target.value)} />
@@ -1574,13 +1568,13 @@ function ServiceRecordModal({ open, onClose, vehicle, schedule, organisationId, 
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Input label="Utförd av" value={performedBy} onChange={(e) => setPerformedBy(e.target.value)} placeholder="Verkstad/person" />
-          <Input label="Kostnad (kr)" type="number" value={cost} onChange={(e) => setCost(e.target.value)} />
+          {admin && <Input label="Kostnad (kr)" type="number" value={cost} onChange={(e) => setCost(e.target.value)} />}
         </div>
         <Textarea label="Beskrivning" value={description} onChange={(e) => setDescription(e.target.value)} />
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-        <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Avbryt</Button><Button onClick={save} loading={saving}>Spara</Button></div>
+
       </div>
-    </Modal>
+      {!admin && <p className="mt-4 text-sm text-vihem-muted">Administratör registrerar kostnader, uppdaterar serviceplaner och ändrar aktuell mätarställning.</p>}</fieldset>
+    </Modal><Modal open={discard} onClose={()=>setDiscard(false)} title="Lämna serviceregistreringen?" footer={<><Button variant="secondary" onClick={()=>setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscard(false);onClose();}}>Lämna</Button></>}><p>Osparade uppgifter försvinner.</p></Modal></>
   );
 }
 
