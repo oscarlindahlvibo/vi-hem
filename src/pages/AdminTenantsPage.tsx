@@ -1,6 +1,8 @@
 import { TenantChatLauncher } from '../components/chat/ContextChatLauncher';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Users, Plus, Edit2, Home, Mail, Phone, KeyRound, RefreshCw, FileSignature, Trash2 } from 'lucide-react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useToast } from '../components/toast';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { createUserAccount, resetUserPassword, sendUserPasswordResetEmail } from '../lib/userAdmin';
@@ -16,6 +18,8 @@ import {
   EmptyState,
   LoadingPage,
   SearchInput,
+  Avatar,
+  Tabs,
 } from '../components/ui';
 import { formatDate, formatCurrency, RENT_VAT_OPTIONS } from '../lib/utils';
 import { Profile, Tenancy, Apartment, Property, FinanceCompany } from '../types';
@@ -35,6 +39,11 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
   const [companies, setCompanies] = useState<FinanceCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter,setStatusFilter]=useState('all');
+  const [loadError,setLoadError]=useState('');
+  const [formStep,setFormStep]=useState('contact');
+  const [discardTenant,setDiscardTenant]=useState(false);
+  const toast=useToast();
   const [selectedTenant, setSelectedTenant] = useState<Profile | null>(null);
   const [tenantAgreements, setTenantAgreements] = useState<AgreementListItem[]>([]);
   const [editingTenant, setEditingTenant] = useState<Profile | null>(null);
@@ -78,9 +87,8 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
     discount_age_limit: '25',
   });
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  const tenantDirty=useUnsavedChanges(tenantFormData,showTenantModal);
+  const closeTenantEditor=()=>{if(saving)return;if(tenantDirty){setDiscardTenant(true);return;}setShowTenantModal(false);setEditingTenant(null);};
 
   // Avtal V2 (beta): agreements linked to the selected tenant via the
   // generic entity-link table. Best-effort -- never blocks the rest of
@@ -90,9 +98,9 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
     listEntityAgreements('tenant', selectedTenant.id).then(setTenantAgreements).catch(() => setTenantAgreements([]));
   }, [selectedTenant]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoading(true);setLoadError('');
       const [tenantsRes, tenanciesRes, aptsRes, propsRes, companiesRes] = await Promise.all([
         supabase.from('vihem_profiles').select('*').eq('role', 'tenant').order('name'),
         supabase.from('vihem_tenancies').select('*'),
@@ -100,23 +108,21 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
         supabase.from('vihem_properties').select('*'),
         supabase.from('vihem_companies').select('id, name').order('name'),
       ]);
-      if (tenantsRes.data) setTenants(tenantsRes.data);
+      for(const result of [tenantsRes,tenanciesRes,aptsRes,propsRes,companiesRes])if(result.error)throw result.error;
+      if (tenantsRes.data) {setTenants(tenantsRes.data);setSelectedTenant(current=>current?tenantsRes.data.find(t=>t.id===current.id)||null:null);}
       if (tenanciesRes.data) setTenancies(tenanciesRes.data);
       if (aptsRes.data) setApartments(aptsRes.data);
       if (propsRes.data) setProperties(propsRes.data);
       if (companiesRes.data) setCompanies(companiesRes.data as FinanceCompany[]);
     } catch (error) {
-      console.error('Error fetching data:', error);
+      setLoadError('Hyresgästerna kunde inte hämtas. Försök igen.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.organisation_id]);
+  useEffect(()=>{void fetchData();},[fetchData]);
 
-  const filteredTenants = tenants.filter(
-    (t) =>
-      t.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.email?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredTenants = tenants.filter(t => (statusFilter==='all'||(statusFilter==='active'?t.active:!t.active)) && `${t.name||''} ${t.email||''} ${t.phone||''}`.toLocaleLowerCase('sv').includes(searchQuery.toLocaleLowerCase('sv')));
 
   const getTenantTenancies = (tenantId: string) =>
     tenancies
@@ -250,6 +256,8 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
   };
 
   const handleSaveTenant = async () => {
+    if(saving)return;
+    if(!tenantFormData.name.trim()||(!editingTenant&&!tenantFormData.email.trim())){setSaveError(editingTenant?'Ange hyresgästens namn.':'Ange namn och e-post för ett nytt konto.');return;}
     const rawPno = tenantFormData.bankid_personal_number.trim();
     const normalizedPno = rawPno ? normalizePersonalNumber(rawPno) : null;
     if (rawPno && !normalizedPno) {
@@ -280,8 +288,9 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
         const { error } = await supabase
           .from('vihem_profiles')
           .update({ name: tenantFormData.name, phone: tenantFormData.phone, active: tenantFormData.active, bankid_personal_number: normalizedPno })
-          .eq('id', editingTenant.id);
+          .eq('id', editingTenant.id).select('id').single();
         if (error) throw error;
+        toast.show('Hyresgästen har sparats',{tone:'success'});
       } else {
         const newAccount = await createUserAccount({
           name: tenantFormData.name,
@@ -467,19 +476,20 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
   };
 
   if (loading) return <LoadingPage />;
+  if(loadError)return <div role="alert" className="space-y-4"><PageHeader title="Hyresgäster"/><p>{loadError}</p><Button onClick={()=>void fetchData()}>Försök igen</Button></div>;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto px-4 py-8">
+    <div className="space-y-6">
+      <div className="space-y-6">
         <PageHeader
           title="Hyresgäster"
           subtitle="Hantera hyresgäster och deras hyresförhållanden"
-          action={
+          action={!selectedTenant&&
             <Button
               onClick={() => {
                 setEditingTenant(null);
                 setTenantFormData({ name: '', email: '', phone: '', active: true, bankid_personal_number: '', property_id: '', apartment_id: '', start_date: '', monthly_rent: '', rent_vat_rate: '0', company_id: '', addons: [], rent_override_choice: '', discount_percent: '', discount_age_based: false, discount_age_limit: '25' });
-                setSaveError('');
+                setSaveError('');setFormStep('contact');
                 setShowTenantModal(true);
               }}
               variant="primary"
@@ -495,20 +505,21 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
           <>
             <div className="mb-6">
               <SearchInput
-                placeholder="Sök hyresgäster..."
+                placeholder="Sök namn, e-post eller telefon…"
                 value={searchQuery}
                 onChange={setSearchQuery}
               />
+              <Tabs className="mt-3" tabs={[{key:'all',label:'Alla'},{key:'active',label:'Aktiva'},{key:'inactive',label:'Inaktiva'}]} active={statusFilter} onChange={setStatusFilter}/>
             </div>
 
             {filteredTenants.length === 0 ? (
               <EmptyState
                 icon={<Users className="w-12 h-12" />}
-                title="Inga hyresgäster"
-                description="Börja med att skapa din första hyresgäst"
+                title={searchQuery||statusFilter!=='all'?"Inga matchande hyresgäster":"Inga hyresgäster"}
+                description={searchQuery||statusFilter!=='all'?"Ändra sökningen eller välj alla statusar.":"Börja med att skapa din första hyresgäst"}
               />
             ) : (
-              <Card>
+              <><div className="space-y-2 lg:hidden">{filteredTenants.map(tenant=>{const current=getTenantTenancies(tenant.id).find(t=>t.status==='active');const apt=current?getApartmentInfo(current.apartment_id):null;const property=apt?getPropertyInfo(apt.property_id):null;return <Card key={tenant.id} className="p-4"><button onClick={()=>setSelectedTenant(tenant)} className="vihem-focus flex w-full items-start gap-3 rounded-xl text-left"><Avatar userId={tenant.id} name={tenant.name||tenant.email}/><span className="min-w-0 flex-1"><span className="block font-semibold text-vihem-ink">{tenant.name}</span><span className="mt-1 block break-all text-sm text-vihem-muted">{tenant.email}</span>{tenant.phone&&<span className="block text-sm text-vihem-muted">{tenant.phone}</span>}{apt&&<span className="mt-2 block text-sm">{property?.name} · {apt.apartment_number}</span>}</span><span className="text-xs text-vihem-muted">{tenant.active?'Aktiv':'Inaktiv'}</span></button></Card>;})}</div><Card className="hidden lg:block">
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
@@ -528,7 +539,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                           onClick={() => setSelectedTenant(tenant)}
                           className="hover:bg-slate-50 cursor-pointer transition-colors"
                         >
-                          <td className="py-3 px-4 font-medium text-slate-900">{tenant.name}</td>
+                          <td className="py-3 px-4 font-medium text-slate-900"><button onClick={e=>{e.stopPropagation();setSelectedTenant(tenant);}} className="vihem-focus flex items-center gap-3 rounded-lg text-left"><Avatar userId={tenant.id} name={tenant.name||tenant.email} size="sm"/>{tenant.name}</button></td>
                           <td className="py-3 px-4 text-sm text-slate-600">{tenant.email}</td>
                           <td className="py-3 px-4 text-sm text-slate-600">{tenant.phone}</td>
                           <td className="py-3 px-4">
@@ -568,7 +579,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                     </tbody>
                   </table>
                 </div>
-              </Card>
+              </Card></>
             )}
           </>
         ) : (
@@ -581,14 +592,14 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
             </button>
 
             <Card className="mb-6 p-6">
-              <div className="flex items-start justify-between mb-4">
+              <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 mb-3">{selectedTenant.name}</h2>
+                  <div className="mb-3 flex items-center gap-3"><Avatar userId={selectedTenant.id} name={selectedTenant.name||selectedTenant.email} size="lg"/><h2 className="text-xl font-semibold text-vihem-ink">{selectedTenant.name}</h2></div>
                   <TenantChatLauncher tenantId={selectedTenant.id} onNavigate={onNavigate} />
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 text-sm text-slate-600">
                       <Mail className="w-4 h-4" />
-                      <span>{selectedTenant.email}</span>
+                      <span className="break-all">{selectedTenant.email}</span>
                     </div>
                     {selectedTenant.phone && (
                       <div className="flex items-center gap-2 text-sm text-slate-600">
@@ -620,9 +631,9 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
                   >
                     <RefreshCw className="w-4 h-4 text-slate-600" />
                   </button>
-                  <button
+                  <button aria-label="Redigera hyresgäst"
                     onClick={() => openEditTenantModal(selectedTenant)}
-                    className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                    className="vihem-icon-button"
                   >
                     <Edit2 className="w-4 h-4 text-slate-600" />
                   </button>
@@ -737,15 +748,18 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
       </div>
 
       <Modal
+        mobileFullscreen
         open={showTenantModal}
-        onClose={() => { setShowTenantModal(false); setEditingTenant(null); }}
+        onClose={closeTenantEditor}
         title={editingTenant ? 'Redigera hyresgäst' : 'Ny hyresgäst'}
         size="lg"
+        footer={<><Button variant="secondary" disabled={saving} onClick={closeTenantEditor}>Avbryt</Button><Button loading={saving} onClick={handleSaveTenant}>{editingTenant?'Spara hyresgäst':'Skapa konto'}</Button></>}
       >
-        <div className="space-y-5">
+        <fieldset disabled={saving} className="space-y-5">
+          {!editingTenant&&<Tabs tabs={[{key:'contact',label:'Kontakt'},{key:'tenancy',label:'Boende'}]} active={formStep} onChange={setFormStep}/>}
           {/* Personal info section */}
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Personuppgifter</p>
+          <div hidden={!editingTenant&&formStep!=='contact'}>
+            <p className="mb-3 text-sm text-vihem-muted">Kontaktuppgifter och inloggning</p>
             <div className="space-y-3">
               <Input
                 label="Namn"
@@ -764,12 +778,14 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
               )}
               <Input
                 label="Telefon"
+                type="tel" autoComplete="tel"
                 value={tenantFormData.phone}
                 onChange={(e) => setTenantFormData({ ...tenantFormData, phone: e.target.value })}
                 placeholder="T.ex. 070-123 45 67"
               />
               <Input
                 label="Personnummer (för BankID-inloggning)"
+                inputMode="numeric"
                 value={tenantFormData.bankid_personal_number}
                 onChange={(e) => setTenantFormData({ ...tenantFormData, bankid_personal_number: e.target.value })}
                 placeholder="T.ex. 199001011234 eller 900101-1234"
@@ -790,7 +806,7 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
 
           {/* Tenancy section — only for new tenants */}
           {!editingTenant && (
-            <div className="border-t border-slate-200 pt-5">
+            <div hidden={formStep!=='tenancy'}> 
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Hyresförhållande</p>
               <div className="space-y-3">
                 <div>
@@ -902,18 +918,12 @@ export function AdminTenantsPage({ onNavigate }: AdminTenantsPageProps) {
             </div>
           )}
 
-          <div className="flex gap-3 justify-end pt-1">
-            <Button variant="secondary" onClick={() => { setShowTenantModal(false); setEditingTenant(null); }}>
-              Avbryt
-            </Button>
-            <Button variant="primary" onClick={handleSaveTenant} loading={saving}>
-              {editingTenant ? 'Spara' : 'Skapa konto'}
-            </Button>
-          </div>
-        </div>
+          {!editingTenant&&formStep==='contact'&&<Button variant="secondary" onClick={()=>setFormStep('tenancy')}>Lägg till boende</Button>}
+        </fieldset>
       </Modal>
 
-      <Modal
+      <Modal open={discardTenant} onClose={()=>setDiscardTenant(false)} title="Lämna osparade ändringar?" footer={<><Button variant="secondary" onClick={()=>setDiscardTenant(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscardTenant(false);setShowTenantModal(false);setEditingTenant(null);}}>Lämna utan att spara</Button></>}><p>Ändringarna har inte sparats. Vill du lämna formuläret?</p></Modal>
+      <Modal mobileFullscreen
         open={showLinkTenancyModal}
         onClose={() => { setShowLinkTenancyModal(false); setSaveError(''); }}
         title="Länka hyresförhållande"
