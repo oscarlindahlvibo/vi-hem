@@ -37,6 +37,7 @@ const ASSET_TYPES_WITH_REGISTRATION: FleetAssetType[] = ['car', 'van', 'truck', 
 const ASSET_TYPES_WITH_TIRES: FleetAssetType[] = ['car', 'van', 'truck', 'trailer', 'tractor'];
 
 const STATUS_ORDER: FleetVehicleStatus[] = ['in_service', 'workshop', 'out_of_service', 'driving_ban', 'laid_up', 'rented_out', 'sold'];
+const escapeLabelHtml = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 const STATUS_LABELS: Record<FleetVehicleStatus, string> = { in_service: 'I drift', workshop: 'På verkstad', out_of_service: 'Ur drift', driving_ban: 'Körförbud', laid_up: 'Avställd', rented_out: 'Uthyrd', sold: 'Såld' };
 const STATUS_CLASS: Record<FleetVehicleStatus, string> = { in_service: 'bg-emerald-100 text-emerald-700', workshop: 'bg-amber-100 text-amber-700', out_of_service: 'bg-slate-200 text-slate-700', driving_ban: 'bg-red-100 text-red-700', laid_up: 'bg-slate-100 text-slate-500', rented_out: 'bg-blue-100 text-blue-700', sold: 'bg-slate-100 text-slate-400' };
 const STATUS_DOT: Record<FleetVehicleStatus, string> = { in_service: 'bg-emerald-500', workshop: 'bg-amber-500', out_of_service: 'bg-slate-400', driving_ban: 'bg-red-500', laid_up: 'bg-slate-300', rented_out: 'bg-blue-500', sold: 'bg-slate-300' };
@@ -433,6 +434,7 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
   const [step,setStep]=useState('object');
   const [discard,setDiscard]=useState(false);
   const saveLock=useRef(false);
+  const saveOperation=useRef<{body:string;id:string}|null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [lookupMode, setLookupMode] = useState<'url' | 'text'>('url');
@@ -568,36 +570,15 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
         number_of_seats: form.number_of_seats ? Number(form.number_of_seats) : null, co2_g_km: form.co2_g_km ? Number(form.co2_g_km) : null, euro_class: form.euro_class.trim(),
         technical_specs: form.technical_specs.filter((s) => s.label.trim() && s.value.trim()),
       };
-      let vehicleId = vehicle?.id || '';
-      if (vehicle) {
-        const { error: err } = await supabase.from('vihem_fleet_vehicles').update(payload).eq('id', vehicle.id).select('id').single();
-        if (err) throw err;
-        if (vehicle.status !== form.status) {
-          await supabase.from('vihem_fleet_events').insert({ organisation_id: organisationId, vehicle_id: vehicle.id, event_type: 'status_changed', summary: `Status ändrad: ${STATUS_LABELS[vehicle.status]} -> ${STATUS_LABELS[form.status as FleetVehicleStatus]}`, actor_id: userId });
-        }
-      } else {
-        const { data, error: err } = await supabase.from('vihem_fleet_vehicles').insert({ ...payload, created_by: userId }).select('id').single();
-        if (err) throw err;
-        vehicleId = data.id;
-        await supabase.from('vihem_fleet_events').insert({ organisation_id: organisationId, vehicle_id: vehicleId, event_type: 'created', summary: 'Tillgång skapad', actor_id: userId });
-      }
-      if (vehicleId && (lookupLastInspection || lookupNextInspection)) {
-        const { data: existingInspection } = await supabase.from('vihem_fleet_inspections').select('id').eq('vehicle_id', vehicleId).eq('inspection_type', 'Kontrollbesiktning').maybeSingle();
-        const inspectionPayload = { last_inspection_date: lookupLastInspection || null, next_inspection_date: lookupNextInspection || null };
-        if (existingInspection) {
-          await supabase.from('vihem_fleet_inspections').update(inspectionPayload).eq('id', existingInspection.id);
-        } else {
-          await supabase.from('vihem_fleet_inspections').insert({ organisation_id: organisationId, vehicle_id: vehicleId, inspection_type: 'Kontrollbesiktning', ...inspectionPayload, created_by: userId });
-        }
-      }
-      if (vehicleId && lookupSourceUrl && saveSource) {
-        const iso = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
-        await supabase.from('vihem_fleet_vehicle_sources').upsert({
-          organisation_id: organisationId, vehicle_id: vehicleId, url: lookupSourceUrl, extracted: lookupExtracted.current,
-          last_inspection_date: iso(lookupLastInspection), next_inspection_date: iso(lookupNextInspection),
-          last_checked_at: new Date().toISOString(), last_status: 'ok', created_by: userId,
-        }, { onConflict: 'vehicle_id,url' });
-      }
+      const fields={...payload};
+      delete (fields as Partial<typeof payload>).organisation_id;
+      const iso=(v:string)=>(/^\d{4}-\d{2}-\d{2}$/.test(v)?v:null);
+      const request={p_vehicle:vehicle?.id||null,p_expected:vehicle?.updated_at||null,p_fields:fields,p_inspection:(lookupLastInspection||lookupNextInspection)?{last_inspection_date:iso(lookupLastInspection),next_inspection_date:iso(lookupNextInspection)}:null,p_source:(lookupSourceUrl&&saveSource)?{url:lookupSourceUrl,extracted:lookupExtracted.current,last_inspection_date:iso(lookupLastInspection),next_inspection_date:iso(lookupNextInspection)}:null};
+      const body=JSON.stringify(request);
+      if(!saveOperation.current||saveOperation.current.body!==body)saveOperation.current={body,id:crypto.randomUUID()};
+      const result=await supabase.rpc('vihem_save_fleet_editor',{...request,p_operation:saveOperation.current.id});
+      if(result.error)throw result.error;
+      saveOperation.current=null;
       onSaved();
     } catch (err) {
       setError(describeError(err));
@@ -755,12 +736,14 @@ function VehicleDetail({ onEdit, vehicle, isAdmin, userId, organisationId, compa
   const [checklistRuns, setChecklistRuns] = useState<ChecklistRunWithItems[]>([]);
   const [events, setEvents] = useState<FleetEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [detailError,setDetailError]=useState('');
+  const detailSequence=useRef(0);
   const [reportModal, setReportModal] = useState(false);
   const [qrModal, setQrModal] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const sequence=++detailSequence.current;setLoading(true);setDetailError('');
     const [dmg, wo, sched, srec, insp, srcs, meters, tir, cst, dev, evt, tpl, runs] = await Promise.all([
       supabase.from('vihem_fleet_damage_reports').select('*').eq('vehicle_id', vehicle.id).order('created_at', { ascending: false }),
       supabase.from('vihem_work_orders').select('*').eq('vehicle_id', vehicle.id).order('created_at', { ascending: false }),
@@ -776,6 +759,9 @@ function VehicleDetail({ onEdit, vehicle, isAdmin, userId, organisationId, compa
       supabase.from('vihem_fleet_checklist_templates').select('*, items:vihem_fleet_checklist_template_items(*)').eq('organisation_id', organisationId).eq('active', true).order('name'),
       supabase.from('vihem_fleet_checklist_runs').select('*, items:vihem_fleet_checklist_run_items(*)').eq('vehicle_id', vehicle.id).order('performed_at', { ascending: false }).limit(30),
     ]);
+    if(sequence!==detailSequence.current)return;
+    const failure=[dmg,wo,sched,srec,insp,srcs,meters,tir,cst,dev,evt,tpl,runs].find(r=>'error' in r&&r.error);
+    if(failure){setDetailError('Tillgångens detaljer kunde inte hämtas. Försök igen.');setLoading(false);return;}
     setDamageReports((dmg.data || []) as FleetDamageReport[]);
     setWorkOrders((wo.data || []) as WorkOrder[]);
     setServiceSchedules((sched.data || []) as FleetServiceSchedule[]);
@@ -792,7 +778,7 @@ function VehicleDetail({ onEdit, vehicle, isAdmin, userId, organisationId, compa
     setLoading(false);
   }, [vehicle.id, isAdmin, organisationId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const counter=detailSequence;load();return()=>{counter.current++;}; }, [load]);
 
   const reload = () => { load(); onChanged(); };
 
@@ -810,7 +796,7 @@ function VehicleDetail({ onEdit, vehicle, isAdmin, userId, organisationId, compa
   const printQr = () => {
     const popup = window.open('', '_blank');
     if (!popup) return;
-    popup.document.write(`<html><head><title>${vehicle.name}</title><style>body{font-family:Arial;text-align:center;padding:24px}.label{width:280px;border:1px solid #ddd;padding:16px;margin:0 auto}img{width:200px}small{display:block;color:#475569;margin-top:8px}</style></head><body><div class="label"><strong>${vehicle.registration_number || vehicle.internal_number}</strong><br/>${vehicle.name}<img src="${qrDataUrl}" /><small>Skanna för att öppna i VI-HEM Fleet</small></div><script>window.print()</script></body></html>`);
+    popup.document.write(`<html><head><title>${escapeLabelHtml(vehicle.name)}</title><style>body{font-family:Arial;text-align:center;padding:24px}.label{width:280px;border:1px solid #ddd;padding:16px;margin:0 auto}img{width:200px}small{display:block;color:#475569;margin-top:8px}</style></head><body><div class="label"><strong>${escapeLabelHtml(vehicle.registration_number || vehicle.internal_number || '')}</strong><br/>${escapeLabelHtml(vehicle.name)}<img src="${qrDataUrl}" /><small>Skanna för att öppna i VI-HEM Fleet</small></div><script>window.print()</script></body></html>`);
     popup.document.close();
   };
 
@@ -833,17 +819,19 @@ function VehicleDetail({ onEdit, vehicle, isAdmin, userId, organisationId, compa
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <button onClick={onBack} className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-800"><ArrowLeft className="h-4 w-4" /> Tillbaka till registret</button>
+      <Button variant="ghost" onClick={onBack} className="mb-4"><ArrowLeft className="h-4 w-4"/>Tillgångsregistret</Button>
+      {detailError&&<div role="alert" className="mb-4 flex items-center gap-3 rounded-xl bg-red-50 p-3 text-sm text-red-800">{detailError}<Button variant="secondary" size="sm" onClick={load}>Försök igen</Button></div>}
 
-      <Card className="mb-5 overflow-hidden">
-        <div className="flex flex-wrap items-start justify-between gap-4 p-5">
-          <div className="min-w-0">
-            <div className="mb-1 flex flex-wrap items-center gap-2">
+      <section className="mb-6 border-b border-vihem-line pb-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-4">
+            {vehicle.image_url&&<img src={vehicle.image_url} alt={vehicle.name} className="h-20 w-24 rounded-xl object-cover sm:h-28 sm:w-36"/>}
+            <div className="min-w-0"><div className="mb-1 flex flex-wrap items-center gap-2">
               {vehicle.registration_number && <span className="rounded bg-slate-900 px-2 py-1 font-mono text-sm font-bold text-white">{vehicle.registration_number}</span>}
               <h1 className="text-xl font-bold text-slate-900">{vehicle.name}</h1>
               <Badge className={STATUS_CLASS[vehicle.status]}>{STATUS_LABELS[vehicle.status]}</Badge>
             </div>
-            <p className="text-sm text-slate-500">{ASSET_TYPE_LABELS[vehicle.asset_type]} · {vehicle.make} {vehicle.model} {vehicle.model_year || ''}</p>
+            <p className="text-sm text-slate-500">{[ASSET_TYPE_LABELS[vehicle.asset_type],vehicle.make,vehicle.model,vehicle.model_year].filter(Boolean).join(' · ')}</p></div>
           </div>
           <div className="flex flex-wrap gap-2">
             {isAdmin && <Button size="sm" variant="secondary" onClick={onEdit}><Pencil className="h-4 w-4" /> Redigera</Button>}
@@ -851,28 +839,16 @@ function VehicleDetail({ onEdit, vehicle, isAdmin, userId, organisationId, compa
             <Button size="sm" onClick={() => setReportModal(true)}><Camera className="h-4 w-4" /> Rapportera skada/fel</Button>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-px border-t border-slate-200 bg-slate-100 sm:grid-cols-3 lg:grid-cols-6">
-          {[
-            ASSET_TYPES_WITH_ODOMETER.includes(vehicle.asset_type) ? { label: 'Mätarställning', value: `${formatNumber(vehicle.current_odometer)} ${vehicle.odometer_unit}` } : null,
-            ASSET_TYPES_WITH_ENGINE_HOURS.includes(vehicle.asset_type) ? { label: 'Maskintimmar', value: `${formatNumber(vehicle.engine_hours)} h` } : null,
-            { label: 'Nästa besiktning', value: nextInspection ? fmtDate(nextInspection.next_inspection_date) : '-' },
-            { label: 'Nästa service', value: nextService ? fmtDate(nextService.next_due_date) : '-' },
-            { label: 'Öppna fel', value: String(openDamage.length) },
-            { label: 'Öppna arbetsordrar', value: String(openWo.length) },
-          ].filter(Boolean).map((cell: any) => (
-            <div key={cell.label} className="bg-white p-3"><p className="text-xs text-slate-500">{cell.label}</p><p className="font-semibold text-slate-900">{cell.value}</p></div>
-          ))}
+        <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+          {ASSET_TYPES_WITH_ODOMETER.includes(vehicle.asset_type)&&<span><span className="text-vihem-muted">Mätare </span><strong className="tabular-nums">{formatNumber(vehicle.current_odometer)} {vehicle.odometer_unit}</strong></span>}
+          {ASSET_TYPES_WITH_ENGINE_HOURS.includes(vehicle.asset_type)&&<span><span className="text-vihem-muted">Maskintimmar </span><strong>{formatNumber(vehicle.engine_hours)} h</strong></span>}
+          {nextInspection&&<button className="vihem-focus min-h-11 text-left" onClick={()=>setTab('inspections')}><span className="text-vihem-muted">Nästa kontroll </span><strong>{fmtDate(nextInspection.next_inspection_date)}</strong></button>}
+          {nextService&&<button className="vihem-focus min-h-11 text-left" onClick={()=>setTab('service')}><span className="text-vihem-muted">Nästa service </span><strong>{fmtDate(nextService.next_due_date)}</strong></button>}
+          {openDamage.length>0&&<Button variant="secondary" size="sm" onClick={()=>setTab('damage')}>{openDamage.length} öppna fel</Button>}
+          {openWo.length>0&&<Button variant="secondary" size="sm" onClick={()=>setTab('workorders')}>{openWo.length} arbetsordrar</Button>}
         </div>
-      </Card>
-
-      <div className="mb-5 flex flex-wrap gap-1 border-b border-slate-200">
-        {TABS.map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key)} className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors ${tab === t.key ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
-            <t.icon className="h-4 w-4" /> {t.label}
-          </button>
-        ))}
-      </div>
-
+      </section>
+      <div className="mb-5"><Tabs active={tab} onChange={key=>setTab(key as DetailTab)} tabs={TABS.map(t=>({key:t.key,label:t.label}))}/></div>
       {tab === 'overview' && <OverviewTab vehicle={vehicle} companies={companies} properties={properties} profilesById={profilesById} openDamage={openDamage} openWo={openWo} serviceSchedules={serviceSchedules} inspections={inspections} organisationId={organisationId} userId={userId} isAdmin={isAdmin} onChanged={reload} />}
       {tab === 'workorders' && <WorkOrdersTab vehicle={vehicle} workOrders={workOrders} organisationId={organisationId} userId={userId} onNavigate={onNavigate} onChanged={reload} />}
       {tab === 'damage' && <DamageTab vehicle={vehicle} reports={damageReports} isAdmin={isAdmin} organisationId={organisationId} onChanged={reload} onNavigate={onNavigate} />}
@@ -958,7 +934,7 @@ function OverviewTab({ vehicle, companies, properties, profilesById, openDamage,
       <Card className="p-5 lg:col-span-2">
         <h3 className="mb-4 font-semibold text-slate-900">Fakta</h3>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
-          {fields.map((f) => (
+          {fields.filter(f=>f.value&&f.value!=='-').map((f) => (
             <div key={f.label}><dt className="text-xs text-slate-500">{f.label}</dt><dd className="font-medium text-slate-800">{f.value}</dd></div>
           ))}
         </dl>
@@ -976,15 +952,15 @@ function OverviewTab({ vehicle, companies, properties, profilesById, openDamage,
             </>
           )}
         </Card>
-        <Card className="p-5">
-          <h3 className="mb-3 font-semibold text-slate-900">Status</h3>
+        {(openDamage.length>0||openWo.length>0||serviceSchedules.length>0||inspections.length>0)&&<Card className="p-5">
+          <h3 className="mb-3 font-semibold text-slate-900">Uppföljning</h3>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between"><span className="text-slate-500">Öppna skador/fel</span><span className="font-semibold">{openDamage.length}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">Öppna arbetsordrar</span><span className="font-semibold">{openWo.length}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">Serviceplaner</span><span className="font-semibold">{serviceSchedules.length}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">Kontroller</span><span className="font-semibold">{inspections.length}</span></div>
           </div>
-        </Card>
+        </Card>}
       </div>
       {(specFields.length > 0 || vehicle.technical_specs.length > 0) && (
         <Card className="p-5 lg:col-span-3">
