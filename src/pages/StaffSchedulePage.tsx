@@ -1,8 +1,9 @@
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Briefcase, CalendarDays, ChevronLeft, ChevronRight, ClipboardList, Plus, StickyNote, Trash2, UserX, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Button, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../components/ui';
+import { Avatar, Button, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../components/ui';
 import type { Profile, ScheduleEntry, ScheduleEntryType } from '../types';
 
 interface StaffSchedulePageProps {
@@ -140,6 +141,11 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
   const [endDate, setEndDate] = useState('');
   const [visitTime, setVisitTime] = useState('');
   const [saving, setSaving] = useState(false);
+  const saveLock=useRef(false);
+  const fetchSequence=useRef(0);
+  const [selectedDay,setSelectedDay]=useState(() => toDateKey(new Date()));
+  const [discard,setDiscard]=useState(false);
+  const dirty=useUnsavedChanges({entryType,selectedRef,freeTitle,subtitle,startDate,endDate,visitTime},modal.open);
   const [formError, setFormError] = useState('');
   const [drag, setDrag] = useState<DragState | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
@@ -149,6 +155,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
   const weekStartKey = weekDayKeys[0];
   const weekEndKey = weekDayKeys[6];
   const todayKeyValue = toDateKey(new Date());
+  const activeDay=weekDayKeys.includes(selectedDay)?selectedDay:weekStartKey;
 
   useEffect(() => {
     fetchWeek();
@@ -157,6 +164,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
 
   async function fetchWeek() {
     if (!user?.organisation_id) return;
+    const sequence=++fetchSequence.current;
     setLoading(true);
     setError('');
 
@@ -166,6 +174,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
       supabase.rpc('vihem_schedule_absence_overlaps', { p_from: weekStartKey, p_to: weekEndKey }),
     ]);
 
+    if(sequence!==fetchSequence.current)return;
     if (staffResult.error) setError(staffResult.error.message);
     else if (entriesResult.error) setError(entriesResult.error.message);
     else if (absenceResult.error) setError(absenceResult.error.message);
@@ -237,6 +246,8 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
   }
 
   function closeModal() {
+    if(saveLock.current)return;
+    if(dirty){setDiscard(true);return;}
     setModal({ open: false, userId: '', userName: '', date: '' });
   }
 
@@ -246,14 +257,15 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
   }
 
   async function saveEntry() {
-    if (!user?.organisation_id) return;
+    if (!user?.organisation_id||saveLock.current) return;
     if (entryType === 'note' && !freeTitle.trim()) { setFormError('Skriv en text för blocket.'); return; }
     if (entryType !== 'note' && !selectedRef) { setFormError('Välj vad som ska schemaläggas.'); return; }
     if (!startDate || !endDate) { setFormError('Ange start- och slutdatum.'); return; }
     if (endDate < startDate) { setFormError('Slutdatum kan inte ligga före startdatum.'); return; }
 
-    setSaving(true);
+    saveLock.current=true;setSaving(true);
     setFormError('');
+    try{
 
     const payload = {
       organisation_id: user.organisation_id,
@@ -269,25 +281,39 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
     };
 
     const result = modal.editing
-      ? await supabase.from('vihem_schedule_entries').update(payload).eq('id', modal.editing.id)
-      : await supabase.from('vihem_schedule_entries').insert(payload);
+      ? await supabase.from('vihem_schedule_entries').update({...payload,updated_at:new Date().toISOString()}).eq('id', modal.editing.id).eq('updated_at',modal.editing.updated_at).select('id').single()
+      : await supabase.from('vihem_schedule_entries').insert(payload).select('id').single();
 
-    setSaving(false);
-    if (result.error) { setFormError(result.error.message); return; }
-    closeModal();
+    if (result.error) { setFormError(result.error.code==='PGRST116'?'Schemaraden har ändrats eller är inte längre tillgänglig. Dina uppgifter finns kvar. Öppna raden igen för att jämföra.':result.error.message); return; }
+    setModal({open:false,userId:'',userName:'',date:''});
     await fetchWeek();
+    }catch{setFormError('Kunde inte spara. Dina uppgifter finns kvar. Försök igen.');}finally{saveLock.current=false;setSaving(false);}
   }
 
   async function deleteEntry() {
-    if (!modal.editing) return;
+    if (!modal.editing || saveLock.current) return;
     const confirmed = window.confirm('Ta bort den här schemaraden?');
     if (!confirmed) return;
+    saveLock.current = true;
     setSaving(true);
-    const { error: deleteError } = await supabase.from('vihem_schedule_entries').delete().eq('id', modal.editing.id);
-    setSaving(false);
-    if (deleteError) { setFormError(deleteError.message); return; }
-    closeModal();
-    await fetchWeek();
+    setFormError('');
+    try {
+      const result = await supabase.from('vihem_schedule_entries').delete()
+        .eq('id', modal.editing.id).eq('updated_at', modal.editing.updated_at).select('id').single();
+      if (result.error) {
+        setFormError(result.error.code === 'PGRST116'
+          ? 'Schemaraden har ändrats. Öppna den igen innan du tar bort den.'
+          : 'Schemaraden kunde inte tas bort. Försök igen.');
+        return;
+      }
+      setModal({ open: false, userId: '', userName: '', date: '' });
+      await fetchWeek();
+    } catch {
+      setFormError('Schemaraden kunde inte tas bort. Försök igen.');
+    } finally {
+      saveLock.current = false;
+      setSaving(false);
+    }
   }
 
   function measureDayColumnWidth() {
@@ -410,9 +436,9 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
 
     const { error: updateError } = await supabase
       .from('vihem_schedule_entries')
-      .update({ start_date: snapshot.previewStartDate, end_date: snapshot.previewEndDate, user_id: snapshot.previewUserId })
-      .eq('id', snapshot.entry.id);
-    if (updateError) { setError(updateError.message); return; }
+      .update({ start_date: snapshot.previewStartDate, end_date: snapshot.previewEndDate, user_id: snapshot.previewUserId,updated_at:new Date().toISOString() })
+      .eq('id', snapshot.entry.id).eq('updated_at',snapshot.entry.updated_at).select('id').single();
+    if (updateError) { setError('Schemaraden kunde inte flyttas. Den kan ha ändrats på en annan enhet. Ladda om innan du försöker igen.'); return; }
     await fetchWeek();
   }
 
@@ -436,10 +462,10 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
   if (loading) return <LoadingPage />;
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24">
+    <div className="mx-auto max-w-[1600px] px-4 py-6 pb-24 sm:px-6 lg:px-8">
       <PageHeader
         title="Schema"
-        subtitle="Se vad var och en ska arbeta med under veckan."
+        subtitle="Planera veckan och se dagens uppgifter och frånvaro."
         icon={CalendarDays}
         action={(
           <div className="flex items-center gap-2">
@@ -464,6 +490,18 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
         {new Date(`${weekStartKey}T12:00:00`).toLocaleDateString('sv-SE', { day: 'numeric', month: 'long' })} – {new Date(`${weekEndKey}T12:00:00`).toLocaleDateString('sv-SE', { day: 'numeric', month: 'long', year: 'numeric' })}
       </div>
 
+      <section className="lg:hidden" aria-label="Dagsplanering">
+        <div className="mb-5 grid grid-cols-7 gap-1" role="group" aria-label="Välj dag">
+          {weekDayKeys.map((day,index)=><button key={day} type="button" aria-pressed={activeDay===day} onClick={()=>setSelectedDay(day)} className={`vihem-focus flex min-h-[60px] flex-col items-center justify-center rounded-xl text-sm ${activeDay===day?'bg-vihem-navy text-white':'bg-white text-vihem-muted hover:bg-vihem-soft'}`}><span className="text-xs">{WEEKDAY_LABELS[index]}</span><span className="mt-1 text-lg font-semibold tabular-nums">{new Date(`${day}T12:00:00`).getDate()}</span></button>)}
+        </div>
+        <div className="divide-y divide-vihem-line">
+          {staff.map(person=>{const dayEntries=entries.filter(e=>e.user_id===person.id&&e.start_date<=activeDay&&e.end_date>=activeDay);const away=absences.some(a=>a.user_id===person.id&&a.start_date<=activeDay&&a.end_date>=activeDay);return <section key={person.id} className="py-4 first:pt-0"><div className="mb-3 flex items-center gap-3"><Avatar name={person.name} userId={person.id}/><h2 className="flex-1 font-semibold text-vihem-navy">{person.name}</h2>{canManage&&<Button size="sm" variant="ghost" onClick={()=>openCreateModal(person,activeDay)} aria-label={`Planera för ${person.name}`}><Plus className="h-4 w-4"/></Button>}</div>
+          {away&&<p className="mb-2 flex items-center gap-2 text-sm text-rose-700"><UserX className="h-4 w-4"/>Frånvarande</p>}
+          {dayEntries.length?<div className="space-y-2 pl-2">{dayEntries.map(entry=>{const meta=ENTRY_TYPE_META[entry.entry_type];const Icon=meta.icon;return <button key={entry.id} disabled={!canManage} onClick={()=>openEditModal(entry,person)} className="vihem-focus flex w-full items-start gap-3 rounded-xl bg-white p-3 text-left disabled:opacity-100"><Icon className="mt-1 h-4 w-4 shrink-0 text-vihem-blue"/><span className="min-w-0"><span className="block text-xs text-vihem-muted">{formatVisitTime(entry.visit_time)||meta.label}</span><span className="block font-medium text-vihem-navy">{entry.title}</span>{entry.subtitle&&<span className="mt-1 block text-sm text-vihem-muted">{entry.subtitle}</span>}</span></button>})}</div>:<p className="pl-12 text-sm text-vihem-muted">Inget inplanerat</p>}
+          </section>})}
+        </div>
+      </section>
+      <div className="hidden lg:block">
       {staff.length === 0 ? (
         <EmptyState icon={CalendarDays} title="Ingen personal hittades" description="Lägg till personal under Personal-sidan först." />
       ) : (
@@ -493,7 +531,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
 
             return (
               <div key={staffMember.id} className="grid border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: `${LABEL_WIDTH}px 1fr` }}>
-                <div className="flex items-center px-4 py-2 text-sm font-black text-slate-900">{staffMember.name}</div>
+                <div className="flex items-center px-4 py-2 text-sm font-semibold text-slate-900"><Avatar name={staffMember.name} userId={staffMember.id} size="sm"/><span className="ml-2 truncate">{staffMember.name}</span></div>
                 <div
                   ref={(el) => { if (el) rowRefs.current.set(staffMember.id, el); else rowRefs.current.delete(staffMember.id); }}
                   className={`relative transition-colors ${isMoveTarget ? 'bg-blue-50' : ''}`}
@@ -599,6 +637,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
         </div>
       )}
 
+      </div>
       {drag?.kind === 'move' && drag.moved && (() => {
         const meta = ENTRY_TYPE_META[drag.entry.entry_type];
         const Icon = meta.icon;
@@ -623,8 +662,8 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
         );
       })()}
 
-      <Modal open={modal.open} onClose={closeModal} title={modal.editing ? 'Redigera schemarad' : `Lägg till för ${modal.userName}`} size="lg">
-        <div className="grid gap-4">
+      <Modal mobileFullscreen open={modal.open} onClose={closeModal} title={modal.editing ? 'Redigera schemarad' : `Lägg till för ${modal.userName}`} size="lg" footer={<><Button variant="secondary" disabled={saving} onClick={closeModal}>Avbryt</Button><Button onClick={saveEntry} loading={saving}>Spara planering</Button></>}>
+        <fieldset disabled={saving} className="min-w-0 grid gap-4">
           <Select
             label="Typ"
             value={entryType}
@@ -643,7 +682,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
                     <p className="truncate font-bold text-slate-900">{selectedRef.title}</p>
                     {selectedRef.subtitle && <p className="truncate text-sm text-slate-500">{selectedRef.subtitle}</p>}
                   </div>
-                  <button type="button" onClick={() => setSelectedRef(null)} className="shrink-0 rounded-lg p-1.5 text-slate-500 hover:bg-blue-100" aria-label="Ändra val">
+                  <button type="button" onClick={() => setSelectedRef(null)} className="vihem-icon-button shrink-0 rounded-lg p-1.5 text-slate-500 hover:bg-blue-100" aria-label="Ändra val">
                     <X className="h-4 w-4" />
                   </button>
                 </div>
@@ -669,7 +708,7 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid gap-3 sm:grid-cols-3">
             <Input type="date" label="Startdatum" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
             <Input type="date" label="Slutdatum" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
             <Input type="time" label="Klockslag (valfritt)" value={visitTime} onChange={(event) => setVisitTime(event.target.value)} hint="Ex. besök hos kund" />
@@ -679,20 +718,10 @@ export function StaffSchedulePage({ onNavigate: _onNavigate }: StaffSchedulePage
 
           {formError && <div className="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{formError}</div>}
 
-          <div className="flex items-center justify-between">
-            {modal.editing ? (
-              <Button type="button" variant="outline" onClick={deleteEntry} loading={saving}>
-                <Trash2 className="h-4 w-4" />
-                Ta bort
-              </Button>
-            ) : <span />}
-            <div className="flex gap-2">
-              <Button type="button" variant="secondary" onClick={closeModal}>Avbryt</Button>
-              <Button type="button" onClick={saveEntry} loading={saving}>Spara</Button>
-            </div>
-          </div>
-        </div>
+          {modal.editing&&<Button type="button" variant="ghost" onClick={deleteEntry} disabled={saving}><Trash2 className="h-4 w-4"/>Ta bort schemarad</Button>}
+        </fieldset>
       </Modal>
+      <Modal open={discard} onClose={()=>setDiscard(false)} title="Lämna osparad planering?" footer={<><Button variant="secondary" onClick={()=>setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscard(false);setModal({open:false,userId:'',userName:'',date:''});}}>Lämna</Button></>}>Dina ändringar har inte sparats.</Modal>
     </div>
   );
 }

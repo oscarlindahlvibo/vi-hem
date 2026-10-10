@@ -1,5 +1,5 @@
 BEGIN;
-CREATE TABLE public.vihem_inventory_create_operations (
+CREATE TABLE IF NOT EXISTS public.vihem_inventory_create_operations (
  actor_id uuid NOT NULL REFERENCES public.vihem_profiles(id) ON DELETE CASCADE,
  operation_id uuid NOT NULL,
  item_id uuid NOT NULL REFERENCES public.vihem_inventory_stock_items(id) ON DELETE CASCADE,
@@ -10,7 +10,7 @@ CREATE TABLE public.vihem_inventory_create_operations (
 ALTER TABLE public.vihem_inventory_create_operations ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.vihem_inventory_create_operations FROM anon, authenticated;
 GRANT ALL ON public.vihem_inventory_create_operations TO service_role;
-CREATE FUNCTION public.vihem_create_inventory_item(p_operation uuid,p_item jsonb,p_quantity numeric DEFAULT 0,p_location uuid DEFAULT NULL)
+CREATE OR REPLACE FUNCTION public.vihem_create_inventory_item(p_operation uuid,p_item jsonb,p_quantity numeric DEFAULT 0,p_location uuid DEFAULT NULL)
 RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE caller public.vihem_profiles; previous public.vihem_inventory_create_operations;
  result uuid; fingerprint text:=md5(jsonb_build_object('item',p_item,'quantity',p_quantity,'location',p_location)::text);
@@ -24,6 +24,7 @@ BEGIN
  SELECT * INTO previous FROM public.vihem_inventory_create_operations WHERE actor_id=caller.id AND operation_id=p_operation;
  IF FOUND THEN
   IF previous.request_hash IS DISTINCT FROM fingerprint THEN RAISE EXCEPTION 'Sparbegäran har ändrats.' USING ERRCODE='22023'; END IF;
+  IF NOT EXISTS(SELECT 1 FROM public.vihem_inventory_stock_items WHERE id=previous.item_id AND organisation_id=caller.organisation_id) THEN RAISE EXCEPTION 'Den tidigare registreringen är inte tillgänglig.' USING ERRCODE='42501'; END IF;
   RETURN previous.item_id;
  END IF;
  IF jsonb_typeof(p_item) IS DISTINCT FROM 'object' OR nullif(trim(p_item->>'name'),'') IS NULL OR
