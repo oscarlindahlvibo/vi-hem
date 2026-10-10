@@ -206,3 +206,21 @@ Gemensamma filter, mobilarkivrader, tangentbordsåtkomlig dokumentöppning och n
 QA router saknade vihem-agreements-admin (404 Unknown QA function). Kopierade samma admin-funktion och två rena databashelpers ENDAST till /var/tmp/vihem-chat-qa-20261008; QA-router tillåter list/get/create/update/save_blocks/save_parties/save_signers/save_entity_links/preview/list_entity_agreements/list_templates/get_template, övriga action nekas. Endast vihem-chat-qa-edge omstartad. Inget workflow/public/utskick aktiverat och produktion orörd.
 
 Browser admin: skapade syntetisk serviceoffert, lade till och sparade rubrik med Å/ä, förhandsvisade och återgick till arkiv. Backend återläsning bekräftade offer/draft och innehåll. Personal får läsa, tenant och annan organisation nekas. Exakt QA-utkast borttaget efter verifiering, inga signaturer eller hyresförhållanden skapade. Screenshots arkiv/form 390/430/768/1024/1440. TypeScript/riktad lint PASS. Full avtalmodul inte klar: mallar, alla block/dialoger och signerade/publika flöden kvar.
+
+## Kontrollpunkt 11D – Dokument, 2026-10-10
+
+Responsivt dokumentarkiv: kompakt filpresentation upp till iPad, desktop-tabell som standard och valbart rutnät. Objektkopplingar bevarade i utfällbar information. Fil/Uppgifter & åtkomst med fasta sparåtgärder, osparat-skydd, tydlig validering och pågående öppning. Inga publika lagringsgenvägar införda; befintliga backend-/Drive-/legacyvägar bevarade.
+
+Admin QA skapade metadata för ett personaldokument: titel/synlighet återlästa, personal får läsa, tenant/annan org nekas. Exakt testpost borttagen. Tom titel ger validering. Screenshots fem bredder; mobilfilval granskad. Ingen faktisk filuppladdning eller riktig Drive-testning; separat QA-Drive-konfiguration saknas. Full dokumentmodul inte klar.
+
+## Kontrollpunkt 11E – Personal, 2026-10-10
+
+Kontakt/Behörighet/Schema ersätter långt sammanhängande redigeringsformulär. En veckodag i taget med kompakta arbetstidsöversikter. Befintliga roll-/modulval kvar. Schema och behörigheter måste laddas innan editorn öppnas; fel stoppar öppningen så tomma rättigheter inte skrivs tillbaka. Schema valideras innan profil skrivs. UPDATE kräver returnerad rad. Fasta sparåtgärder, formulärlås och osparat-dialog.
+
+QA Christofer: native tidsfält ändrat med tangentbord till ogiltig sluttid 07:00 efter start 08:00. Sparning avvisades, formulär kvar, avbryt varnade, återöppning gav 17:00. CUA fill på tidsfält utlöste inte Reacts ändring; tidigare oförändrade sparningar skapade QA:s standardschemarader 08–17. Inga roll-/lösenordsändringar. Screenshots kontakt/schema fem bredder. Flerstegssparning profil/schema/grants är fortfarande inte atomisk vid serverfel. Inga administrativa behörighetsändringar eller nyanställningar verifierade.
+
+## Kontrollpunkt 11F – Inköp, 2026-10-10
+
+Tre stora nollkort ersatta med relevant kompakt översikt, sökning och statusflikar. Avatar, diskret normalprioritet, namngivna ikonåtgärder. Formulär i mobilhelskärm med fasta sparåtgärder och osparat-skydd. Fel och returnerad rad kontrolleras vid skapa/redigera/status. Statusändringar har synkront lås per inköp så dubbeltryck inte utför parallella operationer.
+
+Browser admin QA skapade inköp, markerade inköpt, filtrerade, ångrade, redigerade kommentar och sparade. Osparat-dialog verifierad. Databas återläst: mängd/status/skapare/inköpare och kommentar; ångring nollställde inköparfält. Personal läser, tenant/annan org nekas läsning. Exakt syntetisk testpost borttagen. Screenshots lista/form fem bredder, mobil visuellt granskad. Inga riktiga inköp eller externa beställningar. Radering, felinjektion, fysisk touch och full rollmatris återstår.

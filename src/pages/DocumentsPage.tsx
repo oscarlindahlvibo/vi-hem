@@ -1,5 +1,6 @@
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { inspectionFile, driveReference } from '../lib/inspections/archive';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -14,10 +15,12 @@ import {
   PageHeader,
   EmptyState,
   LoadingPage,
+  SearchInput,
+  Tabs,
 } from '../components/ui';
 import { formatDate, saveOrShareFile, DOCUMENT_CATEGORY_LABELS, DOCUMENT_CONTRACT_STATUS_LABELS, DOCUMENT_TYPE_LABELS } from '../lib/utils';
 import { Document, Profile, Property } from '../types';
-import { FileText, Download, Upload, Search, Trash2, FolderOpen } from 'lucide-react';
+import { FileText, Download, Upload, Trash2, FolderOpen } from 'lucide-react';
 
 interface DocumentsPageProps { onNavigate: (page: string) => void; }
 export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
@@ -28,13 +31,18 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
   const [tenants, setTenants] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [view, setView] = useState<'grid' | 'list'>('grid');
+  const [view, setView] = useState<'grid' | 'list'>('list');
   const [filterType, setFilterType] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
   const [searchTitle, setSearchTitle] = useState('');
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
   const [savingDocument, setSavingDocument] = useState(false);
   const [formError, setFormError] = useState('');
+  const [loadError,setLoadError]=useState('');
+  const [openingId,setOpeningId]=useState<string|null>(null);
+  const [openError,setOpenError]=useState('');
+  const [discard,setDiscard]=useState(false);
+  const [uploadStep,setUploadStep]=useState('file');
 
   const [newTitle, setNewTitle] = useState('');
   const [newType, setNewType] = useState('contract');
@@ -51,13 +59,8 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
   const canDeleteDocuments = user?.role === 'admin' || user?.role === 'superadmin';
   const canCreateDocuments = isStaff;
 
-  useEffect(() => {
-    fetchDocuments();
-    if (isStaff) {
-      fetchProperties();
-      fetchTenants();
-    }
-  }, []);
+  const dirty=useUnsavedChanges({newTitle,newType,newCategory,newContractStatus,newVisibility,newTenantId,newPropertyId,newDescription,newFileUrl,file:newFile&&[newFile.name,newFile.size,newFile.lastModified]},showCreateModal);
+  const closeEditor=()=>{if(savingDocument)return;if(dirty){setDiscard(true);return;}setShowCreateModal(false);resetCreateForm();};
 
   useEffect(() => {
     let filtered = allDocuments;
@@ -143,9 +146,9 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
     return { enabled: true as const, data };
   };
 
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoading(true);setLoadError('');
       let query = supabase
         .from('vihem_documents')
         .select('*, tenant:vihem_profiles!documents_tenant_id_fkey(id, name, email), property:vihem_properties(id, name)');
@@ -159,11 +162,11 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
       setAllDocuments(data || []);
       setDocuments(data || []);
     } catch (error) {
-      console.error('Error fetching vihem_documents:', error);
+      setLoadError('Dokumenten kunde inte hämtas. Försök igen.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [isStaff,user?.id]);
 
   const fetchProperties = async () => {
     try {
@@ -192,8 +195,11 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
     }
   };
 
+  useEffect(()=>{void fetchDocuments();if(isStaff){void fetchProperties();void fetchTenants();}},[fetchDocuments,isStaff]);
+
   const createDocument = async () => {
-    if (!newTitle.trim()) return;
+    if(savingDocument)return;
+    if (!newTitle.trim()) {setFormError('Ange en titel för dokumentet.');setUploadStep('details');return;}
     setFormError('');
     setSavingDocument(true);
 
@@ -286,6 +292,8 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
   };
 
   const downloadDocument = async (doc: Document) => {
+    if(openingId)return;
+    setOpeningId(doc.id);setOpenError('');
     try {
       if (doc.document_type === 'inspection') {
         const { data: archived, error } = await supabase.from('vihem_inspection_file_jobs').select('id').eq('document_id', doc.id).eq('state', 'verified').maybeSingle();
@@ -340,8 +348,8 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
       }
     } catch (error) {
       console.error('Error opening document:', error);
-      window.alert('Kunde inte öppna dokumentet.');
-    }
+      setOpenError('Dokumentet kunde inte öppnas. Försök igen eller kontakta administratören.');
+    } finally {setOpeningId(null);}
   };
 
   const deleteDocument = async (doc: Document) => {
@@ -418,16 +426,17 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
   }, {});
 
   if (loading) return <LoadingPage />;
+  if(loadError)return <div role="alert" className="space-y-4"><PageHeader title="Dokument"/><p>{loadError}</p><Button onClick={()=>void fetchDocuments()}>Försök igen</Button></div>;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto px-4 py-8">
+    <div>
+      <div className="space-y-5">
         <PageHeader
           title="Dokument"
           subtitle="Dina dokument och kontrakt"
           action={
             canCreateDocuments ? (
-              <Button onClick={() => setShowCreateModal(true)} variant="primary" className="gap-2">
+              <Button onClick={() => {setUploadStep('file');setShowCreateModal(true);}} variant="primary" className="gap-2">
                 <Upload size={18} />
                 Nytt dokument
               </Button>
@@ -462,57 +471,15 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
         </div>
 
         {/* Filters */}
-        <div className="mb-6 flex flex-col sm:flex-row gap-3">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Sök efter dokumenttitel..."
-              value={searchTitle}
-              onChange={(e) => setSearchTitle(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-          >
-            <option value="all">Alla typer</option>
-            <option value="contract">Kontrakt</option>
-            <option value="rules">Regler</option>
-            <option value="inspection">Besiktning</option>
-            <option value="invoice">Faktura</option>
-            <option value="notice">Meddelande</option>
-            <option value="certificate">Intyg</option>
-            <option value="template">Mall</option>
-            <option value="other">Övrigt</option>
-          </select>
-
-          <div className="flex gap-2">
-            <Button
-              variant={view === 'grid' ? 'primary' : 'secondary'}
-              size="sm"
-              onClick={() => setView('grid')}
-            >
-              Rutnät
-            </Button>
-            <Button
-              variant={view === 'list' ? 'primary' : 'secondary'}
-              size="sm"
-              onClick={() => setView('list')}
-            >
-              Lista
-            </Button>
-          </div>
-        </div>
-
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><SearchInput placeholder="Sök dokumenttitel…" value={searchTitle} onChange={setSearchTitle}/></div><Select aria-label="Dokumenttyp" value={filterType} onChange={e=>setFilterType(e.target.value)} options={[{value:'all',label:'Alla typer'},...typeOptions]}/><Tabs className="hidden xl:flex" tabs={[{key:'grid',label:'Rutnät'},{key:'list',label:'Lista'}]} active={view} onChange={key=>setView(key as 'grid'|'list')}/></div>
+        {openError&&<p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{openError}</p>}
+        <div className="grid gap-3 md:grid-cols-2 xl:hidden">{documents.map(doc=><Card key={doc.id} className="p-4"><div className="flex items-start gap-3"><FileText className="mt-1 shrink-0 text-vihem-primary" size={22}/><div className="min-w-0 flex-1"><h2 className="break-words text-sm font-semibold text-vihem-ink">{doc.title}</h2><p className="mt-1 text-sm text-vihem-muted">{DOCUMENT_TYPE_LABELS[doc.document_type as keyof typeof DOCUMENT_TYPE_LABELS]||doc.document_type} · {formatDate(doc.created_at)}{doc.file_size?` · ${formatBytes(doc.file_size)}`:''}</p>{doc.file_name&&<p className="mt-1 truncate text-sm text-vihem-muted">{doc.file_name}</p>}</div></div><details className="mt-2 text-sm text-vihem-muted"><summary className="vihem-touch-target cursor-pointer">Dokumentinformation</summary>{doc.description&&<p className="mt-2 whitespace-pre-line">{doc.description}</p>}{isStaff&&doc.tenant?.name&&<p>Hyresgäst: {doc.tenant.name}</p>}{isStaff&&doc.property?.name&&<p>Fastighet: {doc.property.name}</p>}<p>{DOCUMENT_CATEGORY_LABELS[(doc.document_category||fallbackCategory(doc.document_type)) as keyof typeof DOCUMENT_CATEGORY_LABELS]||'Övrigt'}</p>{doc.document_type==='contract'&&<p>{DOCUMENT_CONTRACT_STATUS_LABELS[doc.contract_status||'not_applicable']}</p>}</details><div className="mt-3 flex items-center gap-2">{(doc.file_url||doc.storage_path||doc.storage_provider==='google_drive')&&<Button variant="secondary" size="sm" loading={openingId===doc.id} disabled={!!openingId} onClick={()=>void downloadDocument(doc)} className="gap-2"><Download size={16}/>Öppna dokument</Button>}{canDeleteDocuments&&<button aria-label={`Ta bort ${doc.title}`} className="vihem-icon-button ml-auto text-red-600" disabled={deletingDocumentId===doc.id} onClick={()=>void deleteDocument(doc)}><Trash2 size={18}/></button>}</div></Card>)}</div>
+        <div className="hidden xl:block">
         {documents.length === 0 ? (
           <EmptyState
             icon={<FileText className="w-12 h-12" />}
-            title="Inga dokument"
-            description="Det finns inga dokument att visa"
+            title={searchTitle||filterCategory!=='all'||filterType!=='all'?'Inga matchande dokument':'Inga dokument'}
+            description="Ändra sökningen eller dina filter för att se fler dokument"
           />
         ) : view === 'grid' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -563,6 +530,8 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
                         variant="primary"
                         size="sm"
                         className="w-full gap-2"
+                        loading={openingId===doc.id}
+                        disabled={!!openingId}
                         onClick={() => downloadDocument(doc)}
                       >
                         <Download size={14} />
@@ -641,7 +610,9 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
                             <Button
                               variant="secondary"
                               size="sm"
-                              onClick={() => downloadDocument(doc)}
+                              loading={openingId===doc.id}
+                        disabled={!!openingId}
+                        onClick={() => downloadDocument(doc)}
                               className="gap-1"
                             >
                               <Download size={14} />
@@ -671,23 +642,25 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
             </div>
           </Card>
         )}
+        </div>
+        {documents.length===0&&<div className="xl:hidden"><EmptyState icon={FileText} title="Inga matchande dokument" description="Ändra sökningen eller dina filter."/></div>}
       </div>
 
-      <Modal
+      <Modal mobileFullscreen
         open={showCreateModal}
-        onClose={() => {
-          setShowCreateModal(false);
-          resetCreateForm();
-        }}
+        onClose={closeEditor}
         title="Nytt dokument"
         size="lg"
+        toolbar={formError&&<p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{formError}</p>}
+        footer={<><Button variant="secondary" disabled={savingDocument} onClick={closeEditor}>Avbryt</Button><Button loading={savingDocument} onClick={createDocument}>Spara dokument</Button></>}
       >
-        <div className="space-y-4">
+        <fieldset disabled={savingDocument} className="space-y-4"><Tabs tabs={[{key:'file',label:'Fil'},{key:'details',label:'Uppgifter & åtkomst'}]} active={uploadStep} onChange={setUploadStep}/>
+        <div hidden={uploadStep!=='details'} className="space-y-4">
           <Input
             label="Titel"
             placeholder="Dokumenttitel"
             value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
+            onChange={(e) => {setNewTitle(e.target.value);setFormError('');}}
           />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -722,7 +695,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
               onChange={(e) => setNewCategory(e.target.value)}
               options={categoryOptions}
             />
-            <Select
+            {newType==='contract'&&<Select
               label="Avtalsstatus"
               value={newContractStatus}
               onChange={(e) => setNewContractStatus(e.target.value)}
@@ -735,10 +708,10 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
                 { value: 'cancelled', label: 'Avbrutet' },
                 { value: 'archived', label: 'Arkiverat' },
               ]}
-            />
+            />}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <details className="rounded-xl border border-vihem-line p-3"><summary className="vihem-touch-target cursor-pointer text-sm font-medium">Koppla till bostad eller hyresgäst</summary><div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Select
               label="Hyresgäst (valfritt)"
               value={newTenantId}
@@ -757,7 +730,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
                 ...properties.map((p) => ({ value: p.id, label: p.name })),
               ]}
             />
-          </div>
+          </div></details>
 
           <Textarea
             label="Beskrivning"
@@ -767,13 +740,8 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
             rows={3}
           />
 
-          <Input
-            label="Extern fil-URL (valfritt)"
-            placeholder="https://example.com/dokument.pdf"
-            value={newFileUrl}
-            onChange={(e) => setNewFileUrl(e.target.value)}
-            disabled={Boolean(newFile)}
-          />
+        </div><div hidden={uploadStep!=='file'} className="space-y-4">
+
 
           <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-4">
             <label className="flex cursor-pointer flex-col items-center justify-center gap-2 text-center">
@@ -783,8 +751,8 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
               <span className="text-sm font-semibold text-slate-800">
                 {newFile ? newFile.name : 'Ladda upp PDF, bild eller Word-fil'}
               </span>
-              <span className="text-xs text-slate-500">
-                {newFile ? formatBytes(newFile.size) : 'Max 50 MB. Uppladdningen sparas i vihem-documents.'}
+              <span className="text-sm text-vihem-muted">
+                {newFile ? formatBytes(newFile.size) : 'PDF, bild eller Word. Högst 50 MB.'}
               </span>
               <input
                 type="file"
@@ -807,29 +775,16 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
             )}
           </div>
 
-          {formError && (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-              {formError}
-            </div>
-          )}
-
-          <div className="flex gap-3 pt-2">
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setShowCreateModal(false);
-                resetCreateForm();
-              }}
-              className="flex-1"
-            >
-              Avbryt
-            </Button>
-            <Button variant="primary" onClick={createDocument} className="flex-1" loading={savingDocument}>
-              Skapa dokument
-            </Button>
-          </div>
-        </div>
+        <details><summary className="vihem-touch-target cursor-pointer text-sm text-vihem-muted">Använd en befintlig fillänk</summary><div className="mt-2">          <Input
+            label="Extern fil-URL (valfritt)"
+            placeholder="https://example.com/dokument.pdf"
+            value={newFileUrl}
+            onChange={(e) => setNewFileUrl(e.target.value)}
+            disabled={Boolean(newFile)}
+          /></div></details><Button variant="secondary" onClick={()=>setUploadStep('details')}>Fortsätt till uppgifter</Button></div>
+        </fieldset>
       </Modal>
+      <Modal open={discard} onClose={()=>setDiscard(false)} title="Lämna osparade ändringar?" footer={<><Button variant="secondary" onClick={()=>setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscard(false);setShowCreateModal(false);resetCreateForm();}}>Lämna utan att spara</Button></>}><p>Vald fil och dokumentuppgifter har inte sparats.</p></Modal>
     </div>
   );
 }
