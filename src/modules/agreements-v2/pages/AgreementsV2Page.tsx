@@ -272,8 +272,8 @@ function ArchiveTab({ organisationId, onOpen }: { organisationId: string; onOpen
                   </td>
                   <td className="px-4 py-2.5 text-slate-600">{item.document_type === 'agreement' ? 'Avtal' : item.document_type === 'offer' ? 'Offert' : 'Övrigt'}</td>
                   <td className="px-4 py-2.5"><Badge status={item.status} /></td>
-                  <td className="px-4 py-2.5 text-slate-500">{new Date(item.created_at).toLocaleDateString('sv-SE')}</td>
-                  <td className="px-4 py-2.5 text-slate-500">{new Date(item.updated_at).toLocaleDateString('sv-SE')}</td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{new Date(item.created_at).toLocaleDateString('sv-SE')}</td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{new Date(item.updated_at).toLocaleDateString('sv-SE')}</td>
                   {canDelete && (
                     <td className="px-4 py-2.5 text-right">
                       <button
