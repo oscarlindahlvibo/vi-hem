@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock, Link2, MapPin, Plus, RefreshCw, Trash2, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea, Tabs, Avatar } from '../components/ui';
 import type { CalendarEvent, CalendarEventCategory, CalendarEventVisibility, CalendarSource, Profile } from '../types';
 
 type CalendarFilter = 'all' | 'mine' | 'organisation';
@@ -129,11 +130,16 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const eventLock=useRef(false);
+  const [eventStep,setEventStep]=useState('event');
+  const [discard,setDiscard]=useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
   const [editingSource, setEditingSource] = useState<CalendarSource | null>(null);
   const [form, setForm] = useState<CalendarForm>(() => defaultForm());
+  const dirty=useUnsavedChanges(form,modalOpen);
+  const closeEvent=()=>{if(saving)return;if(dirty){setDiscard(true);return;}setModalOpen(false);};
   const [sourceForm, setSourceForm] = useState<SourceForm>(defaultSourceForm);
   const [syncingSourceId, setSyncingSourceId] = useState<string | null>(null);
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
@@ -211,7 +217,7 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
     setEditingEvent(null);
     setForm(defaultForm(date));
     setError('');
-    setModalOpen(true);
+    setEventStep('event');setModalOpen(true);
   }
 
   function openEdit(event: CalendarEvent) {
@@ -233,7 +239,7 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
       color: event.color || categoryColors[event.category],
     });
     setError('');
-    setModalOpen(true);
+    setEventStep('event');setModalOpen(true);
   }
 
   function toggleParticipant(id: string) {
@@ -246,13 +252,14 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
   }
 
   async function saveEvent() {
-    if (!user?.organisation_id || !user?.id) return;
+    if (eventLock.current||!user?.organisation_id || !user?.id) return;
     setError('');
     if (!form.title.trim()) {
       setError('Ange en rubrik.');
       return;
     }
 
+    if(!form.start_date||!form.end_date||(!form.all_day&&(!form.start_time||!form.end_time))){setError('Ange datum och tider för händelsen.');return;}
     const startsAt = form.all_day ? toInputDateTime(form.start_date, '00:00') : toInputDateTime(form.start_date, form.start_time);
     const endsAt = form.all_day ? toInputDateTime(form.end_date, '23:59') : toInputDateTime(form.end_date, form.end_time);
     if (endsAt <= startsAt) {
@@ -276,18 +283,13 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
       updated_by: user.id,
     };
 
-    setSaving(true);
-    const result = editingEvent
-      ? await supabase.from('vihem_calendar_events').update(payload).eq('id', editingEvent.id)
-      : await supabase.from('vihem_calendar_events').insert(payload);
-    setSaving(false);
-
-    if (result.error) {
-      setError(result.error.message);
-      return;
-    }
-    setModalOpen(false);
-    await fetchData();
+    eventLock.current=true;setSaving(true);
+    try{
+      const result=editingEvent?await supabase.from('vihem_calendar_events').update(payload).eq('id',editingEvent.id).select('id').single():await supabase.from('vihem_calendar_events').insert(payload).select('id').single();
+      if(result.error)throw result.error;
+      setModalOpen(false);await fetchData();
+    }catch(err){setError(err&&typeof err==='object'&&'message' in err?String(err.message):'Händelsen kunde inte sparas. Försök igen.');}
+    finally{eventLock.current=false;setSaving(false);}
   }
 
   async function deleteEvent() {
@@ -406,11 +408,11 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
         <Card className="overflow-hidden">
           <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))}>
+              <Button variant="secondary" size="sm" aria-label="Föregående månad" onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))}>
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <h2 className="min-w-48 text-center text-lg font-black capitalize text-slate-950">{monthLabel}</h2>
-              <Button variant="secondary" size="sm" onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}>
+              <h2 className="min-w-0 flex-1 text-center text-base font-semibold sm:text-lg capitalize text-slate-950">{monthLabel}</h2>
+              <Button variant="secondary" size="sm" aria-label="Nästa månad" onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}>
                 <ChevronRight className="h-4 w-4" />
               </Button>
               <Button variant="outline" size="sm" onClick={() => { setCurrentMonth(new Date()); setSelectedDate(localDateKey()); }}>Idag</Button>
@@ -438,14 +440,15 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
                   type="button"
                   onClick={() => setSelectedDate(day)}
                   onDoubleClick={() => openCreate(day)}
-                  className={`min-h-28 border-b border-r border-slate-100 p-2 text-left transition-colors hover:bg-blue-50 ${
+                  aria-label={`${day}, ${dayEvents.length} händelser`} aria-pressed={day===selectedDate}
+                  className={`min-h-14 sm:min-h-28 border-b border-r border-slate-100 p-2 text-left transition-colors hover:bg-blue-50 ${
                     day === selectedDate ? 'bg-blue-50 ring-2 ring-inset ring-blue-300' : 'bg-white'
                   } ${!inMonth ? 'text-slate-300' : 'text-slate-900'}`}
                 >
                   <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-sm font-black ${day === localDateKey() ? 'bg-blue-600 text-white' : ''}`}>
                     {new Date(`${day}T12:00:00`).getDate()}
                   </span>
-                  <span className="mt-2 block space-y-1">
+                  <span className="mt-1 flex justify-center gap-1 sm:hidden" aria-hidden="true">{dayEvents.slice(0,3).map(event=><span key={event.id} className="h-1.5 w-1.5 rounded-full" style={{backgroundColor:event.color}}/>)}</span><span className="mt-2 hidden space-y-1 sm:block">
                     {dayEvents.slice(0, 3).map(event => (
                       <span key={event.id} className="block truncate rounded-md px-2 py-1 text-xs font-bold text-white" style={{ backgroundColor: event.color }}>
                         {eventTimeLabel(event)} · {event.title}
@@ -548,8 +551,10 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
         </Card>
       )}
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editingEvent ? 'Redigera händelse' : 'Ny händelse'} size="lg">
-        <div className="space-y-4">
+      <Modal mobileFullscreen open={modalOpen} onClose={closeEvent} title={editingEvent ? 'Redigera händelse' : 'Ny händelse'} size="lg" toolbar={error&&<p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>} footer={<><Button variant="secondary" disabled={saving} onClick={closeEvent}>Avbryt</Button><Button onClick={saveEvent} loading={saving}>{editingEvent?'Spara':'Skapa händelse'}</Button></>}>
+        <fieldset disabled={saving} className="space-y-4">
+          <Tabs active={eventStep} onChange={setEventStep} tabs={[{key:'event',label:'Händelsen'},{key:'people',label:'Deltagare & synlighet'}]}/>
+          <div hidden={eventStep!=='event'} className="space-y-4">
           <Input label="Rubrik" value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} />
           <Textarea label="Beskrivning" rows={3} value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} />
           <Input label="Plats" value={form.location} onChange={event => setForm({ ...form, location: event.target.value })} />
@@ -567,7 +572,7 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
             <input type="checkbox" checked={form.all_day} onChange={event => setForm({ ...form, all_day: event.target.checked })} className="h-4 w-4 rounded border-slate-300" />
             Heldag
           </label>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          </div><div hidden={eventStep!=='people'} className="space-y-4"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Select
               label="Typ"
               value={form.category}
@@ -591,23 +596,18 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
                 {staff.map(person => (
                   <label key={person.id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
                     <input type="checkbox" checked={form.participant_ids.includes(person.id)} onChange={() => toggleParticipant(person.id)} className="h-4 w-4 rounded border-slate-300" />
-                    <span className="min-w-0 truncate">{person.name}</span>
+                    <Avatar userId={person.id} name={person.name}/><span className="min-w-0 truncate">{person.name}</span>
                   </label>
                 ))}
               </div>
             </div>
           )}
-          {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
-          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-            {editingEvent ? <Button variant="danger" onClick={deleteEvent} loading={saving}><Trash2 className="h-4 w-4" /> Ta bort</Button> : <span />}
-            <div className="flex justify-end gap-3">
-              <Button variant="secondary" onClick={() => setModalOpen(false)}>Avbryt</Button>
-              <Button onClick={saveEvent} loading={saving}>{editingEvent ? 'Spara' : 'Skapa'}</Button>
-            </div>
           </div>
-        </div>
+          {editingEvent&&<Button variant="danger" disabled={saving} onClick={deleteEvent}>Ta bort händelse</Button>}
+        </fieldset>
       </Modal>
 
+      <Modal open={discard} onClose={()=>setDiscard(false)} title="Lämna osparad händelse?" footer={<><Button variant="secondary" onClick={()=>setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscard(false);setModalOpen(false);}}>Lämna utan att spara</Button></>}><p>Dina ändringar har inte sparats.</p></Modal>
       <Modal open={sourceModalOpen} onClose={() => setSourceModalOpen(false)} title={editingSource ? 'Redigera iCal-kanal' : 'Ny iCal-kanal'} size="lg">
         <div className="space-y-4">
           <Select

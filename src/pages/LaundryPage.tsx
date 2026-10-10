@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -106,6 +106,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [bookingInProgress, setBookingInProgress] = useState(false);
+  const bookingLock=useRef(false);
   const [cancellingBookingId, setCancellingBookingId] = useState('');
   const [mobileViewDay, setMobileViewDay] = useState(() => getTodayWeekdayIndex());
   const [slotsRefreshKey, setSlotsRefreshKey] = useState(0);
@@ -353,7 +354,8 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
 
   // Book a slot
   const handleBookSlot = async () => {
-    if (!confirmModal.slot || !user) return;
+    if (!confirmModal.slot || !user || bookingLock.current) return;
+    bookingLock.current=true;
 
     try {
       setBookingInProgress(true);
@@ -442,7 +444,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
         : 'Något gick fel. Försök igen.';
       setBookingModalError(message);
     } finally {
-      setBookingInProgress(false);
+      bookingLock.current=false;setBookingInProgress(false);
     }
   };
 
@@ -807,7 +809,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
   ) : null;
 
   const createRoomModal = (
-    <Modal
+    <Modal mobileFullscreen
       open={createRoomModalOpen}
       onClose={() => {
         setCreateRoomModalOpen(false);
@@ -1055,7 +1057,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
       )}
 
       {canManageLaundryRooms && (
-        <Card className="mb-6 p-4 sm:p-5">
+        <details className="mb-5 rounded-xl border border-slate-200 bg-white p-4"><summary className="cursor-pointer text-sm font-semibold text-slate-700">Gästlänkar för korttidsboende · {guestLinks.length}</summary><div className="mt-4">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="flex items-center gap-2 text-lg font-bold text-slate-950">
@@ -1122,7 +1124,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
               ))}
             </div>
           )}
-        </Card>
+        </div></details>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -1135,11 +1137,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
             </h2>
 
             {myBookings.length === 0 ? (
-              <EmptyState
-                icon={<Calendar className="w-8 h-8" />}
-                title="Ingen bokning"
-                description="Du har inga aktiva bokningar."
-              />
+              <p className="py-2 text-sm text-slate-500">Du har inga aktiva bokningar. Välj en ledig tid nedan.</p>
             ) : (
               <div className="space-y-3">
                 {myBookings.map((booking) => (
@@ -1156,7 +1154,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
                       </div>
                       <div className="flex items-center gap-2 text-xs text-slate-600">
                         <Clock className="w-3.5 h-3.5" />
-                        {booking.slot?.start_time} - {booking.slot?.end_time}
+                        {booking.slot?.start_time?.slice(0,5)} - {booking.slot?.end_time?.slice(0,5)}
                       </div>
                       <Button
                         variant="danger"
@@ -1206,7 +1204,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
                   <p className="text-sm font-semibold text-slate-500">Vald tvättstuga</p>
                   <h2 className="truncate text-lg font-bold text-slate-900">{currentRoom.name}</h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    {currentRoom.description || 'Ingen beskrivning'} · Max {currentRoom.max_bookings_per_tenant} aktiva bokningar per hyresgäst
+                    {currentRoom.description ? `${currentRoom.description} · ` : ''}Max {currentRoom.max_bookings_per_tenant} aktiva bokningar per hyresgäst
                   </p>
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row">
@@ -1223,38 +1221,12 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
             </Card>
           )}
 
-          {/* Week navigation */}
-          <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between">
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full sm:w-auto"
-              onClick={() => {
-                setWeekOffset(weekOffset - 1);
-                setMobileViewDay(0);
-              }}
-            >
-              <ChevronLeft className="w-4 h-4" />
-              Förra vecka
-            </Button>
-
-            <div className="text-center text-sm font-medium text-slate-700">
-              {formatDate(weekStart)} - {formatDate(weekEnd)}
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full sm:w-auto"
-              onClick={() => {
-                setWeekOffset(weekOffset + 1);
-                setMobileViewDay(0);
-              }}
-            >
-              Nästa vecka
-              <ChevronRight className="w-4 h-4" />
-            </Button>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <Button variant="secondary" size="sm" aria-label="Föregående vecka" onClick={() => {setWeekOffset(weekOffset-1);setMobileViewDay(0);}}><ChevronLeft className="h-4 w-4" /></Button>
+            <div className="text-center"><p className="text-sm font-medium text-slate-900">{formatDate(weekStart)} – {formatDate(weekEnd)}</p><button className="vihem-focus min-h-11 text-sm text-blue-700" onClick={()=>{setWeekOffset(0);setMobileViewDay(getTodayWeekdayIndex());}}>Till idag</button></div>
+            <Button variant="secondary" size="sm" aria-label="Nästa vecka" onClick={() => {setWeekOffset(weekOffset+1);setMobileViewDay(0);}}><ChevronRight className="h-4 w-4" /></Button>
           </div>
+          {(() => {const next=weekDays.flatMap((day,index)=>getSlotsForDay(day).map(slot=>({slot,index}))).find(({slot})=>!slot.isPast&&!slot.is_blocked&&!slot.booking&&getSlotStatus(slot).label==='Ledig');return next ? <button className="vihem-focus mb-4 flex min-h-12 w-full items-center justify-between gap-3 rounded-xl bg-blue-50 px-4 py-3 text-left text-sm text-blue-800" onClick={()=>{setMobileViewDay(next.index);setConfirmModal({open:true,slot:next.slot,day:formatDate(next.slot.date)});setBookingModalError('');}}><span><strong className="block">Nästa lediga tid denna vecka</strong><span>{formatDate(next.slot.date)} · {next.slot.start_time.slice(0,5)}–{next.slot.end_time.slice(0,5)}</span></span><ChevronRight className="h-5 w-5 shrink-0" /></button> : null;})()}
 
           {/* Desktop calendar view */}
           <div className="hidden md:block overflow-x-auto">
@@ -1305,7 +1277,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
                               : 'cursor-not-allowed opacity-60'
                           }`}
                         >
-                          <div>{slot.start_time}</div>
+                          <div>{slot.start_time.slice(0,5)}</div>
                           <div className="text-xs">{status.label}</div>
                         </button>
                       );
@@ -1322,6 +1294,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
               {weekDays.map((day, dayIdx) => (
                 <button
                   key={dayIdx}
+                  aria-pressed={mobileViewDay === dayIdx}
                   onClick={() => setMobileViewDay(dayIdx)}
                   className={`flex-shrink-0 px-4 py-2 rounded-lg font-medium transition-colors ${
                     mobileViewDay === dayIdx
@@ -1341,8 +1314,8 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
               {getSlotsForDay(weekDays[mobileViewDay]).length === 0 ? (
                 <EmptyState
                   icon={<Calendar className="w-8 h-8" />}
-                  title="Ingen lediga tider"
-                  description="Inga lediga tidsslots denna dag."
+                  title="Inga bokningspass"
+                  description="Det finns inga bokningspass registrerade för denna dag."
                 />
               ) : (
                 getSlotsForDay(weekDays[mobileViewDay]).map((slot) => {
@@ -1371,7 +1344,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
                       <div className="flex items-center justify-between gap-3 min-w-0">
                         <div className="min-w-0">
                           <p className="font-medium text-slate-800">
-                            {slot.start_time} - {slot.end_time}
+                            {slot.start_time.slice(0,5)} - {slot.end_time.slice(0,5)}
                           </p>
                           <Badge className={`${status.color} ${status.textColor} mt-1`}>
                             {status.label}
@@ -1403,7 +1376,7 @@ export function LaundryPage({ onNavigate: _onNavigate }: { onNavigate: (page: st
           {confirmModal.slot && (
             <div className="bg-slate-50 p-4 rounded-lg">
               <p className="text-sm font-medium text-slate-800">
-                {confirmModal.slot.start_time} - {confirmModal.slot.end_time}
+                {confirmModal.slot.start_time.slice(0,5)} - {confirmModal.slot.end_time.slice(0,5)}
               </p>
               <p className="text-sm text-slate-600">{currentRoom?.name}</p>
             </div>

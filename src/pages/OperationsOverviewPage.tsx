@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { AlertTriangle, BookOpen, ClipboardCheck, KeyRound, Package } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Card, LoadingPage, PageHeader, SearchInput, StatCard } from '../components/ui';
+import { Card, LoadingPage, PageHeader, SearchInput, Button } from '../components/ui';
 import { ACCESS_ENTRY_TYPE_LABELS, type AccessEntryType, type Routine } from '../lib/operations';
 
 interface SearchResult {
@@ -21,19 +21,12 @@ export function OperationsOverviewPage({ onNavigate }: { onNavigate: (page: stri
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [error,setError]=useState('');
+  const searchSequence=useRef(0);
 
-  useEffect(() => { loadOverview(); }, [user?.organisation_id, user?.id]);
-
-  useEffect(() => {
-    const q = search.trim();
-    if (q.length < 2) { setResults([]); return; }
-    const timeout = window.setTimeout(() => runSearch(q), 300);
-    return () => window.clearTimeout(timeout);
-  }, [search]);
-
-  async function loadOverview() {
+  const loadOverview=useCallback(async () => {
     if (!user?.organisation_id) { setLoading(false); return; }
-    setLoading(true);
+    setLoading(true);setError('');
 
     const [routinesResult, ackResult, checksResult] = await Promise.all([
       supabase.from('vihem_routines').select('*').eq('organisation_id', user.organisation_id).eq('status', 'published').eq('requires_acknowledgement', true),
@@ -41,6 +34,7 @@ export function OperationsOverviewPage({ onNavigate }: { onNavigate: (page: stri
       supabase.from('vihem_inventory_check_items').select('id,action,shortage,created_at:check_id').gt('shortage', 0).limit(200),
     ]);
 
+    if(routinesResult.error || ackResult.error || checksResult.error) setError('Översikten kunde inte hämtas helt. Försök igen.');
     const acknowledgedIds = new Set((ackResult.data || []).map((r: any) => r.routine_id));
     const applicableRoutines = (routinesResult.data || []).filter((r: any) => r.applies_to_roles.includes(user.role));
     setPendingAckCount(applicableRoutines.filter((r: any) => !acknowledgedIds.has(r.id)).length);
@@ -54,9 +48,9 @@ export function OperationsOverviewPage({ onNavigate }: { onNavigate: (page: stri
     setEmergencyRoutines((emergencyRows || []) as Routine[]);
 
     setLoading(false);
-  }
+  },[user?.organisation_id,user?.id,user?.role]);
 
-  async function runSearch(query: string) {
+  const runSearch=useCallback(async (query: string, sequence: number) => {
     if (!user?.organisation_id) return;
     setSearching(true);
     const [routinesResult, accessResult] = await Promise.all([
@@ -64,6 +58,8 @@ export function OperationsOverviewPage({ onNavigate }: { onNavigate: (page: stri
       supabase.from('vihem_access_entries').select('id,name,entry_type,property:vihem_properties(name)').eq('organisation_id', user.organisation_id).eq('active', true).or(`name.ilike.%${query}%,location_note.ilike.%${query}%`).limit(8),
     ]);
 
+    if(sequence!==searchSequence.current)return;
+    if(routinesResult.error||accessResult.error){setResults([]);setSearching(false);setError('Sökningen misslyckades. Försök igen.');return;}
     const routineResults: SearchResult[] = (routinesResult.data || []).map((r: any) => ({ kind: 'routine', id: r.id, title: r.title, subtitle: r.summary || 'Rutin' }));
     const accessResults: SearchResult[] = (accessResult.data || []).map((a: any) => ({
       kind: 'access',
@@ -73,7 +69,10 @@ export function OperationsOverviewPage({ onNavigate }: { onNavigate: (page: stri
     }));
     setResults([...routineResults, ...accessResults]);
     setSearching(false);
-  }
+  },[user?.organisation_id]);
+
+  useEffect(()=>{void loadOverview();},[loadOverview]);
+  useEffect(()=>{const sequence=++searchSequence.current;const q=search.trim();setResults([]);setSearching(q.length>=2);if(q.length<2)return;const timer=window.setTimeout(()=>void runSearch(q,sequence),300);return()=>{window.clearTimeout(timer);searchSequence.current=sequence+1;};},[search,runSearch]);
 
   if (loading) return <LoadingPage />;
 
@@ -81,6 +80,7 @@ export function OperationsOverviewPage({ onNavigate }: { onNavigate: (page: stri
     <div className="min-h-screen bg-slate-50">
       <PageHeader title="Drift & rutiner" subtitle="Åtkomstuppgifter, driftrutiner och checklistor för verksamheten." icon={ClipboardCheck} />
 
+      {error&&<div role="alert" className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-800">{error}<Button variant="secondary" size="sm" onClick={()=>void loadOverview()}>Försök igen</Button></div>}
       <div className="mb-5">
         <SearchInput value={search} onChange={setSearch} placeholder='Sök, t.ex. "portkod", "airbnb städ", "pannrum"...' />
         {search.trim().length >= 2 && (
@@ -121,12 +121,9 @@ export function OperationsOverviewPage({ onNavigate }: { onNavigate: (page: stri
         </Card>
       )}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Kräver kvittering" value={pendingAckCount} icon={<BookOpen className="h-5 w-5" />} onClick={() => onNavigate('operations-routines')} />
-        <StatCard label="Brister ej hanterade" value={shortageCount} icon={<Package className="h-5 w-5" />} onClick={() => onNavigate('operations-inventory')} color="text-amber-600 bg-amber-50" />
-        <StatCard label="Åtkomst" value="Öppna" icon={<KeyRound className="h-5 w-5" />} onClick={() => onNavigate('operations-access')} color="text-blue-600 bg-blue-50" />
-        <StatCard label="Rutiner" value="Öppna" icon={<BookOpen className="h-5 w-5" />} onClick={() => onNavigate('operations-routines')} color="text-purple-600 bg-purple-50" />
-      </div>
+      {(pendingAckCount>0||shortageCount>0)&&<section className="mb-5 divide-y divide-slate-200"><h2 className="pb-3 text-sm font-semibold">Att följa upp</h2>{pendingAckCount>0&&<button className="vihem-focus flex min-h-12 w-full items-center justify-between py-3 text-left" onClick={()=>onNavigate('operations-routines')}><span>Rutiner att kvittera</span><strong className="tabular-nums">{pendingAckCount}</strong></button>}{shortageCount>0&&<button className="vihem-focus flex min-h-12 w-full items-center justify-between py-3 text-left" onClick={()=>onNavigate('operations-inventory')}><span>Brister som behöver hanteras</span><strong className="tabular-nums text-amber-700">{shortageCount}</strong></button>}</section>}
+      <section className="grid gap-2 sm:grid-cols-2" aria-label="Driftverktyg">{[{page:'operations-access',title:'Åtkomst',description:'Hitta nycklar, koder och åtkomstuppgifter.',icon:KeyRound},{page:'operations-routines',title:'Rutiner',description:'Instruktioner och arbetssätt för verksamheten.',icon:BookOpen},{page:'operations-checklists',title:'Checklistor',description:'Genomför kontroller och följ upp resultat.',icon:ClipboardCheck},{page:'operations-inventory',title:'Driftinventarier',description:'Kontrollera utrustning och hantera brister.',icon:Package}].map(item=><button key={item.page} onClick={()=>onNavigate(item.page)} className="vihem-focus flex items-start gap-3 rounded-xl bg-white p-4 text-left ring-1 ring-slate-200 transition-colors hover:bg-blue-50"><item.icon className="mt-1 h-5 w-5 shrink-0 text-blue-700"/><span><strong className="block text-sm text-slate-900">{item.title}</strong><span className="mt-1 block text-sm text-slate-500">{item.description}</span></span></button>)}</section>
+
     </div>
   );
 }

@@ -7,6 +7,7 @@
 // tillagd), vihem_notifications (create_notification/notification_enabled,
 // samma mönster som Jour), och samma storage-uppladdningsmönster som
 // WorkOrdersPage/InventoryPage (bucket + valfri Google Drive-arkivering).
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
@@ -18,7 +19,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { archiveFileInGoogleDrive } from '../lib/googleDriveStorage';
 import { WO_PRIORITY_LABELS, WO_STATUS_LABELS } from '../lib/utils';
-import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea, Tabs } from '../components/ui';
 import type {
   AttachmentItem, FleetAssetType, FleetChecklistRun, FleetChecklistRunItem, FleetChecklistTemplate, FleetChecklistTemplateItem,
   FleetCost, FleetCostType, FleetDamageReport, FleetDamageSeverity, FleetEvent, FleetInspection, FleetMeterReading,
@@ -97,12 +98,13 @@ export function FleetPage({ onNavigate, initialVehicleId }: { onNavigate: (page:
   const [inspections, setInspections] = useState<FleetInspection[]>([]);
   const [fleetWorkOrders, setFleetWorkOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError,setLoadError]=useState('');
   const [vehicleModal, setVehicleModal] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<FleetVehicle | null>(null);
 
   const load = useCallback(async () => {
     if (!user?.organisation_id) return;
-    setLoading(true);
+    setLoading(true);setLoadError('');
     const [vehiclesRes, companiesRes, propertiesRes, profilesRes, damageRes, scheduleRes, inspectionRes, woRes] = await Promise.all([
       supabase.from('vihem_fleet_vehicles').select('*').eq('organisation_id', user.organisation_id).eq('active', true).order('name'),
       supabase.from('vihem_companies').select('id,name').eq('organisation_id', user.organisation_id).order('name'),
@@ -113,6 +115,7 @@ export function FleetPage({ onNavigate, initialVehicleId }: { onNavigate: (page:
       supabase.from('vihem_fleet_inspections').select('*').eq('organisation_id', user.organisation_id).eq('active', true),
       supabase.from('vihem_work_orders').select('*').eq('organisation_id', user.organisation_id).not('vehicle_id', 'is', null),
     ]);
+    if([vehiclesRes,companiesRes,propertiesRes,profilesRes,damageRes,scheduleRes,inspectionRes,woRes].some(r=>r.error)){setLoadError('Fordonsuppgifterna kunde inte hämtas. Försök igen.');setLoading(false);return;}
     setVehicles((vehiclesRes.data || []) as FleetVehicle[]);
     setCompanies(companiesRes.data || []);
     setProperties(propertiesRes.data || []);
@@ -169,6 +172,7 @@ export function FleetPage({ onNavigate, initialVehicleId }: { onNavigate: (page:
 
   if (!user?.organisation_id) return <LoadingPage />;
   if (loading) return <LoadingPage />;
+  if(loadError)return <div role="alert" className="p-6"><PageHeader title="Fordon & utrustning"/><p className="mb-4 text-red-700">{loadError}</p><Button onClick={()=>void load()}>Försök igen</Button></div>;
 
   if (view === 'detail' && selectedVehicleId) {
     const vehicle = vehicles.find((v) => v.id === selectedVehicleId);
@@ -285,22 +289,21 @@ function FleetDashboard({ stats, onFilter, vehicles, inspections, serviceSchedul
     .slice(0, 6);
 
   return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {cards.map((c) => (
-          <button key={c.label} onClick={c.onClick} className="rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-blue-300 hover:bg-blue-50/40">
-            <div className="mb-2 flex items-center justify-between">
-              <c.icon className={`h-5 w-5 ${c.className}`} />
-              <ChevronRight className="h-4 w-4 text-slate-300" />
-            </div>
-            <p className={`text-2xl font-bold ${c.className}`}>{c.value}</p>
-            <p className="text-xs font-medium text-slate-500">{c.label}</p>
-          </button>
-        ))}
+    <div className="min-w-0 space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+        <div><p className="text-sm text-slate-500">Tillgångar i verksamheten</p><p className="text-3xl font-semibold tabular-nums text-slate-900">{stats.total}<span className="ml-3 text-sm font-normal text-slate-500">{stats.byStatus.in_service} i drift</span></p></div>
+        <Button variant="secondary" onClick={() => onFilter(null)}>Öppna registret <ChevronRight className="h-4 w-4" /></Button>
       </div>
+      {stats.total === 0 ? <div className="py-8"><h2 className="text-xl font-semibold text-slate-900">Samla fordon och utrustning här</h2><p className="mt-2 max-w-lg text-sm text-slate-500">Lägg till din första tillgång med knappen Ny tillgång. Service, besiktningar och ärenden blir sedan synliga i översikten.</p></div> : <>
+        {cards.slice(4).some(c => c.value > 0) && <section aria-label="Att följa upp" className="divide-y divide-slate-200">
+          <h2 className="pb-3 text-sm font-semibold text-slate-900">Att följa upp</h2>
+          {cards.slice(4).filter(c => c.value > 0).map(c => <button key={c.label} onClick={c.onClick} className="flex min-h-12 w-full items-center gap-3 py-3 text-left hover:bg-slate-50"><c.icon className={`h-5 w-5 ${c.className}`} /><span className="flex-1 text-sm">{c.label}</span><span className={`font-semibold tabular-nums ${c.className}`}>{c.value}</span><ChevronRight className="h-4 w-4 text-slate-400" /></button>)}
+        </section>}
+        <details className="rounded-xl border border-slate-200 bg-white p-4"><summary className="cursor-pointer text-sm font-medium text-slate-700">Alla statusar och bevakningar</summary><div className="mt-3 grid gap-1 sm:grid-cols-2">{cards.map(c => <button key={c.label} onClick={c.onClick} className="flex min-h-11 items-center justify-between gap-3 rounded-lg px-2 text-left text-sm hover:bg-slate-50"><span>{c.label}</span><span className="tabular-nums text-slate-500">{c.value}</span></button>)}</div></details>
+      </>}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="overflow-hidden">
+        {urgentDamage.length > 0 && <Card className="overflow-hidden">
           <div className="border-b border-slate-200 p-4"><h2 className="font-semibold text-slate-900">Allvarliga skador/fel som kräver åtgärd</h2></div>
           {urgentDamage.length ? (
             <div className="divide-y divide-slate-100">
@@ -318,9 +321,9 @@ function FleetDashboard({ stats, onFilter, vehicles, inspections, serviceSchedul
               })}
             </div>
           ) : <EmptyState icon={<CheckSquare className="w-10 h-10" />} title="Inga allvarliga skador" description="Allt ser bra ut just nu." />}
-        </Card>
+        </Card>}
 
-        <Card className="overflow-hidden">
+        {dueInspections.length > 0 && <Card className="overflow-hidden">
           <div className="border-b border-slate-200 p-4"><h2 className="font-semibold text-slate-900">Besiktningar som snart går ut</h2></div>
           {dueInspections.length ? (
             <div className="divide-y divide-slate-100">
@@ -338,7 +341,7 @@ function FleetDashboard({ stats, onFilter, vehicles, inspections, serviceSchedul
               })}
             </div>
           ) : <EmptyState icon={<CheckSquare className="w-10 h-10" />} title="Inga besiktningar snart" description="Inget att bevaka just nu." />}
-        </Card>
+        </Card>}
       </div>
     </div>
   );
@@ -385,14 +388,14 @@ function FleetList({ vehicles, companiesById, propertiesById, profilesById, filt
                   <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_DOT[v.status]}`} />
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-slate-900">{v.registration_number && <span className="mr-2 rounded bg-slate-900 px-1.5 py-0.5 font-mono text-xs text-white">{v.registration_number}</span>}{v.name}</p>
-                    <p className="truncate text-sm text-slate-500">{ASSET_TYPE_LABELS[v.asset_type]} · {v.make} {v.model} {v.model_year || ''} · {companiesById.get(v.company_id || '')?.name || 'Inget bolag'}</p>
+                    <p className="truncate text-sm text-slate-500">{[ASSET_TYPE_LABELS[v.asset_type], [v.make, v.model, v.model_year].filter(Boolean).join(' '), companiesById.get(v.company_id || '')?.name].filter(Boolean).join(' · ')}</p>
                   </div>
                 </button>
                 <div className="flex items-center gap-2">
                   <Badge className={STATUS_CLASS[v.status]}>{STATUS_LABELS[v.status]}</Badge>
                   {damageCount > 0 && <Badge className="bg-red-100 text-red-700"><AlertTriangle className="mr-1 inline h-3 w-3" />{damageCount}</Badge>}
                   {woCount > 0 && <Badge className="bg-blue-100 text-blue-700"><ClipboardList className="mr-1 inline h-3 w-3" />{woCount}</Badge>}
-                  {isAdmin && <button onClick={() => onEdit(v)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Settings className="h-4 w-4" /></button>}
+                  {isAdmin && <button onClick={() => onEdit(v)} aria-label={`Redigera ${v.name}`} className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Settings className="h-4 w-4" /></button>}
                 </div>
               </div>
             );
@@ -426,6 +429,10 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
   companies: { id: string; name: string }[]; properties: { id: string; name: string }[]; profiles: Pick<Profile, 'id' | 'name'>[]; onSaved: () => void;
 }) {
   const [form, setForm] = useState<VehicleForm>(EMPTY_VEHICLE_FORM);
+  const [editorReady,setEditorReady]=useState(false);
+  const [step,setStep]=useState('object');
+  const [discard,setDiscard]=useState(false);
+  const saveLock=useRef(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [lookupMode, setLookupMode] = useState<'url' | 'text'>('url');
@@ -439,6 +446,8 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
   const [lookupSourceUrl, setLookupSourceUrl] = useState('');
   const [saveSource, setSaveSource] = useState(true);
 
+  const dirty=useUnsavedChanges({form,lookupLastInspection,lookupNextInspection,lookupSourceUrl,saveSource},open&&editorReady);
+  const close=()=>{if(saving||lookupLoading)return;if(dirty){setDiscard(true);return;}onClose();};
   const regForUrl = form.registration_number.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
   const suggestedLookupUrl = regForUrl.length >= 2 ? `https://biluppgifter.se/fordon/${regForUrl}` : '';
   const lookupExtracted = useRef<Record<string, unknown>>({});
@@ -508,7 +517,7 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
   };
 
   useEffect(() => {
-    if (!open) return;
+    if (!open){setEditorReady(false);return;}
     setLookupMode('url'); setLookupUrl(''); setLookupText(''); setLookupError(''); setLookupNote(''); setLookupLastInspection(''); setLookupNextInspection(''); setLookupSourceUrl(''); setSaveSource(true);
     if (vehicle) {
       setForm({
@@ -530,7 +539,7 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
     } else {
       setForm(EMPTY_VEHICLE_FORM);
     }
-    setError('');
+    setEditorReady(true);setStep('object');setError('');
   }, [open, vehicle]);
 
   const showOdometer = ASSET_TYPES_WITH_ODOMETER.includes(form.asset_type);
@@ -538,8 +547,9 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
   const showRegistration = ASSET_TYPES_WITH_REGISTRATION.includes(form.asset_type);
 
   const handleSave = async () => {
+    if(saveLock.current||lookupLoading)return;
     if (!form.name.trim()) { setError('Ange ett namn.'); return; }
-    setSaving(true);
+    saveLock.current=true;setSaving(true);
     setError('');
     try {
       const payload = {
@@ -560,7 +570,7 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
       };
       let vehicleId = vehicle?.id || '';
       if (vehicle) {
-        const { error: err } = await supabase.from('vihem_fleet_vehicles').update(payload).eq('id', vehicle.id);
+        const { error: err } = await supabase.from('vihem_fleet_vehicles').update(payload).eq('id', vehicle.id).select('id').single();
         if (err) throw err;
         if (vehicle.status !== form.status) {
           await supabase.from('vihem_fleet_events').insert({ organisation_id: organisationId, vehicle_id: vehicle.id, event_type: 'status_changed', summary: `Status ändrad: ${STATUS_LABELS[vehicle.status]} -> ${STATUS_LABELS[form.status as FleetVehicleStatus]}`, actor_id: userId });
@@ -592,14 +602,15 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
     } catch (err) {
       setError(describeError(err));
     } finally {
-      setSaving(false);
+      saveLock.current=false;setSaving(false);
     }
   };
 
   return (
-    <Modal open={open} onClose={onClose} title={vehicle ? 'Redigera tillgång' : 'Ny tillgång'} size="lg">
-      <div className="space-y-4">
-        <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+    <><Modal mobileFullscreen open={open} onClose={close} title={vehicle ? 'Redigera tillgång' : 'Ny tillgång'} size="lg" toolbar={error&&<p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>} footer={<><Button variant="secondary" disabled={saving||lookupLoading} onClick={close}>Avbryt</Button><Button loading={saving} disabled={lookupLoading} onClick={handleSave}>Spara tillgång</Button></>}>
+      <fieldset disabled={saving||lookupLoading} className="min-w-0 space-y-4"><Tabs active={step} onChange={setStep} tabs={[{key:'object',label:'Tillgången'},{key:'technical',label:'Teknik & kontroll'},{key:'finance',label:'Ägande & ekonomi'}]}/>
+      <div hidden={step!=='object'} className="space-y-4">
+        <details className="border-b border-vihem-line pb-3"><summary className="vihem-focus cursor-pointer py-2 text-sm font-medium">Fyll i från länk eller text med AI</summary><div className="pt-3">
           <div className="mb-2 flex items-center justify-between gap-2">
             <label className="text-sm font-semibold text-slate-700">Fyll i med AI</label>
             <div className="flex gap-1 rounded-lg bg-white p-0.5 ring-1 ring-slate-200">
@@ -626,7 +637,7 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
           {lookupSourceUrl && (
             <label className="mt-1.5 flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={saveSource} onChange={(e) => setSaveSource(e.target.checked)} /> Spara länken och kontrollera den automatiskt (besiktning m.m.)</label>
           )}
-        </div>
+        </div></details>
         <div className="grid gap-3 sm:grid-cols-3">
           <Select label="Typ" value={form.asset_type} onChange={(e) => setForm({ ...form, asset_type: e.target.value as FleetAssetType })} options={ASSET_TYPES.map((t) => ({ value: t, label: ASSET_TYPE_LABELS[t] }))} />
           <Input label="Namn" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="T.ex. Ford Transit" />
@@ -637,7 +648,7 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
           <Input label="Internt inventarienummer" value={form.internal_number} onChange={(e) => setForm({ ...form, internal_number: e.target.value })} />
           <Select label="Ägande bolag" value={form.company_id} onChange={(e) => setForm({ ...form, company_id: e.target.value })} options={[{ value: '', label: 'Inget valt' }, ...companies.map((c) => ({ value: c.id, label: c.name }))]} />
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
+        </div><div hidden={step!=='technical'} className="space-y-4"><div className="grid gap-3 sm:grid-cols-3">
           <Input label="Märke" value={form.make} onChange={(e) => setForm({ ...form, make: e.target.value })} />
           <Input label="Modell" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} />
           <Input label="Årsmodell" type="number" value={form.model_year} onChange={(e) => setForm({ ...form, model_year: e.target.value })} />
@@ -658,14 +669,6 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
           </div>
         )}
         {showEngineHours && <Input label="Maskintimmar" type="number" value={form.engine_hours} onChange={(e) => setForm({ ...form, engine_hours: e.target.value })} />}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Input label="Inköpsdatum" type="date" value={form.purchase_date} onChange={(e) => setForm({ ...form, purchase_date: e.target.value })} />
-          <Input label="Inköpspris" type="number" value={form.purchase_price} onChange={(e) => setForm({ ...form, purchase_price: e.target.value })} />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Select label="Leasing/finansiering" value={form.financing_type} onChange={(e) => setForm({ ...form, financing_type: e.target.value })} options={Object.entries(FINANCING_LABELS).map(([value, label]) => ({ value, label }))} />
-          {showRegistration && <Select label="Registreringsstatus" value={form.registration_status} onChange={(e) => setForm({ ...form, registration_status: e.target.value })} options={[{ value: 'registered', label: 'Registrerad' }, { value: 'deregistered', label: 'Avregistrerad' }, { value: 'not_applicable', label: 'Ej tillämpligt' }]} />}
-        </div>
 
         <div className="border-t border-slate-200 pt-4">
           <h3 className="mb-3 text-sm font-semibold text-slate-700">Mått, vikter & spec</h3>
@@ -713,14 +716,17 @@ function VehicleFormModal({ open, onClose, vehicle, organisationId, userId, comp
           </div>
         </div>
 
-        <Textarea label="Anteckningar" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>Avbryt</Button>
-          <Button onClick={handleSave} loading={saving}>Spara</Button>
+        </div><div hidden={step!=='finance'} className="space-y-4">        <div className="grid gap-3 sm:grid-cols-2">
+          <Input label="Inköpsdatum" type="date" value={form.purchase_date} onChange={(e) => setForm({ ...form, purchase_date: e.target.value })} />
+          <Input label="Inköpspris" type="number" value={form.purchase_price} onChange={(e) => setForm({ ...form, purchase_price: e.target.value })} />
         </div>
-      </div>
-    </Modal>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Select label="Leasing/finansiering" value={form.financing_type} onChange={(e) => setForm({ ...form, financing_type: e.target.value })} options={Object.entries(FINANCING_LABELS).map(([value, label]) => ({ value, label }))} />
+          {showRegistration && <Select label="Registreringsstatus" value={form.registration_status} onChange={(e) => setForm({ ...form, registration_status: e.target.value })} options={[{ value: 'registered', label: 'Registrerad' }, { value: 'deregistered', label: 'Avregistrerad' }, { value: 'not_applicable', label: 'Ej tillämpligt' }]} />}
+        </div>
+        <Textarea label="Anteckningar" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+        </div></fieldset>
+    </Modal><Modal open={discard} onClose={()=>setDiscard(false)} title="Lämna osparad tillgång?" footer={<><Button variant="secondary" onClick={()=>setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscard(false);onClose();}}>Lämna utan att spara</Button></>}><p>Uppgifterna har inte sparats.</p></Modal></>
   );
 }
 
@@ -1204,7 +1210,7 @@ function ChecklistsTab({ vehicle, templates, runs, isAdmin, organisationId, user
   const applicableTemplates = templates.filter((t) => !t.asset_type || t.asset_type === vehicle.asset_type);
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 p-4">
           <h3 className="font-semibold text-slate-900">Genomför checklista</h3>
@@ -1476,7 +1482,7 @@ function ServiceTab({ vehicle, schedules, records, isAdmin, organisationId, user
   };
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-slate-200 p-4">
           <h3 className="font-semibold text-slate-900">Serviceplaner</h3>
@@ -1635,7 +1641,7 @@ function InspectionsTab({ vehicle, sources, inspections, isAdmin, organisationId
   };
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-200 p-4">
         <h3 className="font-semibold text-slate-900">Besiktningar & återkommande kontroller</h3>
@@ -1844,7 +1850,7 @@ function MetersTab({ vehicle, readings, profilesById, organisationId, onChanged 
   const SOURCE_LABEL: Record<string, string> = { manual: 'Manuell', telematics: 'Telematik', service: 'Service', import: 'Import' };
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <Card className="p-5">
         <h3 className="mb-3 font-semibold text-slate-900">Registrera mätarställning</h3>
         <div className="flex flex-wrap items-end gap-3">
@@ -2051,7 +2057,7 @@ function CostsTab({ vehicle, costs, organisationId, userId, onChanged }: { vehic
   };
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card className="p-4"><p className="text-xs text-slate-500">Senaste 12 mån</p><p className="text-lg font-bold text-slate-900">{formatNumber(totals.last12)} kr</p></Card>
         <Card className="p-4"><p className="text-xs text-slate-500">Total kostnad</p><p className="text-lg font-bold text-slate-900">{formatNumber(totals.total)} kr</p></Card>

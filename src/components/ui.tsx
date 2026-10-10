@@ -317,8 +317,15 @@ interface TabsProps {
 }
 
 export function Tabs({ tabs, active, onChange, className = '' }: TabsProps) {
+  const strip=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    const container=strip.current;
+    if(!container)return;
+    const reveal=()=>{const selected=container.querySelector<HTMLButtonElement>('[aria-pressed="true"]');if(!selected)return;const box=container.getBoundingClientRect(),item=selected.getBoundingClientRect();if(item.left<box.left||item.right>box.right)container.scrollLeft+=item.left-box.left-(box.width-item.width)/2;};
+    reveal();const observer=new ResizeObserver(reveal);observer.observe(container);return()=>observer.disconnect();
+  },[active]);
   return (
-    <div className={`flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 ${className}`}>
+    <div ref={strip} className={`flex min-w-0 gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 ${className}`}>
       {tabs.map(tab => (
         <button
           key={tab.key}
