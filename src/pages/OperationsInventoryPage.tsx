@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { Package, Plus, ShoppingCart, Trash2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Package, Plus, ShoppingCart, Trash2, Check, Pencil, RefreshCw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select } from '../components/ui';
+import { Button, EmptyState, Input, LoadingPage, Modal, PageHeader, Select } from '../components/ui';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import type { InventoryTemplate } from '../lib/operations';
 
 interface StockItemOption { id: string; name: string; unit: string }
@@ -23,17 +24,26 @@ export function OperationsInventoryPage() {
   const [actualQuantities, setActualQuantities] = useState<Record<string, string>>({});
   const [checkResult, setCheckResult] = useState<{ id: string; items: any[] } | null>(null);
 
+  const checkLock=useRef(false), checkOperation=useRef<{body:string;id:string}|null>(null);
+  const [checkingBusy,setCheckingBusy]=useState(false), [discardCheck,setDiscardCheck]=useState(false);
+  const checkDirty=useUnsavedChanges(actualQuantities,!!checking && !checkResult);
+  const closeCheck=()=>{if(checkLock.current)return;if(checkDirty)setDiscardCheck(true);else setChecking(null);};
+  const discardDialog=<Modal open={discardCheck} onClose={()=>setDiscardCheck(false)} title="Lämna kontrollen?" footer={<><Button variant="secondary" onClick={()=>setDiscardCheck(false)}>Fortsätt kontrollera</Button><Button variant="danger" onClick={()=>{setDiscardCheck(false);setChecking(null);}}>Lämna</Button></>}><p>Osparade antal försvinner.</p></Modal>;
   const canManage = user?.role === 'admin' || user?.role === 'superadmin';
 
-  useEffect(() => { fetchAll(); }, [user?.organisation_id]);
+  const loadGeneration=useRef(0);
+  function invalidateLoads(){loadGeneration.current++;}
+  useEffect(() => { void fetchAll(); return invalidateLoads; }, [user?.id,user?.organisation_id]);
 
   async function fetchAll() {
     if (!user?.organisation_id) { setLoading(false); return; }
-    setLoading(true);
+    const request=++loadGeneration.current;setLoading(true); setError('');
     const [templatesResult, stockResult] = await Promise.all([
       supabase.from('vihem_inventory_templates').select('*, items:vihem_inventory_template_items(*)').eq('organisation_id', user.organisation_id).order('name'),
       supabase.from('vihem_inventory_stock_items').select('id,name,unit').eq('organisation_id', user.organisation_id).eq('active', true).order('name'),
     ]);
+    if(request!==loadGeneration.current)return;
+    if (templatesResult.error) setError('Inventarielistorna kunde inte hämtas. Försök igen.');
     if (!templatesResult.error) setTemplates((templatesResult.data || []).map((t: any) => ({ ...t, items: (t.items || []).sort((a: any, b: any) => a.sort_order - b.sort_order) })) as InventoryTemplate[]);
     setStockItems((stockResult.data || []) as StockItemOption[]);
     setLoading(false);
@@ -83,6 +93,7 @@ export function OperationsInventoryPage() {
   }
 
   function startCheck(template: InventoryTemplate) {
+    checkOperation.current=null; setError('');
     setChecking(template);
     setActualQuantities({});
     setCheckResult(null);
@@ -90,27 +101,19 @@ export function OperationsInventoryPage() {
   }
 
   async function submitCheck() {
-    if (!checking || !user?.organisation_id) return;
+    if (!checking || !user?.organisation_id || checkLock.current) return;
     const items = checking.items || [];
-    const { data: check, error: checkError } = await supabase
-      .from('vihem_inventory_checks')
-      .insert({ organisation_id: user.organisation_id, template_id: checking.id, performed_by: user.id })
-      .select('id')
-      .single();
-    if (checkError || !check) { setError(checkError?.message || 'Kunde inte spara.'); return; }
-
-    const rows = items.map(item => ({
-      check_id: check.id,
-      template_item_id: item.id,
-      label: item.label,
-      desired_quantity: item.desired_quantity,
-      unit: item.unit,
-      actual_quantity: actualQuantities[item.id] !== undefined ? Number(actualQuantities[item.id]) : item.desired_quantity,
-    }));
-    const { data: savedItems, error: itemsError } = await supabase.from('vihem_inventory_check_items').insert(rows).select('*');
-    if (itemsError) { setError(itemsError.message); return; }
-
-    setCheckResult({ id: check.id, items: savedItems || [] });
+    if (!items.length || items.some(i => !actualQuantities[i.id]?.trim() || !Number.isFinite(Number(actualQuantities[i.id])) || Number(actualQuantities[i.id])<0)) { setError('Ange antal för varje artikel. Ange noll om den saknas.'); return; }
+    const snapshot=[...items].sort((a,b)=>a.sort_order-b.sort_order||a.id.localeCompare(b.id)).map(({id,label,desired_quantity,unit})=>({id,label,desired_quantity,unit}));
+    const request={p_template:checking.id,p_snapshot:snapshot,p_counts:Object.fromEntries(items.map(i=>[i.id,Number(actualQuantities[i.id])]))};
+    const body=JSON.stringify(request); if(checkOperation.current?.body!==body)checkOperation.current={body,id:crypto.randomUUID()};
+    checkLock.current=true;setCheckingBusy(true);setError('');
+    try {
+      const result=await supabase.rpc('vihem_complete_inventory_check',{...request,p_operation:checkOperation.current.id});
+      if(result.error || !result.data?.id) throw result.error || new Error('Kontrollen kunde inte bekräftas.');
+      setCheckResult({...result.data,items:[...result.data.items].sort((a:any,b:any)=>items.findIndex(i=>i.id===a.template_item_id)-items.findIndex(i=>i.id===b.template_item_id))});
+    } catch(e) { setError(`${e instanceof Error ? e.message : (e as {message?:string})?.message || 'Kontrollen kunde inte sparas.'} Dina antal finns kvar. Försök igen.`); }
+    finally {checkLock.current=false;setCheckingBusy(false);}
   }
 
   async function addShortageToPurchaseList(checkItem: any) {
@@ -131,91 +134,59 @@ export function OperationsInventoryPage() {
 
   if (checking) {
     if (checkResult) {
-      const shortages = checkResult.items.filter((i: any) => Number(i.shortage) > 0);
-      return (
-        <div className="min-h-screen bg-slate-50">
-          <PageHeader title={`Kontroll: ${checking.name}`} subtitle="Resultat av kontrollen." icon={Package} backButton={() => setChecking(null)} />
-          {message && <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">{message}</div>}
-          {shortages.length === 0 ? (
-            <EmptyState icon={Package} title="Allt finns" description="Inga brister hittades vid kontrollen." />
-          ) : (
-            <div className="space-y-3">
-              {shortages.map((item: any) => {
-                return (
-                  <Card key={item.id} className="p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="font-black text-slate-950">{item.label}</h3>
-                        <p className="text-sm text-slate-500">Önskat: {item.desired_quantity} {item.unit} · Finns: {item.actual_quantity} {item.unit} · Saknas: {item.shortage} {item.unit}</p>
-                      </div>
-                      {item.action === 'added_to_purchase_list' ? (
-                        <span className="text-xs font-black text-emerald-600">På inköpslistan</span>
-                      ) : (
-                        <Button size="sm" variant="secondary" onClick={() => addShortageToPurchaseList(item)}>
-                          <ShoppingCart className="h-4 w-4" />Lägg till inköpslista
-                        </Button>
-                      )}
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      );
+      const shortages=checkResult.items.filter((i:{shortage:number})=>Number(i.shortage)>0);
+      return <div className="mx-auto max-w-4xl pb-6">
+        <PageHeader title={checking.name} subtitle={`Sparad kontroll · ${checkResult.items.length} artiklar · ${shortages.length} ${shortages.length===1 ? "brist" : "brister"}`} icon={Package} backButton={closeCheck}/>
+        {error && <p role="alert" className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+        {message && <p role="status" className="mb-4 text-sm text-emerald-700">{message}</p>}
+        {!shortages.length && <p className="mb-4 flex items-center gap-2 text-sm text-emerald-700"><Check className="h-4 w-4"/>Alla artiklar finns enligt din kontroll.</p>}
+        <div className="divide-y divide-slate-100 rounded-2xl bg-white px-4 sm:px-6">{checkResult.items.map((item:any)=><div key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-4"><div><h2 className="text-base font-medium text-vihem-navy">{item.label}</h2><p className="mt-1 text-sm text-vihem-muted">Finns {item.actual_quantity} av {item.desired_quantity} {item.unit}{Number(item.shortage)>0 && ` · Saknas ${item.shortage}`}</p></div>{Number(item.shortage)>0 && (item.action==='added_to_purchase_list' ? <span className="text-sm text-emerald-700">På inköpslistan</span> : <Button variant="secondary" size="sm" onClick={()=>void addShortageToPurchaseList(item)}><ShoppingCart className="h-4 w-4"/>Lägg till inköpslista</Button>)}</div>)}</div>
+      </div>;
     }
+    const items=checking.items || [];
 
+    const reviewed=items.filter(i=>actualQuantities[i.id]?.trim() && Number.isFinite(Number(actualQuantities[i.id])) && Number(actualQuantities[i.id])>=0).length;
     return (
-      <div className="min-h-screen bg-slate-50">
-        <PageHeader title={`Kontrollera: ${checking.name}`} subtitle="Ange vad som faktiskt finns för varje artikel." icon={Package} backButton={() => setChecking(null)} />
-        <div className="space-y-3">
-          {(checking.items || []).map(item => (
-            <Card key={item.id} className="p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="font-black text-slate-950">{item.label}</h3>
-                  <p className="text-xs text-slate-500">Önskat: {item.desired_quantity} {item.unit}</p>
-                </div>
-                <Input
-                  type="number"
-                  value={actualQuantities[item.id] ?? ''}
-                  onChange={e => setActualQuantities({ ...actualQuantities, [item.id]: e.target.value })}
-                  placeholder={String(item.desired_quantity)}
-                  className="w-24"
-                />
-              </div>
-            </Card>
-          ))}
-          <Button onClick={submitCheck}>Slutför kontroll</Button>
+      <div className="mx-auto max-w-4xl pb-8">
+        <PageHeader title={checking.name} subtitle="Kontrollera innehållet innan du sparar resultatet." icon={Package} backButton={closeCheck}/>
+        <div className="sticky top-0 z-10 mb-5 rounded-2xl bg-vihem-surface p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-semibold text-vihem-navy">{reviewed} av {items.length} artiklar kontrollerade</p><p className="mt-1 text-sm text-vihem-muted">Tomma antal är inte en bedömning. Ange noll när något saknas.</p></div><Button variant="secondary" size="sm" disabled={checkingBusy} onClick={()=>setActualQuantities(Object.fromEntries(items.map(i=>[i.id,String(i.desired_quantity)])))}><Check className="h-4 w-4"/>Alla finns</Button></div>
+          <div role="progressbar" aria-label="Kontrollerade artiklar" aria-valuemin={0} aria-valuemax={items.length} aria-valuenow={reviewed} className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-vihem-blue motion-safe:transition-all" style={{width:`${reviewed/(items.length || 1)*100}%`}}/></div>
         </div>
+        {error && <p role="alert" className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+        <div className="overflow-hidden rounded-2xl bg-white px-4 sm:px-6">
+          <div className="hidden grid-cols-[minmax(0,1fr)_100px_140px] gap-4 border-b border-slate-200 py-3 text-xs font-medium uppercase tracking-wide text-vihem-muted sm:grid"><span>Artikel</span><span>Behövs</span><span>Finns på plats</span></div>
+          <div className="divide-y divide-slate-100">{items.map(item=><div key={item.id} className="grid grid-cols-[minmax(0,1fr)_110px] items-center gap-4 py-4 sm:grid-cols-[minmax(0,1fr)_100px_140px]"><div className="min-w-0"><h2 className="break-words text-base font-medium text-vihem-navy">{item.label}</h2><p className="mt-1 text-sm text-vihem-muted sm:hidden">Behövs {item.desired_quantity} {item.unit}</p></div><p className="hidden text-sm tabular-nums text-vihem-muted sm:block">{item.desired_quantity} {item.unit}</p><Input aria-label={`Antal ${item.label}`} type="number" inputMode="decimal" min="0" step="any" disabled={checkingBusy} value={actualQuantities[item.id] ?? ''} onChange={e=>setActualQuantities({...actualQuantities,[item.id]:e.target.value})} placeholder="Ange antal"/></div>)}</div>
+        </div>
+        {!items.length && <EmptyState icon={Package} title="Listan saknar artiklar" description="Administratören behöver lägga till innehåll före en kontroll."/>}
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-vihem-muted">Resultatet och alla artikelantal sparas tillsammans.</p><Button loading={checkingBusy} disabled={reviewed!==items.length || !items.length} onClick={()=>void submitCheck()}>Spara kontroll</Button></div>
+        {discardDialog}
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="mx-auto max-w-5xl pb-6">
       <PageHeader title="Inventarielistor" subtitle="Städvagnar och andra inventarielistor." icon={Package} action={canManage ? <Button onClick={openCreateTemplate}><Plus className="h-4 w-4" />Ny inventarielista</Button> : undefined} />
-      {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</div>}
+      {error && <div role="alert" className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}<Button className="ml-3" variant="ghost" onClick={()=>void fetchAll()}><RefreshCw className="h-4 w-4"/>Försök igen</Button></div>}
 
       {templates.length === 0 ? (
         <EmptyState icon={Package} title="Inga inventarielistor" description="Skapa en lista, t.ex. Standard städvagn." />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white">
           {templates.map(template => (
-            <Card key={template.id} className="p-4">
+            <div key={template.id} className="flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <h3 className="font-black text-slate-950">{template.name}</h3>
+                  <h3 className="font-semibold text-vihem-navy">{template.name}</h3>
                   <p className="text-xs text-slate-500">{(template.items || []).length} artiklar</p>
                 </div>
                 {canManage && (
-                  <button onClick={() => openEditTemplate(template)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Redigera">
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-                  </button>
+                  <Button variant="ghost" size="sm" onClick={()=>openEditTemplate(template)} aria-label={`Redigera ${template.name}`}><Pencil className="h-4 w-4"/></Button>
                 )}
               </div>
-              <Button size="sm" variant="secondary" className="mt-3" onClick={() => startCheck(template)}>Kontrollera</Button>
-            </Card>
+              <Button size="sm" variant="secondary" onClick={() => startCheck(template)}>Kontrollera</Button>
+            </div>
           ))}
         </div>
       )}

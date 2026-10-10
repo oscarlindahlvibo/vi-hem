@@ -1423,8 +1423,8 @@ function ChecklistTemplateManagerModal({ open, onClose, templates, organisationI
 
 // ── Service ────────────────────────────────────────────────────────────
 
-type ScheduleForm = { name: string; interval_km: string; interval_hours: string; interval_months: string; notes: string };
-const EMPTY_SCHEDULE_FORM: ScheduleForm = { name: '', interval_km: '', interval_hours: '', interval_months: '', notes: '' };
+type ScheduleForm = { name: string; interval_km: string; interval_hours: string; interval_months: string; notes: string; next_due_date: string; next_due_odometer: string; next_due_hours: string };
+const EMPTY_SCHEDULE_FORM: ScheduleForm = { name: '', interval_km: '', interval_hours: '', interval_months: '', notes: '', next_due_date: '', next_due_odometer: '', next_due_hours: '' };
 
 function ServiceTab({ vehicle, schedules, records, isAdmin, organisationId, userId, onChanged }: {
   vehicle: FleetVehicle; schedules: FleetServiceSchedule[]; records: FleetServiceRecord[]; isAdmin: boolean; organisationId: string; userId: string; onChanged: () => void;
@@ -1435,36 +1435,52 @@ function ServiceTab({ vehicle, schedules, records, isAdmin, organisationId, user
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const saveSchedule = async () => {
-    if (!scheduleForm.name.trim() || (!scheduleForm.interval_km && !scheduleForm.interval_hours && !scheduleForm.interval_months)) { setError('Ange namn och minst ett intervall.'); return; }
-    setSaving(true); setError('');
+  const [editingPlan, setEditingPlan] = useState<FleetServiceSchedule | null>(null);
+  const [archivePlan, setArchivePlan] = useState<FleetServiceSchedule | null>(null);
+  const planOperation = useRef<{ fingerprint: string; id: string } | null>(null);
+  const planLock = useRef(false);
+  const planStart = useRef({ time: Date.now(), odometer: vehicle.current_odometer, hours: vehicle.engine_hours });
+  const [savedMessage, setSavedMessage] = useState('');
+  const planDirty = useUnsavedChanges(scheduleForm, scheduleModal);
+  const [discardPlan, setDiscardPlan] = useState(false);
+  const closePlan = () => { if(planLock.current) return; if(planDirty) setDiscardPlan(true); else setScheduleModal(false); };
+  function planForm(plan: FleetServiceSchedule): ScheduleForm {
+    return { name: plan.name, interval_km: String(plan.interval_km ?? ''), interval_hours: String(plan.interval_hours ?? ''), interval_months: String(plan.interval_months ?? ''), notes: plan.notes || '', next_due_date: plan.next_due_date || '', next_due_odometer: String(plan.next_due_odometer ?? ''), next_due_hours: String(plan.next_due_hours ?? '') };
+  }
+  function openPlan(plan: FleetServiceSchedule | null) {
+    planStart.current={time:Date.now(),odometer:vehicle.current_odometer,hours:vehicle.engine_hours};
+    setEditingPlan(plan); setScheduleForm(plan ? planForm(plan) : EMPTY_SCHEDULE_FORM); setError(''); planOperation.current=null; setScheduleModal(true);
+  }
+  async function saveSchedule(archived?: FleetServiceSchedule) {
+    if (planLock.current) return;
+    const source = archived ? planForm(archived) : scheduleForm;
+    const plan = archived || editingPlan;
+    const number = (v: string) => v.trim() ? Number(v) : null;
+    const interval_km = number(source.interval_km), interval_hours = number(source.interval_hours), interval_months = number(source.interval_months);
+    if (!source.name.trim() || [interval_km, interval_hours, interval_months].every(v => v === null) || [interval_km, interval_hours, interval_months].some(v => v !== null && (!Number.isFinite(v) || v <= 0)) || (interval_months !== null && !Number.isInteger(interval_months))) { setError('Ange namn och minst ett positivt intervall. Månader anges som heltal.'); return; }
+    const fields = { name: source.name.trim(), interval_km, interval_hours, interval_months, notes: source.notes.trim(), active: !archived,
+      next_due_date: source.next_due_date || (!plan && interval_months ? new Date(planStart.current.time+interval_months*30*86400000).toISOString().slice(0,10) : null),
+      next_due_odometer: number(source.next_due_odometer) ?? (!plan && interval_km ? planStart.current.odometer+interval_km : null),
+      next_due_hours: number(source.next_due_hours) ?? (!plan && interval_hours ? planStart.current.hours+interval_hours : null) };
+    const request = { p_vehicle: vehicle.id, p_plan: plan?.id || null, p_expected: plan?.updated_at || null, p_fields: fields };
+    const fingerprint=JSON.stringify(request);
+    if (planOperation.current?.fingerprint !== fingerprint) planOperation.current={fingerprint,id:crypto.randomUUID()};
+    planLock.current=true; setSaving(true); setError('');
     try {
-      const interval_km = scheduleForm.interval_km ? Number(scheduleForm.interval_km) : null;
-      const interval_hours = scheduleForm.interval_hours ? Number(scheduleForm.interval_hours) : null;
-      const interval_months = scheduleForm.interval_months ? Number(scheduleForm.interval_months) : null;
-      const next_due_date = interval_months ? new Date(Date.now() + interval_months * 30 * 86400000).toISOString().slice(0, 10) : null;
-      const next_due_odometer = interval_km ? vehicle.current_odometer + interval_km : null;
-      const next_due_hours = interval_hours ? vehicle.engine_hours + interval_hours : null;
-      const { error: err } = await supabase.from('vihem_fleet_service_schedules').insert({
-        organisation_id: organisationId, vehicle_id: vehicle.id, name: scheduleForm.name.trim(), interval_km, interval_hours, interval_months,
-        next_due_date, next_due_odometer, next_due_hours, notes: scheduleForm.notes.trim(), created_by: userId,
-      });
-      if (err) throw err;
-      setScheduleModal(false); setScheduleForm(EMPTY_SCHEDULE_FORM); onChanged();
-    } catch (err) {
-      setError(describeError(err));
-    } finally {
-      setSaving(false);
-    }
-  };
+      const result=await supabase.rpc('vihem_save_fleet_service_plan',{...request,p_operation:planOperation.current.id});
+      if (result.error || !result.data) throw result.error || new Error('Planen kunde inte bekräftas.');
+      setScheduleModal(false); setArchivePlan(null); setSavedMessage(archived ? 'Serviceplanen har arkiverats. Historiken finns kvar.' : 'Serviceplanen har sparats.'); onChanged();
+    } catch (err) { setError(describeError(err)); }
+    finally { planLock.current=false; setSaving(false); }
+  }
 
   return (
     <div className="min-w-0 grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
-          <h3 className="font-semibold text-slate-900">Serviceplaner</h3>
+          <div><h3 className="font-semibold text-slate-900">Serviceplaner</h3><p className="mt-1 text-sm text-vihem-muted">Planera nästa service och följ upp utfört arbete.</p></div>
           <div className="flex shrink-0 gap-2 whitespace-nowrap">
-            {isAdmin && <Button size="sm" variant="secondary" onClick={() => setScheduleModal(true)}><Plus className="h-4 w-4" /> Ny plan</Button>}
+            {isAdmin && <Button size="sm" variant="secondary" onClick={() => openPlan(null)}><Plus className="h-4 w-4" /> Ny plan</Button>}
             <Button size="sm" onClick={() => setRecordModal('adhoc')}>Registrera service</Button>
           </div>
         </div>
@@ -1476,16 +1492,16 @@ function ServiceTab({ vehicle, schedules, records, isAdmin, organisationId, user
               return (
                 <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                   <div className="min-w-0">
-                    <p className="font-semibold text-slate-800">{s.name}</p>
+                    <p className="font-semibold text-slate-800">{s.name}</p>{s.notes && <p className="mt-1 max-w-prose text-sm text-vihem-muted">{s.notes}</p>}
                     <p className="text-sm text-vihem-muted">
                       {[s.interval_km ? `${formatNumber(s.interval_km)} ${vehicle.odometer_unit}` : null, s.interval_hours ? `${formatNumber(s.interval_hours)} h` : null, s.interval_months ? `${s.interval_months} mån` : null].filter(Boolean).join(' · ')}
-                      {s.next_due_date && ` -- nästa: ${fmtDate(s.next_due_date)}`}
+                      {s.next_due_date && ` · Nästa ${fmtDate(s.next_due_date)}`}
                       {kmRemaining !== null && ` (${formatNumber(kmRemaining)} ${vehicle.odometer_unit} kvar)`}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge className={URGENCY_CLASS[dayU]}>{URGENCY_LABEL[dayU]}</Badge>
-                    <Button size="sm" variant="secondary" onClick={() => setRecordModal(s)}>Registrera utförd</Button>
+                    {s.next_due_date && dayU !== 'ok' && <Badge className={URGENCY_CLASS[dayU]}>{URGENCY_LABEL[dayU]}</Badge>}
+                    <Button size="sm" variant="secondary" onClick={() => setRecordModal(s)}>Registrera utförd</Button>{isAdmin && <><Button size="sm" variant="ghost" aria-label={`Redigera serviceplan ${s.name}`} onClick={() => openPlan(s)}><Pencil className="h-4 w-4" /></Button><Button size="sm" variant="ghost" aria-label={`Arkivera serviceplan ${s.name}`} onClick={() => { setError(''); setArchivePlan(s); }}><Trash2 className="h-4 w-4" /></Button></>}
                   </div>
                 </div>
               );
@@ -1508,7 +1524,8 @@ function ServiceTab({ vehicle, schedules, records, isAdmin, organisationId, user
         ) : <EmptyState icon={<History className="w-10 h-10" />} title="Ingen servicehistorik ännu" />}
       </Card>
 
-      <Modal open={scheduleModal} onClose={() => setScheduleModal(false)} title="Ny serviceplan">
+      <p role="status" className="text-sm text-vihem-muted xl:col-span-2">{savedMessage}</p>
+      <Modal open={scheduleModal} onClose={closePlan} title={editingPlan ? 'Redigera serviceplan' : 'Ny serviceplan'} size="lg">
         <div className="space-y-4">
           <Input label="Namn" value={scheduleForm.name} onChange={(e) => setScheduleForm({ ...scheduleForm, name: e.target.value })} placeholder="T.ex. Motorservice" />
           <div className="grid gap-3 sm:grid-cols-3">
@@ -1516,13 +1533,16 @@ function ServiceTab({ vehicle, schedules, records, isAdmin, organisationId, user
             <Input label="Intervall (maskintimmar)" type="number" value={scheduleForm.interval_hours} onChange={(e) => setScheduleForm({ ...scheduleForm, interval_hours: e.target.value })} />
             <Input label="Intervall (månader)" type="number" value={scheduleForm.interval_months} onChange={(e) => setScheduleForm({ ...scheduleForm, interval_months: e.target.value })} />
           </div>
-          <p className="text-sm text-vihem-muted">Villkoret som inträffar först utlöser servicebehov.</p>
+          <p className="text-sm text-vihem-muted">Det första uppnådda intervallet avgör servicebehovet. Befintlig beräkning använder 30 dagar per månad.</p>
+          <details open={!!editingPlan} className="rounded-xl bg-vihem-surface p-3"><summary className="cursor-pointer font-medium text-sm">Nästa servicetillfälle</summary><p className="my-3 text-sm text-vihem-muted">En ny plan räknas från dagens datum och tillgångens mätare om du lämnar fälten tomma. Redigering behåller befintliga gränser.</p><div className="grid gap-3 sm:grid-cols-3"><Input label="Nästa datum" type="date" value={scheduleForm.next_due_date} onChange={e=>setScheduleForm({...scheduleForm,next_due_date:e.target.value})}/><Input label={`Nästa mätarställning (${vehicle.odometer_unit})`} type="number" min="0" value={scheduleForm.next_due_odometer} onChange={e=>setScheduleForm({...scheduleForm,next_due_odometer:e.target.value})}/><Input label="Nästa maskintimmar" type="number" min="0" value={scheduleForm.next_due_hours} onChange={e=>setScheduleForm({...scheduleForm,next_due_hours:e.target.value})}/></div></details>
           <Textarea label="Anteckningar" value={scheduleForm.notes} onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })} />
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setScheduleModal(false)}>Avbryt</Button><Button onClick={saveSchedule} loading={saving}>Spara</Button></div>
+          {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          <div className="flex justify-end gap-2"><Button variant="secondary" disabled={saving} onClick={closePlan}>Avbryt</Button><Button onClick={() => void saveSchedule()} loading={saving}>Spara</Button></div>
         </div>
       </Modal>
 
+      <Modal open={discardPlan} onClose={()=>setDiscardPlan(false)} title="Lämna serviceplanen?" footer={<><Button variant="secondary" onClick={()=>setDiscardPlan(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscardPlan(false);setScheduleModal(false);}}>Lämna</Button></>}><p>Osparade uppgifter försvinner.</p></Modal>
+      <Modal open={!!archivePlan} onClose={() => { if(!saving) setArchivePlan(null); }} title="Arkivera serviceplan?" footer={<><Button variant="secondary" disabled={saving} onClick={()=>setArchivePlan(null)}>Avbryt</Button><Button variant="danger" loading={saving} onClick={()=>{if(archivePlan) void saveSchedule(archivePlan);}}>Arkivera</Button></>}><p className="text-sm">{archivePlan?.name} tas bort från kommande service. Tidigare service och historik bevaras.</p>{error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}</Modal>
       <ServiceRecordModal key={recordModal==='adhoc'?'adhoc':recordModal?.id||'closed'} open={recordModal !== null} onClose={() => setRecordModal(null)} vehicle={vehicle} schedule={recordModal === 'adhoc' ? null : recordModal} organisationId={organisationId} userId={userId} onSaved={() => { setRecordModal(null); onChanged(); }} />
     </div>
   );

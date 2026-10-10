@@ -240,6 +240,23 @@ try {
     more = rows.length > 50;
   }
   assert.equal(seen.size, 54);
+  const literalId = randomUUID(); ids.push(literalId);
+  const literal = 'ÅÄÖ _%" komma, parentes (test)';
+  ok(await s.from('vihem_notifications').insert({id:literalId,user_id:c.users.tenant.id,title:literal,message:'literal QA',type:'info'}));
+  const quoted = JSON.stringify(`%${literal.replace(/[\\%_]/g,ch=>`\\${ch}`)}%`);
+  assert.equal(ok(await clients.tenant.from('vihem_notifications').select('id').or(`title.ilike.${quoted},message.ilike.${quoted}`)).length,1);
+  assert.equal(ok(await clients.outsider.from('vihem_notifications').select('id').or(`title.ilike.${quoted},message.ilike.${quoted}`)).length,0);
+  // Real REST combines the search OR with the independent cursor OR.
+  const after = history.filter(r=>r.created_at).sort((a,b)=>b.id.localeCompare(a.id))[0];
+  const searched=ok(await clients.tenant.from('vihem_notifications').select('id').in('id',history.map(r=>r.id)).or('title.ilike."%Page QA%",message.ilike."%Page QA%"').or(`created_at.lt.${after.created_at},created_at.is.null,and(created_at.eq.${after.created_at},id.lt.${after.id})`));
+  assert.equal(searched.length,53);
+  const invalid=await fetch(`${url}/rest/v1/vihem_notifications?select=id`,{headers:{apikey:c.anon,Authorization:'Bearer expired.invalid.token'}});
+  assert.equal(invalid.status,401);
+  if(process.env.PREMIUM_EXPIRED_JWT_FILE) {
+    const expired=await fetch(`${url}/rest/v1/vihem_notifications?select=id`,{headers:{apikey:c.anon,Authorization:`Bearer ${fs.readFileSync(process.env.PREMIUM_EXPIRED_JWT_FILE,'utf8').trim()}`}});
+    assert.equal(expired.status,401); const payload=await expired.json(); assert.match(JSON.stringify(payload),/expired/i);
+    console.log('PASS correctly signed expired QA JWT denied by actual REST gateway.');
+  }
   console.log(
     "PASS notification owner read/update/delete isolation for admin/staff/tenant/foreign, anonymous denied, read persisted, keyset equal timestamps/null dates/older records preserved.",
   );

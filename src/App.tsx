@@ -477,6 +477,10 @@ function AppInner() {
       return <TimeTrackingPage onNavigate={navigate} initialAction={action} />;
     }
 
+    if (currentPage.startsWith('operations/routines/')) {
+      if (!isStaff || !enabledModules.operations) return renderDashboard();
+      return <OperationsRoutinesPage key={currentPage} initialRoutineId={currentPage.split('/')[2]} onNavigate={navigate}/>;
+    }
     if (currentPage.startsWith('fleet/')) {
       if (!isStaff || !enabledModules.fleet_management) return renderDashboard();
       return <FleetPage onNavigate={navigate} initialVehicleId={currentPage.split('/')[1]} />;
@@ -642,7 +646,7 @@ function AppInner() {
 
       case 'operations-routines':
         if (!isStaff || !enabledModules.operations) return renderDashboard();
-        return <OperationsRoutinesPage />;
+        return <OperationsRoutinesPage onNavigate={navigate} />;
 
       case 'operations-checklists':
         if (!isStaff || !enabledModules.operations) return renderDashboard();

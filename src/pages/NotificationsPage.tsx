@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import {
-  Button,
-  PageHeader,
-  EmptyState,
-  LoadingPage,
-  Modal,
-  Input,
-} from "../components/ui";
+import { Button, PageHeader, EmptyState, Modal, Input } from "../components/ui";
 import { formatDateTime } from "../lib/utils";
 import type { Notification } from "../types";
 import {
@@ -24,6 +17,12 @@ import {
   Trash2,
 } from "lucide-react";
 
+// Quote PostgREST values and treat wildcard characters as literal search text.
+const searchFilter = (text: string) => {
+  const pattern = `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const quoted = JSON.stringify(pattern);
+  return `title.ilike.${quoted},message.ilike.${quoted}`;
+};
 const resolveLink = (n: Notification) =>
   n.link === "mail" ||
   `${n.title} ${n.message}`.toLowerCase().match(/fakturamatch|e-postmatchning/)
@@ -42,6 +41,11 @@ export function NotificationsPage({
     [actionError, setActionError] = useState(""),
     [filter, setFilter] = useState<"all" | "unread">("all"),
     [query, setQuery] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearchTerm(query.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [query]);
   const [feedback, setFeedback] = useState("");
   const [connected, setConnected] = useState(true);
   const [pending, setPending] = useState<string | null>(null),
@@ -66,6 +70,7 @@ export function NotificationsPage({
           .order("id", { ascending: false })
           .limit(51);
         if (filter === "unread") q = q.is("read_at", null);
+        if (searchTerm) q = q.or(searchFilter(searchTerm));
         const last = reset ? null : cursor.current;
         if (last)
           q = last.created_at
@@ -95,7 +100,7 @@ export function NotificationsPage({
         }
       }
     },
-    [user?.id, filter],
+    [user?.id, filter, searchTerm],
   );
   useEffect(() => {
     generation.current++;
@@ -120,47 +125,38 @@ export function NotificationsPage({
   useEffect(() => {
     setNewActivity(false);
     if (!user?.id) return;
-    let stopped = false;
-    let subscribed = false;
-    const recover = () => {
-      if (!stopped) setNewActivity(true);
+    let stopped = false, subscribed = false, live = false, attempts = 0, binding = 0;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let timer: number | undefined;
+    const recover = () => { if (!stopped) setNewActivity(true); };
+    const reconnect = async () => {
+      if (stopped) return;
+      window.clearTimeout(timer); timer = undefined;
+      if (!navigator.onLine) return;
+      const version = ++binding;
+      const previous = channel; channel = null;
+      if (previous) await supabase.removeChannel(previous);
+      if (stopped || version !== binding) return;
+      channel = supabase.channel(`notifications-inbox:${user.id}`)
+        .on('postgres_changes', {event:'*',schema:'public',table:'vihem_notifications',filter:`user_id=eq.${user.id}`}, () => { if(!stopped && version===binding) recover(); })
+        .subscribe(status => {
+          if(stopped || version!==binding) return;
+          live = status==='SUBSCRIBED'; setConnected(live);
+          if(live) { window.clearTimeout(timer); timer=undefined; if(subscribed || attempts>0) recover(); subscribed=true; attempts=0; }
+          else if(status==='CHANNEL_ERROR' || status==='TIMED_OUT' || status==='CLOSED') {
+            if(timer===undefined) timer=window.setTimeout(() => { attempts++; void reconnect(); },Math.min(30000,5000 * 2 ** Math.min(attempts,3)));
+          }
+        });
     };
-    const foreground = () => {
-      if (document.visibilityState === "visible") recover();
-    };
-    const offline = () => setConnected(false);
-    setConnected(false);
-    window.addEventListener("online", recover);
-    window.addEventListener("offline", offline);
-    document.addEventListener("visibilitychange", foreground);
-    const channel = supabase
-      .channel(`notifications-inbox:${user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "vihem_notifications",
-          filter: `user_id=eq.${user.id}`,
-        },
-        () => {
-          if (!stopped) setNewActivity(true);
-        },
-      )
-      .subscribe((status) => {
-        if (stopped) return;
-        setConnected(status === "SUBSCRIBED");
-        if (status === "SUBSCRIBED") {
-          if (subscribed) recover();
-          subscribed = true;
-        }
-      });
+    const online = () => { recover(); if(!live) void reconnect(); };
+    const offline = () => { live=false; setConnected(false); };
+    const foreground = () => { if(document.visibilityState==='visible') online(); };
+    setConnected(false); void reconnect();
+    window.addEventListener('online',online); window.addEventListener('offline',offline); document.addEventListener('visibilitychange',foreground);
     return () => {
-      stopped = true;
-      window.removeEventListener("online", recover);
-      window.removeEventListener("offline", offline);
-      document.removeEventListener("visibilitychange", foreground);
-      void supabase.removeChannel(channel);
+      stopped=true; binding++; window.clearTimeout(timer);
+      window.removeEventListener('online',online); window.removeEventListener('offline',offline); document.removeEventListener('visibilitychange',foreground);
+      if(channel) void supabase.removeChannel(channel);
     };
   }, [user?.id]);
   async function act(id: string, kind: "read" | "unread" | "all" | "delete") {
@@ -248,12 +244,7 @@ export function NotificationsPage({
     }
   }
   const unread = rows.filter((r) => !r.read_at).length,
-    visible = rows.filter((r) =>
-      `${r.title} ${r.message}`
-        .toLocaleLowerCase("sv")
-        .includes(query.toLocaleLowerCase("sv")),
-    );
-  if (loading && !rows.length) return <LoadingPage />;
+    visible = rows;
   return (
     <div className="mx-auto w-full max-w-5xl pb-5">
       <PageHeader
@@ -307,8 +298,8 @@ export function NotificationsPage({
         </div>
         <div className="w-full sm:w-80">
           <Input
-            aria-label="Sök i hämtade aviseringar"
-            placeholder="Sök i hämtade aviseringar"
+            aria-label="Sök i alla dina aviseringar"
+            placeholder="Sök i alla dina aviseringar"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -457,7 +448,12 @@ export function NotificationsPage({
           );
         })}
       </div>
-      {!visible.length && !error && (
+      {loading && (
+        <p role="status" className="py-6 text-sm text-vihem-muted">
+          Hämtar aviseringar…
+        </p>
+      )}
+      {!visible.length && !error && !loading && (
         <EmptyState
           icon={Bell}
           title={
@@ -469,7 +465,7 @@ export function NotificationsPage({
           }
           description={
             query
-              ? "Sökningen gäller de aviseringar du har hämtat."
+              ? "Prova en annan titel eller text."
               : "Nya händelser visas här."
           }
         />
