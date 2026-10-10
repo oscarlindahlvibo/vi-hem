@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Home,
   Building2,
@@ -27,6 +27,7 @@ import {
   Button,
   Badge,
   Modal,
+  Tabs,
 } from '../components/ui';
 import { formatDate, formatCurrency } from '../lib/utils';
 import { BANKID_ENABLED, initiateBankIDSign } from '../lib/bankid';
@@ -136,6 +137,9 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
   const [agreementsV2, setAgreementsV2] = useState<AgreementListItem[]>([]);
   const [openingAgreementId, setOpeningAgreementId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError,setLoadError]=useState('');
+  const [agreementError,setAgreementError]=useState('');
+  const [section,setSection]=useState<'home'|'contracts'|'inspections'>('home');
   const [showSignModal, setShowSignModal] = useState(false);
   const [signingContract, setSigningContract] = useState<any>(null);
   const [signature, setSignature] = useState('');
@@ -146,9 +150,6 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
   const bankId = useBankIdFlow('sign');
   const bankIdBusy = bankId.status === 'starting' || bankId.status === 'redirecting' || bankId.status === 'pending';
 
-  useEffect(() => {
-    fetchData();
-  }, [user?.id]);
 
   // The BankID signature itself is already written to vihem_contract_signatures
   // server-side by vihem-bankid's `collect` action once the order completes --
@@ -166,13 +167,13 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
     if (bankId.status === 'failed' && bankId.error) setSignError(bankId.error);
   }, [bankId.status, bankId.error]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!user?.id) {
       setLoading(false);
       return;
     }
     try {
-      setLoading(true);
+      setLoading(true);setLoadError('');
 
       if (user.organisation_id) {
         const { data: organisation } = await supabase
@@ -187,15 +188,18 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
       // scoped to the tenancy lookup below -- a signer link can exist
       // independently of an active vihem_tenancies row. Best-effort: never
       // let this block the rest of the page from loading.
-      listMyAgreements().then(setAgreementsV2).catch(() => setAgreementsV2([]));
+      setAgreementError('');
+      listMyAgreements().then(setAgreementsV2).catch(()=>setAgreementError('Avtalsarkivet kunde inte hämtas. Försök igen.'));
 
-      const { data: tenancyData } = await supabase
+      const { data: tenancyData,error:tenancyError } = await supabase
         .from('vihem_tenancies')
         .select('*')
         .eq('tenant_id', user.id)
         .eq('status', 'active')
         .maybeSingle();
 
+      if(tenancyError)throw tenancyError;
+      setTenancy(tenancyData);setApartment(null);setProperty(null);setInspections([]);setContracts([]);
       if (tenancyData) {
         setTenancy(tenancyData);
 
@@ -211,20 +215,23 @@ export function ApartmentPage({ onNavigate }: ApartmentPageProps) {
             .order('created_at', { ascending: false }),
         ]);
 
+        if(aptRes.error||inspRes.error||contractRes.error)throw aptRes.error||inspRes.error||contractRes.error;
         if (aptRes.data) {
           setApartment(aptRes.data);
           const propRes = await supabase.from('vihem_properties').select('*').eq('id', aptRes.data.property_id).maybeSingle();
+          if(propRes.error)throw propRes.error;
           if (propRes.data) setProperty(propRes.data);
         }
         setInspections(inspRes.data || []);
         setContracts(contractRes.data || []);
       }
     } catch (error) {
-      console.error('Error fetching data:', error);
+      setLoadError('Bostadsuppgifterna kunde inte hämtas. Försök igen.');
     } finally {
       setLoading(false);
     }
-  };
+  },[user?.id,user?.organisation_id]);
+  useEffect(()=>{void fetchData();},[fetchData]);
 
   const handleSignContract = async () => {
     if (!signingContract) return;
@@ -377,10 +384,12 @@ Signeringsmetod: Handskriven signatur`,
 
   if (loading) return <LoadingPage />;
 
+  if(loadError)return <div className="space-y-4"><PageHeader title="Min bostad"/><div role="alert" className="vihem-feedback vihem-feedback-error">{loadError}</div><Button variant="secondary" onClick={()=>void fetchData()}>Försök igen</Button></div>;
+
   if (!tenancy || !apartment || !property) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="space-y-5">
+        <div className="mx-auto max-w-6xl">
           <PageHeader title="Min lägenhet" subtitle="Information om din lägenhet" />
           <EmptyState
             icon={<Home className="w-12 h-12" />}
@@ -395,20 +404,23 @@ Signeringsmetod: Handskriven signatur`,
   const contactInfo = property.contact_info as unknown as ContactInfo | null;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        <PageHeader title="Min lägenhet" subtitle="Information om din lägenhet och ditt hyresavtal" />
+    <div className="space-y-5">
+      <div className="mx-auto max-w-6xl">
+        <PageHeader title="Min bostad" subtitle={`${property.address} · ${apartment.apartment_number}`} />
+        <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4"><Button variant="secondary" className="gap-2" onClick={()=>onNavigate('maintenance')}><Wrench size={18}/>Felanmälan</Button><Button variant="secondary" className="gap-2" onClick={()=>onNavigate('chat')}><Phone size={18}/>Kontakta oss</Button><Button variant="secondary" className="gap-2" onClick={()=>onNavigate('documents')}><FileText size={18}/>Dokument</Button><Button variant="secondary" className="gap-2" onClick={()=>onNavigate('laundry')}><Calendar size={18}/>Tvättstuga</Button></div>
+        <Tabs active={section} onChange={value=>setSection(value as typeof section)} tabs={[{key:'home',label:'Bostaden'},{key:'contracts',label:'Avtal'},{key:'inspections',label:'Besiktningar'}]} className="mb-5"/>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
+            <div hidden={section!=='home'} className="space-y-4">
             {/* Property Overview */}
-            <Card className="p-6">
+            <Card className="p-4 sm:p-5">
               <div className="flex items-start justify-between mb-4">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900 mb-1">{property.name}</h2>
                   <div className="flex items-center gap-2 text-slate-500 text-sm">
                     <Building2 className="w-4 h-4" />
-                    <span>{property.address}, {property.zip} {property.city}</span>
+                    <span>{[property.address,[property.zip,property.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}</span>
                   </div>
                 </div>
                 <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center">
@@ -418,54 +430,53 @@ Signeringsmetod: Handskriven signatur`,
               {property.description && (
                 <p className="text-sm text-slate-600 bg-slate-50 rounded-lg p-3">{property.description}</p>
               )}
-            </Card>
 
             {/* Apartment Details */}
-            <Card className="p-6">
+            <div className="mt-4 border-t border-vihem-line pt-4">
               <h3 className="text-base font-semibold text-slate-800 mb-4">Lägenhetsinformation</h3>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <div className="flex items-start gap-3">
                   <div className="p-2 bg-blue-50 rounded-lg"><DoorOpen className="w-4 h-4 text-blue-600" /></div>
                   <div>
-                    <p className="text-xs text-slate-500 uppercase font-medium">Lägenhetsnr</p>
+                    <p className="text-sm text-vihem-muted">Lägenhetsnr</p>
                     <p className="font-semibold text-slate-800">{apartment.apartment_number}</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
-                  <div className="p-2 bg-green-50 rounded-lg"><Ruler className="w-4 h-4 text-green-600" /></div>
+                  <div className="p-2 bg-blue-50 rounded-lg"><Ruler className="w-4 h-4 text-blue-600" /></div>
                   <div>
-                    <p className="text-xs text-slate-500 uppercase font-medium">Storlek</p>
+                    <p className="text-sm text-vihem-muted">Storlek</p>
                     <p className="font-semibold text-slate-800">{apartment.size} m²</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
-                  <div className="p-2 bg-teal-50 rounded-lg"><Home className="w-4 h-4 text-teal-600" /></div>
+                  <div className="p-2 bg-blue-50 rounded-lg"><Home className="w-4 h-4 text-blue-600" /></div>
                   <div>
-                    <p className="text-xs text-slate-500 uppercase font-medium">Rum</p>
+                    <p className="text-sm text-vihem-muted">Rum</p>
                     <p className="font-semibold text-slate-800">{apartment.rooms}</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
-                  <div className="p-2 bg-orange-50 rounded-lg"><FileText className="w-4 h-4 text-orange-600" /></div>
+                  <div className="p-2 bg-blue-50 rounded-lg"><FileText className="w-4 h-4 text-blue-600" /></div>
                   <div>
-                    <p className="text-xs text-slate-500 uppercase font-medium">Hyra/mån</p>
-                    <p className="font-semibold text-slate-800">{formatCurrency(apartment.rent)}</p>
+                    <p className="text-sm text-vihem-muted">Hyra/mån</p>
+                    <p className="font-semibold text-slate-800">{formatCurrency(tenancy.monthly_rent)}</p>
                   </div>
                 </div>
                 {apartment.floor != null && (
                   <div className="flex items-start gap-3">
-                    <div className="p-2 bg-red-50 rounded-lg"><Building2 className="w-4 h-4 text-red-600" /></div>
+                    <div className="p-2 bg-blue-50 rounded-lg"><Building2 className="w-4 h-4 text-blue-600" /></div>
                     <div>
-                      <p className="text-xs text-slate-500 uppercase font-medium">Våning</p>
+                      <p className="text-sm text-vihem-muted">Våning</p>
                       <p className="font-semibold text-slate-800">{apartment.floor}</p>
                     </div>
                   </div>
                 )}
                 {apartment.storage && (
                   <div className="flex items-start gap-3">
-                    <div className="p-2 bg-yellow-50 rounded-lg"><Package className="w-4 h-4 text-yellow-600" /></div>
+                    <div className="p-2 bg-blue-50 rounded-lg"><Package className="w-4 h-4 text-blue-600" /></div>
                     <div>
-                      <p className="text-xs text-slate-500 uppercase font-medium">Förråd</p>
+                      <p className="text-sm text-vihem-muted">Förråd</p>
                       <p className="font-semibold text-slate-800">Ja</p>
                     </div>
                   </div>
@@ -474,39 +485,42 @@ Signeringsmetod: Handskriven signatur`,
                   <div className="flex items-start gap-3">
                     <div className="p-2 bg-slate-100 rounded-lg"><Car className="w-4 h-4 text-slate-600" /></div>
                     <div>
-                      <p className="text-xs text-slate-500 uppercase font-medium">Parkering</p>
+                      <p className="text-sm text-vihem-muted">Parkering</p>
                       <p className="font-semibold text-slate-800">Ja</p>
                     </div>
                   </div>
                 )}
               </div>
-            </Card>
+            </div>
 
             {/* Tenancy Information */}
-            <Card className="p-6">
+            <div className="mt-4 border-t border-vihem-line pt-4">
               <h3 className="text-base font-semibold text-slate-800 mb-4">Hyresförhållande</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex items-start gap-3">
                   <div className="p-2 bg-blue-50 rounded-lg"><Calendar className="w-4 h-4 text-blue-600" /></div>
                   <div>
-                    <p className="text-xs text-slate-500 uppercase font-medium">Startdatum</p>
+                    <p className="text-sm text-vihem-muted">Startdatum</p>
                     <p className="font-semibold text-slate-800">{formatDate(tenancy.start_date)}</p>
                   </div>
                 </div>
                 {tenancy.end_date && (
                   <div className="flex items-start gap-3">
-                    <div className="p-2 bg-red-50 rounded-lg"><Calendar className="w-4 h-4 text-red-600" /></div>
+                    <div className="p-2 bg-blue-50 rounded-lg"><Calendar className="w-4 h-4 text-blue-600" /></div>
                     <div>
-                      <p className="text-xs text-slate-500 uppercase font-medium">Slutdatum</p>
+                      <p className="text-sm text-vihem-muted">Slutdatum</p>
                       <p className="font-semibold text-slate-800">{formatDate(tenancy.end_date)}</p>
                     </div>
                   </div>
                 )}
               </div>
+            </div>
             </Card>
-
+            </div>
+            <div hidden={section!=='contracts'} className="space-y-4">
+            {agreementError&&<div role="alert" className="vihem-feedback vihem-feedback-error">{agreementError}<Button variant="secondary" size="sm" onClick={()=>void fetchData()}>Försök igen</Button></div>}
             {/* Contracts */}
-            <Card className="p-6">
+            <Card className="p-4 sm:p-5">
               <div className="flex items-center gap-2 mb-4">
                 <PenLine className="w-5 h-5 text-blue-600" />
                 <h3 className="text-base font-semibold text-slate-800">Hyresavtal</h3>
@@ -552,7 +566,7 @@ Signeringsmetod: Handskriven signatur`,
                 "Hyresavtal" one above -- different data source, never
                 merged. */}
             {agreementsV2.length > 0 && (
-              <Card className="p-6">
+              <Card className="p-4 sm:p-5">
                 <div className="flex items-center gap-2 mb-4">
                   <FileSignature className="w-5 h-5 text-blue-600" />
                   <h3 className="text-base font-semibold text-slate-800">Avtal</h3>
@@ -587,11 +601,14 @@ Signeringsmetod: Handskriven signatur`,
             )}
 
             {/* Inspections */}
-            <Card className="p-6">
+            </div>
+            <div hidden={section!=='inspections'}>
+            <Card className="p-4 sm:p-5">
               <div className="flex items-center gap-2 mb-4">
                 <ClipboardCheck className="w-5 h-5 text-blue-600" />
                 <h3 className="text-base font-semibold text-slate-800">Besiktningsprotokoll</h3>
               </div>
+              {inspections.length>0&&<Button variant="secondary" size="sm" className="mb-4 gap-2" onClick={()=>onNavigate('documents')}><FileText size={16}/>Öppna dokumentarkivet</Button>}
               {inspections.length === 0 ? (
                 <p className="text-sm text-slate-500 text-center py-4">Inga besiktningar genomförda</p>
               ) : (
@@ -607,12 +624,12 @@ Signeringsmetod: Handskriven signatur`,
                             {conditionLabel[insp.overall_condition] || insp.overall_condition}
                           </Badge>
                         </div>
-                        <span className="text-xs text-slate-400">{formatDate(insp.inspection_date)}</span>
+                        <span className="text-sm text-vihem-muted">{formatDate(insp.inspection_date)}</span>
                       </div>
                       {insp.inspector?.name && (
                         <p className="text-xs text-slate-500">Besiktad av: {insp.inspector.name}</p>
                       )}
-                      {insp.notes && <p className="text-xs text-slate-600 mt-1">{insp.notes}</p>}
+                      {insp.notes && <p className="text-sm text-vihem-muted mt-1">{insp.notes}</p>}
                       {insp.action_required && (
                         <p className="text-xs text-amber-700 mt-1 font-medium">Åtgärd krävs: {insp.action_required}</p>
                       )}
@@ -622,6 +639,7 @@ Signeringsmetod: Handskriven signatur`,
               )}
             </Card>
 
+            </div>
             {/* Emergency info */}
             {property.emergency_info && (
               <Card className="p-4 border-orange-200 bg-orange-50">
@@ -638,7 +656,7 @@ Signeringsmetod: Handskriven signatur`,
 
           {/* Sidebar */}
           <div className="space-y-6">
-            <Card className="p-5">
+            {(contactInfo?.property_manager||contactInfo?.phone||contactInfo?.email)&&<Card className="p-5">
               <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
                 <Phone className="w-4 h-4 text-blue-600" />
                 Kontakt
@@ -646,7 +664,7 @@ Signeringsmetod: Handskriven signatur`,
               <div className="space-y-3">
                 {contactInfo?.property_manager && (
                   <div>
-                    <p className="text-xs text-slate-500 uppercase font-medium mb-0.5">Fastighetsskötare</p>
+                    <p className="text-sm text-vihem-muted mb-0.5">Fastighetsskötare</p>
                     <p className="text-sm font-medium text-slate-800">{contactInfo.property_manager}</p>
                   </div>
                 )}
@@ -666,19 +684,11 @@ Signeringsmetod: Handskriven signatur`,
                   <p className="text-sm text-slate-400">Ingen kontaktinfo tillgänglig</p>
                 )}
               </div>
-            </Card>
+            </Card>}
 
             <Card className="p-5">
-              <h3 className="text-base font-semibold text-slate-800 mb-4">Snabblänkar</h3>
+              <h3 className="text-base font-semibold text-slate-800 mb-4">Boendeärenden</h3>
               <div className="space-y-2">
-                <Button onClick={() => onNavigate('documents')} variant="secondary" className="w-full justify-start text-sm gap-2">
-                  <FileText className="w-4 h-4" />
-                  Dokument
-                </Button>
-                <Button onClick={() => onNavigate('maintenance')} variant="secondary" className="w-full justify-start text-sm gap-2">
-                  <Wrench className="w-4 h-4" />
-                  Felanmälningar
-                </Button>
                 <Button onClick={() => onNavigate('termination')} variant="secondary" className="w-full justify-start text-sm gap-2">
                   <FileText className="w-4 h-4" />
                   Säg upp lägenhet
@@ -690,7 +700,7 @@ Signeringsmetod: Handskriven signatur`,
       </div>
 
       {/* Sign Contract Modal */}
-      <Modal open={showSignModal} onClose={() => { setShowSignModal(false); setSignature(''); setSignatureName(''); setSignError(''); setSigningContract(null); bankId.reset(); }} title="Signera hyresavtal" size="lg">
+      <Modal open={showSignModal} onClose={() => { setShowSignModal(false); setSignature(''); setSignatureName(''); setSignError(''); setSigningContract(null); bankId.reset(); }} title="Signera hyresavtal" size="lg" mobileFullscreen>
         {signingContract && (
           <div className="space-y-4">
             {signingContract.contract_content && (
