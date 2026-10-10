@@ -1,8 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BarChart3, Calendar, Download, CheckCircle, XCircle, ChevronRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
   Card,
+  Avatar,
+  SearchInput,
+  Tabs,
+  Input,
   Badge,
   Button,
   Modal,
@@ -31,6 +35,14 @@ const TIME_STATUS_COLORS: Record<string, string> = {
 interface AdminPayrollPageProps { onNavigate: (page: string) => void; }
 export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPageProps) {
   const { labelFor } = useTimeCategories();
+  const [error,setError]=useState('');
+  const [actionError,setActionError]=useState('');
+  const [pending,setPending]=useState(false);
+  const actionLock=useRef(false);
+  const loadSequence=useRef(0);
+  const [search,setSearch]=useState('');
+  const [filter,setFilter]=useState('all');
+  const [confirmAll,setConfirmAll]=useState(false);
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,23 +50,20 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
   const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
-  useEffect(() => {
-    fetchData();
-  }, [selectedMonth]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    if(!/^\d{4}-\d{2}$/.test(selectedMonth))return;
+    const sequence=++loadSequence.current;
     try {
-      setLoading(true);
-      const [year, month] = selectedMonth.split('-');
-      const startOfMonth = `${year}-${month}-01`;
-      const endOfMonth = new Date(parseInt(year), parseInt(month), 0).toISOString().split('T')[0];
-
+      setLoading(true);setError('');
+      const [year,month]=selectedMonth.split('-').map(Number);
+      const startOfMonth=`${selectedMonth}-01`;
+      const nextMonth=`${year+(month===12?1:0)}-${String(month===12?1:month+1).padStart(2,'0')}-01`;
       const [entriesRes, profilesRes] = await Promise.all([
         supabase
           .from('vihem_time_entries')
           .select('*')
           .gte('start_time', `${startOfMonth}T00:00:00`)
-          .lte('start_time', `${endOfMonth}T23:59:59`)
+          .lt('start_time', `${nextMonth}T00:00:00`)
           .order('start_time', { ascending: false }),
         supabase
           .from('vihem_profiles')
@@ -63,14 +72,20 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
           .order('name'),
       ]);
 
+      if(sequence!==loadSequence.current)return;
+      if(entriesRes.error)throw entriesRes.error;
+      if(profilesRes.error)throw profilesRes.error;
       if (entriesRes.data) setTimeEntries(entriesRes.data);
       if (profilesRes.data) setProfiles(profilesRes.data);
     } catch (error) {
-      console.error('Error fetching data:', error);
+      if(sequence===loadSequence.current)setError('Löneunderlaget kunde inte hämtas. Försök igen.');
     } finally {
-      setLoading(false);
+      if(sequence===loadSequence.current)setLoading(false);
     }
-  };
+  },[selectedMonth]);
+  // Sequence guards old period responses; this ref is a request counter, not a DOM node.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{void fetchData();return()=>{loadSequence.current++;};},[fetchData]);
 
   const getEntriesForUser = (userId: string) =>
     timeEntries.filter((e) => e.user_id === userId);
@@ -90,39 +105,28 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
 
   const getAllStats = () => calculateStats(timeEntries);
 
-  const handleApproveAll = async (userId: string) => {
-    try {
-      const entries = getEntriesForUser(userId).filter((e) => e.status !== 'approved');
-      for (const entry of entries) {
-        await supabase.from('vihem_time_entries').update({ status: 'approved' }).eq('id', entry.id);
-      }
-      fetchData();
-    } catch (error) {
-      console.error('Error approving entries:', error);
-    }
+  const changeStatus=async(ids:string[],status:'approved'|'rejected')=>{
+    if(actionLock.current||!ids.length)return;
+    actionLock.current=true;setPending(true);setActionError('');
+    try{
+      const {data,error:saveError}=await supabase.from('vihem_time_entries').update({status}).in('id',ids).select('id,status');
+      if(saveError)throw saveError;
+      if(data?.length!==ids.length)throw new Error('Alla tidposter kunde inte uppdateras. Läs om underlaget innan du fortsätter.');
+      setTimeEntries(entries=>entries.map(entry=>ids.includes(entry.id)?{...entry,status}:entry));
+      setConfirmAll(false);
+    }catch(err){setActionError(err instanceof Error?err.message:'Ändringen kunde inte sparas. Försök igen.');}
+    finally{actionLock.current=false;setPending(false);}
   };
-
-  const handleApproveEntry = async (entryId: string) => {
-    try {
-      await supabase.from('vihem_time_entries').update({ status: 'approved' }).eq('id', entryId);
-      fetchData();
-    } catch (error) {
-      console.error('Error approving entry:', error);
-    }
-  };
-
-  const handleRejectEntry = async (entryId: string) => {
-    try {
-      await supabase.from('vihem_time_entries').update({ status: 'rejected' }).eq('id', entryId);
-      fetchData();
-    } catch (error) {
-      console.error('Error rejecting entry:', error);
-    }
+  const exportSummary=()=>{
+    const quote=(value:string)=>'"'+(/^[=+@-]/.test(value)?"'":'')+value.replace(/"/g,'""')+'"';
+    const lines=[['Namn','Månad','Totalt (min)','Godkänt (min)','Inlämnat (min)','Utkast (min)','Avvisat (min)'],...profiles.filter(p=>getEntriesForUser(p.id).length).map(p=>{const stats=calculateStats(getEntriesForUser(p.id));return[p.name||'',selectedMonth,...[stats.total,stats.approved,stats.submitted,stats.draft,stats.rejected].map(String)];})];
+    const url=URL.createObjectURL(new Blob(['\uFEFF'+lines.map(row=>row.map(quote).join(';')).join('\r\n')],{type:'text/csv;charset=utf-8'}));
+    const link=document.createElement('a');link.href=url;link.download=`loneunderlag-${selectedMonth}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   };
 
   if (loading) return <LoadingPage />;
 
-  const staffWithEntries = profiles.filter((p) => getEntriesForUser(p.id).length > 0);
+  const staffWithEntries = profiles.filter(p=>getEntriesForUser(p.id).length>0&&(p.name||'').toLowerCase().includes(search.toLowerCase())&&(filter==='all'||getEntriesForUser(p.id).some(entry=>entry.status==='submitted'||entry.status==='draft')));
   const allStats = getAllStats();
 
   return (
@@ -133,10 +137,10 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
           subtitle="Översikt över timmar och tidposter per månad"
         />
 
-        <div className="flex items-center justify-between gap-4 mb-8">
+        <div className="flex flex-wrap items-end justify-between gap-4 mb-5">
           <div className="flex items-center gap-2">
             <Calendar className="w-5 h-5 text-slate-500" />
-            <input
+            <Input label="Period"
               type="month"
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
@@ -146,39 +150,25 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
           <Button
             variant="secondary"
             className="gap-2"
-            onClick={() => alert('Exportfunktion ej implementerad')}
+            onClick={exportSummary}
           >
             <Download className="w-4 h-4" />
             Exportera
           </Button>
         </div>
 
-        {/* Summary cards */}
-        {staffWithEntries.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-            <Card className="p-5">
-              <p className="text-sm text-slate-500 mb-1">Totalt timmar (all personal)</p>
-              <p className="text-2xl font-bold text-slate-900">{formatMinutes(allStats.total)}</p>
-            </Card>
-            <Card className="p-5">
-              <p className="text-sm text-slate-500 mb-1">Godkända timmar</p>
-              <p className="text-2xl font-bold text-green-700">{formatMinutes(allStats.approved)}</p>
-            </Card>
-            <Card className="p-5">
-              <p className="text-sm text-slate-500 mb-1">Väntande timmar</p>
-              <p className="text-2xl font-bold text-blue-700">{formatMinutes(allStats.submitted + allStats.draft)}</p>
-            </Card>
-          </div>
-        )}
-
+        <div className="mb-5 flex flex-wrap gap-x-8 gap-y-3 border-y border-vihem-line py-4"><div><p className="text-sm text-vihem-muted">Totalt</p><p className="text-xl font-semibold tabular-nums">{formatMinutes(allStats.total)}</p></div><div><p className="text-sm text-vihem-muted">Godkänt</p><p className="text-xl font-semibold tabular-nums">{formatMinutes(allStats.approved)}</p></div><div><p className="text-sm text-vihem-muted">Att granska</p><p className="text-xl font-semibold tabular-nums">{formatMinutes(allStats.submitted+allStats.draft)}</p></div></div>
+        {error&&<div role="alert" className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-800">{error}<Button variant="secondary" onClick={()=>void fetchData()}>Försök igen</Button></div>}
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center"><SearchInput value={search} onChange={setSearch} placeholder="Sök medarbetare…"/><Tabs active={filter} onChange={setFilter} tabs={[{key:'all',label:'Alla'},{key:'pending',label:'Att granska'}]}/></div>
+        <div className="divide-y divide-vihem-line md:hidden">{staffWithEntries.map(profile=>{const stats=calculateStats(getEntriesForUser(profile.id));return <button key={profile.id} className="vihem-focus flex w-full items-center gap-3 py-4 text-left" onClick={()=>{setSelectedUser(profile);setShowDetailModal(true);setActionError('');}}><Avatar userId={profile.id} name={profile.name}/><span className="min-w-0 flex-1"><span className="block font-medium">{profile.name}</span><span className="block text-sm text-vihem-muted">{formatMinutes(stats.submitted+stats.draft)} att granska</span></span><span className="font-semibold tabular-nums">{formatMinutes(stats.total)}</span><ChevronRight className="h-4 w-4"/></button>;})}</div>
         {staffWithEntries.length === 0 ? (
           <EmptyState
             icon={<BarChart3 className="w-12 h-12" />}
-            title="Inga tidposter"
-            description="Ingen data för vald månad"
+            title={timeEntries.length?'Inga medarbetare matchar':'Inga tidposter'}
+            description={timeEntries.length?'Ändra sökning eller filter.':'Ingen data för vald månad.'}
           />
         ) : (
-          <Card>
+          <Card className="hidden md:block">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -202,28 +192,20 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
                           {formatMinutes(stats.total)}
                         </td>
                         <td className="py-3 px-4">
-                          <Badge className="text-green-700 bg-green-100">
-                            {formatMinutes(stats.approved)}
-                          </Badge>
+                          <span className="tabular-nums text-vihem-muted">{formatMinutes(stats.approved)}</span>
                         </td>
                         <td className="py-3 px-4">
-                          <Badge className="text-blue-700 bg-blue-100">
-                            {formatMinutes(stats.submitted)}
-                          </Badge>
+                          <span className="tabular-nums text-vihem-muted">{formatMinutes(stats.submitted)}</span>
                         </td>
                         <td className="py-3 px-4">
-                          <Badge className="text-slate-600 bg-slate-100">
-                            {formatMinutes(stats.draft)}
-                          </Badge>
+                          <span className="tabular-nums text-vihem-muted">{formatMinutes(stats.draft)}</span>
                         </td>
                         <td className="py-3 px-4">
-                          <Badge className="text-red-700 bg-red-100">
-                            {formatMinutes(stats.rejected)}
-                          </Badge>
+                          <span className="tabular-nums text-vihem-muted">{formatMinutes(stats.rejected)}</span>
                         </td>
                         <td className="py-3 px-4 text-right">
                           <button
-                            onClick={() => { setSelectedUser(userProfile); setShowDetailModal(true); }}
+                            onClick={() => { setSelectedUser(userProfile); setShowDetailModal(true);setActionError(''); }}
                             className="text-blue-600 hover:text-blue-700 font-medium text-sm inline-flex items-center gap-1"
                           >
                             Detaljer
@@ -240,15 +222,17 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
         )}
       </div>
 
-      <Modal
+      <Modal mobileFullscreen
         open={showDetailModal}
-        onClose={() => { setShowDetailModal(false); setSelectedUser(null); }}
+        onClose={() => { if(pending)return;setShowDetailModal(false); setSelectedUser(null);setActionError(''); }}
         title={`Tidposter — ${selectedUser?.name}`}
         size="lg"
+        toolbar={actionError&&<p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{actionError}</p>}
+        footer={<><Button variant="secondary" disabled={pending} onClick={()=>setShowDetailModal(false)}>Stäng</Button><Button disabled={!selectedUser||!getEntriesForUser(selectedUser.id).some(e=>e.status!=='approved')} loading={pending} onClick={()=>setConfirmAll(true)}>Godkänn alla</Button></>}
       >
-        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+        <div className="divide-y divide-vihem-line">
           {selectedUser && getEntriesForUser(selectedUser.id).map((entry) => (
-            <div key={entry.id} className="border border-slate-200 rounded-lg p-4">
+            <div key={entry.id} className="py-4">
               <div className="flex items-start justify-between mb-3">
                 <div>
                   <p className="font-semibold text-slate-900 text-sm">
@@ -286,13 +270,13 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
 
               <div className="flex gap-2 pt-3 border-t border-slate-100">
                 {entry.status !== 'approved' && (
-                  <Button size="sm" variant="primary" onClick={() => handleApproveEntry(entry.id)} className="gap-1">
+                  <Button size="sm" variant="primary" disabled={pending} onClick={() => void changeStatus([entry.id],'approved')} className="gap-1">
                     <CheckCircle className="w-3 h-3" />
                     Godkänn
                   </Button>
                 )}
                 {entry.status !== 'rejected' && (
-                  <Button size="sm" variant="secondary" onClick={() => handleRejectEntry(entry.id)} className="gap-1">
+                  <Button size="sm" variant="secondary" disabled={pending} onClick={() => void changeStatus([entry.id],'rejected')} className="gap-1">
                     <XCircle className="w-3 h-3" />
                     Avvisa
                   </Button>
@@ -301,20 +285,9 @@ export function AdminPayrollPage({ onNavigate: _onNavigate }: AdminPayrollPagePr
             </div>
           ))}
 
-          {selectedUser && (
-            <div className="pt-2 border-t border-slate-200 sticky bottom-0 bg-white pb-1">
-              <Button
-                variant="primary"
-                onClick={() => handleApproveAll(selectedUser.id)}
-                className="w-full gap-2"
-              >
-                <CheckCircle className="w-4 h-4" />
-                Godkänn alla
-              </Button>
-            </div>
-          )}
         </div>
       </Modal>
+      <Modal open={confirmAll} onClose={()=>{if(!pending)setConfirmAll(false);}} title="Godkänn månadens tidposter?" footer={<><Button variant="secondary" disabled={pending} onClick={()=>setConfirmAll(false)}>Avbryt</Button><Button loading={pending} onClick={()=>selectedUser&&void changeStatus(getEntriesForUser(selectedUser.id).filter(e=>e.status!=='approved').map(e=>e.id),'approved')}>Godkänn tidposter</Button></>}><p>{selectedUser?.name} · {selectedMonth}. Även utkast och tidigare avvisade tidposter ingår enligt den befintliga funktionen. Granska underlaget först.</p>{actionError&&<p role="alert">{actionError}</p>}</Modal>
     </div>
   );
 }

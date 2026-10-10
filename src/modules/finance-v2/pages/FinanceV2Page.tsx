@@ -11,10 +11,10 @@
 // too but moved to its own standalone page (src/pages/InstallmentPlansPage.tsx)
 // -- it isn't rewired to Accounted and doesn't belong behind this page's
 // "you need a company link first" framing.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
-import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select } from '../../../components/ui';
+import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Tabs, SearchInput } from '../../../components/ui';
 import { formatCurrency, formatDate, formatDateTime } from '../../../lib/utils';
 import {
   AccountedIntegrationError,
@@ -84,6 +84,8 @@ export function FinanceV2Page() {
   const [tab, setTab] = useState<TabKey>('overview');
   const [companies, setCompanies] = useState<VihemCompany[]>([]);
   const [companyId, setCompanyId] = useState('');
+  const linkSequence=useRef(0);
+  const [linkLoading,setLinkLoading]=useState(false);
   const [companyLink, setCompanyLink] = useState<AccountedCompanyLink | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -113,15 +115,20 @@ export function FinanceV2Page() {
   }, [loadCompanies]);
 
   const loadCompanyLink = useCallback(async () => {
+    const sequence=++linkSequence.current;
+    setCompanyLink(null);setError('');
     if (!companyId) {
+      setLinkLoading(false);
       setCompanyLink(null);
       return;
     }
+    setLinkLoading(true);
     try {
       const link = await getCompanyLink(companyId);
-      setCompanyLink(link);
+      if(sequence===linkSequence.current)setCompanyLink(link);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Kunde inte läsa bolagskopplingen.');
+      if(sequence===linkSequence.current)setError(err instanceof Error ? err.message : 'Kunde inte läsa bolagskopplingen.');
+    }finally{if(sequence===linkSequence.current)setLinkLoading(false);
     }
   }, [companyId]);
 
@@ -135,8 +142,8 @@ export function FinanceV2Page() {
     <div className="p-4 md:p-6">
       <PageHeader
         icon={Landmark}
-        title="Ekonomi V2 (beta)"
-        subtitle="Grunden för Accounted-integrationen. Fakturering, avdrag/tillägg och underlag hanteras fortfarande i Ekonomi (legacy) tills de flyttas hit."
+        title="Ekonomi V2"
+        subtitle="Fakturaunderlag, justeringar och bolagets koppling till Accounted."
       />
 
       {companies.length === 0 ? (
@@ -153,7 +160,7 @@ export function FinanceV2Page() {
             <Select
               label="Bolag"
               value={companyId}
-              onChange={(e) => setCompanyId(e.target.value)}
+              onChange={(e) => {linkSequence.current++;setCompanyLink(null);setCompanyId(e.target.value);}}
               options={companies.map((c) => ({ value: c.id, label: c.name }))}
             />
           </div>
@@ -162,25 +169,10 @@ export function FinanceV2Page() {
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
           )}
 
-          <div className="mt-4 flex gap-1 overflow-x-auto border-b border-slate-200">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => setTab(t.key)}
-                className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                  tab === t.key
-                    ? 'border-blue-600 text-blue-700'
-                    : 'border-transparent text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-4">
-            {tab === 'overview' && <OverviewTab companyLink={companyLink} />}
+          <div className="mt-5"><Tabs active={tab} onChange={key=>setTab(key as TabKey)} tabs={TABS}/></div>
+          <div className="mt-4" key={companyId}>
+            {linkLoading?<p role="status" className="py-6 text-sm text-vihem-muted">Hämtar bolagets uppgifter…</p>:<>
+            {tab === 'overview' && <OverviewTab companyLink={companyLink} onSelect={setTab} />}
             {tab === 'company-link' && (
               <CompanyLinkTab companyId={companyId} companyLink={companyLink} onSaved={loadCompanyLink} />
             )}
@@ -192,6 +184,7 @@ export function FinanceV2Page() {
             )}
             {tab === 'invoices' && <InvoicesTab companyLink={companyLink} />}
             {tab === 'upcoming' && <UpcomingTab />}
+            </>}
           </div>
         </>
       )}
@@ -199,42 +192,24 @@ export function FinanceV2Page() {
   );
 }
 
-function OverviewTab({ companyLink }: { companyLink: AccountedCompanyLink | null }) {
+function OverviewTab({ companyLink,onSelect }: { companyLink: AccountedCompanyLink | null;onSelect:(tab:TabKey)=>void }) {
   if (!companyLink) {
     return (
       <Card>
         <EmptyState
           icon={Link2}
           title="Ingen Accounted-koppling ännu"
-          description="Gå till fliken Bolagskoppling för att koppla bolaget mot en självhostad Accounted-instans."
+          description="Koppla bolaget för att kunna skapa fakturor i Accounted."
+          action={<Button onClick={()=>onSelect('company-link')}>Koppla bolaget</Button>}
         />
       </Card>
     );
   }
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-      <Card>
-        <p className="text-xs font-medium uppercase text-slate-500">Status</p>
-        <div className="mt-2">
-          <Badge
-            text={companyLink.enabled ? 'Aktiverad' : 'Inaktiverad'}
-            className={companyLink.enabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}
-          />
-        </div>
-      </Card>
-      <Card>
-        <p className="text-xs font-medium uppercase text-slate-500">Senaste hälsokontroll</p>
-        <p className="mt-2 text-sm text-slate-700">
-          {companyLink.last_health_status === 'ok' ? 'OK' : companyLink.last_health_status === 'error' ? 'Fel' : 'Ej testad'}
-        </p>
-        {companyLink.last_health_check_at && (
-          <p className="mt-1 text-xs text-slate-400">{formatDateTime(companyLink.last_health_check_at)}</p>
-        )}
-      </Card>
-      <Card>
-        <p className="text-xs font-medium uppercase text-slate-500">Accounted company-id</p>
-        <p className="mt-2 break-all text-sm text-slate-700">{companyLink.accounted_company_id}</p>
-      </Card>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-3 border-y border-vihem-line py-4"><Badge text={companyLink.enabled?'Accounted aktiverat':'Accounted avstängt'}/><p className="text-sm text-vihem-muted">{companyLink.last_health_status==='ok'?'Anslutningen fungerar':companyLink.last_health_status==='error'?'Anslutningen behöver kontrolleras':'Anslutningen är inte testad'}</p><Button variant="secondary" size="sm" onClick={()=>onSelect('company-link')}>Hantera kopplingen</Button></div>
+      <h2 className="text-lg font-semibold">Vad vill du göra?</h2>
+      <div className="divide-y divide-vihem-line">{[{key:'billing' as const,title:'Granska hyresunderlag',detail:'Välj period och kontrollera vad som ska faktureras.'},{key:'project-billing' as const,title:'Fakturera kundprojekt',detail:'Granska projektens fakturaunderlag.'},{key:'adjustments' as const,title:'Hantera avdrag och tillägg',detail:'Engångsbelopp och återkommande justeringar.'},{key:'invoices' as const,title:'Följ upp fakturor',detail:'Sök fakturanummer och kontrollera betalstatus.'}].map(item=><button key={item.key} className="vihem-focus block w-full py-4 text-left" onClick={()=>onSelect(item.key)}><span className="block font-medium text-vihem-ink">{item.title}</span><span className="mt-1 block text-sm text-vihem-muted">{item.detail}</span></button>)}</div>
     </div>
   );
 }
@@ -691,7 +666,7 @@ function ProjectBillingTab({ companyId, companyLink }: { companyId: string; comp
                   <th className="py-2 pr-4" />
                   <th className="py-2 pr-4">Projekt</th>
                   <th className="py-2 pr-4">Underlag</th>
-                  <th className="py-2 pr-4">Belopp</th>
+                  <th className="py-2 pr-4 text-right">Belopp</th>
                   <th className="py-2 pr-4">Resultat</th>
                   <th className="py-2 pr-4" />
                 </tr>
@@ -892,7 +867,7 @@ function AdjustmentsTab({ companyId }: { companyId: string }) {
                 <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase text-slate-500">
                   <th className="py-2 pr-4">Mål</th>
                   <th className="py-2 pr-4">Beskrivning</th>
-                  <th className="py-2 pr-4">Belopp</th>
+                  <th className="py-2 pr-4 text-right">Belopp</th>
                   <th className="py-2 pr-4">Typ</th>
                   <th className="py-2 pr-4">Period</th>
                   <th className="py-2 pr-4">Använt</th>
@@ -957,7 +932,7 @@ function AdjustmentsTab({ companyId }: { companyId: string }) {
               <thead>
                 <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase text-slate-500">
                   <th className="py-2 pr-4">Period</th>
-                  <th className="py-2 pr-4">Belopp</th>
+                  <th className="py-2 pr-4 text-right">Belopp</th>
                   <th className="py-2 pr-4">Använt av</th>
                   <th className="py-2 pr-4">Tidpunkt</th>
                 </tr>
@@ -1299,6 +1274,8 @@ function ScannerTab({
 }
 
 function InvoicesTab({ companyLink }: { companyLink: AccountedCompanyLink | null }) {
+  const [search,setSearch]=useState('');
+  const [status,setStatus]=useState('all');
   const [invoices, setInvoices] = useState<AccountedInvoiceLink[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -1324,16 +1301,17 @@ function InvoicesTab({ companyLink }: { companyLink: AccountedCompanyLink | null
     load();
   }, [load]);
 
+  const filtered=invoices.filter(inv=>(status==='all'||inv.status===status)&&[inv.accounted_invoice_number||'',INVOICE_STATUS_LABELS[inv.status]||inv.status].join(' ').toLowerCase().includes(search.toLowerCase()));
   if (!companyLink) {
     return (
-      <Card>
+      <Card className="p-4 sm:p-5">
         <EmptyState icon={ListChecks} title="Koppla bolaget först" description="Fakturor visas här när bolaget är kopplat till Accounted." />
       </Card>
     );
   }
 
   return (
-    <Card>
+    <Card className="p-4 sm:p-5">
       <div className="mb-3 flex items-center justify-between">
         <p className="text-sm font-medium text-slate-700">Fakturor skapade via Finance V2</p>
         <Button variant="secondary" size="sm" onClick={load} loading={loading}>
@@ -1341,39 +1319,40 @@ function InvoicesTab({ companyLink }: { companyLink: AccountedCompanyLink | null
         </Button>
       </div>
       {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
-      {invoices.length === 0 ? (
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row"><div className="min-w-0 flex-1"><SearchInput value={search} onChange={setSearch} placeholder="Sök fakturanummer eller status…"/></div><Select label="Status" value={status} onChange={e=>setStatus(e.target.value)} options={[{value:'all',label:'Alla statusar'},...Object.entries(INVOICE_STATUS_LABELS).map(([value,label])=>({value,label}))]}/></div>
+      {loading?<p role="status" className="py-6 text-sm text-vihem-muted">Hämtar fakturor…</p>:filtered.length === 0 ? (
         <EmptyState
           icon={ListChecks}
-          title="Inga fakturor ännu"
-          description="Rent- och kundprojektfakturering mot Accounted är inte kopplat in i det här steget."
+          title={invoices.length?'Inga fakturor matchar':'Inga fakturor ännu'}
+          description={invoices.length?'Ändra sökning eller statusfilter.':'Fakturor visas här när fakturaunderlag har behandlats.'}
         />
       ) : (
-        <div className="overflow-x-auto">
+        <><div className="divide-y divide-vihem-line md:hidden">{filtered.map(inv=><div key={inv.id} className="py-4"><div className="flex justify-between gap-3"><p className="font-medium">{inv.accounted_invoice_number||'Utkast'}</p><p className="font-semibold tabular-nums">{inv.total!==null?formatCurrency(inv.total):'–'}</p></div><div className="mt-2 flex justify-between gap-3 text-sm"><span className="text-vihem-muted">{INVOICE_STATUS_LABELS[inv.status]||inv.status}</span><span>Kvar {inv.remaining_amount!==null?formatCurrency(inv.remaining_amount):'–'}</span></div><p className="mt-1 text-sm text-vihem-muted">Synkad {formatDateTime(inv.last_synced_at)}</p></div>)}</div><div className="hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase text-slate-500">
                 <th className="py-2 pr-4">Fakturanr</th>
                 <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Belopp</th>
-                <th className="py-2 pr-4">Kvar att betala</th>
+                <th className="py-2 pr-4 text-right">Belopp</th>
+                <th className="py-2 pr-4 text-right">Kvar att betala</th>
                 <th className="py-2 pr-4">Senast synkad</th>
               </tr>
             </thead>
             <tbody>
-              {invoices.map((inv) => (
+              {filtered.map((inv) => (
                 <tr key={inv.id} className="border-b border-slate-100">
                   <td className="py-2 pr-4">{inv.accounted_invoice_number || '(utkast)'}</td>
                   <td className="py-2 pr-4">
                     <Badge text={INVOICE_STATUS_LABELS[inv.status] ?? inv.status} />
                   </td>
-                  <td className="py-2 pr-4">{inv.total !== null ? formatCurrency(inv.total) : '–'}</td>
-                  <td className="py-2 pr-4">{inv.remaining_amount !== null ? formatCurrency(inv.remaining_amount) : '–'}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{inv.total !== null ? formatCurrency(inv.total) : '–'}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{inv.remaining_amount !== null ? formatCurrency(inv.remaining_amount) : '–'}</td>
                   <td className="py-2 pr-4 text-slate-500">{formatDateTime(inv.last_synced_at)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+        </div></>
       )}
     </Card>
   );
@@ -1381,7 +1360,7 @@ function InvoicesTab({ companyLink }: { companyLink: AccountedCompanyLink | null
 
 function UpcomingTab() {
   return (
-    <Card>
+    <Card className="p-4 sm:p-5">
       <EmptyState
         icon={Sparkles}
         title="Kommande i Finance V2"
