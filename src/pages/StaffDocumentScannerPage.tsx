@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Camera, CheckCircle2, FileCheck2, ReceiptText, Send } from 'lucide-react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { DocumentCapture, type DocumentCaptureKind } from '../components/DocumentCapture';
@@ -28,6 +29,9 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [scanResetKey, setScanResetKey] = useState(0);
+
+  const submitLock = useRef(false);
+  useUnsavedChanges({ file: file ? [file.name, file.size, file.lastModified] : null, notes }, true);
 
   const selectedCompany = useMemo(
     () => companies.find(company => company.id === companyId) ?? null,
@@ -60,11 +64,13 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
   }, [user?.organisation_id]);
 
   const submitScan = async () => {
-    if (!file || !companyId) return;
+    if (!file || !companyId || submitLock.current) return;
+    submitLock.current = true;
     setSaving(true);
     setError('');
     setSuccess('');
 
+    try {
     const fileBase64 = await fileToBase64(file);
     const { data, error: submitError } = await supabase.functions.invoke('vihem-ingest-supplier-invoice', {
       body: {
@@ -81,7 +87,6 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
 
     if (submitError || data?.error) {
       setError(data?.error || submitError?.message || 'Kunde inte skicka underlaget.');
-      setSaving(false);
       return;
     }
 
@@ -103,12 +108,13 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
         });
         if (archived) {
           if (data.document_id) {
-            await supabase.from('vihem_documents').update({
+            const { error: registryError } = await supabase.from('vihem_documents').update({
               drive_file_id: archived.id,
               drive_web_url: archived.webViewLink || null,
               drive_folder_id: archived.folder_id || null,
               drive_synced_at: new Date().toISOString(),
             }).eq('id', data.document_id);
+            if (registryError) throw registryError;
           }
           driveMessage = ' En kopia har sparats på Google Drive.';
         }
@@ -122,7 +128,9 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
     setFile(null);
     setNotes('');
     setScanResetKey(prev => prev + 1);
-    setSaving(false);
+    } catch {
+      setError('Kunde inte läsa eller skicka filen. Underlaget finns kvar för ett nytt försök.');
+    } finally { submitLock.current = false; setSaving(false); }
   };
 
   if (loading) {
@@ -135,7 +143,7 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 pb-24">
-      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-5 shadow-sm sm:px-6">
+      <div className="px-4 py-5 sm:px-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex items-center gap-3">
@@ -157,12 +165,12 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
       </div>
 
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
           {error}
         </div>
       )}
       {success && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+        <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
           <CheckCircle2 className="mr-2 inline h-4 w-4" />
           {success}
         </div>
@@ -178,9 +186,9 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
           />
         </Card>
       ) : (
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
-          <div className="space-y-4">
-            <Card className="p-4 sm:p-5">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_19rem]">
+          <div className="space-y-6 rounded-2xl bg-white p-4 sm:p-6">
+            <section>
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="font-bold text-slate-950">Vad vill du skicka in?</h2>
                 <span className="text-xs font-medium text-slate-500">Steg 1 av 3</span>
@@ -190,46 +198,47 @@ export function StaffDocumentScannerPage({ onNavigate }: StaffDocumentScannerPag
                   label="Typ av underlag"
                   value={documentKind}
                   options={documentKindOptions}
-                  onChange={event => {
-                    setDocumentKind(event.target.value as DocumentCaptureKind);
-                    setFile(null);
-                  }}
+                  disabled={saving}
+                  onChange={event => setDocumentKind(event.target.value as DocumentCaptureKind)}
                 />
                 <Select
+                  disabled={saving}
                   label="Bolag"
                   value={companyId}
                   options={companies.map(company => ({ value: company.id, label: company.name }))}
                   onChange={event => setCompanyId(event.target.value)}
                 />
               </div>
-            </Card>
+            </section>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+            <div className="border-y border-slate-100 py-5">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="font-bold text-slate-950">Steg 2: fotografera eller välj fil</h2>
                 <span className="text-xs font-medium text-slate-500">{file ? 'Klar' : 'Ej klar'}</span>
               </div>
-              <DocumentCapture documentKind={documentKind} file={file} onFileChange={setFile} resetKey={scanResetKey} />
+              <fieldset disabled={saving}><DocumentCapture documentKind={documentKind} file={file} onFileChange={setFile} resetKey={scanResetKey} /></fieldset>
             </div>
 
-            <Card className="p-4 sm:p-5">
+            <section>
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="font-bold text-slate-950">Steg 3: skicka till granskning</h2>
                 <span className="text-xs font-medium text-slate-500">Admin granskar</span>
               </div>
               <Textarea
+                disabled={saving}
                 label="Kort kommentar till admin"
                 value={notes}
                 onChange={event => setNotes(event.target.value)}
                 placeholder="Exempel: Material till badrum lgh 14, betalt med företagskort."
               />
-              <div className="mt-4 flex justify-end">
+              <div className="sticky bottom-0 mt-4 flex flex-wrap items-center justify-between gap-3 bg-white py-3">
+                <p className="text-sm text-slate-500">{file ? `${file.name} · ${(file.size / 1024 / 1024).toLocaleString("sv-SE", {maximumFractionDigits:1})} MB` : "Välj ett underlag för att fortsätta"}</p>
                 <Button onClick={submitScan} loading={saving} disabled={!file || !companyId}>
                   <Send className="h-4 w-4" />
                   Skicka till granskning
                 </Button>
               </div>
-            </Card>
+            </section>
           </div>
 
           <Card className="h-fit p-4 sm:p-5">

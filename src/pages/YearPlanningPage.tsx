@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   CalendarDays,
   CheckCircle2,
@@ -14,7 +14,8 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../components/ui';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, SearchInput, Select, Textarea } from '../components/ui';
 import { formatDate } from '../lib/utils';
 import type { PlanningCategory, PlanningItem, PlanningItemStatus, PlanningItemType, Profile } from '../types';
 
@@ -259,8 +260,13 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedMonth, setSelectedMonth] = useState<number | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<PlanningItemStatus | 'active' | 'all'>('active');
-  const [viewMode, setViewMode] = useState<PlanningViewMode>('wheel');
+  const [viewMode, setViewMode] = useState<PlanningViewMode>('list');
   const [visibleTypes, setVisibleTypes] = useState<PlanningItemType[]>(defaultCategoryRows.map(category => category.category_key));
+  const [search, setSearch] = useState('');
+  const [discard, setDiscard] = useState(false);
+  const saveLock = useRef(false);
+  const dirty = useUnsavedChanges(form, showModal);
+  const closeEditor = () => { if (saving) return; if (dirty) setDiscard(true); else { setShowModal(false); setEditingItem(null); } };
   const canManageCategories = user?.role === 'admin' || user?.role === 'superadmin';
 
   useEffect(() => {
@@ -348,7 +354,7 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
   }
 
   async function handleSave() {
-    if (!user?.organisation_id) return;
+    if (!user?.organisation_id || saveLock.current) return;
     setSaveError('');
 
     if (!form.title.trim()) {
@@ -370,6 +376,7 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
     }
 
     try {
+      saveLock.current = true;
       setSaving(true);
       const payload = {
         organisation_id: user.organisation_id,
@@ -414,6 +421,7 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
     } catch (error: any) {
       setSaveError(error.message || 'Kunde inte spara planeringspunkten.');
     } finally {
+      saveLock.current = false;
       setSaving(false);
     }
   }
@@ -474,14 +482,16 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
   const wheelTypes = useMemo(() => activeCategories.map(category => category.category_key), [activeCategories]);
 
   const filteredItems = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase('sv-SE');
     return items.filter(item => {
+      if (query && ![item.title, item.description, item.responsible?.name].some(value => value?.toLocaleLowerCase('sv-SE').includes(query))) return false;
       if (selectedMonth !== 'all' && !isInMonth(item.start_at, selectedYear, selectedMonth)) return false;
       if (!visibleTypes.includes(item.item_type)) return false;
       if (statusFilter === 'active') return !['done', 'cancelled'].includes(item.status);
       if (statusFilter !== 'all') return item.status === statusFilter;
       return true;
     });
-  }, [items, selectedMonth, selectedYear, statusFilter, visibleTypes]);
+  }, [items, selectedMonth, selectedYear, statusFilter, visibleTypes, search]);
 
   const itemsByMonth = useMemo(() => {
     const grouped: Record<string, PlanningItem[]> = {};
@@ -634,25 +644,12 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Card className="p-4">
-          <p className="text-xs font-medium text-slate-500">Aktiva punkter</p>
-          <p className="text-2xl font-bold text-slate-800 mt-1">{yearStats.active}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-medium text-slate-500">Kommande</p>
-          <p className="text-2xl font-bold text-blue-700 mt-1">{yearStats.upcoming}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-medium text-slate-500">Akuta</p>
-          <p className="text-2xl font-bold text-red-600 mt-1">{yearStats.urgent}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-medium text-slate-500">Klara</p>
-          <p className="text-2xl font-bold text-green-700 mt-1">{yearStats.done}</p>
-        </Card>
+      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 border-b border-slate-200 pb-4 text-sm text-slate-500">
+        <span><strong className="mr-1 text-xl font-semibold tabular-nums text-slate-900">{yearStats.active}</strong> aktiva</span>
+        <span><strong className="mr-1 tabular-nums text-slate-900">{yearStats.upcoming}</strong> kommande</span>
+        {yearStats.urgent > 0 && <span className="text-red-700">{yearStats.urgent} akuta</span>}
+        <span>{yearStats.done} klara</span>
       </div>
-
       <Card className="p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-2">
@@ -668,8 +665,8 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:w-[28rem]">
-            <div className="flex flex-col gap-1">
+          <div className="grid grid-cols-2 xl:grid-cols-3 gap-3 lg:w-[40rem]">
+            <div className="col-span-2 xl:col-span-1 flex flex-col gap-1">
               <span className="text-sm font-medium text-slate-700">Vy</span>
               <div className="grid grid-cols-2 rounded-lg border border-slate-300 bg-white p-1">
                 <button
@@ -715,14 +712,19 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
         </div>
       </Card>
 
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <SearchInput value={search} onChange={setSearch} placeholder="Sök rubrik, beskrivning eller ansvarig" />
+        <Button variant="secondary" onClick={() => { setSelectedYear(currentYear); setSelectedMonth(new Date().getMonth()); }}>Denna månad</Button>
+      </div>
       {viewMode === 'list' && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+        <div className="flex gap-2 overflow-x-auto pb-2">
           {monthSummaries.map(summary => (
             <button
               key={summary.monthIndex}
               type="button"
+              aria-pressed={selectedMonth === summary.monthIndex}
               onClick={() => setSelectedMonth(selectedMonth === summary.monthIndex ? 'all' : summary.monthIndex)}
-              className={`text-left rounded-lg border p-3 transition-all ${
+              className={`min-w-28 shrink-0 text-left rounded-lg border p-3 transition-colors ${
                 selectedMonth === summary.monthIndex
                   ? 'border-blue-400 bg-blue-50 shadow-sm'
                   : 'border-slate-200 bg-white hover:border-slate-300'
@@ -806,12 +808,10 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
 
       <Modal
         open={showModal}
-        onClose={() => {
-          setShowModal(false);
-          setEditingItem(null);
-          setSaveError('');
-        }}
+        onClose={closeEditor}
         title={editingItem ? 'Redigera planeringspunkt' : 'Ny planeringspunkt'}
+        mobileFullscreen
+        footer={<div className="flex justify-end gap-3"><Button variant="secondary" disabled={saving} onClick={closeEditor}>Avbryt</Button><Button onClick={handleSave} loading={saving}>{editingItem ? 'Spara ändringar' : 'Skapa punkt'}</Button></div>}
         size="lg"
       >
         <div className="space-y-4">
@@ -864,13 +864,11 @@ export function YearPlanningPage({ onNavigate: _onNavigate }: { onNavigate: (pag
               options={statusOptions}
             />
           </div>
-          <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
-            <Button variant="secondary" onClick={() => setShowModal(false)} className="flex-1">Avbryt</Button>
-            <Button onClick={handleSave} loading={saving} className="flex-1">{editingItem ? 'Spara ändringar' : 'Skapa punkt'}</Button>
-          </div>
+
         </div>
       </Modal>
 
+      <Modal open={discard} onClose={() => setDiscard(false)} title="Lämna osparad planering?" footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={() => { setDiscard(false); setShowModal(false); }}>Kasta ändringar</Button></div>}>Dina ändringar har inte sparats.</Modal>
       <Modal
         open={showCategoryModal}
         onClose={() => {

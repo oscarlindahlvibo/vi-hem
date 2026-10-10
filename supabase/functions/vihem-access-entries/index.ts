@@ -26,11 +26,12 @@ Deno.serve(async (req) => {
     const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const authHeaders = { Authorization: req.headers.get("Authorization") || "" };
     const authDb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: authHeaders } });
-    const { data: authData } = await authDb.auth.getUser();
+    const bearerToken = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+    const { data: authData } = await authDb.auth.getUser(bearerToken);
     if (!authData.user) return json({ error: "Du måste vara inloggad." }, 401);
 
-    const { data: profile } = await db.from("vihem_profiles").select("id,role,organisation_id").eq("id", authData.user.id).maybeSingle();
-    if (!profile?.organisation_id) return json({ error: "Kontot saknar organisation." }, 400);
+    const { data: profile } = await db.from("vihem_profiles").select("id,role,organisation_id,active").eq("id", authData.user.id).maybeSingle();
+    if (!profile?.organisation_id || !profile.active) return json({ error: "Kontot saknar aktiv organisationstillhörighet." }, 403);
 
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || "");
@@ -69,6 +70,18 @@ Deno.serve(async (req) => {
         return json({ error: "Koppla posten till minst en fastighet, lägenhet, företag eller projekt." }, 400);
       }
 
+      // Validate object ownership before any metadata or secret is written.
+      for (const [field, table] of [["property_id", "vihem_properties"], ["apartment_id", "vihem_apartments"], ["company_id", "vihem_companies"], ["customer_project_id", "vihem_customer_projects"]]) {
+        if (!metadata[field]) continue;
+        const { data: object, error: objectError } = await db.from(table).select("id").eq("id", metadata[field]).eq("organisation_id", profile.organisation_id).maybeSingle();
+        if (objectError || !object) return json({ error: "Det kopplade objektet är inte tillgängligt i organisationen." }, 403);
+      }
+      if (action === "update") {
+        const { data: target, error: targetError } = await authDb.from("vihem_access_entries").select("id").eq("id", entryId).eq("organisation_id", profile.organisation_id).maybeSingle();
+        if (targetError || !target) return json({ error: "Åtkomstposten är inte tillgänglig." }, 404);
+      }
+      const encrypted = secretValue ? await encrypt(secretValue, encryptionSecret()) : null;
+
       // Uses the CALLER's own client so RLS enforces access.manage for
       // real and the audit trigger records the correct actor -- this
       // function's own permission check above is a fast pre-check, not
@@ -85,16 +98,15 @@ Deno.serve(async (req) => {
         savedId = created.id;
       } else {
         if (!entryId) return json({ error: "id krävs för uppdatering." }, 400);
-        const { error: updateError } = await callerDb
+        const { data: updated, error: updateError } = await callerDb
           .from("vihem_access_entries")
           .update({ ...metadata, updated_by: profile.id, updated_at: new Date().toISOString() })
           .eq("id", entryId)
-          .eq("organisation_id", profile.organisation_id);
-        if (updateError) throw updateError;
+          .eq("organisation_id", profile.organisation_id).select("id").single();
+        if (updateError || !updated) return json({ error: "Åtkomstposten kunde inte uppdateras." }, 403);
       }
 
-      if (secretValue) {
-        const encrypted = await encrypt(secretValue, encryptionSecret());
+      if (encrypted) {
         const { error: secretError } = await db
           .from("vihem_access_entry_secrets")
           .upsert({ entry_id: savedId, encrypted_secret: encrypted, updated_at: new Date().toISOString() }, { onConflict: "entry_id" });

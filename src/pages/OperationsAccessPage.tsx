@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { KeyRound, Plus, Trash2 } from 'lucide-react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, RevealSecret, SearchInput, Select, Textarea } from '../components/ui';
@@ -34,6 +35,12 @@ export function OperationsAccessPage({ propertyId }: { propertyId?: string }) {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('active');
+  const [discard, setDiscard] = useState(false);
+  const [deactivating, setDeactivating] = useState<AccessEntry | null>(null);
+  const saveLock = useRef(false);
+  const dirty = useUnsavedChanges(form, showModal);
+  const closeEditor = () => { if (saving) return; if (dirty) setDiscard(true); else setShowModal(false); };
   const canManage = user?.role === 'admin' || user?.role === 'superadmin';
 
   useEffect(() => { fetchAll(); }, [user?.organisation_id, propertyId]);
@@ -65,14 +72,13 @@ export function OperationsAccessPage({ propertyId }: { propertyId?: string }) {
 
   const filteredEntries = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return entries;
-    return entries.filter(entry =>
+    return entries.filter(entry => (statusFilter === 'all' || entry.active === (statusFilter === 'active')) && (!q ||
       entry.name.toLowerCase().includes(q) ||
       ACCESS_ENTRY_TYPE_LABELS[entry.entry_type].toLowerCase().includes(q) ||
       (entry.property?.name || '').toLowerCase().includes(q) ||
-      entry.location_note.toLowerCase().includes(q)
+      entry.location_note.toLowerCase().includes(q))
     );
-  }, [entries, search]);
+  }, [entries, search, statusFilter]);
 
   const apartmentsForProperty = apartments.filter(a => a.property_id === form.property_id);
 
@@ -100,11 +106,15 @@ export function OperationsAccessPage({ propertyId }: { propertyId?: string }) {
   }
 
   async function handleSave() {
+    if (saveLock.current) return;
     if (!form.name.trim()) { setError('Namn krävs.'); return; }
     if (!form.property_id && !form.apartment_id) { setError('Välj minst en fastighet eller lägenhet.'); return; }
+    if (form.valid_from && form.valid_to && form.valid_to < form.valid_from) { setError('Slutdatum måste vara samma dag eller senare än startdatum.'); return; }
+    saveLock.current = true;
     setSaving(true);
     setError('');
 
+    try {
     const { data, error: invokeError } = await supabase.functions.invoke('vihem-access-entries', {
       body: {
         action: form.id ? 'update' : 'create',
@@ -123,19 +133,28 @@ export function OperationsAccessPage({ propertyId }: { propertyId?: string }) {
       },
     });
 
-    setSaving(false);
-    if (invokeError || data?.error) { setError(data?.error || invokeError?.message || 'Kunde inte spara.'); return; }
+
+    if (invokeError || data?.error) { const payload = invokeError?.context instanceof Response ? await invokeError.context.clone().json().catch(() => null) : data; setError(payload?.error || 'Kunde inte spara åtkomstuppgifterna. Kontrollera behörigheten och försök igen.'); return; }
     setShowModal(false);
-    fetchAll();
+    void fetchAll();
+    } catch { setError('Anslutningen avbröts. Dina ändringar finns kvar.'); }
+    finally { saveLock.current = false; setSaving(false); }
   }
 
   async function handleDeactivate(entry: AccessEntry) {
-    if (!window.confirm(`Inaktivera "${entry.name}"?`)) return;
+    if (saveLock.current) return;
+    saveLock.current = true;
+    setSaving(true);
+    try {
     const { data, error: invokeError } = await supabase.functions.invoke('vihem-access-entries', {
       body: { action: 'update', id: entry.id, name: entry.name, entry_type: entry.entry_type, property_id: entry.property_id, apartment_id: entry.apartment_id, location_note: entry.location_note, instructions: entry.instructions, comments: entry.comments, valid_from: entry.valid_from, valid_to: entry.valid_to, active: false },
     });
-    if (invokeError || data?.error) { setError(data?.error || invokeError?.message || 'Kunde inte inaktivera.'); return; }
-    fetchAll();
+
+    if (invokeError || data?.error) { const payload = invokeError?.context instanceof Response ? await invokeError.context.clone().json().catch(() => null) : data; setError(payload?.error || 'Kunde inte inaktivera åtkomstposten. Försök igen.'); return; }
+    setDeactivating(null);
+    void fetchAll();
+    } catch { setError('Anslutningen avbröts. Dina ändringar finns kvar.'); }
+    finally { saveLock.current = false; setSaving(false); }
   }
 
   async function revealSecret(entryId: string): Promise<string> {
@@ -170,31 +189,32 @@ export function OperationsAccessPage({ propertyId }: { propertyId?: string }) {
       {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</div>}
 
       {!propertyId && (
-        <div className="mb-4">
+        <div className="mb-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
+          <Select label="Visa" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} options={[{value:"active", label:"Aktiva"}, {value:"inactive", label:"Inaktiva"}, {value:"all", label:"Alla"}]} />
           <SearchInput value={search} onChange={setSearch} placeholder="Sök namn, typ, fastighet..." />
         </div>
       )}
 
       {filteredEntries.length === 0 ? (
-        <EmptyState icon={KeyRound} title="Inga åtkomstuppgifter" description="Lägg till portkoder, larmkoder och andra åtkomstuppgifter för fastigheten." />
+        <EmptyState icon={KeyRound} title="Inga åtkomstuppgifter i urvalet" description="Ändra sökningen eller visa en annan status." />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {filteredEntries.map(entry => (
             <Card key={entry.id} className={`p-4 ${!entry.active ? 'opacity-50' : ''}`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-xs font-black uppercase tracking-wide text-blue-600">{ACCESS_ENTRY_TYPE_LABELS[entry.entry_type]}</p>
-                  <h3 className="truncate font-black text-slate-950">{entry.name}</h3>
-                  {!propertyId && entry.property?.name && <p className="text-xs text-slate-500">{entry.property.name}{entry.apartment?.apartment_number ? ` · lgh ${entry.apartment.apartment_number}` : ''}</p>}
-                  {entry.location_note && <p className="mt-0.5 text-xs text-slate-500">{entry.location_note}</p>}
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{ACCESS_ENTRY_TYPE_LABELS[entry.entry_type]}</p>
+                  <h3 className="break-words font-semibold text-slate-950">{entry.name}</h3>
+                  {!propertyId && entry.property?.name && <p className="text-sm text-slate-500">{entry.property.name}{entry.apartment?.apartment_number ? ` · lgh ${entry.apartment.apartment_number}` : ''}</p>}
+                  {entry.location_note && <p className="mt-0.5 text-sm text-slate-500">{entry.location_note}</p>}
                 </div>
                 {canManage && (
                   <div className="flex shrink-0 gap-1">
-                    <button onClick={() => openEdit(entry)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Redigera">
+                    <button onClick={() => openEdit(entry)} className="vihem-icon-button text-slate-500 hover:bg-slate-100 hover:text-slate-700" aria-label="Redigera">
                       <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
                     </button>
                     {entry.active && (
-                      <button onClick={() => handleDeactivate(entry)} className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Inaktivera">
+                      <button onClick={() => setDeactivating(entry)} className="vihem-icon-button text-slate-500 hover:bg-red-50 hover:text-red-600" aria-label="Inaktivera">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     )}
@@ -211,14 +231,15 @@ export function OperationsAccessPage({ propertyId }: { propertyId?: string }) {
               </div>
 
               {entry.instructions && <p className="mt-2 text-sm leading-5 text-slate-600">{entry.instructions}</p>}
-              {entry.comments && <p className="mt-1 text-xs italic text-slate-400">{entry.comments}</p>}
+              {entry.comments && <p className="mt-1 text-sm text-slate-500">{entry.comments}</p>}
             </Card>
           ))}
         </div>
       )}
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title={form.id ? 'Redigera åtkomstpost' : 'Ny åtkomstpost'} size="lg">
+      <Modal open={showModal} onClose={closeEditor} title={form.id ? 'Redigera åtkomstpost' : 'Ny åtkomstpost'} size="lg" mobileFullscreen footer={<div className="flex justify-end gap-2"><Button variant="secondary" disabled={saving} onClick={closeEditor}>Avbryt</Button><Button onClick={handleSave} loading={saving}>Spara åtkomstpost</Button></div>}>
         <div className="space-y-4">
+          {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
           <Input label="Namn" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Ex. Portkod trapphus A" />
           <Select
             label="Typ"
@@ -247,7 +268,8 @@ export function OperationsAccessPage({ propertyId }: { propertyId?: string }) {
             value={form.secret}
             onChange={e => setForm({ ...form, secret: e.target.value })}
             placeholder="Ex. 4832"
-            type="text"
+            type="password"
+            autoComplete="off"
           />
           <Textarea label="Instruktion" value={form.instructions} onChange={e => setForm({ ...form, instructions: e.target.value })} placeholder="Ex. Kod används efter kl 18." rows={3} />
           <Textarea label="Kommentarer" value={form.comments} onChange={e => setForm({ ...form, comments: e.target.value })} rows={2} />
@@ -255,12 +277,11 @@ export function OperationsAccessPage({ propertyId }: { propertyId?: string }) {
             <Input label="Giltig från" type="date" value={form.valid_from} onChange={e => setForm({ ...form, valid_from: e.target.value })} />
             <Input label="Giltig till" type="date" value={form.valid_to} onChange={e => setForm({ ...form, valid_to: e.target.value })} />
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setShowModal(false)}>Avbryt</Button>
-            <Button type="button" onClick={handleSave} loading={saving}>Spara</Button>
-          </div>
+
         </div>
       </Modal>
+      <Modal open={discard} onClose={() => setDiscard(false)} title="Lämna osparade uppgifter?" footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={() => { setDiscard(false); setShowModal(false); setForm(EMPTY_FORM); }}>Kasta ändringar</Button></div>}>Dina ändringar har inte sparats.</Modal>
+      <Modal open={Boolean(deactivating)} onClose={() => { if (!saving) setDeactivating(null); }} title="Inaktivera åtkomstpost?" footer={<div className="flex justify-end gap-2"><Button variant="secondary" disabled={saving} onClick={() => setDeactivating(null)}>Avbryt</Button><Button loading={saving} onClick={() => { if (deactivating) void handleDeactivate(deactivating); }}>Inaktivera</Button></div>}><p>{deactivating?.name} tas bort från det aktiva urvalet. Posten bevaras.</p>{error && <p role="alert" className="mt-3 text-red-700">{error}</p>}</Modal>
     </div>
   );
 }
