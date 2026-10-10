@@ -31,6 +31,7 @@ export function InstallmentPlansPage({ onNavigate }: InstallmentPlansPageProps) 
   const [customers, setCustomers] = useState<FinanceCustomer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export function InstallmentPlansPage({ onNavigate }: InstallmentPlansPageProps) 
       .catch((err) => { if (!cancelled) setError(describeError(err)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [user?.organisation_id]);
+  }, [user?.organisation_id, retry]);
 
   if (loading) return <LoadingPage />;
 
@@ -64,11 +65,11 @@ export function InstallmentPlansPage({ onNavigate }: InstallmentPlansPageProps) 
         title="Avbetalningsplaner"
         subtitle="Administrativ uppföljning av skuld, delbetalningar och betalningsplaner."
       />
-      {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">
+      {error && <div role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}<Button variant="secondary" onClick={() => setRetry(value => value + 1)}>Försök igen</Button></div>}
+      <details className="mt-4 text-sm text-slate-600"><summary className="cursor-pointer py-2 font-medium">Betalningsuppgifter och bolagsinställningar</summary><div className="flex flex-wrap items-center justify-between gap-3 py-3">
         <span>Bankgiro, Swish, plusgiro m.m. som visas på fakturorna ställs in per bolag, inte här.</span>
         <Button size="sm" variant="secondary" onClick={() => onNavigate('finance')}><Landmark className="h-4 w-4" /> Öppna Ekonomi → Bolag</Button>
-      </div>
+      </div></details>
       {companies.length === 0 ? (
         <Card className="mt-4">
           <EmptyState

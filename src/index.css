@@ -24,7 +24,7 @@
   .installment-plans-layout { grid-template-columns: minmax(300px, 0.9fr) minmax(0, 1.1fr); }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .installment-plans-layout { display: block; }
   .installment-plans-filters { grid-template-columns: 1fr; }
   .installment-plans-detail { min-height: 0; margin-top: 1rem; }

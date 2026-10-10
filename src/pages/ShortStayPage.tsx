@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   BedDouble, CalendarDays, RefreshCw, Plus, Edit2, ExternalLink,
-  Sparkles, Search, ClipboardCheck, AlertTriangle, DoorOpen,
+  Sparkles, ClipboardCheck, AlertTriangle, DoorOpen,
   ChevronLeft, ChevronRight, LogIn, LogOut, Users, Wrench,
   ReceiptText, Printer, CheckCircle2, Trash2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useAuth } from '../contexts/AuthContext';
 import { formatDateTime } from '../lib/utils';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
@@ -13,7 +14,7 @@ import { ShortStayPricingPanel } from '../components/ShortStayPricingPanel';
 import { ShortStayMessageTemplates } from '../components/ShortStayMessageTemplates';
 import { ShortStayMessages } from '../components/ShortStayMessages';
 import {
-  Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea,
+  Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea, SearchInput, Tabs,
 } from '../components/ui';
 import type {
   Apartment, Property, ShortStayBooking, ShortStayBookingType,
@@ -525,6 +526,9 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [unitModalOpen, setUnitModalOpen] = useState(false);
+  const [bookingStep, setBookingStep] = useState('stay');
+  const [discardBooking, setDiscardBooking] = useState(false);
+  const [bookingPeriod, setBookingPeriod] = useState('all');
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [commonCleaningModalOpen, setCommonCleaningModalOpen] = useState(false);
   const [keyBoxModalOpen, setKeyBoxModalOpen] = useState(false);
@@ -539,6 +543,9 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const [saving, setSaving] = useState(false);
   const [syncingUnitId, setSyncingUnitId] = useState<string | null>(null);
   const [formError, setFormError] = useState('');
+  const bookingDirty = useUnsavedChanges(bookingForm, bookingModalOpen);
+  const closeBooking = () => { if (saving) return; if (bookingDirty) setDiscardBooking(true); else setBookingModalOpen(false); };
+  useEffect(() => { if (bookingModalOpen) setBookingStep('stay'); }, [bookingModalOpen]);
   const [calendarStartDate, setCalendarStartDate] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
@@ -1471,7 +1478,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const filteredBookings = bookings.filter((booking) => {
     const unit = units.find(u => u.id === booking.unit_id);
     const text = `${booking.title} ${booking.guest_name} ${booking.channel_name} ${unit?.name || ''}`.toLowerCase();
-    return text.includes(searchQuery.toLowerCase());
+    return text.includes(searchQuery.trim().toLowerCase()) && (bookingPeriod === 'all' || (bookingPeriod === 'upcoming' ? booking.end_date >= todayKey() : bookingPeriod === 'today' ? booking.start_date === todayKey() || booking.end_date === todayKey() : booking.end_date < todayKey()));
   });
 
   if (loading) return <LoadingPage />;
@@ -1550,30 +1557,12 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
         }} />
       ) : tab === 'overview' ? (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <Card className="p-4">
-              <p className="text-xs text-slate-500">Aktiva enheter</p>
-              <p className="mt-1 text-2xl font-bold text-slate-900">{stats.activeUnits.length}</p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-xs text-slate-500">Belagda nu</p>
-              <p className="mt-1 text-2xl font-bold text-blue-700">{stats.current.length}</p>
-              <p className="mt-1 text-xs text-slate-500">{stats.currentGuests} gäster</p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-xs text-slate-500">Check-in idag</p>
-              <p className="mt-1 text-2xl font-bold text-emerald-700">{stats.checkIns.length}</p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-xs text-slate-500">Check-out idag</p>
-              <p className="mt-1 text-2xl font-bold text-amber-700">{stats.checkOuts.length}</p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-xs text-slate-500">Att städa</p>
-              <p className="mt-1 text-2xl font-bold text-rose-700">{stats.pendingCleaningCount}</p>
-            </Card>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-slate-200 pb-4 text-sm text-slate-500">
+            <span><strong className="mr-1 text-xl font-semibold text-slate-900">{stats.current.length}</strong> belagda · {stats.currentGuests} gäster</span>
+            <span>{stats.activeUnits.length} aktiva enheter</span>
+            <Button variant="ghost" onClick={() => { setBookingPeriod('today'); setTab('bookings'); }}>{stats.checkIns.length} ankomster · {stats.checkOuts.length} avresor idag</Button>
+            {stats.pendingCleaningCount > 0 && <Button variant="secondary" onClick={() => setTab('cleaning')}>{stats.pendingCleaningCount} att städa</Button>}
           </div>
-
           {conflicts.length > 0 && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1860,15 +1849,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
         </Card>
       ) : tab === 'bookings' ? (
         <div className="space-y-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Sök gäst, kanal eller enhet..."
-              className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]"><SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Sök gäst, kanal eller enhet" /><Select label="Period" value={bookingPeriod} onChange={event => setBookingPeriod(event.target.value)} options={[{value:'all',label:'Alla bokningar'},{value:'today',label:'Ankomst / avresa idag'},{value:'upcoming',label:'Pågående och kommande'},{value:'past',label:'Tidigare'}]} /></div>
           <div className="grid gap-3">
             {filteredBookings.length === 0 ? (
               <Card className="p-8">
@@ -2568,8 +2549,10 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
         </div>
       </Modal>
 
-      <Modal open={bookingModalOpen} onClose={() => setBookingModalOpen(false)} title={editingBooking ? 'Redigera bokning' : 'Ny bokning'} size="lg">
+      <Modal open={bookingModalOpen} onClose={closeBooking} title={editingBooking ? 'Redigera bokning' : 'Ny bokning'} size="lg" mobileFullscreen toolbar={<Tabs active={bookingStep} onChange={setBookingStep} tabs={[{key:'stay',label:'Vistelse'},...(bookingForm.booking_type === 'booking' ? [{key:'guest',label:'Gäst'}] : []),{key:'review',label:'Uppföljning'}]} />} footer={<div className="flex flex-wrap items-center justify-between gap-2"><Button variant="secondary" disabled={saving} onClick={closeBooking}>Avbryt</Button>{bookingStep !== 'review' ? <Button onClick={() => setBookingStep(bookingStep === 'stay' && bookingForm.booking_type === 'booking' ? 'guest' : 'review')}>Fortsätt</Button> : <Button onClick={saveBooking} loading={saving}><ClipboardCheck className="h-4 w-4" />{editingBooking ? 'Spara bokning' : 'Skapa bokning'}</Button>}</div>}>
         <div className="space-y-4">
+          {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{formError}</p>}
+          <section hidden={bookingStep !== 'stay'} className="space-y-4">
           {editingBooking?.beds24_booking_id && organisationId && ['admin', 'superadmin', 'staff'].includes(user?.role || '') && (
             <details className="rounded-lg border border-slate-200 p-3">
               <summary className="cursor-pointer font-medium text-slate-800">Gästmeddelanden från Beds24</summary>
@@ -2602,14 +2585,17 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
             )}
           </div>
           <Input label={bookingForm.booking_type === 'block' ? 'Rubrik' : 'Rubrik / bokningsnamn'} value={bookingForm.title} onChange={e => setBookingForm({ ...bookingForm, title: e.target.value })} />
+          </section>
           {bookingForm.booking_type === 'booking' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <section className={bookingStep === 'guest' ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'hidden'}>
               <Input label="Gästnamn" value={bookingForm.guest_name} onChange={e => setBookingForm({ ...bookingForm, guest_name: e.target.value })} />
               <Input label="Antal gäster" type="number" min={1} value={bookingForm.guest_count} onChange={e => setBookingForm({ ...bookingForm, guest_count: e.target.value })} />
               <Input label="E-post" type="email" value={bookingForm.guest_email} onChange={e => setBookingForm({ ...bookingForm, guest_email: e.target.value })} />
               <Input label="Telefon" value={bookingForm.guest_phone} onChange={e => setBookingForm({ ...bookingForm, guest_phone: e.target.value })} />
-            </div>
+            </section>
           )}
+          <section hidden={bookingStep !== 'review'} className="space-y-4">
+          <p className="text-sm text-slate-500">{units.find(unit => unit.id === bookingForm.unit_id)?.name} · {formatDateRange(bookingForm.start_date, bookingForm.end_date)}</p>
           {bookingForm.booking_type === 'booking' && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p className="mb-3 text-sm font-semibold text-slate-800">Pris och kvitto</p>
@@ -2655,20 +2641,11 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
             />
           </div>
           <Textarea label="Anteckningar" rows={3} value={bookingForm.notes} onChange={e => setBookingForm({ ...bookingForm, notes: e.target.value })} />
-          {formError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{formError}</div>}
-          <div className="flex flex-col-reverse sm:flex-row sm:justify-between gap-3">
-            {editingBooking ? (
-              <Button variant="danger" onClick={deleteBooking} loading={saving}>Ta bort</Button>
-            ) : <span />}
-            <div className="flex justify-end gap-3">
-              <Button variant="secondary" onClick={() => setBookingModalOpen(false)}>Avbryt</Button>
-              <Button onClick={saveBooking} loading={saving}>
-                <ClipboardCheck className="w-4 h-4" /> {editingBooking ? 'Spara' : 'Skapa'}
-              </Button>
-            </div>
-          </div>
+          {editingBooking && <Button variant="ghost" className="text-red-700" onClick={deleteBooking} disabled={saving}>Ta bort bokning</Button>}
+          </section>
         </div>
       </Modal>
+      <Modal open={discardBooking} onClose={() => setDiscardBooking(false)} title="Lämna osparad bokning?" footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setDiscardBooking(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={() => { setDiscardBooking(false); setBookingModalOpen(false); }}>Kasta ändringar</Button></div>}>Ändringarna har inte sparats.</Modal>
     </div>
   );
 }
