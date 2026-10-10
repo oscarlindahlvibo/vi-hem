@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useToast } from '../components/toast';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import {
   Check,
   ExternalLink,
-  PackagePlus,
   Pencil,
   Plus,
-  Search,
   ShoppingCart,
   Store,
   Trash2,
@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea, SearchInput, Tabs, Avatar } from '../components/ui';
 import { formatDateTime } from '../lib/utils';
 import type { PurchaseItem } from '../types';
 
@@ -84,14 +84,19 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
   const [saveError, setSaveError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<PurchaseStatusFilter>('open');
+  const [loadError,setLoadError]=useState('');
+  const [actionError,setActionError]=useState('');
+  const [pending,setPending]=useState<Set<string>>(new Set());
+  const pendingOperations=useRef(new Set<string>());
+  const [discard,setDiscard]=useState(false);
+  const dirty=useUnsavedChanges(form,showModal);
+  const toast=useToast();
+  const closeEditor=()=>{if(saving)return;if(dirty){setDiscard(true);return;}setShowModal(false);setEditingItem(null);setForm(defaultForm);};
 
-  useEffect(() => {
-    fetchItems();
-  }, []);
-
-  async function fetchItems() {
+  const fetchItems=useCallback(async () => {
+    if(!user?.organisation_id) return;
     try {
-      setLoading(true);
+      setLoading(true);setLoadError('');
       const { data, error } = await supabase
         .from('vihem_purchase_items')
         .select(`
@@ -99,17 +104,19 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
           creator:vihem_profiles!created_by(id, name, email, phone, role),
           purchaser:vihem_profiles!purchased_by(id, name, email, phone, role)
         `)
+        .eq('organisation_id', user.organisation_id)
         .order('store_name', { ascending: true })
         .order('created_at', { ascending: false });
 
       if (error) throw error;
       setItems((data || []) as unknown as PurchaseItem[]);
     } catch (error) {
-      console.error('Error fetching purchase items:', error);
+      setLoadError('Inköpslistan kunde inte hämtas. Försök igen.');
     } finally {
       setLoading(false);
     }
-  }
+  },[user?.organisation_id]);
+  useEffect(()=>{void fetchItems();},[fetchItems]);
 
   function openCreateModal() {
     setEditingItem(null);
@@ -133,7 +140,7 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
   }
 
   async function handleSave() {
-    if (!user) return;
+    if (!user||saving) return;
     setSaveError('');
 
     const storeName = form.store_name.trim();
@@ -171,12 +178,12 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
         const { error } = await supabase
           .from('vihem_purchase_items')
           .update(payload)
-          .eq('id', editingItem.id);
+          .eq('id', editingItem.id).select('id').single();
         if (error) throw error;
       } else {
         const { error } = await supabase
           .from('vihem_purchase_items')
-          .insert({ ...payload, created_by: user.id });
+          .insert({ ...payload, created_by: user.id }).select('id').single();
         if (error) throw error;
       }
 
@@ -184,6 +191,7 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
       setEditingItem(null);
       setForm(defaultForm);
       await fetchItems();
+      toast.show(editingItem?'Inköpet har sparats':'Inköpet har lagts till',{tone:'success'});
     } catch (error: any) {
       setSaveError(error.message || 'Kunde inte spara inköpet.');
     } finally {
@@ -192,22 +200,10 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
   }
 
   async function updateStatus(item: PurchaseItem, status: PurchaseItem['status']) {
-    if (!user) return;
-    const payload = status === 'purchased'
-      ? { status, purchased_by: user.id, purchased_at: new Date().toISOString() }
-      : { status, purchased_by: null, purchased_at: null };
-
-    const { error } = await supabase
-      .from('vihem_purchase_items')
-      .update(payload)
-      .eq('id', item.id);
-
-    if (error) {
-      alert('Kunde inte uppdatera inköpsraden.');
-      return;
-    }
-
-    setItems((current) => current.map((row) => row.id === item.id ? { ...row, ...payload } as PurchaseItem : row));
+    if(!user||pendingOperations.current.has(item.id))return;
+    pendingOperations.current.add(item.id);setPending(new Set(pendingOperations.current));setActionError('');
+    const payload=status==='purchased'?{status,purchased_by:user.id,purchased_at:new Date().toISOString()}:{status,purchased_by:null,purchased_at:null};
+    try{const {error}=await supabase.from('vihem_purchase_items').update(payload).eq('id',item.id).select('id').single();if(error)throw error;setItems(current=>current.map(row=>row.id===item.id?{...row,...payload} as PurchaseItem:row));toast.show(status==='purchased'?'Markerat som inköpt':status==='open'?'Tillbaka på inköpslistan':'Inköpet har avbrutits',{tone:'success'});}catch{setActionError('Inköpet kunde inte uppdateras. Uppgifterna finns kvar; försök igen.');}finally{pendingOperations.current.delete(item.id);setPending(new Set(pendingOperations.current));}
   }
 
   async function deleteItem(item: PurchaseItem) {
@@ -246,6 +242,7 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
   const urgentCount = items.filter((item) => item.status === 'open' && item.priority === 'urgent').length;
 
   if (loading) return <LoadingPage />;
+  if(loadError)return <div role="alert" className="space-y-4"><PageHeader title="Inköpslista"/><p>{loadError}</p><Button onClick={()=>void fetchItems()}>Försök igen</Button></div>;
 
   return (
     <div className="space-y-6">
@@ -260,46 +257,15 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <Card className="p-4">
-          <p className="text-xs text-slate-500 mb-1">Att köpa</p>
-          <p className="text-2xl font-bold text-amber-600">{openCount}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-slate-500 mb-1">Brådskande</p>
-          <p className="text-2xl font-bold text-red-600">{urgentCount}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-slate-500 mb-1">Inköpta</p>
-          <p className="text-2xl font-bold text-green-600">{purchasedCount}</p>
-        </Card>
-      </div>
-
-      <Card className="p-4">
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-3">
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Sök produkt, butik eller kommentar..."
-              className="w-full border border-slate-300 bg-white rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <Select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as PurchaseStatusFilter)}
-            options={statusOptions}
-          />
-        </div>
-      </Card>
-
+      <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-vihem-muted"><span><strong className="text-vihem-ink">{openCount}</strong> att köpa</span>{urgentCount>0&&<span className="text-red-700"><strong>{urgentCount}</strong> brådskande</span>}{purchasedCount>0&&<span>{purchasedCount} inköpta</span>}</div>
+      <div className="space-y-3"><SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Sök produkt, butik eller kommentar…"/><Tabs tabs={statusOptions.map(option=>({key:option.value,label:option.label}))} active={statusFilter} onChange={key=>setStatusFilter(key as PurchaseStatusFilter)}/></div>
+      {actionError&&<p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{actionError}</p>}
       {filteredItems.length === 0 ? (
         <Card>
           <EmptyState
             icon={<ShoppingCart className="w-12 h-12" />}
             title="Inga inköp att visa"
-            description="Lägg till något som behöver köpas, så sorteras det automatiskt under rätt butik."
+            description={searchQuery||statusFilter!=='open'?"Ändra sökningen eller välj en annan status.":"Lägg till något som behöver köpas. Listan grupperas efter butik."}
             action={<Button onClick={openCreateModal}><Plus className="w-4 h-4" /> Lägg till inköp</Button>}
           />
         </Card>
@@ -327,7 +293,7 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
                             {item.item_name}
                           </h3>
                           <Badge className={statusClasses[item.status]}>{statusLabels[item.status]}</Badge>
-                          <Badge className={priorityClasses[item.priority]}>{priorityLabels[item.priority]}</Badge>
+                          {item.priority!=='normal'&&<Badge className={priorityClasses[item.priority]}>{priorityLabels[item.priority]}</Badge>}
                           {item.quantity && (
                             <Badge className="bg-slate-100 text-slate-600">
                               {item.quantity}
@@ -341,7 +307,7 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
 
                         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500">
                           <span>Skapad {formatDateTime(item.created_at)}</span>
-                          {item.creator?.name && <span>av {item.creator.name}</span>}
+                          {item.creator?.name && <span className="inline-flex items-center gap-2"><Avatar userId={item.created_by} name={item.creator.name} size="xs"/>{item.creator.name}</span>}
                           {item.purchased_at && (
                             <span>Inköpt {formatDateTime(item.purchased_at)}{item.purchaser?.name ? ` av ${item.purchaser.name}` : ''}</span>
                           )}
@@ -350,7 +316,7 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
                               href={item.product_url}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 font-medium"
+                              className="vihem-focus vihem-touch-target inline-flex items-center gap-2 rounded-lg px-2 text-vihem-primary font-medium"
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
                               Produktlänk
@@ -361,26 +327,26 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
 
                       <div className="flex flex-wrap gap-2 lg:justify-end">
                         {item.status !== 'purchased' ? (
-                          <Button size="sm" variant="secondary" onClick={() => updateStatus(item, 'purchased')}>
+                          <Button size="sm" variant="secondary" loading={pending.has(item.id)} onClick={() => updateStatus(item, 'purchased')}>
                             <Check className="w-3.5 h-3.5" />
                             Inköpt
                           </Button>
                         ) : (
-                          <Button size="sm" variant="secondary" onClick={() => updateStatus(item, 'open')}>
+                          <Button size="sm" variant="secondary" loading={pending.has(item.id)} onClick={() => updateStatus(item, 'open')}>
                             <X className="w-3.5 h-3.5" />
                             Ångra
                           </Button>
                         )}
                         {item.status !== 'cancelled' && (
-                          <Button size="sm" variant="ghost" onClick={() => updateStatus(item, 'cancelled')}>
+                          <Button size="sm" variant="ghost" disabled={pending.has(item.id)} onClick={() => updateStatus(item, 'cancelled')}>
                             Avbryt
                           </Button>
                         )}
-                        <Button size="sm" variant="outline" onClick={() => openEditModal(item)}>
+                        <Button size="sm" variant="outline" aria-label={`Redigera ${item.item_name}`} disabled={pending.has(item.id)} onClick={() => openEditModal(item)}>
                           <Pencil className="w-3.5 h-3.5" />
                         </Button>
                         {user?.role === 'admin' && (
-                          <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50" onClick={() => deleteItem(item)}>
+                          <Button size="sm" variant="ghost" aria-label={`Ta bort ${item.item_name}`} disabled={pending.has(item.id)} className="text-red-600 hover:bg-red-50" onClick={() => deleteItem(item)}>
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         )}
@@ -394,17 +360,15 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
         </div>
       )}
 
-      <Modal
+      <Modal mobileFullscreen
         open={showModal}
-        onClose={() => {
-          setShowModal(false);
-          setEditingItem(null);
-          setForm(defaultForm);
-        }}
+        onClose={closeEditor}
         title={editingItem ? 'Redigera inköp' : 'Lägg till inköp'}
-        size="lg"
+        size="md"
+        toolbar={saveError&&<p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{saveError}</p>}
+        footer={<><Button variant="secondary" disabled={saving} onClick={closeEditor}>Avbryt</Button><Button loading={saving} onClick={handleSave}>{editingItem?'Spara inköp':'Lägg till inköp'}</Button></>}
       >
-        <div className="space-y-4">
+        <fieldset disabled={saving} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Butik"
@@ -451,30 +415,9 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
             rows={3}
           />
 
-          {saveError && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
-              {saveError}
-            </div>
-          )}
-
-          <div className="flex justify-end gap-3 pt-2">
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setShowModal(false);
-                setEditingItem(null);
-                setForm(defaultForm);
-              }}
-            >
-              Avbryt
-            </Button>
-            <Button variant="primary" onClick={handleSave} loading={saving}>
-              <PackagePlus className="w-4 h-4" />
-              {editingItem ? 'Spara' : 'Lägg till'}
-            </Button>
-          </div>
-        </div>
+        </fieldset>
       </Modal>
+      <Modal open={discard} onClose={()=>setDiscard(false)} title="Lämna osparade ändringar?" footer={<><Button variant="secondary" onClick={()=>setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscard(false);setShowModal(false);setEditingItem(null);setForm(defaultForm);}}>Lämna utan att spara</Button></>}><p>Inköpsuppgifterna har inte sparats.</p></Modal>
     </div>
   );
 }
