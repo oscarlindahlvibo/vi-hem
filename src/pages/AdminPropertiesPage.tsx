@@ -1,15 +1,17 @@
 import { ContextChatLauncher } from '../components/chat/ContextChatLauncher';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Building2, Plus, Edit2, Home, Users, ChevronRight,
   Key, Network, Zap, Droplets, Thermometer, Wind,
   Lock, MailOpen, CarFront, Package, Layers, KeyRound, BookOpen, Trash2, FileSignature,
 } from 'lucide-react';
+import { useToast } from '../components/toast';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Card, Badge, Button, Modal, Input, Textarea, Select,
-  PageHeader, EmptyState, LoadingPage, SearchInput, Tabs,
+  PageHeader, EmptyState, LoadingPage, SearchInput, Tabs, Avatar,
 } from '../components/ui';
 import {
   formatCurrency, APARTMENT_STATUS_LABELS, getAptStatusColor,
@@ -52,12 +54,20 @@ interface AdminPropertiesPageProps { onNavigate: (page: string) => void; }
 
 export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
   const { user } = useAuth();
+  const toast=useToast();
   const [properties, setProperties] = useState<Property[]>([]);
   const [apartments, setApartments] = useState<Apartment[]>([]);
   const [tenancies, setTenancies] = useState<Tenancy[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [orgLimits, setOrgLimits] = useState<{ max_properties: number; max_apartments: number } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError,setLoadError]=useState('');
+  const [saveError,setSaveError]=useState('');
+  const [saving,setSaving]=useState(false);
+  const [discard,setDiscard]=useState<'property'|'apartment'|null>(null);
+  const [unitQuery,setUnitQuery]=useState('');
+  const [unitStatus,setUnitStatus]=useState('all');
+  const [propertyTab,setPropertyTab]=useState('units');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
@@ -79,18 +89,21 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
   });
   const [apartmentFormData, setApartmentFormData] = useState<AptFormData>(defaultAptForm);
 
-  useEffect(() => { fetchData(); }, []);
+  const propertyDirty=useUnsavedChanges(propertyFormData,showPropertyModal);
+  const apartmentDirty=useUnsavedChanges({apartmentFormData,keyIds,networkOutlets},showApartmentModal);
+  const closeEditor=(kind:'property'|'apartment',force=false)=>{if(saving)return;if(!force&&(kind==='property'?propertyDirty:apartmentDirty)){setDiscard(kind);return;}setDiscard(null);setSaveError('');if(kind==='property'){setShowPropertyModal(false);setEditingProperty(null);}else{setShowApartmentModal(false);setEditingApartment(null);}};
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoading(true); setLoadError('');
       const [propsRes, aptsRes, tenanciesRes, profilesRes] = await Promise.all([
         supabase.from('vihem_properties').select('*').order('name'),
         supabase.from('vihem_apartments').select('*').order('apartment_number'),
         supabase.from('vihem_tenancies').select('*'),
         supabase.from('vihem_profiles').select('id, name, email'),
       ]);
-      if (propsRes.data) setProperties(propsRes.data);
+      for(const result of [propsRes,aptsRes,tenanciesRes,profilesRes])if(result.error)throw result.error;
+      if (propsRes.data) {setProperties(propsRes.data);setSelectedProperty(previous=>previous?propsRes.data.find(p=>p.id===previous.id)||null:null);}
       if (aptsRes.data) setApartments(aptsRes.data);
       if (tenanciesRes.data) setTenancies(tenanciesRes.data);
       if (profilesRes.data) setProfiles(profilesRes.data as Profile[]);
@@ -113,11 +126,12 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
         setOperationsEnabled(Boolean(operationsModule?.enabled));
       }
     } catch (error) {
-      console.error('Error fetching data:', error);
+      setLoadError('Fastigheterna kunde inte hämtas. Försök igen.');
     } finally {
       setLoading(false);
     }
-  };
+  },[user?.organisation_id]);
+  useEffect(()=>{void fetchData();},[fetchData]);
 
   const filteredProperties = properties.filter(
     (p) =>
@@ -148,11 +162,15 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
 
   // ── Property save ──────────────────────────────────────────────────────────
   const handleSaveProperty = async () => {
+    if(saving)return;
+    if(!propertyFormData.name.trim()||!propertyFormData.address.trim()){setSaveError('Ange fastighetens namn och adress.');return;}
     if (!editingProperty && orgLimits && properties.length >= orgLimits.max_properties) {
       alert(`Licensgränsen för fastigheter är nådd (${orgLimits.max_properties} st). Uppgradera licensen för att lägga till fler.`);
       return;
     }
 
+    setSaving(true);setSaveError('');
+    try {
     const lines = propertyFormData.contact_info.split('\n');
     const contactInfo = {
       property_manager: lines[0] || '',
@@ -160,27 +178,32 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
       email: lines[2] || '',
     };
     if (editingProperty) {
-      await supabase.from('vihem_properties').update({
+      const result=await supabase.from('vihem_properties').update({
         name: propertyFormData.name, address: propertyFormData.address,
         city: propertyFormData.city, zip: propertyFormData.zip,
         description: propertyFormData.description,
         emergency_info: propertyFormData.emergency_info,
         contact_info: contactInfo,
-      }).eq('id', editingProperty.id);
+      }).eq('id', editingProperty.id).select('id').single();
+      if(result.error)throw result.error;
+      setSelectedProperty(previous=>previous?.id===editingProperty.id?{...previous,...propertyFormData,contact_info:contactInfo}:previous);
     } else {
-      await supabase.from('vihem_properties').insert({
+      const result=await supabase.from('vihem_properties').insert({
         name: propertyFormData.name, address: propertyFormData.address,
         city: propertyFormData.city, zip: propertyFormData.zip,
         description: propertyFormData.description,
         emergency_info: propertyFormData.emergency_info,
         contact_info: contactInfo,
         organisation_id: user?.organisation_id,
-      });
+      }).select('id').single();
+      if(result.error)throw result.error;
     }
     setShowPropertyModal(false);
     setEditingProperty(null);
     setPropertyFormData({ name: '', address: '', city: '', zip: '', description: '', emergency_info: '', contact_info: '' });
-    fetchData();
+    toast.show('Uppgifterna är sparade');
+    await fetchData();
+    }catch{setSaveError('Fastigheten kunde inte sparas. Dina uppgifter finns kvar. Försök igen.');}finally{setSaving(false);}
   };
 
   const deleteProperty = async (property: Property) => {
@@ -203,7 +226,8 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
 
   // ── Apartment save ─────────────────────────────────────────────────────────
   const handleSaveApartment = async () => {
-    if (!selectedProperty) return;
+    if (!selectedProperty||saving) return;
+    if(!apartmentFormData.apartment_number.trim()){setSaveError('Ange enhetens nummer.');return;}
 
     // Enforce apartment quota for new vihem_apartments
     if (!editingApartment && orgLimits) {
@@ -212,6 +236,8 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
         return;
       }
     }
+    setSaving(true);setSaveError('');
+    try {
     const payload = {
       unit_type: apartmentFormData.unit_type,
       apartment_number: apartmentFormData.apartment_number,
@@ -242,20 +268,22 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
       technical_notes: apartmentFormData.technical_notes,
     };
     if (editingApartment) {
-      await supabase.from('vihem_apartments').update(payload).eq('id', editingApartment.id);
+      const result=await supabase.from('vihem_apartments').update(payload).eq('id', editingApartment.id).select('id').single();if(result.error)throw result.error;
     } else {
-      await supabase.from('vihem_apartments').insert({
+      const result=await supabase.from('vihem_apartments').insert({
         ...payload,
         property_id: selectedProperty.id,
         organisation_id: user?.organisation_id,
-      });
+      }).select('id').single();if(result.error)throw result.error;
     }
     setShowApartmentModal(false);
     setEditingApartment(null);
     setApartmentFormData(defaultAptForm);
     setKeyIds([]);
     setNetworkOutlets([]);
-    fetchData();
+    toast.show('Uppgifterna är sparade');
+    await fetchData();
+    }catch{setSaveError('Enheten kunde inte sparas. Dina uppgifter finns kvar. Försök igen.');}finally{setSaving(false);}
   };
 
   const deleteApartment = async (apt: Apartment) => {
@@ -285,7 +313,7 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
       contact_info: `${ci?.property_manager || ''}\n${ci?.phone || ''}\n${ci?.email || ''}`,
     });
     setEditingProperty(property);
-    setShowPropertyModal(true);
+    setSaveError('');setShowPropertyModal(true);
   };
 
   const openEditApartmentModal = (apt: Apartment) => {
@@ -313,7 +341,7 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
     setNetworkOutlets(Array.isArray(apt.network_outlet_ids) ? apt.network_outlet_ids : []);
     setEditingApartment(apt);
     setAptTab('basic');
-    setShowApartmentModal(true);
+    setSaveError('');setShowApartmentModal(true);
   };
 
   const openCreateApartmentModal = () => {
@@ -322,19 +350,21 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
     setNetworkOutlets([]);
     setEditingApartment(null);
     setAptTab('basic');
-    setShowApartmentModal(true);
+    setSaveError('');setShowApartmentModal(true);
   };
 
   const setF = (key: keyof AptFormData, value: any) =>
     setApartmentFormData(prev => ({ ...prev, [key]: value }));
 
+  const visibleUnits=selectedProperty?getPropertyApartments(selectedProperty.id).filter(apt=>(unitStatus==='all'||apt.status===unitStatus)&&`${apt.apartment_number} ${getCurrentTenant(apt.id)?.name||''}`.toLocaleLowerCase('sv').includes(unitQuery.toLocaleLowerCase('sv'))):[];
   if (loading) return <LoadingPage />;
+  if(loadError)return <div role="alert" className="space-y-4"><PageHeader title="Fastigheter"/><p>{loadError}</p><Button onClick={()=>void fetchData()}>Försök igen</Button></div>;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <PageHeader title="Fastigheter" subtitle="Hantera fastigheter, lägenheter, lokaler och förråd" />
-        <Button
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <PageHeader title={selectedProperty?.name||"Fastigheter"} subtitle={selectedProperty?selectedProperty.address:"Dina fastigheter och uthyrningsobjekt"} />
+        {!selectedProperty&&<Button
           onClick={() => {
             if (orgLimits && properties.length >= orgLimits.max_properties) {
               alert(`Licensgränsen för fastigheter är nådd (${orgLimits.max_properties} st). Uppgradera licensen för att lägga till fler.`);
@@ -342,7 +372,7 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
             }
             setEditingProperty(null);
             setPropertyFormData({ name: '', address: '', city: '', zip: '', description: '', emergency_info: '', contact_info: '' });
-            setShowPropertyModal(true);
+            setSaveError('');setShowPropertyModal(true);
           }}
           variant="primary"
           className="flex items-center gap-2"
@@ -351,7 +381,7 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
         >
           <Plus className="w-4 h-4" />
           Ny fastighet
-        </Button>
+        </Button>}
       </div>
 
       {!selectedProperty ? (
@@ -365,40 +395,21 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
             </div>
           )}
           {filteredProperties.length === 0 ? (
-            <EmptyState icon={<Building2 className="w-12 h-12" />} title="Inga fastigheter" description="Börja med att skapa din första fastighet" />
+            <EmptyState icon={<Building2 className="w-12 h-12" />} title={searchQuery?"Inga träffar":"Inga fastigheter"} description={searchQuery?"Prova ett annat namn eller en annan adress.":"Börja med att skapa din första fastighet"} />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {filteredProperties.map((property) => {
                 const apts = getPropertyApartments(property.id);
                 const occupied = apts.filter(a => a.status === 'rented').length;
                 return (
-                  <Card key={property.id} className="cursor-pointer hover:shadow-md transition-shadow p-5">
-                    <div className="flex items-start justify-between gap-4 mb-4">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-lg mb-1">{property.name}</h3>
-                        <p className="text-sm text-slate-600">{property.address}</p>
-                        <p className="text-sm text-slate-500">{property.zip} {property.city}</p>
-                      </div>
-                      <button onClick={(e) => { e.stopPropagation(); openEditPropertyModal(property); }} className="shrink-0 p-2 hover:bg-slate-100 rounded-lg">
-                        <Edit2 className="w-4 h-4 text-slate-600" />
-                      </button>
+                  <Card key={property.id} className="p-4 sm:p-5">
+                    {property.image_url&&<img src={property.image_url} alt="" loading="lazy" className="mb-4 h-32 w-full rounded-xl object-cover"/>}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0"><h3 className="text-base font-semibold text-vihem-ink">{property.name}</h3><p className="mt-1 text-sm text-vihem-muted">{property.address}</p>{property.city&&<p className="text-sm text-vihem-muted">{property.zip} {property.city}</p>}</div>
+                      <button aria-label={`Redigera ${property.name}`} onClick={()=>openEditPropertyModal(property)} className="vihem-icon-button shrink-0"><Edit2 size={18}/></button>
                     </div>
-                    {property.description && <p className="text-sm text-slate-600 mb-4 leading-relaxed">{property.description}</p>}
-                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 py-3 border-t border-b border-slate-100 text-sm">
-                      <div className="flex items-center gap-2">
-                        <Home className="w-4 h-4 text-blue-500" />
-                        <span className="font-medium">{apts.length}</span>
-                        <span className="text-slate-500">enheter</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Users className="w-4 h-4 text-green-500" />
-                        <span className="font-medium">{occupied}</span>
-                        <span className="text-slate-500">uthyrda</span>
-                      </div>
-                    </div>
-                    <button onClick={() => setSelectedProperty(property)} className="w-full mt-4 flex items-center justify-between text-blue-600 hover:text-blue-700 font-medium text-sm">
-                      <span>Visa enheter</span>
-                      <ChevronRight className="w-4 h-4" />
+                    <button onClick={()=>{setSelectedProperty(property);setPropertyTab('units');setUnitQuery('');setUnitStatus('all');}} aria-label={`Öppna fastighet ${property.name}`} className="vihem-focus vihem-touch-target mt-3 flex w-full items-center justify-between gap-3 rounded-xl text-left">
+                      <span className="text-sm text-vihem-muted">{apts.length?`${apts.length} enheter · ${occupied} uthyrda · ${apts.filter(a=>a.status==='vacant').length} lediga`:'Inga enheter ännu'}</span><ChevronRight size={18} className="shrink-0 text-vihem-muted"/>
                     </button>
                   </Card>
                 );
@@ -413,17 +424,17 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
           </button>
 
           <Card className="p-5">
-            <div className="flex items-start justify-between mb-2">
+            <div className="flex flex-col gap-4 mb-2 lg:flex-row lg:justify-between">
               <div>
-                <h2 className="text-xl font-bold text-slate-900">{selectedProperty.name}</h2>
-                <p className="text-slate-500 text-sm">{selectedProperty.address}, {selectedProperty.zip} {selectedProperty.city}</p>
+                <h2 className="text-base font-semibold text-vihem-ink">Förvaltning</h2>
+                <p className="mt-1 text-sm text-vihem-muted">{getPropertyApartments(selectedProperty.id).length} enheter{selectedProperty.city?` · ${selectedProperty.city}`:''}</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <ContextChatLauncher type="property" id={selectedProperty.id} name={selectedProperty.name} onNavigate={onNavigate} />
                 <Button variant="secondary" onClick={() => openEditPropertyModal(selectedProperty)} className="gap-1">
                   <Edit2 className="w-3.5 h-3.5" /> Redigera
                 </Button>
-                <Button variant="danger" onClick={() => deleteProperty(selectedProperty)} className="gap-1">
+                <Button variant="ghost" onClick={() => deleteProperty(selectedProperty)} className="gap-1">
                   <Trash2 className="w-3.5 h-3.5" /> Radera
                 </Button>
                 <Button
@@ -438,7 +449,8 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
               </div>
             </div>
             {selectedProperty.description && <p className="text-sm text-slate-600 mt-2">{selectedProperty.description}</p>}
-            {orgLimits && (
+            {(selectedProperty.emergency_info||selectedProperty.contact_info?.property_manager)&&<details className="mt-4 border-t border-vihem-line pt-3"><summary className="vihem-focus vihem-touch-target cursor-pointer text-sm font-medium">Kontakt & fastighetsinformation</summary><div className="mt-3 space-y-2 text-sm text-vihem-muted">{selectedProperty.contact_info?.property_manager&&<p>{selectedProperty.contact_info.property_manager}</p>}{selectedProperty.contact_info?.phone&&<p>{selectedProperty.contact_info.phone}</p>}{selectedProperty.contact_info?.email&&<p>{selectedProperty.contact_info.email}</p>}{selectedProperty.emergency_info&&<p className="whitespace-pre-line">{selectedProperty.emergency_info}</p>}</div></details>}
+            {orgLimits && apartments.length >= orgLimits.max_apartments && (
               <div className={`mt-3 flex items-center gap-2 text-xs px-3 py-2 rounded-lg w-fit ${apartments.length >= orgLimits.max_apartments ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-500'}`}>
                 <Home className="w-3.5 h-3.5" />
                 <span>Enheter (org-total): <strong>{apartments.length}</strong> / {orgLimits.max_apartments}</span>
@@ -447,7 +459,8 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
             )}
           </Card>
 
-          {operationsEnabled && (
+          {operationsEnabled&&<Tabs tabs={[{key:'units',label:'Enheter'},...(operationsEnabled?[{key:'operations',label:'Drift'}]:[])]} active={propertyTab} onChange={setPropertyTab}/>}
+          {operationsEnabled && propertyTab==='operations' && (
             <Card className="p-5">
               <h3 className="mb-3 text-lg font-black text-slate-950">Driftinformation</h3>
               <Tabs
@@ -464,17 +477,18 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
             </Card>
           )}
 
+          {propertyTab==='units'&&<><div className="flex flex-col gap-3 sm:flex-row"><SearchInput placeholder="Sök nummer eller hyresgäst…" value={unitQuery} onChange={setUnitQuery}/><Select aria-label="Uthyrningsstatus" value={unitStatus} onChange={e=>setUnitStatus(e.target.value)} options={[{value:'all',label:'Alla statusar'},...APARTMENT_STATUS_OPTIONS]}/></div>
           <div className="space-y-3">
-            {getPropertyApartments(selectedProperty.id).length === 0 ? (
-              <EmptyState icon={<Home className="w-12 h-12" />} title="Inga enheter" description="Lägg till en lägenhet, lokal eller förråd" />
+            {visibleUnits.length === 0 ? (
+              <EmptyState icon={<Home className="w-12 h-12" />} title={unitQuery||unitStatus!=='all'?"Inga matchande enheter":"Inga enheter"} description={unitQuery||unitStatus!=='all'?"Ändra sökningen eller välj alla statusar.":"Lägg till en lägenhet, lokal eller förråd"} />
             ) : (
-              getPropertyApartments(selectedProperty.id).map((apt) => {
+              visibleUnits.map((apt) => {
                 const tenant = getCurrentTenant(apt.id);
                 return (
                   <Card key={apt.id} className="p-4">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
                           <h4 className="font-semibold text-slate-900">{unitTypeLabel(apt.unit_type)} {apt.apartment_number}</h4>
                           <Badge className={getAptStatusColor(apt.status) + ' text-xs'}>
                             {APARTMENT_STATUS_LABELS[apt.status as keyof typeof APARTMENT_STATUS_LABELS] || apt.status}
@@ -516,8 +530,8 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
                         </div>
                         {tenant && (
                           <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg mt-2 w-fit">
-                            <Users className="w-3.5 h-3.5" />
-                            <span>Uthyrd till {tenant.name || tenant.email}</span>
+                            <Avatar name={tenant.name||tenant.email} userId={tenant.id} size="xs"/>
+                            <span>{tenant.name || tenant.email}</span>
                           </div>
                         )}
                         {apt.notes && (
@@ -534,10 +548,10 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
                         />
                       </div>
                       <div className="flex items-center gap-1 ml-3">
-                        <button onClick={() => openEditApartmentModal(apt)} className="p-2 hover:bg-slate-100 rounded-lg">
+                        <button aria-label={`Redigera ${unitTypeLabel(apt.unit_type)} ${apt.apartment_number}`} onClick={() => openEditApartmentModal(apt)} className="vihem-icon-button">
                           <Edit2 className="w-4 h-4 text-slate-500" />
                         </button>
-                        <button onClick={() => deleteApartment(apt)} className="p-2 hover:bg-red-50 rounded-lg">
+                        <button aria-label={`Radera ${unitTypeLabel(apt.unit_type)} ${apt.apartment_number}`} onClick={() => deleteApartment(apt)} className="vihem-icon-button text-vihem-danger">
                           <Trash2 className="w-4 h-4 text-red-500" />
                         </button>
                       </div>
@@ -546,13 +560,13 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
                 );
               })
             )}
-          </div>
+          </div></>}
         </>
       )}
 
       {/* ── Property Modal ──────────────────────────────────────────────── */}
-      <Modal open={showPropertyModal} onClose={() => { setShowPropertyModal(false); setEditingProperty(null); }} title={editingProperty ? 'Redigera fastighet' : 'Ny fastighet'} size="md">
-        <div className="space-y-4">
+      <Modal mobileFullscreen open={showPropertyModal} onClose={()=>closeEditor('property')} title={editingProperty ? 'Redigera fastighet' : 'Ny fastighet'} size="md" footer={<><Button variant="secondary" disabled={saving} onClick={()=>closeEditor('property')}>Avbryt</Button><Button loading={saving} onClick={handleSaveProperty}>Spara fastighet</Button></>}>
+        <fieldset disabled={saving} className="space-y-4"><p className="text-sm text-vihem-muted">Grunduppgifterna hjälper dig att hitta och organisera fastighetens enheter.</p>{saveError&&<p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-vihem-danger">{saveError}</p>}
           <Input label="Namn" value={propertyFormData.name} onChange={(e) => setPropertyFormData({ ...propertyFormData, name: e.target.value })} placeholder="T.ex. Storgatan Fastigheter" />
           <Input label="Adress" value={propertyFormData.address} onChange={(e) => setPropertyFormData({ ...propertyFormData, address: e.target.value })} placeholder="T.ex. Storgatan 123" />
           <div className="grid grid-cols-2 gap-4">
@@ -561,29 +575,13 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
           </div>
           <Textarea label="Beskrivning" value={propertyFormData.description} onChange={(e) => setPropertyFormData({ ...propertyFormData, description: e.target.value })} rows={3} />
           <Textarea label="Nödinformation" value={propertyFormData.emergency_info} onChange={(e) => setPropertyFormData({ ...propertyFormData, emergency_info: e.target.value })} rows={2} />
-          <Textarea label="Kontaktuppgifter (namn, telefon, e-post — en per rad)" value={propertyFormData.contact_info} onChange={(e) => setPropertyFormData({ ...propertyFormData, contact_info: e.target.value })} placeholder={"Anna Svensson\n070-123 45 67\nanna@exempel.se"} rows={3} />
-          <div className="flex gap-3 justify-end pt-2">
-            <Button variant="secondary" onClick={() => { setShowPropertyModal(false); setEditingProperty(null); }}>Avbryt</Button>
-            <Button variant="primary" onClick={handleSaveProperty}>Spara</Button>
-          </div>
-        </div>
+          <section className="space-y-3 border-t border-vihem-line pt-4"><h3 className="text-base font-semibold">Kontaktperson</h3>{[{label:'Namn på kontaktperson',type:'text'},{label:'Telefon',type:'tel'},{label:'E-post',type:'email'}].map((field,index)=><Input key={field.label} label={field.label} type={field.type} value={propertyFormData.contact_info.split('\n')[index]||''} onChange={e=>setPropertyFormData(previous=>{const lines=previous.contact_info.split('\n');while(lines.length<3)lines.push('');lines[index]=e.target.value;return {...previous,contact_info:lines.join('\n')};})}/>)}</section>
+        </fieldset>
       </Modal>
 
       {/* ── Apartment Modal ─────────────────────────────────────────────── */}
-      <Modal open={showApartmentModal} onClose={() => { setShowApartmentModal(false); setEditingApartment(null); }} title={editingApartment ? `Redigera ${unitTypeLabel(apartmentFormData.unit_type).toLowerCase()}` : newUnitLabel(apartmentFormData.unit_type)} size="xl">
-        {/* Tab bar */}
-        <div className="flex gap-1 mb-5 p-1 bg-slate-100 rounded-xl">
-          {(['basic', 'technical'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setAptTab(tab)}
-              className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${aptTab === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              {tab === 'basic' ? 'Grunduppgifter' : 'Teknisk information'}
-            </button>
-          ))}
-        </div>
-
+      <Modal mobileFullscreen open={showApartmentModal} onClose={()=>closeEditor('apartment')} title={editingApartment ? `Redigera ${unitTypeLabel(apartmentFormData.unit_type).toLowerCase()}` : newUnitLabel(apartmentFormData.unit_type)} size="xl" toolbar={<Tabs tabs={[{key:'basic',label:'Grunduppgifter'},{key:'technical',label:'Teknik & åtkomst'}]} active={aptTab} onChange={tab=>setAptTab(tab as typeof aptTab)}/>} footer={<><Button variant="secondary" disabled={saving} onClick={()=>closeEditor('apartment')}>Avbryt</Button><Button loading={saving} onClick={handleSaveApartment}>Spara enhet</Button></>}>
+        <fieldset disabled={saving} className="space-y-4 max-w-3xl mx-auto">{saveError&&<p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-vihem-danger">{saveError}</p>}
         {aptTab === 'basic' && (
           <div className="space-y-4">
             <Select label="Typ" value={apartmentFormData.unit_type} onChange={(e) => setF('unit_type', e.target.value as AptFormData['unit_type'])} options={UNIT_TYPE_OPTIONS} />
@@ -591,17 +589,12 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
               <Input label={unitNumberLabel(apartmentFormData.unit_type)} value={apartmentFormData.apartment_number} onChange={(e) => setF('apartment_number', e.target.value)} placeholder="T.ex. 101" />
               <Select label="Våning" value={apartmentFormData.floor} onChange={(e) => setF('floor', e.target.value)} options={FLOOR_OPTIONS} />
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               <Input label="Storlek (m²)" type="number" value={apartmentFormData.size} onChange={(e) => setF('size', e.target.value)} placeholder="75" />
               <Input label="Antal rum" type="number" step="0.5" value={apartmentFormData.rooms} onChange={(e) => setF('rooms', e.target.value)} placeholder="T.ex. 2.5" />
-              <Input label="Månadshyra (kr)" type="number" value={apartmentFormData.rent} onChange={(e) => setF('rent', e.target.value)} placeholder="12000" />
+              <div className="col-span-2 sm:col-span-1"><Input label="Månadshyra (kr)" type="number" value={apartmentFormData.rent} onChange={(e) => setF('rent', e.target.value)} placeholder="12000" /></div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
-              <select value={apartmentFormData.status} onChange={(e) => setF('status', e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                {APARTMENT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
+            <Select label="Status" value={apartmentFormData.status} onChange={e=>setF('status',e.target.value)} options={APARTMENT_STATUS_OPTIONS}/>
             <div className="grid grid-cols-2 gap-4 pt-1">
               {[
                 { key: 'storage', label: 'Förråd' },
@@ -643,19 +636,19 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                   <Key className="w-3.5 h-3.5" /> Nycklar
                 </p>
-                <button onClick={() => setKeyIds(prev => [...prev, { id: '', label: '', copies: 1 }])} className="text-xs text-blue-600 hover:text-blue-700 font-medium">+ Lägg till nyckel</button>
+                <Button size="sm" variant="secondary" onClick={() => setKeyIds(prev => [...prev, { id: '', label: '', copies: 1 }])}><Plus size={16}/>Nyckel</Button>
               </div>
               {keyIds.length === 0 ? (
                 <p className="text-sm text-slate-400 italic">Inga nycklar registrerade</p>
               ) : (
                 <div className="space-y-2">
                   {keyIds.map((k, i) => (
-                    <div key={i} className="grid grid-cols-3 gap-2 items-end">
-                      <Input label={i === 0 ? 'Nyckel-ID' : ''} value={k.id} onChange={(e) => setKeyIds(prev => prev.map((x, j) => j === i ? { ...x, id: e.target.value } : x))} placeholder="ID" />
-                      <Input label={i === 0 ? 'Beskrivning' : ''} value={k.label} onChange={(e) => setKeyIds(prev => prev.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} placeholder="T.ex. Ytterdörr" />
+                    <div key={i} className="grid grid-cols-2 sm:grid-cols-3 gap-3 items-end">
+                      <Input label="Nyckel-ID" value={k.id} onChange={(e) => setKeyIds(prev => prev.map((x, j) => j === i ? { ...x, id: e.target.value } : x))} placeholder="ID" />
+                      <Input label="Beskrivning" value={k.label} onChange={(e) => setKeyIds(prev => prev.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} placeholder="T.ex. Ytterdörr" />
                       <div className="flex gap-2 items-end">
-                        <Input label={i === 0 ? 'Kopior' : ''} type="number" value={String(k.copies)} onChange={(e) => setKeyIds(prev => prev.map((x, j) => j === i ? { ...x, copies: parseInt(e.target.value) || 1 } : x))} placeholder="1" />
-                        <button onClick={() => setKeyIds(prev => prev.filter((_, j) => j !== i))} className="pb-2 text-red-400 hover:text-red-600 text-lg leading-none">×</button>
+                        <Input label="Kopior" type="number" value={String(k.copies)} onChange={(e) => setKeyIds(prev => prev.map((x, j) => j === i ? { ...x, copies: parseInt(e.target.value) || 1 } : x))} placeholder="1" />
+                        <button aria-label={`Ta bort nyckel ${i+1}`} onClick={() => setKeyIds(prev => prev.filter((_, j) => j !== i))} className="vihem-icon-button text-vihem-danger"><Trash2 size={16}/></button>
                       </div>
                     </div>
                   ))}
@@ -669,20 +662,20 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                   <Network className="w-3.5 h-3.5" /> Nätverksuttag
                 </p>
-                <button onClick={() => setNetworkOutlets(prev => [...prev, { room: '', port_id: '', switch: '', vlan: '' }])} className="text-xs text-blue-600 hover:text-blue-700 font-medium">+ Lägg till uttag</button>
+                <Button size="sm" variant="secondary" onClick={() => setNetworkOutlets(prev => [...prev, { room: '', port_id: '', switch: '', vlan: '' }])}><Plus size={16}/>Uttag</Button>
               </div>
               {networkOutlets.length === 0 ? (
                 <p className="text-sm text-slate-400 italic">Inga nätverksuttag registrerade</p>
               ) : (
                 <div className="space-y-2">
                   {networkOutlets.map((n, i) => (
-                    <div key={i} className="grid grid-cols-4 gap-2 items-end">
-                      <Input label={i === 0 ? 'Rum' : ''} value={n.room} onChange={(e) => setNetworkOutlets(prev => prev.map((x, j) => j === i ? { ...x, room: e.target.value } : x))} placeholder="Vardagsrum" />
-                      <Input label={i === 0 ? 'Port-ID' : ''} value={n.port_id} onChange={(e) => setNetworkOutlets(prev => prev.map((x, j) => j === i ? { ...x, port_id: e.target.value } : x))} placeholder="P-24" />
-                      <Input label={i === 0 ? 'Switch' : ''} value={n.switch || ''} onChange={(e) => setNetworkOutlets(prev => prev.map((x, j) => j === i ? { ...x, switch: e.target.value } : x))} placeholder="SW-02" />
+                    <div key={i} className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
+                      <Input label="Rum" value={n.room} onChange={(e) => setNetworkOutlets(prev => prev.map((x, j) => j === i ? { ...x, room: e.target.value } : x))} placeholder="Vardagsrum" />
+                      <Input label="Port-ID" value={n.port_id} onChange={(e) => setNetworkOutlets(prev => prev.map((x, j) => j === i ? { ...x, port_id: e.target.value } : x))} placeholder="P-24" />
+                      <Input label="Switch" value={n.switch || ''} onChange={(e) => setNetworkOutlets(prev => prev.map((x, j) => j === i ? { ...x, switch: e.target.value } : x))} placeholder="SW-02" />
                       <div className="flex gap-2 items-end">
-                        <Input label={i === 0 ? 'VLAN' : ''} value={n.vlan || ''} onChange={(e) => setNetworkOutlets(prev => prev.map((x, j) => j === i ? { ...x, vlan: e.target.value } : x))} placeholder="100" />
-                        <button onClick={() => setNetworkOutlets(prev => prev.filter((_, j) => j !== i))} className="pb-2 text-red-400 hover:text-red-600 text-lg leading-none">×</button>
+                        <Input label="VLAN" value={n.vlan || ''} onChange={(e) => setNetworkOutlets(prev => prev.map((x, j) => j === i ? { ...x, vlan: e.target.value } : x))} placeholder="100" />
+                        <button aria-label={`Ta bort uttag ${i+1}`} onClick={() => setNetworkOutlets(prev => prev.filter((_, j) => j !== i))} className="vihem-icon-button text-vihem-danger"><Trash2 size={16}/></button>
                       </div>
                     </div>
                   ))}
@@ -707,17 +700,14 @@ export function AdminPropertiesPage({ onNavigate }: AdminPropertiesPageProps) {
 
             {/* Notes */}
             <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Interna anteckningar</p>
-              <Textarea value={apartmentFormData.technical_notes} onChange={(e) => setF('technical_notes', e.target.value)} rows={3} placeholder="Övrig teknisk info för personal..." />
+              <Textarea label="Interna anteckningar" value={apartmentFormData.technical_notes} onChange={(e) => setF('technical_notes', e.target.value)} rows={3} placeholder="Övrig teknisk info för personal..." />
             </div>
           </div>
         )}
 
-        <div className="flex gap-3 justify-end pt-5 mt-2 border-t border-slate-100">
-          <Button variant="secondary" onClick={() => { setShowApartmentModal(false); setEditingApartment(null); }}>Avbryt</Button>
-          <Button variant="primary" onClick={handleSaveApartment}>Spara {unitTypeLabel(apartmentFormData.unit_type).toLowerCase()}</Button>
-        </div>
+        </fieldset>
       </Modal>
+      <Modal open={!!discard} onClose={()=>setDiscard(null)} title="Lämna utan att spara?" size="sm" footer={<><Button variant="secondary" onClick={()=>setDiscard(null)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>discard&&closeEditor(discard,true)}>Lämna utan att spara</Button></>}><p className="text-sm text-vihem-muted">Du har ändrat uppgifter. Spara dem innan du lämnar för att behålla ändringarna.</p></Modal>
     </div>
   );
 }
@@ -735,9 +725,9 @@ function ApartmentAgreementsLink({ apartmentId, onCreateAgreement }: { apartment
 
   return (
     <div className="flex items-center gap-2 text-xs mt-2">
-      <button onClick={onCreateAgreement} className="inline-flex items-center gap-1 font-medium text-blue-600 hover:text-blue-700">
-        <FileSignature className="w-3.5 h-3.5" /> Skapa avtal
-      </button>
+      <Button size="sm" variant="ghost" onClick={onCreateAgreement}>
+        <FileSignature className="w-4 h-4" /> Skapa avtal
+      </Button>
       {agreements.length > 0 && (
         <span className="text-slate-400">· {agreements.length} kopplat{agreements.length === 1 ? '' : 'e'} avtal</span>
       )}
