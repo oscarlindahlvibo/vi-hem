@@ -211,7 +211,7 @@ Browser admin: skapade syntetisk serviceoffert, lade till och sparade rubrik med
 
 Responsivt dokumentarkiv: kompakt filpresentation upp till iPad, desktop-tabell som standard och valbart rutnät. Objektkopplingar bevarade i utfällbar information. Fil/Uppgifter & åtkomst med fasta sparåtgärder, osparat-skydd, tydlig validering och pågående öppning. Inga publika lagringsgenvägar införda; befintliga backend-/Drive-/legacyvägar bevarade.
 
-Admin QA skapade metadata för ett personaldokument: titel/synlighet återlästa, personal får läsa, tenant/annan org nekas. Exakt testpost borttagen. Tom titel ger validering. Screenshots fem bredder; mobilfilval granskad. Ingen faktisk filuppladdning eller riktig Drive-testning; separat QA-Drive-konfiguration saknas. Full dokumentmodul inte klar.
+Admin QA skapade metadata för ett personaldokument: titel/synlighet återlästa, personal får läsa, tenant/annan org nekas. Exakt testpost borttagen. Tom titel ger validering. Dokumentets osparat-dialog och tom sök provade i browser. Screenshots fem bredder; mobilfilval granskad. Ingen faktisk filuppladdning eller riktig Drive-testning; separat QA-Drive-konfiguration saknas. Full dokumentmodul inte klar.
 
 ## Kontrollpunkt 11E – Personal, 2026-10-10
 
@@ -240,3 +240,7 @@ QA finance saknades i module registry. En tillfällig finance-rad och QA-organis
 Den egna overlay-dialogen ersatt med DialogSurface/Modal, mobilhelskärm och fasta åtgärder. Innehåll först, därefter Mottagare & publicering med sammanfattning. Alla fält har kopplade etiketter, tomma uppgifter valideras, utkastskydd finns. Publicera/Spara utkast är uttryckliga åtgärder; befintlig standardstatus och backend-regler bevarade. Sök/statusflikar, lugnare märkning och läs mer expanderar samma text i stället för att duplicera den. Datum visas som lokal datetime och oförändrat datum sparas utan förskjutning; tom datumväljare kastar inte längre RangeError.
 
 Admin browser QA: tom rubrik/innehåll valideras, långt svenskt utkast skapas, läs mer/återöppning, osparat-dialog, redigering och sparning. QA-trigger scoped till exakt syntetisk nyhet gav sparfel, text och inställningar bevarades; efter borttagen trigger lyckades återförsök. DB bekräftar draft/Unicode, original published_at oförändrat, personal läser, tenant/annan organisation nekas. Exakt QA-utkast borttaget; ingen feltrigger kvar. Ingen nyhet publicerad och inga externa utskick gjorda. Screenshots lista/form fem bredder, mobil/lista och form visuellt granskade. Bilder, fastighetsspecifik publicering, publikt mottagarflöde och full roll-/statusmatris återstår.
+
+## Kontrollpunkt 11I – samlad verifiering och återupptagning
+
+Se broad-module-verification.md för nio individuellt förbättrade områden, testmatris, QA-städning, releaseblockerare och nästa steg. Slutkontroller TypeScript/build/mobile/premium/chat/rental/inventory/installments och property/invoice QA PASS. Full lint 0 errors/85 warnings. Ingen hel modul räknas verifierad och klar. Main/produktion orörda. Visuella bilder och testloggar i outputs/vihem-3-premium-pass5.
