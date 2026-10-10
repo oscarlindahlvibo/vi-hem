@@ -643,7 +643,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
     if (!navigator.onLine) await queueOfflineMutation('absence_insert', absenceData, `absence:${user.id}:${payload.start_date}:${payload.absence_type}`);
     if (error) {
       setAbsenceError(absenceDbErrorMessage(error));
-      return;
+      throw error;
     }
     setAbsenceError('');
     setShowAbsenceModal(false);
@@ -1074,6 +1074,7 @@ function StaffTimeView({ user, initialAction }: { user: Profile; initialAction?:
       )}
 
       <AbsenceRequestModal
+        key={String(showAbsenceModal)}
         open={showAbsenceModal}
         onClose={() => setShowAbsenceModal(false)}
         onSubmit={handleAbsenceSubmit}
@@ -1772,87 +1773,276 @@ function AbsenceRequestList({ requests }: { requests: StaffAbsenceRequest[] }) {
   );
 }
 
-function AbsenceRequestModal({ open, onClose, onSubmit, defaultDate, title = 'Anmäl frånvaro eller ansök om ledighet', submitLabel = 'Skicka', absence }: {
+function AbsenceRequestModal({
+  open,
+  onClose,
+  onSubmit,
+  defaultDate,
+  title = "Anmäl frånvaro eller ansök om ledighet",
+  submitLabel = "Skicka",
+  absence,
+}: {
   open: boolean;
   onClose: () => void;
-  onSubmit: (payload: { absence_type: StaffAbsenceType; start_date: string; end_date: string; start_time?: string | null; end_time?: string | null; comment: string }) => void;
+  onSubmit: (payload: {
+    absence_type: StaffAbsenceType;
+    start_date: string;
+    end_date: string;
+    start_time?: string | null;
+    end_time?: string | null;
+    comment: string;
+  }) => void | Promise<void>;
   defaultDate?: string;
   title?: string;
   submitLabel?: string;
   absence?: StaffAbsenceRequest | null;
 }) {
   const today = absence?.start_date || defaultDate || localDateKey(new Date());
-  const [absenceType, setAbsenceType] = useState<StaffAbsenceType>('sick');
+  const [absenceType, setAbsenceType] = useState<StaffAbsenceType>(
+    absence?.absence_type || "sick",
+  );
   const [startDate, setStartDate] = useState(today);
-  const [endDate, setEndDate] = useState(today);
-  const [startTime, setStartTime] = useState('');
-  const [endTime, setEndTime] = useState('');
-  const [comment, setComment] = useState('');
+  const [endDate, setEndDate] = useState(absence?.end_date || today);
+  const [startTime, setStartTime] = useState(
+    absence?.start_time?.slice(0, 5) || "",
+  );
+  const [endTime, setEndTime] = useState(absence?.end_time?.slice(0, 5) || "");
+  const [comment, setComment] = useState(absence?.comment || "");
 
   useEffect(() => {
     if (open) {
-      setAbsenceType(absence?.absence_type || 'sick');
+      setAbsenceType(absence?.absence_type || "sick");
       setStartDate(absence?.start_date || today);
       setEndDate(absence?.end_date || today);
-      setStartTime(absence?.start_time?.slice(0, 5) || '');
-      setEndTime(absence?.end_time?.slice(0, 5) || '');
-      setComment(absence?.comment || '');
+      setStartTime(absence?.start_time?.slice(0, 5) || "");
+      setEndTime(absence?.end_time?.slice(0, 5) || "");
+      setComment(absence?.comment || "");
     }
   }, [open, today, absence]);
 
-  const hasPartialTime = Boolean(startTime || endTime);
-  const valid = !!startDate && !!endDate && endDate >= startDate && (!hasPartialTime || (!!startTime && !!endTime && (endDate > startDate || endTime > startTime)));
-
+  const {
+    saving,
+    error: submissionError,
+    run,
+    clearError,
+  } = useFormSubmission(
+    "Frånvaron kunde inte sparas. Dina uppgifter finns kvar. Försök igen.",
+  );
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const [partialDay, setPartialDay] = useState(
+    Boolean(absence?.start_time || absence?.end_time),
+  );
+  useEffect(() => {
+    if (open) {
+      setPartialDay(Boolean(absence?.start_time || absence?.end_time));
+      clearError();
+    }
+  }, [open, absence, clearError]);
+  const dirty = useUnsavedChanges(
+    { absenceType, startDate, endDate, startTime, endTime, comment },
+    open,
+  );
+  const close = () => {
+    if (saving) return;
+    if (dirty) setDiscardOpen(true);
+    else onClose();
+  };
+  const valid =
+    !!startDate &&
+    !!endDate &&
+    endDate >= startDate &&
+    (!partialDay ||
+      (!!startTime &&
+        !!endTime &&
+        (endDate > startDate || endTime > startTime)));
+  const dayCount =
+    startDate && endDate && endDate >= startDate
+      ? Math.round(
+          (Date.parse(endDate + "T12:00:00Z") -
+            Date.parse(startDate + "T12:00:00Z")) /
+            86400000,
+        ) + 1
+      : 0;
+  const submit = () =>
+    run(() =>
+      onSubmit({
+        absence_type: absenceType,
+        start_date: startDate,
+        end_date: endDate,
+        start_time: partialDay ? startTime : null,
+        end_time: partialDay ? endTime : null,
+        comment,
+      }),
+    );
   return (
-    <Modal open={open} onClose={onClose} title={title}>
-      <div className="space-y-4">
-        <Select
-          label="Typ"
-          value={absenceType}
-          onChange={e => setAbsenceType(e.target.value as StaffAbsenceType)}
-          options={Object.entries(ABSENCE_TYPE_LABEL).map(([value, label]) => ({ value, label }))}
-        />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input label="Från" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
-          <Input label="Till" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input label="Från tid (valfritt)" type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
-          <Input label="Till tid (valfritt)" type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
-        </div>
-        <p className="text-xs text-slate-500">
-          Lämna tiderna tomma för heldag. Fyll i tider om frånvaron bara gäller några timmar.
+    <>
+      <Modal
+        open={open}
+        onClose={close}
+        title={title}
+        mobileFullscreen
+        size="md"
+        toolbar={
+          submissionError ? (
+            <p
+              role="alert"
+              className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800"
+            >
+              {submissionError}
+            </p>
+          ) : undefined
+        }
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" disabled={saving} onClick={close}>
+              Avbryt
+            </Button>
+            <Button
+              disabled={!valid || saving}
+              loading={saving}
+              onClick={submit}
+            >
+              <Send className="h-4 w-4" />
+              {submitLabel}
+            </Button>
+          </div>
+        }
+      >
+        <fieldset disabled={saving} className="min-w-0 space-y-6">
+          <Select
+            label="Vad gäller frånvaron?"
+            value={absenceType}
+            onChange={(e) => setAbsenceType(e.target.value as StaffAbsenceType)}
+            options={Object.entries(ABSENCE_TYPE_LABEL).map(
+              ([value, label]) => ({ value, label }),
+            )}
+          />
+          <section className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-semibold text-vihem-navy">
+                När är du borta?
+              </h3>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  const date = localDateKey(new Date());
+                  setStartDate(date);
+                  setEndDate(date);
+                }}
+              >
+                Idag
+              </Button>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input
+                label="Från datum"
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  if (endDate < e.target.value) setEndDate(e.target.value);
+                }}
+              />
+              <Input
+                label="Till datum"
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </div>
+            <div
+              className="flex gap-1 rounded-xl bg-vihem-soft p-1"
+              aria-label="Frånvarons omfattning"
+            >
+              <Button
+                className="flex-1"
+                variant={partialDay ? "ghost" : "secondary"}
+                onClick={() => {
+                  setPartialDay(false);
+                  setStartTime("");
+                  setEndTime("");
+                }}
+                aria-pressed={!partialDay}
+              >
+                Hela dagen
+              </Button>
+              <Button
+                className="flex-1"
+                variant={partialDay ? "secondary" : "ghost"}
+                onClick={() => setPartialDay(true)}
+                aria-pressed={partialDay}
+              >
+                Del av dagen
+              </Button>
+            </div>
+            {partialDay && (
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="Från klockan"
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                />
+                <Input
+                  label="Till klockan"
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                />
+              </div>
+            )}
+            {dayCount > 0 && (
+              <p className="text-sm text-vihem-muted">
+                {dayCount === 1
+                  ? formatDate(startDate)
+                  : `${formatDate(startDate)} – ${formatDate(endDate)}`}
+                {!partialDay &&
+                  ` · ${dayCount} kalenderdag${dayCount === 1 ? "" : "ar"}`}
+              </p>
+            )}
+            {!valid && (
+              <p role="alert" className="text-sm text-red-700">
+                Kontrollera datum och tider. Sluttiden ska vara efter starttiden
+                samma dag.
+              </p>
+            )}
+          </section>
+          <Textarea
+            label="Kommentar (valfritt)"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            rows={3}
+            placeholder="Lägg till information som behövs för din anmälan."
+          />
+        </fieldset>
+      </Modal>
+      <Modal
+        open={discardOpen}
+        onClose={() => setDiscardOpen(false)}
+        title="Lämna osparad frånvaro?"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setDiscardOpen(false)}>
+              Fortsätt redigera
+            </Button>
+            <Button
+              onClick={() => {
+                setDiscardOpen(false);
+                onClose();
+              }}
+            >
+              Lämna
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-vihem-muted">
+          Dina ändringar har inte skickats. Fortsätt om du vill behålla dem.
         </p>
-        <Textarea
-          label="Kommentar (valfritt)"
-          value={comment}
-          onChange={e => setComment(e.target.value)}
-          rows={3}
-          placeholder="Exempel: sjuk idag, VAB, önskar ledigt..."
-        />
-        {!valid && (
-          <p className="text-sm text-red-600">Kontrollera datum och tider. Sluttid måste vara efter starttid samma dag.</p>
-        )}
-        <div className="flex gap-3 pt-2">
-          <Button variant="secondary" onClick={onClose} className="flex-1">Avbryt</Button>
-          <Button
-            variant="primary"
-            disabled={!valid}
-            onClick={() => onSubmit({
-              absence_type: absenceType,
-              start_date: startDate,
-              end_date: endDate,
-              start_time: startTime || null,
-              end_time: endTime || null,
-              comment,
-            })}
-            className="flex-1 gap-2"
-          >
-            <Send className="w-4 h-4" /> {submitLabel}
-          </Button>
-        </div>
-      </div>
-    </Modal>
+      </Modal>
+    </>
   );
 }
 
@@ -1895,6 +2085,8 @@ function AdminTimeView({ user }: { user: Profile }) {
   const [adminEditingAbsence, setAdminEditingAbsence] = useState<StaffAbsenceRequest | null>(null);
   const [staffSchedules, setStaffSchedules] = useState<StaffWorkSchedule[]>([]);
   const [adminAbsenceError, setAdminAbsenceError] = useState('');
+  const absenceReviewLock = useRef(false);
+  const [reviewingAbsence, setReviewingAbsence] = useState<string | null>(null);
 
   // Calendar for admin staff view
   const now = new Date();
@@ -1902,7 +2094,18 @@ function AdminTimeView({ user }: { user: Profile }) {
   const [calMonth, setCalMonth] = useState(now.getMonth());
 
   const { workOrders, error: workOrderOptionsError } = useTimeWorkOrders(user.organisation_id, String(adminEditModalOpen));
-  useEffect(() => { fetchStaff(); fetchAdminOptions(); fetchAllPending(); }, []);
+  useEffect(() => {
+    let live = true;
+    async function loadStaff() {
+      const result = await supabase.from('vihem_profiles').select('*')
+        .in('role', ['staff', 'admin', 'superadmin']).eq('organisation_id', user.organisation_id).eq('active', true).order('name');
+      if (!live) return;
+      if (result.error) { setAdminAbsenceError('Personalen kunde inte hämtas. Försök igen.'); return; }
+      setStaffMembers(result.data || []);
+    }
+    void loadStaff(); fetchAdminOptions(); fetchAllPending();
+    return () => { live = false; };
+  }, [user.organisation_id]);
   useEffect(() => { if (staffMembers.length > 0) { fetchSummary(); fetchTodayEntries(); } }, [monthFilter, todayFilter, staffMembers]);
   useEffect(() => {
     const channel = supabase
@@ -1920,11 +2123,6 @@ function AdminTimeView({ user }: { user: Profile }) {
     return () => { supabase.removeChannel(channel); };
   }, [user.organisation_id, user.id, selectedStaff?.id, monthFilter, todayFilter]);
 
-  async function fetchStaff() {
-    const { data } = await supabase.from('vihem_profiles').select('*')
-      .in('role', ['staff', 'admin', 'superadmin']).eq('active', true).order('name');
-    setStaffMembers(data || []);
-  }
 
   async function fetchAdminOptions() {
     const { data: projectsData } = await supabase.from('vihem_customer_projects').select('id, title, name, customer_name, status').not('status', 'in', '(archived,completed,cancelled)').order('updated_at', { ascending: false });
@@ -1966,17 +2164,30 @@ function AdminTimeView({ user }: { user: Profile }) {
   }
 
   async function reviewPendingAbsence(id: string, status: 'approved' | 'rejected') {
-    const { error } = await supabase
-      .from('vihem_staff_absence_requests')
-      .update({ status, reviewed_by: user.id, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq('id', id);
-    if (error) {
-      setAdminAbsenceError(absenceDbErrorMessage(error));
-      return;
-    }
+    if (absenceReviewLock.current) return;
+    absenceReviewLock.current = true;
+    setReviewingAbsence(id);
     setAdminAbsenceError('');
-    fetchAllPending();
-    if (selectedStaff) loadAbsenceRequests(selectedStaff.id, monthFilter);
+    try {
+      const result = await supabase.from('vihem_staff_absence_requests')
+        .update({ status, reviewed_by: user.id, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', id).eq('status', 'submitted').select('id').single();
+      if (result.error) {
+        setAdminAbsenceError(result.error.code === 'PGRST116'
+          ? 'Anmälan är redan granskad eller inte längre tillgänglig. Läs in listan igen.'
+          : absenceDbErrorMessage(result.error));
+        await fetchAllPending();
+        return;
+      }
+      await fetchAllPending();
+      await fetchTodayEntries();
+      if (selectedStaff) await loadAbsenceRequests(selectedStaff.id, monthFilter);
+    } catch {
+      setAdminAbsenceError('Beslutet kunde inte bekräftas. Läs in listan innan du försöker igen.');
+    } finally {
+      absenceReviewLock.current = false;
+      setReviewingAbsence(null);
+    }
   }
 
   async function fetchSummary() {
@@ -2188,7 +2399,7 @@ function AdminTimeView({ user }: { user: Profile }) {
     end_time?: string | null;
     comment: string;
   }) {
-    if (!selectedStaff) return;
+    if (!selectedStaff) throw new Error('Välj en medarbetare först.');
     const data = {
       ...payload,
       status: adminEditingAbsence?.status === 'submitted' ? 'submitted' : 'approved',
@@ -2205,7 +2416,7 @@ function AdminTimeView({ user }: { user: Profile }) {
         });
     if (result.error) {
       setAdminAbsenceError(absenceDbErrorMessage(result.error));
-      return;
+      throw result.error;
     }
     setAdminAbsenceError('');
     setAdminAbsenceModalOpen(false);
@@ -2449,8 +2660,8 @@ function AdminTimeView({ user }: { user: Profile }) {
                         </p>
                       </button>
                       <div className="flex shrink-0 gap-3">
-                        <button onClick={() => reviewPendingAbsence(request.id, 'approved')} className="text-xs font-medium text-green-600 hover:text-green-700">Godkänn</button>
-                        <button onClick={() => reviewPendingAbsence(request.id, 'rejected')} className="text-xs font-medium text-red-500 hover:text-red-600">Avvisa</button>
+                        <Button size="sm" variant="secondary" disabled={Boolean(reviewingAbsence)} loading={reviewingAbsence===request.id} onClick={() => reviewPendingAbsence(request.id, 'approved')}>Godkänn</Button>
+                        <Button size="sm" variant="ghost" disabled={Boolean(reviewingAbsence)} onClick={() => reviewPendingAbsence(request.id, 'rejected')}>Avvisa</Button>
                       </div>
                     </div>
                   ))}
@@ -3028,6 +3239,7 @@ function AdminTimeView({ user }: { user: Profile }) {
       )}
       {selectedStaff && (
         <AbsenceRequestModal
+          key={`${adminAbsenceModalOpen}:${adminEditingAbsence?.id || 'new'}:${adminAbsenceDefaultDate}`}
           open={adminAbsenceModalOpen}
           onClose={() => { setAdminAbsenceModalOpen(false); setAdminAbsenceDefaultDate(''); setAdminEditingAbsence(null); setStaffModalOpen(true); }}
           onSubmit={handleAdminAbsenceSubmit}

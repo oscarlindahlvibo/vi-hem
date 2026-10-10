@@ -53,8 +53,11 @@ async function makeOrder(who) {
   assert.equal(r.error, null);
   return r.data.id;
 }
-const own = await makeOrder("oscar"),
-  foreign = await makeOrder("outsider");
+const service = createClient(url, c.service, {auth:{persistSession:false}});
+let own, foreign;
+try {
+ own = await makeOrder("oscar");
+ foreign = await makeOrder("outsider");
 for (const internal of [true, false]) {
   const r = await clients.oscar
     .from("vihem_work_order_comments")
@@ -117,7 +120,6 @@ console.log(
   "PASS: work-order comments preserve staff access; tenant, anonymous, foreign organisation and author spoofing denied.",
 );
 
-const service = createClient(url, c.service, {auth:{persistSession:false}});
 const original = await service.from("vihem_profiles").select("role,active").eq("id",c.users.christofer.id).single();
 assert.equal(original.error,null);
 try {
@@ -132,3 +134,9 @@ try {
   assert.equal((await service.from("vihem_profiles").update(original.data).eq("id",c.users.christofer.id)).error,null);
 }
 console.log("PASS: inactive account denied; explicit superadmin access preserved; QA identity restored.");
+
+} finally {
+ for (const id of [own, foreign].filter(Boolean)) {
+  assert.equal((await service.from('vihem_work_orders').delete().eq('id', id)).error, null);
+ }
+}
