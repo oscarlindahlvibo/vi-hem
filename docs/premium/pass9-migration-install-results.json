@@ -1,0 +1,130 @@
+[
+  {
+    "file": "supabase/migrations/20261009090000_chat_foundation.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261009091000_chat_actions_groups.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261009092000_chat_private_storage.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261009093000_chat_workorder_files.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261009094000_chat_legacy_cutover.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261009095000_chat_push_dedup.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261009120000_profile_photos.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261009130000_work_order_comment_isolation.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261009131000_chat_link_previews.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261009170000_atomic_customer_project_create.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261009190000_atomic_inspection_save.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261010100000_inspection_drive_jobs.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261010101000_inspection_archive_commit.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261010130000_atomic_clock_transitions.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261010140000_workorder_clock_compatibility.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261010160000_inspection_draft_revisions.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261010170000_tenant_invoice_ownership.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011100000_atomic_staff_editor.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011103000_fleet_read_role_guard.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011120000_atomic_inventory_create.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011123000_atomic_checklist_step.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011130000_idempotent_inventory_movement.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011133000_atomic_fleet_editor.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011140000_editor_revision_timestamps.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011143000_inventory_reference_isolation.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011150000_atomic_inventory_cart.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011153000_inventory_location_editor.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011160000_atomic_fleet_service.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011170000_notification_active_owner.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011180000_fleet_service_plan_editor.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011190000_atomic_operations_inventory_check.sql",
+    "status": "PASS"
+  },
+  {
+    "file": "supabase/migrations/20261011200000_atomic_routine_checklist_start.sql",
+    "status": "PASS"
+  }
+]
