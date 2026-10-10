@@ -1219,7 +1219,7 @@ export interface Notification {
   user_id: string;
   title: string;
   message: string;
-  type: 'info' | 'maintenance' | 'work_order' | 'chat' | 'laundry' | 'news' | 'termination' | 'time_entry';
+  type: 'info' | 'maintenance' | 'work_order' | 'chat' | 'message' | 'document' | 'announcement' | 'absence' | 'jour' | 'fleet' | 'laundry' | 'news' | 'termination' | 'time_entry';
   link: string;
   read_at: string | null;
   created_at: string;

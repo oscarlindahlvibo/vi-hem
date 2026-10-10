@@ -1,321 +1,423 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
-import { Button, Badge, PageHeader, EmptyState, LoadingPage } from '../components/ui';
-import { formatDateTime } from '../lib/utils';
-import { Notification } from '../types';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
+import {
+  Button,
+  PageHeader,
+  EmptyState,
+  LoadingPage,
+  Modal,
+  Input,
+} from "../components/ui";
+import { formatDateTime } from "../lib/utils";
+import type { Notification } from "../types";
 import {
   Bell,
   Check,
   CheckCheck,
-  Wrench,
   MessageCircle,
-  Clock,
-  Newspaper,
   FileText,
-  CalendarX,
-  X,
-} from 'lucide-react';
+  Wrench,
+  ArrowUpRight,
+  Trash2,
+} from "lucide-react";
 
-interface NotificationsPageProps { onNavigate: (page: string) => void; }
-
-const resolveNotificationLink = (notification: Notification) => {
-  const text = `${notification.title} ${notification.message}`.toLowerCase();
-
-  if (notification.link === 'mail' || text.includes('fakturamatch') || text.includes('e-postmatchning')) {
-    return 'mail-watchers';
-  }
-
-  return notification.link;
-};
-
-export function NotificationsPage({ onNavigate }: NotificationsPageProps) {
+const resolveLink = (n: Notification) =>
+  n.link === "mail" ||
+  `${n.title} ${n.message}`.toLowerCase().match(/fakturamatch|e-postmatchning/)
+    ? "mail-watchers"
+    : n.link;
+export function NotificationsPage({
+  onNavigate,
+}: {
+  onNavigate: (page: string) => void;
+}) {
   const { user } = useAuth();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const fetchNotifications = useCallback(async () => {
-    if (!user?.id) {
-      setNotifications([]);
-      setLoading(false);
-      return;
-    }
-
-    try {
+  const [rows, setRows] = useState<Notification[]>([]),
+    [loading, setLoading] = useState(true),
+    [more, setMore] = useState(false);
+  const [error, setError] = useState(""),
+    [actionError, setActionError] = useState(""),
+    [filter, setFilter] = useState<"all" | "unread">("all"),
+    [query, setQuery] = useState("");
+  const [pending, setPending] = useState<string | null>(null),
+    [remove, setRemove] = useState<Notification | null>(null);
+  const generation = useRef(0),
+    fetching = useRef(false),
+    acting = useRef(false),
+    cursor = useRef<Notification | null>(null);
+  const fetchRows = useCallback(
+    async (reset = false) => {
+      if (!user?.id || fetching.current) return;
+      fetching.current = true;
+      const epoch = generation.current;
       setLoading(true);
-      setErrorMessage(null);
-      const notificationSince = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-
-      const { data, error } = await supabase
-        .from('vihem_notifications')
-        .select('*')
-        .eq('user_id', user.id)
-        .gte('created_at', notificationSince)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setNotifications(data || []);
-
-      // Retention cleanup is best-effort and never blocks the read.
-      void supabase
-        .from('vihem_notifications')
-        .delete()
-        .eq('user_id', user.id)
-        .lt('created_at', notificationSince)
-        .then(({ error: cleanupError }) => {
-          if (cleanupError) console.warn('Notification retention cleanup skipped:', cleanupError);
-        });
-    } catch (error) {
-      console.error('Error fetching vihem_notifications:', error);
-      setErrorMessage('Aviseringarna kunde inte laddas just nu. Kontrollera anslutningen och försök igen.');
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    void fetchNotifications();
-    if (!user?.id) return;
-
-    // Set up real-time subscription
-    const channel = supabase
-      .channel('vihem_notifications')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'vihem_notifications',
-          filter: `user_id=eq.${user?.id}`,
-        },
-        () => {
-          void fetchNotifications();
+      setError("");
+      try {
+        let q = supabase
+          .from("vihem_notifications")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false, nullsFirst: false })
+          .order("id", { ascending: false })
+          .limit(51);
+        if (filter === "unread") q = q.is("read_at", null);
+        const last = reset ? null : cursor.current;
+        if (last)
+          q = last.created_at
+            ? q.or(
+                `created_at.lt.${last.created_at},created_at.is.null,and(created_at.eq.${last.created_at},id.lt.${last.id})`,
+              )
+            : q.is("created_at", null).lt("id", last.id);
+        const result = await q;
+        if (epoch !== generation.current) return;
+        if (result.error) throw result.error;
+        const fetched = (result.data || []) as Notification[],
+          page = fetched.slice(0, 50);
+        cursor.current = page[page.length - 1] || last;
+        setRows((old) =>
+          reset
+            ? page
+            : [...old, ...page.filter((r) => !old.some((n) => n.id === r.id))],
+        );
+        setMore(fetched.length > 50);
+      } catch {
+        if (epoch === generation.current)
+          setError("Aviseringarna kunde inte hämtas. Försök igen.");
+      } finally {
+        if (epoch === generation.current) {
+          fetching.current = false;
+          setLoading(false);
         }
+      }
+    },
+    [user?.id, filter],
+  );
+  useEffect(() => {
+    generation.current++;
+    const epoch = generation.current;
+    fetching.current = false;
+    cursor.current = null;
+    setRows([]);
+    setMore(false);
+    setActionError("");
+    void fetchRows(true);
+    return () => {
+      generation.current = epoch + 1;
+      fetching.current = false;
+    };
+  }, [fetchRows]);
+  // New arrivals are shown on demand; don't jump the user's scroll or discard older pages.
+  const [newActivity, setNewActivity] = useState(false);
+  useEffect(() => {
+    setNewActivity(false);
+    if (!user?.id) return;
+    const channel = supabase
+      .channel(`notifications-inbox:${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "vihem_notifications",
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => setNewActivity(true),
       )
       .subscribe();
-
     return () => {
-      void channel.unsubscribe();
+      void supabase.removeChannel(channel);
     };
-  }, [fetchNotifications, user?.id]);
-
-  const markAsRead = async (notificationId: string) => {
+  }, [user?.id]);
+  async function act(id: string, kind: "read" | "all" | "delete") {
+    if (!user?.id || acting.current) return false;
+    acting.current = true;
+    setPending(id);
+    setActionError("");
     try {
-      await supabase
-        .from('vihem_notifications')
-        .update({ read_at: new Date().toISOString() })
-        .eq('id', notificationId);
-
-      fetchNotifications();
-    } catch (error) {
-      console.error('Error marking notification as read:', error);
+      if (kind === "delete") {
+        const result = await supabase
+          .from("vihem_notifications")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("id", id)
+          .select("id")
+          .single();
+        if (result.error) throw result.error;
+        setRows((old) => old.filter((r) => r.id !== id));
+        setRemove(null);
+      } else {
+        const now = new Date().toISOString();
+        let q = supabase
+          .from("vihem_notifications")
+          .update({ read_at: now })
+          .eq("user_id", user.id)
+          .is("read_at", null);
+        if (kind === "read") q = q.eq("id", id);
+        const result = await q.select("id");
+        if (result.error) throw result.error;
+        const ids = new Set((result.data || []).map((r) => r.id));
+        if (kind === "read" && !ids.size) {
+          const current = await supabase
+            .from("vihem_notifications")
+            .select("id,read_at")
+            .eq("id", id)
+            .eq("user_id", user.id)
+            .single();
+          if (current.error || !current.data?.read_at)
+            throw current.error || new Error("Not read");
+          ids.add(id);
+        }
+        setRows((old) =>
+          filter === "unread"
+            ? old.filter((r) => !ids.has(r.id))
+            : old.map((r) => (ids.has(r.id) ? { ...r, read_at: now } : r)),
+        );
+      }
+      if (kind === "all") void fetchRows(true);
+      return true;
+    } catch {
+      setActionError(
+        "Åtgärden kunde inte sparas. Aviseringarna finns kvar. Försök igen.",
+      );
+      return false;
+    } finally {
+      acting.current = false;
+      setPending(null);
     }
-  };
-
-  const markAllAsRead = async () => {
-    try {
-      await supabase
-        .from('vihem_notifications')
-        .update({ read_at: new Date().toISOString() })
-        .eq('user_id', user?.id)
-        .is('read_at', null);
-
-      fetchNotifications();
-    } catch (error) {
-      console.error('Error marking all vihem_notifications as read:', error);
-    }
-  };
-
-  const deleteNotification = async (notificationId: string) => {
-    try {
-      await supabase
-        .from('vihem_notifications')
-        .delete()
-        .eq('id', notificationId);
-
-      fetchNotifications();
-    } catch (error) {
-      console.error('Error deleting notification:', error);
-    }
-  };
-
-  const getNotificationIcon = (type: string) => {
-    switch (type) {
-      case 'maintenance':
-        return <Wrench className="w-5 h-5 text-orange-600" />;
-      case 'work_order':
-        return <Wrench className="w-5 h-5 text-teal-600" />;
-      case 'chat':
-      case 'message':
-        return <MessageCircle className="w-5 h-5 text-blue-600" />;
-      case 'announcement':
-        return <Newspaper className="w-5 h-5 text-purple-600" />;
-      case 'document':
-        return <FileText className="w-5 h-5 text-green-600" />;
-      case 'absence':
-        return <CalendarX className="w-5 h-5 text-amber-600" />;
-      default:
-        return <Bell className="w-5 h-5 text-gray-600" />;
-    }
-  };
-
-  const getNotificationColor = (type: string): string => {
-    switch (type) {
-      case 'maintenance':
-        return 'bg-orange-50 border-l-4 border-orange-600';
-      case 'work_order':
-        return 'bg-teal-50 border-l-4 border-teal-600';
-      case 'chat':
-      case 'message':
-        return 'bg-blue-50 border-l-4 border-blue-600';
-      case 'announcement':
-        return 'bg-purple-50 border-l-4 border-purple-600';
-      case 'document':
-        return 'bg-green-50 border-l-4 border-green-600';
-      case 'absence':
-        return 'bg-amber-50 border-l-4 border-amber-600';
-      default:
-        return 'bg-gray-50 border-l-4 border-gray-600';
-    }
-  };
-
-  const unreadCount = notifications.filter((n) => !n.read_at).length;
-
-  if (loading && notifications.length === 0) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <PageHeader title="Aviseringar" icon={Bell} />
-        <div className="mx-auto flex max-w-4xl items-center justify-center px-4 py-20">
-          <div className="text-center">
-            <LoadingPage />
-            <p className="-mt-16 text-sm text-gray-500">Laddar dina aviseringar...</p>
-          </div>
-        </div>
-      </div>
-    );
   }
-
+  const unread = rows.filter((r) => !r.read_at).length,
+    visible = rows.filter((r) =>
+      `${r.title} ${r.message}`
+        .toLocaleLowerCase("sv")
+        .includes(query.toLocaleLowerCase("sv")),
+    );
+  if (loading && !rows.length) return <LoadingPage />;
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="mx-auto w-full max-w-5xl pb-5">
       <PageHeader
         title="Aviseringar"
+        subtitle="Händelser som berör dig, samlade på ett ställe."
         icon={Bell}
         action={
-          unreadCount > 0 && (
-            <Button
-              onClick={markAllAsRead}
-              variant="primary"
-              className="gap-2"
-            >
-              <CheckCheck size={18} />
-              Markera alla som lästa
-            </Button>
-          )
+          <Button
+            variant="secondary"
+            disabled={!!pending}
+            loading={pending === "all"}
+            onClick={() => void act("all", "all")}
+          >
+            <CheckCheck className="h-4 w-4" />
+            Markera alla som lästa
+          </Button>
         }
       />
-
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {errorMessage ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
-            <Bell className="mx-auto h-8 w-8 text-red-500" />
-            <h2 className="mt-3 font-semibold text-red-900">Kunde inte ladda aviseringar</h2>
-            <p className="mt-1 text-sm text-red-700">{errorMessage}</p>
-            <Button className="mt-4" onClick={() => void fetchNotifications()}>
-              Försök igen
-            </Button>
-          </div>
-        ) : notifications.length === 0 ? (
-          <EmptyState
-            icon={Bell}
-            title="Inga aviseringar"
-            description="Du har ingen nya aviseringar"
-          />
-        ) : (
-          <div className="space-y-4">
-            {/* Unread count badge */}
-            {unreadCount > 0 && (
-              <div className="mb-6 flex items-center gap-2">
-                <Badge
-                  className="bg-blue-100 text-blue-800"
-                  text={`${unreadCount} olästa avisering${unreadCount !== 1 ? 'ar' : ''}`}
-                />
-              </div>
-            )}
-
-            {/* Notifications list */}
-            {notifications.map((notification: any) => (
-              <div
-                key={notification.id}
-                className={`p-4 rounded-lg transition cursor-pointer hover:shadow-md ${
-                  notification.read_at
-                    ? getNotificationColor(notification.type)
-                    : `${getNotificationColor(notification.type)} ring-2 ring-${notification.type === 'maintenance' ? 'orange' : notification.type === 'message' ? 'blue' : notification.type === 'announcement' ? 'purple' : 'green'}-200`
-                }`}
-                onClick={() => {
-                  if (!notification.read_at) {
-                    markAsRead(notification.id);
-                  }
-                  if (notification.link) onNavigate(resolveNotificationLink(notification));
-                }}
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex gap-2">
+          <Button
+            variant={filter === "all" ? "primary" : "ghost"}
+            aria-pressed={filter === "all"}
+            onClick={() => setFilter("all")}
+          >
+            Alla
+          </Button>
+          <Button
+            variant={filter === "unread" ? "primary" : "ghost"}
+            aria-pressed={filter === "unread"}
+            onClick={() => setFilter("unread")}
+          >
+            Olästa{unread ? ` (${unread}${more ? "+" : ""})` : ""}
+          </Button>
+        </div>
+        <div className="w-full sm:w-80"><Input
+          aria-label="Sök i hämtade aviseringar"
+          placeholder="Sök i hämtade aviseringar"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        /></div>
+      </div>
+      {newActivity && (
+        <Button
+          className="mb-4"
+          variant="secondary"
+          onClick={() => {
+            setNewActivity(false);
+            void fetchRows(true);
+          }}
+        >
+          Uppdatera aviseringar
+        </Button>
+      )}
+      {actionError && (
+        <p
+          role="alert"
+          className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-700"
+        >
+          {actionError}
+        </p>
+      )}
+      {error && (
+        <div
+          role="alert"
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-red-50 p-3 text-sm text-red-700"
+        >
+          <p>{error}</p>
+          <Button
+            variant="secondary"
+            onClick={() => void fetchRows(rows.length === 0)}
+          >
+            Försök igen
+          </Button>
+        </div>
+      )}
+      <div className="divide-y divide-slate-200 rounded-2xl bg-white px-4 sm:px-6">
+        {visible.map((n) => {
+          const Icon =
+            n.type === "chat" || n.type === "message"
+              ? MessageCircle
+              : n.type === "document"
+                ? FileText
+                : n.type === "work_order" || n.type === "maintenance"
+                  ? Wrench
+                  : Bell;
+          return (
+            <article
+              key={n.id}
+              className="grid grid-cols-[36px_minmax(0,1fr)] gap-3 py-5 sm:grid-cols-[40px_minmax(0,1fr)_auto]"
+            >
+              <span
+                className={`flex h-9 w-9 items-center justify-center rounded-xl ${n.read_at ? "bg-slate-50 text-vihem-muted" : "bg-blue-50 text-vihem-blue"}`}
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-4 flex-1">
-                    <div className="mt-1 flex-shrink-0">
-                      {getNotificationIcon(notification.type)}
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-semibold text-gray-900">
-                          {notification.title}
-                        </h3>
-                        {!notification.read_at && (
-                          <span className="inline-flex items-center justify-center w-2 h-2 bg-blue-500 rounded-full flex-shrink-0" />
-                        )}
-                      </div>
-
-                      <p className="text-sm text-gray-700 mb-2">
-                        {notification.message}
-                      </p>
-
-                      <div className="flex items-center gap-2 text-xs text-gray-600">
-                        <Clock size={14} />
-                        {formatDateTime(notification.created_at)}
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteNotification(notification.id);
-                    }}
-                    className="ml-4 text-gray-400 hover:text-gray-600 flex-shrink-0"
+                <Icon className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <div className="flex items-start gap-2">
+                  <h2
+                    className={`text-base text-vihem-navy ${n.read_at ? "font-medium" : "font-semibold"}`}
                   >
-                    <X size={18} />
-                  </button>
+                    {n.title}
+                  </h2>
+                  {!n.read_at && (
+                    <span
+                      className="mt-2 h-2 w-2 shrink-0 rounded-full bg-vihem-blue"
+                      aria-label="Oläst"
+                    />
+                  )}
                 </div>
-
-                {!notification.read_at && (
-                  <div className="mt-3 flex justify-end">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        markAsRead(notification.id);
-                      }}
-                      className="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                    >
-                      <Check size={14} />
-                      Markera som läst
-                    </button>
-                  </div>
+                <p className="mt-1 max-w-prose whitespace-pre-wrap break-words text-sm leading-relaxed text-vihem-muted">
+                  {n.message}
+                </p>
+                <time className="mt-2 block text-xs text-vihem-muted">
+                  {n.created_at ? formatDateTime(n.created_at) : "Datum saknas"}
+                </time>
+                {n.link && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2"
+                    onClick={async () => {
+                      if (!n.read_at && !(await act(n.id, "read"))) return;
+                      const link = resolveLink(n);
+                      if (link) onNavigate(link);
+                    }}
+                    disabled={!!pending}
+                  >
+                    <ArrowUpRight className="h-4 w-4" />
+                    Öppna
+                  </Button>
                 )}
               </div>
-            ))}
-          </div>
-        )}
+              <div className="col-start-2 flex items-center gap-2 sm:col-start-3 sm:row-start-1 sm:self-start">
+                {!n.read_at && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Markera ${n.title} som läst`}
+                    loading={pending === n.id}
+                    disabled={!!pending}
+                    onClick={() => void act(n.id, "read")}
+                  >
+                    <Check className="h-4 w-4" />
+                    Läst
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Ta bort ${n.title}`}
+                  disabled={!!pending}
+                  onClick={() => setRemove(n)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </article>
+          );
+        })}
       </div>
+      {!visible.length && !error && (
+        <EmptyState
+          icon={Bell}
+          title={
+            query
+              ? "Inga träffar"
+              : filter === "unread"
+                ? "Du är ikapp"
+                : "Inga aviseringar"
+          }
+          description={
+            query
+              ? "Sökningen gäller de aviseringar du har hämtat."
+              : "Nya händelser visas här."
+          }
+        />
+      )}
+      {more && (
+        <Button
+          variant="secondary"
+          className="mt-5"
+          loading={loading}
+          onClick={() => void fetchRows()}
+        >
+          Visa äldre aviseringar
+        </Button>
+      )}
+      <Modal
+        open={!!remove}
+        onClose={() => {
+          if (!acting.current) setRemove(null);
+        }}
+        title="Ta bort aviseringen?"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              disabled={!!pending}
+              onClick={() => setRemove(null)}
+            >
+              Avbryt
+            </Button>
+            <Button
+              variant="danger"
+              loading={pending === remove?.id}
+              onClick={() => {
+                if (remove) void act(remove.id, "delete");
+              }}
+            >
+              Ta bort
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm">
+          {remove?.title}. Aviseringen tas bort permanent. Den kopplade
+          informationen påverkas inte.
+        </p>
+        {actionError && (
+          <p role="alert" className="mt-3 text-sm text-red-700">
+            {actionError}
+          </p>
+        )}
+      </Modal>
     </div>
   );
 }
