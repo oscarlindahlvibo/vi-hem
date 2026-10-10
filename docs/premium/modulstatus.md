@@ -41,7 +41,7 @@ Ingen rad är modul-Klar. Gemensamma kontroller påverkar även orörda vyer; de
 | src/pages/MailPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/MaintenancePage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/MeetingsPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
-| src/pages/NewsPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
+| src/pages/NewsPage.tsx | Implementerad men inte fullständigt verifierad: innehåll/mottagare, mobilhelskärm, kopplade etiketter, sök/status, utkastskydd/sparfeedback, lokal datumvisning och odubblerad läs mer | Admin QA create/edit/draft, validering/utkastvarning, kontrollerat serverfel/retry; DB datum/Unicode och staff/tenant/foreign; screenshots fem bredder | Publicering till olika mottagare/fastigheter, bilder, alla statusar, native och full DoD |
 | src/pages/NotificationsPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/OperationsAccessPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |
 | src/pages/OperationsChecklistsPage.tsx | Baslinjeinventerad | Ingen individuell runtime-/visuell verifiering | Alla revisionsdimensioner och DoD-flöden återstår |

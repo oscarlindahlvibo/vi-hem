@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useToast } from '../components/toast';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -10,9 +12,9 @@ import {
   Select,
   PageHeader,
   EmptyState,
-  LoadingPage,
+  LoadingPage, Modal, Tabs, SearchInput,
 } from '../components/ui';
-import { formatDate, NEWS_AUDIENCE_LABELS, NEWS_PRIORITY_LABELS, NEWS_TARGET_LABELS, useScrollLock } from '../lib/utils';
+import { formatDate, NEWS_AUDIENCE_LABELS, NEWS_PRIORITY_LABELS, NEWS_TARGET_LABELS } from '../lib/utils';
 import type { News, Property } from '../types';
 import { Newspaper, Plus, Edit2, Calendar } from 'lucide-react';
 
@@ -40,21 +42,26 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
 
   const canManageNews = user?.role === 'staff' || user?.role === 'admin' || user?.role === 'superadmin';
 
-  useScrollLock(showCreateModal);
+  const [saving,setSaving]=useState(false);
+  const [saveError,setSaveError]=useState('');
+  const [loadError,setLoadError]=useState('');
+  const [propertiesError,setPropertiesError]=useState('');
+  const [editorStep,setEditorStep]=useState('content');
+  const [search,setSearch]=useState('');
+  const [discard,setDiscard]=useState(false);
+  const toast=useToast();
+  const dirty=useUnsavedChanges({newTitle,newContent,newAudience,newTarget,newTargetId,newPriority,newStatus,newPublishedAt,newImageUrl},showCreateModal);
+  const closeEditor=()=>{if(saving)return;if(dirty){setDiscard(true);return;}setShowCreateModal(false);resetForm();};
 
-  useEffect(() => {
-    fetchNews();
-    if (canManageNews) fetchProperties();
-  }, [statusFilter, user?.id]);
-
-  const fetchNews = async () => {
+  const fetchNews = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoading(true);setLoadError('');
       let query = supabase
         .from('vihem_news')
         .select('*')
         .order('published_at', { ascending: false });
 
+      if(user?.organisation_id)query=query.eq('organisation_id',user.organisation_id);
       if (!canManageNews) {
         // Tenants see only published vihem_news
         query = query.eq('status', 'published');
@@ -68,13 +75,14 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
       if (error) throw error;
       setNews(data || []);
     } catch (error) {
-      console.error('Error fetching vihem_news:', error);
+      setLoadError('Nyheterna kunde inte hämtas. Försök igen.');
     } finally {
       setLoading(false);
     }
-  };
+  },[canManageNews,statusFilter,user?.organisation_id]);
 
-  const fetchProperties = async () => {
+  const fetchProperties = useCallback(async () => {
+    setPropertiesError('');
     const { data, error } = await supabase
       .from('vihem_properties')
       .select('*')
@@ -82,14 +90,16 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
       .order('name', { ascending: true });
 
     if (error) {
-      console.error('Error fetching vihem_properties:', error);
+      setPropertiesError('Fastigheterna kunde inte hämtas. Försök igen innan du riktar nyheten.');
       return;
     }
 
     setProperties(data || []);
-  };
+  },[]);
+  useEffect(()=>{void fetchNews();if(canManageNews)void fetchProperties();},[fetchNews,fetchProperties,canManageNews]);
 
   const resetForm = () => {
+    setSaveError('');setEditorStep('content');
     setNewTitle('');
     setNewContent('');
     setNewAudience('tenants');
@@ -103,12 +113,14 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
   };
 
   const createNews = async () => {
-    if (!newTitle.trim() || !newContent.trim()) return;
+    if(saving)return;
+    if (!newTitle.trim() || !newContent.trim()){setSaveError('Ange en rubrik och ett innehåll.');setEditorStep('content');return;}
     if (newTarget === 'property' && !newTargetId) {
-      alert('Välj en fastighet för nyheten.');
+      setSaveError('Välj en fastighet för nyheten.');
       return;
     }
 
+    setSaving(true);setSaveError('');
     try {
       const newsData = {
         title: newTitle,
@@ -125,25 +137,28 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
         created_at: new Date().toISOString(),
       };
 
-      const { error } = await supabase.from('vihem_news').insert(newsData);
+      const { error } = await supabase.from('vihem_news').insert(newsData).select('id').single();
 
       if (error) throw error;
 
+      toast.show('Nyheten har sparats');
       resetForm();
       setShowCreateModal(false);
-      fetchNews();
+      void fetchNews();
     } catch (error) {
-      console.error('Error creating vihem_news:', error);
-    }
+      setSaveError('Nyheten kunde inte sparas. Uppgifterna finns kvar – försök igen.');
+    }finally{setSaving(false);}
   };
 
   const updateNews = async () => {
-    if (!editingNews || !newTitle.trim() || !newContent.trim()) return;
+    if(saving||!editingNews)return;
+    if (!newTitle.trim() || !newContent.trim()){setSaveError('Ange en rubrik och ett innehåll.');setEditorStep('content');return;}
     if (newTarget === 'property' && !newTargetId) {
-      alert('Välj en fastighet för nyheten.');
+      setSaveError('Välj en fastighet för nyheten.');
       return;
     }
 
+    setSaving(true);setSaveError('');
     try {
       const { error } = await supabase
         .from('vihem_news')
@@ -158,16 +173,17 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
           published_at: newPublishedAt || new Date().toISOString(),
           image_url: newImageUrl || null,
         })
-        .eq('id', editingNews.id);
+        .eq('id', editingNews.id).select('id').single();
 
       if (error) throw error;
 
+      toast.show('Nyheten har sparats');
       resetForm();
       setShowCreateModal(false);
-      fetchNews();
+      void fetchNews();
     } catch (error) {
-      console.error('Error updating vihem_news:', error);
-    }
+      setSaveError('Nyheten kunde inte sparas. Uppgifterna finns kvar – försök igen.');
+    }finally{setSaving(false);}
   };
 
   const deleteNews = async (id: string) => {
@@ -180,11 +196,12 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
       if (error) throw error;
       fetchNews();
     } catch (error) {
-      console.error('Error deleting vihem_news:', error);
+      setLoadError('Nyheten kunde inte tas bort. Försök igen.');
     }
   };
 
   const openEditModal = (item: News) => {
+    setSaveError('');setEditorStep('content');
     setEditingNews(item);
     setNewTitle(item.title);
     setNewContent(item.content);
@@ -201,11 +218,11 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
   const getStatusColor = (status: string): string => {
     switch (status) {
       case 'published':
-        return 'bg-green-100 text-green-800';
+        return 'bg-slate-100 text-slate-600';
       case 'draft':
         return 'bg-gray-100 text-gray-800';
       case 'archived':
-        return 'bg-red-100 text-red-800';
+        return 'bg-slate-100 text-slate-600';
       default:
         return 'bg-gray-100 text-gray-800';
     }
@@ -226,8 +243,10 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
     return <LoadingPage />;
   }
 
+  const visibleNews=news.filter(item=>[item.title,item.content].join(' ').toLowerCase().includes(search.toLowerCase()));
+  const localDateTime=newPublishedAt?new Date(new Date(newPublishedAt).getTime()-new Date(newPublishedAt).getTimezoneOffset()*60000).toISOString().slice(0,16):'';
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="space-y-4">
       <PageHeader
         title="Nyheter"
         icon={Newspaper}
@@ -248,28 +267,14 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
         }
       />
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Filter */}
-        {canManageNews && (
-          <div className="mb-8">
-            <Select
-              label="Status"
-              value={statusFilter}
-              onChange={(e: any) => setStatusFilter(e.target.value)}
-              options={[
-                { value: 'all', label: 'Alla' },
-                { value: 'published', label: 'Publicerad' },
-                { value: 'draft', label: 'Utkast' },
-                { value: 'archived', label: 'Arkiverad' },
-              ]}
-            />
-          </div>
-        )}
-
-        {news.length === 0 ? (
+      <div className="mx-auto max-w-4xl space-y-4">
+        {loadError&&<div role="alert" className="vihem-feedback vihem-feedback-error">{loadError}<Button variant="secondary" onClick={()=>void fetchNews()}>Försök igen</Button></div>}
+        <SearchInput value={search} onChange={setSearch} placeholder="Sök rubrik eller innehåll…"/>
+        {canManageNews&&<Tabs active={statusFilter} onChange={setStatusFilter} tabs={[{key:'all',label:'Alla'},{key:'published',label:'Publicerade'},{key:'draft',label:'Utkast'},{key:'archived',label:'Arkiverade'}]} />}
+        {loadError&&news.length===0?null:visibleNews.length === 0 ? (
           <EmptyState
             icon={<Newspaper className="w-12 h-12" />}
-            title="Inga nyheter"
+            title={search?'Inga nyheter matchar':'Inga nyheter'}
             description={
               canManageNews
                 ? 'Skapa din första nyhet'
@@ -278,9 +283,9 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
           />
         ) : (
           <div className="space-y-6">
-            {news.map((item: any) => (
-              <Card key={item.id} className="hover:shadow-lg transition">
-                <div className="p-6">
+            {visibleNews.map((item: any) => (
+              <Card key={item.id} className="overflow-hidden">
+                <div className="p-4 sm:p-5">
                   {/* Header with image if exists */}
                   {item.image_url && (
                     <div className="mb-4 -mx-6 -mt-6 h-48 overflow-hidden rounded-t-lg">
@@ -295,8 +300,8 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                     </div>
                   )}
 
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Newspaper className="w-5 h-5 text-blue-600" />
                       {canManageNews && (
                         <>
@@ -310,12 +315,10 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                                   : 'Arkiverad'
                             }
                           />
-                          <Badge className={getPriorityColor(item.priority || 'normal')}>
-                            {NEWS_PRIORITY_LABELS[item.priority || 'normal']}
-                          </Badge>
-                          <Badge className="bg-slate-100 text-slate-700">
-                            {NEWS_AUDIENCE_LABELS[item.audience || 'tenants']}
-                          </Badge>
+                          {item.priority&&item.priority!=='normal'&&<Badge className={getPriorityColor(item.priority)}>
+                            {NEWS_PRIORITY_LABELS[item.priority]}
+                          </Badge>}
+
                         </>
                       )}
                     </div>
@@ -343,7 +346,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                     )}
                   </div>
 
-                  <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                  <h2 className="break-words text-lg font-semibold text-vihem-ink mb-2">
                     {item.title}
                   </h2>
 
@@ -352,35 +355,7 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
                     {formatDate(item.published_at)}
                   </div>
 
-                  <div className="mb-4">
-                    <p className="text-gray-700 line-clamp-3">
-                      {item.content}
-                    </p>
-
-                    {expandedNewsId !== item.id && item.content.length > 200 && (
-                      <button
-                        onClick={() => setExpandedNewsId(item.id)}
-                        className="text-blue-600 hover:text-blue-700 font-medium mt-2 text-sm"
-                      >
-                        Läs mer
-                      </button>
-                    )}
-                  </div>
-
-                  {expandedNewsId === item.id && (
-                    <div className="mb-4 p-4 bg-gray-50 rounded-lg max-h-96 overflow-y-auto">
-                      <p className="text-gray-700 whitespace-pre-wrap">
-                        {item.content}
-                      </p>
-                      <button
-                        onClick={() => setExpandedNewsId(null)}
-                        className="text-blue-600 hover:text-blue-700 font-medium mt-3 text-sm"
-                      >
-                        Visa mindre
-                      </button>
-                    </div>
-                  )}
-
+                  <div className="mb-4"><p className={`whitespace-pre-wrap break-words text-sm leading-relaxed text-vihem-muted ${expandedNewsId===item.id||item.content.length<=200?'':'line-clamp-3'}`}>{item.content}</p>{item.content.length>200&&<Button variant="ghost" size="sm" className="mt-2" aria-expanded={expandedNewsId===item.id} onClick={()=>setExpandedNewsId(expandedNewsId===item.id?null:item.id)}>{expandedNewsId===item.id?'Visa mindre':'Läs mer'}</Button>}</div>
                   {canManageNews && (
                     <div className="pt-4 border-t border-gray-200">
                       <div className="text-sm text-gray-600 space-y-1">
@@ -406,190 +381,29 @@ export function NewsPage({ onNavigate: _onNavigate }: NewsPageProps) {
         )}
       </div>
 
-      {/* Create/Edit News Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
-            <div className="p-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">
-                {editingNews ? 'Redigera nyhet' : 'Ny nyhet'}
-              </h2>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Titel
-                  </label>
-                  <Input
-                    placeholder="Nyhetsrubrik"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Innehål
-                  </label>
-                  <Textarea
-                    placeholder="Skriv nyhetsinnehållet här"
-                    value={newContent}
-                    onChange={(e) => setNewContent(e.target.value)}
-                    rows={8}
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Mottagare
-                    </label>
-                    <Select
-                      value={newAudience}
-                      onChange={(e: any) => setNewAudience(e.target.value)}
-                      options={[
-                        { value: 'tenants', label: 'Hyresgäster' },
-                        { value: 'staff', label: 'Personal' },
-                        { value: 'all', label: 'Personal och hyresgäster' },
-                      ]}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Område
-                    </label>
-                    <Select
-                      value={newTarget}
-                      onChange={(e: any) => {
-                        setNewTarget(e.target.value);
-                        if (e.target.value === 'all') setNewTargetId('');
-                      }}
-                      options={[
-                        { value: 'all', label: 'Alla i valda mottagargruppen' },
-                        { value: 'property', label: 'Särskild fastighet' },
-                      ]}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Status
-                    </label>
-                    <Select
-                      value={newStatus}
-                      onChange={(e: any) => setNewStatus(e.target.value)}
-                      options={[
-                        { value: 'draft', label: 'Utkast' },
-                        { value: 'published', label: 'Publicerad' },
-                        { value: 'archived', label: 'Arkiverad' },
-                      ]}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Prioritet
-                    </label>
-                    <Select
-                      value={newPriority}
-                      onChange={(e: any) => setNewPriority(e.target.value)}
-                      options={[
-                        { value: 'normal', label: 'Normal' },
-                        { value: 'important', label: 'Viktig' },
-                        { value: 'urgent', label: 'Akut' },
-                      ]}
-                    />
-                  </div>
-                </div>
-
-                {newTarget === 'property' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Fastighet
-                    </label>
-                    <Select
-                      value={newTargetId}
-                      onChange={(e: any) => setNewTargetId(e.target.value)}
-                      options={[
-                        { value: '', label: 'Välj fastighet' },
-                        ...properties.map(property => ({
-                          value: property.id,
-                          label: `${property.name} · ${property.address}`,
-                        })),
-                      ]}
-                    />
-                    {properties.length === 0 && (
-                      <p className="text-xs text-amber-700 mt-1">
-                        Ingen fastighet hittades i organisationen.
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Publiceringsdatum
-                  </label>
-                  <Input
-                    type="datetime-local"
-                    value={newPublishedAt.slice(0, 16)}
-                    onChange={(e) =>
-                      setNewPublishedAt(
-                        new Date(e.target.value).toISOString()
-                      )
-                    }
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Bild-URL (valfritt)
-                  </label>
-                  <Input
-                    placeholder="https://images.pexels.com/..."
-                    value={newImageUrl}
-                    onChange={(e) => setNewImageUrl(e.target.value)}
-                  />
-                  {newImageUrl && (
-                    <div className="mt-2 rounded-lg overflow-hidden h-40">
-                      <img
-                        src={newImageUrl}
-                        alt="Preview"
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex gap-3 mt-6">
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    resetForm();
-                    setShowCreateModal(false);
-                  }}
-                  className="flex-1"
-                >
-                  Avbryt
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={editingNews ? updateNews : createNews}
-                  className="flex-1"
-                >
-                  {editingNews ? 'Uppdatera' : 'Skapa nyhet'}
-                </Button>
-              </div>
+      <Modal open={showCreateModal} onClose={closeEditor} title={editingNews?'Redigera nyhet':'Ny nyhet'} size="lg" mobileFullscreen toolbar={saveError?<div role="alert" className="vihem-feedback vihem-feedback-error">{saveError}</div>:undefined} footer={<><Button variant="secondary" disabled={saving} onClick={closeEditor}>Avbryt</Button>{editorStep==='content'?<Button onClick={()=>{if(!newTitle.trim()||!newContent.trim()){setSaveError('Ange en rubrik och ett innehåll.');return;}setSaveError('');setEditorStep('audience');}}>Fortsätt</Button>:<Button loading={saving} onClick={()=>void(editingNews?updateNews():createNews())}>{newStatus==='published'?'Publicera nyhet':newStatus==='draft'?'Spara utkast':'Spara arkiverad nyhet'}</Button>}</>}>
+        <fieldset disabled={saving} className="space-y-5">
+          <Tabs active={editorStep} onChange={setEditorStep} tabs={[{key:'content',label:'Innehåll'},{key:'audience',label:'Mottagare & publicering'}]}/>
+          <div hidden={editorStep!=='content'} className="space-y-4">
+            <Input label="Rubrik" value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="Vad behöver mottagaren veta?"/>
+            <Textarea label="Innehåll" value={newContent} onChange={e=>setNewContent(e.target.value)} rows={8} placeholder="Skriv nyheten här…"/>
+            <details><summary className="vihem-touch-target cursor-pointer text-sm font-medium">Lägg till en bild</summary><div className="mt-2 space-y-2"><Input label="Bild-URL (valfritt)" type="url" value={newImageUrl} onChange={e=>setNewImageUrl(e.target.value)}/>{newImageUrl&&<img src={newImageUrl} alt="Nyhetens bildförhandsvisning" className="max-h-48 w-full rounded-xl object-contain"/>}</div></details>
+          </div>
+          <div hidden={editorStep!=='audience'} className="space-y-4">
+            <div className="rounded-xl bg-vihem-canvas p-4"><p className="break-words font-semibold">{newTitle||'Nyhetens rubrik'}</p><p className="mt-1 line-clamp-2 whitespace-pre-wrap text-sm text-vihem-muted">{newContent}</p></div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Select label="Mottagare" value={newAudience} onChange={e=>setNewAudience(e.target.value as typeof newAudience)} options={[{value:'tenants',label:'Hyresgäster'},{value:'staff',label:'Personal'},{value:'all',label:'Personal och hyresgäster'}]}/>
+              <Select label="Område" value={newTarget} onChange={e=>{setNewTarget(e.target.value as typeof newTarget);if(e.target.value==='all')setNewTargetId('');}} options={[{value:'all',label:'Alla i valda mottagargruppen'},{value:'property',label:'Särskild fastighet'}]}/>
             </div>
-          </Card>
-        </div>
-      )}
+            {newTarget==='property'&&<div>{propertiesError&&<div role="alert" className="vihem-feedback vihem-feedback-error">{propertiesError}<Button variant="secondary" onClick={()=>void fetchProperties()}>Försök igen</Button></div>}<Select label="Fastighet" value={newTargetId} onChange={e=>setNewTargetId(e.target.value)} options={[{value:'',label:'Välj fastighet'},...properties.map(property=>({value:property.id,label:`${property.name} · ${property.address}`}))]}/></div>}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Select label="Status" value={newStatus} onChange={e=>setNewStatus(e.target.value)} options={[{value:'draft',label:'Utkast'},{value:'published',label:'Publicerad'},{value:'archived',label:'Arkiverad'}]}/><Select label="Prioritet" value={newPriority} onChange={e=>setNewPriority(e.target.value as typeof newPriority)} options={[{value:'normal',label:'Normal'},{value:'important',label:'Viktig'},{value:'urgent',label:'Akut'}]}/></div>
+            <Input label="Publiceringsdatum" type="datetime-local" value={localDateTime} onChange={e=>setNewPublishedAt(e.target.value?new Date(e.target.value).toISOString():'')}/>
+            <p className="text-sm text-vihem-muted">{newStatus==='draft'?'Utkastet visas bara för behörig personal.':newStatus==='published'?'Nyheten visas för den valda mottagargruppen när du sparar.':'Nyheten sparas som arkiverad.'}</p>
+          </div>
+        </fieldset>
+      </Modal>
+      <Modal open={discard} onClose={()=>setDiscard(false)} title="Lämna osparade ändringar?" footer={<><Button variant="secondary" onClick={()=>setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscard(false);setShowCreateModal(false);resetForm();}}>Lämna utan att spara</Button></>}><p>Nyhetens innehåll och inställningar har inte sparats.</p></Modal>
     </div>
   );
 }
