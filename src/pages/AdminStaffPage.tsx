@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Users, Plus, Edit2, ShieldCheck, KeyRound, RefreshCw, Clock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -15,6 +16,8 @@ import {
   EmptyState,
   LoadingPage,
   SearchInput,
+  Tabs,
+  Select,
 } from '../components/ui';
 import type { ModuleKey, Profile, StaffWorkSchedule } from '../types';
 import { defaultNotificationSettings, NOTIFICATION_SETTING_LABELS, type NotificationSettings } from '../lib/utils';
@@ -93,6 +96,11 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   const [searchQuery, setSearchQuery] = useState('');
   const [editingStaff, setEditingStaff] = useState<Profile | null>(null);
   const [showStaffModal, setShowStaffModal] = useState(false);
+  const [editorStep,setEditorStep]=useState('contact');
+  const [activeScheduleDay,setActiveScheduleDay]=useState<number|null>(1);
+  const [discard,setDiscard]=useState(false);
+  const [openingStaff,setOpeningStaff]=useState(false);
+  const [editorLoadError,setEditorLoadError]=useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [createdCredentials, setCreatedCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
@@ -113,14 +121,11 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     bankid_personal_number: '',
     is_system_admin: false,
   });
+  const dirty=useUnsavedChanges({staffFormData,scheduleRows,modules:[...moduleAccess].sort()},showStaffModal);
+  const closeEditor=()=>{if(saving)return;if(dirty){setDiscard(true);return;}setShowStaffModal(false);setEditingStaff(null);resetForm();};
   const canManageSystemAdminFlag = user?.role === 'superadmin' || user?.is_system_admin;
 
-  useEffect(() => {
-    fetchStaff();
-    fetchNotificationSettings();
-  }, []);
-
-  async function fetchNotificationSettings() {
+  const fetchNotificationSettings=useCallback(async () => {
     if (!user?.organisation_id) return;
     const { data, error } = await supabase
       .from('vihem_organisation_notification_settings')
@@ -132,7 +137,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       return;
     }
     setNotificationSettings({ ...defaultNotificationSettings, ...(data?.settings || {}) });
-  }
+  },[user?.organisation_id]);
 
   async function saveNotificationSettings() {
     if (!user?.organisation_id) return;
@@ -157,7 +162,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     setNotificationSettings((current) => ({ ...current, [key]: value }));
   }
 
-  const fetchStaff = async () => {
+  const fetchStaff = useCallback(async () => {
     try {
       setLoading(true);
       const { data, error } = await supabase
@@ -172,7 +177,8 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     } finally {
       setLoading(false);
     }
-  };
+  },[]);
+  useEffect(()=>{void fetchStaff();void fetchNotificationSettings();},[fetchStaff,fetchNotificationSettings]);
 
   const filteredStaff = staff.filter(
     (s) =>
@@ -181,6 +187,8 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   );
 
   const handleSaveStaff = async () => {
+    if(saving||openingStaff)return;
+    if(!staffFormData.name.trim()){setSaveError('Ange medarbetarens namn.');setEditorStep('contact');return;}
     const rawPno = staffFormData.bankid_personal_number.trim();
     const normalizedPno = rawPno ? normalizePersonalNumber(rawPno) : null;
     if (rawPno && !normalizedPno) {
@@ -191,6 +199,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     setSaving(true);
     try {
       if (editingStaff) {
+        validateStaffSchedule();
         // Update existing profile — no auth changes needed
         const { error } = await supabase
           .from('vihem_profiles')
@@ -202,7 +211,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
             bankid_personal_number: normalizedPno,
             is_system_admin: canManageSystemAdminFlag ? staffFormData.is_system_admin : editingStaff.is_system_admin,
           })
-          .eq('id', editingStaff.id);
+          .eq('id', editingStaff.id).select('id').single();
         if (error) throw error;
         await saveStaffSchedule(editingStaff.id);
         if (staffFormData.role === 'staff') await saveModuleAccess(editingStaff.id);
@@ -264,13 +273,8 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       .eq('user_id', staffId)
       .order('weekday');
     if (error) {
-      setScheduleRows(defaultScheduleRows());
-      if (isMissingSchemaError(error)) {
-        setSaveError('Arbetsschema-tabellen saknas i databasen. Kör senaste Supabase-migrationerna på miljön först.');
-        return;
-      }
-      console.error('Error fetching staff schedule:', error);
-      return;
+      throw new Error('Arbetsschemat kunde inte hämtas. Försök igen innan du redigerar.');
+
     }
     const existing = (data || []) as StaffWorkSchedule[];
     const rows = defaultScheduleRows().map((row) => {
@@ -288,8 +292,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     setScheduleRows(rows);
   }
 
-  async function saveStaffSchedule(staffId: string) {
-    if (!user?.organisation_id) return;
+  function validateStaffSchedule() {
     const scheduleError = scheduleRows.find((row) => {
       if (!row.active) return false;
       if (!row.work_start || !row.work_end) return true;
@@ -298,6 +301,11 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     if (scheduleError) {
       throw new Error('Kontrollera arbetsschemat. Aktiva dagar behöver start och slut, och sluttiden måste vara efter starttiden.');
     }
+  }
+
+  async function saveStaffSchedule(staffId: string) {
+    if (!user?.organisation_id) return;
+    validateStaffSchedule();
     const rows = scheduleRows.map((row) => ({
       organisation_id: user.organisation_id,
       user_id: staffId,
@@ -324,7 +332,13 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     setScheduleRows((rows) => rows.map((row) => row.weekday === weekday ? { ...row, ...patch } : row));
   }
 
-  const openEditStaffModal = (staffMember: Profile) => {
+  const openEditStaffModal = async (staffMember: Profile) => {
+    if(openingStaff)return;
+    setOpeningStaff(true);setEditorLoadError('');
+    const results=await Promise.allSettled([fetchStaffSchedule(staffMember.id),fetchModuleAccess(staffMember.id)]);
+    setOpeningStaff(false);
+    if(results.some(result=>result.status==='rejected')){setEditorLoadError('Schema och behörigheter kunde inte hämtas. Försök öppna medarbetaren igen.');return;}
+    setEditorStep('contact');
     setStaffFormData({
       name: staffMember.name || '',
       email: staffMember.email || '',
@@ -335,14 +349,13 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       is_system_admin: staffMember.is_system_admin === true,
     });
     setEditingStaff(staffMember);
-    fetchStaffSchedule(staffMember.id);
-    fetchModuleAccess(staffMember.id);
     setSaveError('');
     setShowStaffModal(true);
   };
 
   async function fetchModuleAccess(staffId: string) {
-    const { data } = await supabase.from('vihem_permission_grants').select('permission_key').eq('user_id', staffId).like('permission_key', 'module.%');
+    const { data,error } = await supabase.from('vihem_permission_grants').select('permission_key').eq('user_id', staffId).like('permission_key', 'module.%');
+    if(error)throw error;
     const granted = new Set((data || []).map((row) => row.permission_key.replace('module.', '') as ModuleKey));
     setModuleAccess(granted);
     setInitialModuleAccess(new Set(granted));
@@ -364,12 +377,14 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     const toGrant = [...moduleAccess].filter((key) => !initialModuleAccess.has(key));
     const toRevoke = [...initialModuleAccess].filter((key) => !moduleAccess.has(key));
     if (toGrant.length) {
-      await supabase.from('vihem_permission_grants').insert(
+      const {error}=await supabase.from('vihem_permission_grants').insert(
         toGrant.map((key) => ({ organisation_id: user.organisation_id, user_id: staffId, permission_key: `module.${key}`, granted_by: user.id }))
       );
+      if(error)throw error;
     }
     if (toRevoke.length) {
-      await supabase.from('vihem_permission_grants').delete().eq('user_id', staffId).in('permission_key', toRevoke.map((key) => `module.${key}`));
+      const {error}=await supabase.from('vihem_permission_grants').delete().eq('user_id', staffId).in('permission_key', toRevoke.map((key) => `module.${key}`));
+      if(error)throw error;
     }
   }
 
@@ -414,7 +429,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
             <Button
               onClick={() => {
                 setEditingStaff(null);
-                resetForm();
+                resetForm();setEditorStep('contact');
                 setShowStaffModal(true);
               }}
               variant="primary"
@@ -477,6 +492,8 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
         </div>
         </details>
 
+        {editorLoadError&&<p role="alert" className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-800">{editorLoadError}</p>}
+        {openingStaff&&<p role="status" className="mb-4 text-sm text-vihem-muted">Hämtar schema och behörigheter…</p>}
         {filteredStaff.length === 0 ? (
           <EmptyState
             icon={<Users className="w-12 h-12" />}
@@ -513,7 +530,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                       </button>
                       <button
                         type="button"
-                        aria-label={`Redigera ${staffMember.name}`}
+                        disabled={openingStaff} aria-label={`Redigera ${staffMember.name}`}
                         onClick={() => openEditStaffModal(staffMember)}
                         className="vihem-icon-button"
                       >
@@ -592,7 +609,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                           </button>
                           <button
                             type="button"
-                        aria-label={`Redigera ${staffMember.name}`}
+                        disabled={openingStaff} aria-label={`Redigera ${staffMember.name}`}
                         onClick={() => openEditStaffModal(staffMember)}
                             className="vihem-icon-button"
                           >
@@ -610,12 +627,16 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       </div>
 
       {/* Create / Edit modal */}
-      <Modal
+      <Modal mobileFullscreen
         open={showStaffModal}
-        onClose={() => { setShowStaffModal(false); setEditingStaff(null); resetForm(); }}
-        title={editingStaff ? 'Redigera personal' : 'Ny personal'}
+        onClose={closeEditor}
+        title={editingStaff ? editingStaff.name : 'Ny personal'} size="lg"
+        toolbar={saveError&&<p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{saveError}</p>}
+        footer={<><Button variant="secondary" disabled={saving} onClick={closeEditor}>Avbryt</Button><Button loading={saving} onClick={handleSaveStaff}>{editingStaff?'Spara ändringar':'Skapa konto'}</Button></>}
       >
-        <div className="space-y-4">
+        <fieldset disabled={saving} className="space-y-5">
+          {editingStaff&&<Tabs tabs={[{key:'contact',label:'Kontakt'},{key:'access',label:'Behörighet'},{key:'schedule',label:'Schema'}]} active={editorStep} onChange={setEditorStep}/>}
+          <div hidden={editingStaff!==null&&editorStep!=='contact'} className="space-y-4">
           <Input
             label="Namn"
             value={staffFormData.name}
@@ -632,30 +653,19 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
             />
           )}
           <Input
-            label="Telefon"
+            label="Telefon" type="tel" autoComplete="tel"
             value={staffFormData.phone}
             onChange={(e) => setStaffFormData({ ...staffFormData, phone: e.target.value })}
             placeholder="T.ex. 070-123 45 67"
           />
           <Input
-            label="Personnummer (för BankID-inloggning)"
+            label="Personnummer (för BankID-inloggning)" inputMode="numeric"
             value={staffFormData.bankid_personal_number}
             onChange={(e) => setStaffFormData({ ...staffFormData, bankid_personal_number: e.target.value })}
             placeholder="T.ex. 199001011234 eller 900101-1234"
           />
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Roll</label>
-            <select
-              value={staffFormData.role}
-              onChange={(e) => setStaffFormData({ ...staffFormData, role: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="staff">Personal</option>
-              <option value="admin">Admin</option>
-              <option value="screen">TV-skärm</option>
-              {user?.role === 'superadmin' && <option value="superadmin">Superadmin</option>}
-            </select>
-          </div>
+          </div><div hidden={editingStaff!==null&&editorStep!=='access'} className="space-y-4">
+          <Select label="Roll" value={staffFormData.role} onChange={e=>setStaffFormData({...staffFormData,role:e.target.value})} options={[{value:'staff',label:'Personal'},{value:'admin',label:'Admin'},{value:'screen',label:'TV-skärm'},...(user?.role==='superadmin'?[{value:'superadmin',label:'Superadmin'}]:[])]}/>
           {editingStaff && (
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -702,15 +712,16 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
               </div>
             </div>
           )}
+          </div>
           {editingStaff && (
-            <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div hidden={editorStep!=='schedule'} className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-slate-500" />
                 <p className="text-sm font-semibold text-slate-800">Arbetsschema och lunch</p>
               </div>
               <div className="space-y-2">
                 {scheduleRows.map((row) => (
-                  <div key={row.weekday} className="grid grid-cols-1 gap-2 rounded-lg bg-white p-2 sm:grid-cols-[110px_80px_1fr_1fr_1fr_90px] sm:items-center">
+                  <details key={row.weekday} open={activeScheduleDay===row.weekday} className="rounded-xl border border-vihem-line bg-white"><summary onClick={e=>{e.preventDefault();setActiveScheduleDay(current=>current===row.weekday?null:row.weekday);}} className="vihem-touch-target vihem-focus cursor-pointer px-4 py-3 text-sm font-medium"><span>{WEEKDAYS.find(day=>day.weekday===row.weekday)?.label}</span><span className="ml-3 font-normal text-vihem-muted">{row.active?`${row.work_start}–${row.work_end}`:'Ledig'}</span></summary><div className="grid grid-cols-2 gap-3 border-t border-vihem-line p-4">
                     <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                       <input
                         type="checkbox"
@@ -723,10 +734,10 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                     <span className={`text-xs font-medium ${row.active ? 'text-green-700' : 'text-slate-400'}`}>
                       {row.active ? 'Arbetsdag' : 'Ledig'}
                     </span>
-                    <Input type="time" value={row.work_start} onChange={(event) => updateScheduleRow(row.weekday, { work_start: event.target.value })} disabled={!row.active} />
-                    <Input type="time" value={row.work_end} onChange={(event) => updateScheduleRow(row.weekday, { work_end: event.target.value })} disabled={!row.active} />
-                    <Input type="time" value={row.lunch_start} onChange={(event) => updateScheduleRow(row.weekday, { lunch_start: event.target.value })} disabled={!row.active} />
-                    <Input
+                    <Input label="Start" type="time" value={row.work_start} onChange={(event) => updateScheduleRow(row.weekday, { work_start: event.target.value })} disabled={!row.active} />
+                    <Input label="Slut" type="time" value={row.work_end} onChange={(event) => updateScheduleRow(row.weekday, { work_end: event.target.value })} disabled={!row.active} />
+                    <Input label="Lunchstart" type="time" value={row.lunch_start} onChange={(event) => updateScheduleRow(row.weekday, { lunch_start: event.target.value })} disabled={!row.active} />
+                    <Input label="Lunch (minuter)"
                       type="number"
                       min={0}
                       max={240}
@@ -735,11 +746,11 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                       onChange={(event) => updateScheduleRow(row.weekday, { lunch_minutes: event.target.value })}
                       disabled={!row.active || !row.lunch_start}
                     />
-                  </div>
+                  </div></details>
                 ))}
               </div>
               <p className="text-xs text-slate-500">
-                Kolumnerna är: dag, status, start, slut, lunchstart och lunchlängd i minuter. Lämna lunchstart och längd tomma för dagar utan rast, till exempel kortare fredagar.
+                Lämna lunchstart och längd tomma för dagar utan lunch. Lediga dagar sparas enligt befintliga schemaregler.
               </p>
             </div>
           )}
@@ -749,22 +760,10 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
               och be användaren byta det efter inloggning.
             </div>
           )}
-          {saveError && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
-              {saveError}
-            </div>
-          )}
-          <div className="flex gap-3 justify-end pt-2">
-            <Button variant="secondary" onClick={() => { setShowStaffModal(false); setEditingStaff(null); resetForm(); }}>
-              Avbryt
-            </Button>
-            <Button variant="primary" onClick={handleSaveStaff} loading={saving}>
-              {editingStaff ? 'Spara' : 'Skapa konto'}
-            </Button>
-          </div>
-        </div>
+        </fieldset>
       </Modal>
 
+      <Modal open={discard} onClose={()=>setDiscard(false)} title="Lämna osparade ändringar?" footer={<><Button variant="secondary" onClick={()=>setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscard(false);setShowStaffModal(false);setEditingStaff(null);resetForm();}}>Lämna utan att spara</Button></>}><p>Kontaktuppgifter, schema och behörigheter har inte sparats.</p></Modal>
       {/* Show temporary credentials after creation */}
       <Modal
         open={!!createdCredentials}
