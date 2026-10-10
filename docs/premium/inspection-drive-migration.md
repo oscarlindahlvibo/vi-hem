@@ -17,3 +17,9 @@ Gamla protokoll och URL:er bevaras. Inga gamla bucket-filer eller Google-filer r
 ## Särskild övergångsrisk
 
 Ett äldre completed-objekt utan verifierat nytt protokoll får inte bara få drive_required=true genom photo-begin: completed-vakten kräver ett verifierat protokoll. Den fullständiga migratorn måste därför ha ett separat verifierat legacy-flöde som bevarar completed/signering och befintlig dokumentreferens. Att först sätta gamla besiktningar till draft för att kringgå vakten är inte en godkänd migrationsstrategi. UI:s normala redigering kan spara ett nytt utkast, men det är inte ett automatiskt legacy-migreringsverktyg.
+
+## Kontrollpunkt 10 – säkrare inventering även av protokoll
+
+Register och dokument pagineras nu. Foto-kopior korreleras med både organisation och besiktnings-ID. Äldre Storage-källor godtas endast på konfigurerad QA-origin, med samma organisations-prefix och utan credentials, query, fragment, path traversal eller kontrolltecken. Okänd källa lämnas för manuell granskning. Inline-PDF valideras och storleksbegränsas; inventeringen rapporterar byte_size/SHA256, aldrig base64-innehåll. Nuvarande/protokoll i Drive markeras för faktisk återverifiering och antas inte vara bevisade.
+
+QA read-only: 22 besiktningar, 7 fotoreferenser, 14 protokoll. Källvalideringstester PASS. Inga Google-anrop eller skrivningar. Detta slutför inte migratorn: beständig legacy-operation, signerade/utgångna dokumentversioner, verifierad Drive-överföring och transaktionell referensavstämning återstår. Endast nuvarande document_id inventeras här; full historik av äldre dokumentversioner måste inventeras separat före migrering.
