@@ -1,0 +1,10 @@
+import assert from'node:assert/strict';import{createHash}from'node:crypto';import{reconcileInspectionStage}from'./inspection-reconcile-core.mjs';
+const bytes=Buffer.from('Synthetic QA permanent content'),job={id:'qa',state:'verified',drive_file_id:'qa-file',stage_path:'qa/stage',byte_size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};let removed=0;
+const adapter={stage:async()=>bytes,permanent:async()=>bytes,current:async()=>job,remove:async()=>{removed++;}};
+assert.equal((await reconcileInspectionStage(job,adapter)).action,'cleanup-candidate');assert.equal(removed,0);
+assert.equal((await reconcileInspectionStage({...job,state:'failed'},adapter,{apply:true})).action,'keep');
+assert.equal((await reconcileInspectionStage(job,{...adapter,permanent:async()=>{throw Error('timeout');}},{apply:true})).action,'keep');
+assert.equal((await reconcileInspectionStage(job,{...adapter,permanent:async()=>Buffer.from('Bad')},{apply:true})).action,'keep');
+assert.equal((await reconcileInspectionStage(job,{...adapter,current:async()=>({...job,drive_file_id:'changed'})},{apply:true})).action,'keep');assert.equal(removed,0);
+assert.equal((await reconcileInspectionStage(job,adapter,{apply:true})).action,'removed-staging');assert.equal(removed,1);
+console.log('PASS staging reconciliation: dry run, failed preservation, permanent read/hash failure, changed job, verified-only cleanup. Mock adapter; no real Drive.');

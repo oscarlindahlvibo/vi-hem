@@ -1,295 +1,37 @@
-import {
-  Camera,
-  Check,
-  ChevronDown,
-  ImagePlus,
-  Plus,
-  Pencil,
-  Trash2,
-} from "lucide-react";
-import { Button, Input, Textarea, Modal } from "../ui";
-import { InspectionImage } from "./InspectionImage";
-import { useState } from "react";
-export type InspectionRoom = {
-  id: string;
-  name: string;
-  condition: string;
-  notes: string;
-  photos: string[];
-  reviewed?: boolean;
-};
-// Preserve the four existing inspection conditions; review is workflow metadata, not approval.
-const conditions = [
-  ["excellent", "Utmärkt"],
-  ["good", "Bra"],
-  ["fair", "Godkänd"],
-  ["poor", "Dålig"],
-];
-export function InspectionRooms({
-  rooms,
-  change,
-  add,
-  remove,
-  camera,
-  upload,
-  removePhoto,
-  busy,
-}: {
-  rooms: InspectionRoom[];
-  change: (index: number, patch: Partial<InspectionRoom>) => void;
-  add: () => void;
-  remove: (index: number) => void;
-  camera: (index: number) => void;
-  upload: (files: File[], index: number) => void;
-  removePhoto: (url: string, index: number) => void;
-  busy: boolean;
+import { Camera, Check, ChevronLeft, ChevronRight, ImagePlus, Plus, Pencil, Trash2, MessageSquare } from 'lucide-react';
+import { Button, Input, Textarea, Modal } from '../ui';
+import { InspectionImage } from './InspectionImage';
+import { useRef, useState } from 'react';
+import { hasRoomAssessment } from '../../lib/inspections/roomAssessment';
+export type InspectionRoom = { id: string; name: string; condition: string; notes: string; photos: string[]; reviewed?: boolean; condition_selected?: boolean };
+const conditions = [['excellent','Utmärkt','Mycket gott skick'],['good','Bra','Normalt skick'],['fair','Godkänd','Visst slitage'],['poor','Dålig','Behöver åtgärdas']];
+export function InspectionRooms({ rooms, change, add, remove, camera, upload, removePhoto, busy }: {
+ rooms: InspectionRoom[]; change: (index:number,patch:Partial<InspectionRoom>)=>void; add:()=>void; remove:(index:number)=>void;
+ camera:(index:number)=>void; upload:(files:File[],index:number)=>void; removePhoto:(url:string,index:number)=>void; busy:boolean;
 }) {
-  const [expanded, setExpanded] = useState<number | null>(0);
-  const [rename, setRename] = useState<number | null>(null),
-    [pendingRemove, setPendingRemove] = useState<number | null>(null);
-  const reviewed = rooms.filter((r) => r.reviewed).length;
-  return (
-    <section aria-label="Rumsobservationer" className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-vihem-ink">
-            Gå igenom rummen
-          </h3>
-          <p className="mt-1 text-sm text-vihem-muted">
-            {reviewed} av {rooms.length} markerade som genomgångna
-          </p>
-        </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => {
-            add();
-            setExpanded(rooms.length);
-          }}
-        >
-          <Plus size={16} />
-          Lägg till rum
-        </Button>
-      </div>
-      <div
-        role="progressbar"
-        aria-label="Genomgångna rum"
-        aria-valuenow={reviewed}
-        aria-valuemin={0}
-        aria-valuemax={Math.max(1, rooms.length)}
-        className="h-1.5 overflow-hidden rounded-full bg-slate-100"
-      >
-        <div
-          className="h-full rounded-full bg-vihem-blue transition-[width] motion-reduce:transition-none"
-          style={{
-            width: rooms.length ? `${(reviewed / rooms.length) * 100}%` : "0%",
-          }}
-        />
-      </div>
-      <p className="text-sm text-vihem-muted">
-        Välj skick, lägg till bilder och markera varje rum när du är klar.
-      </p>
-      <div className="divide-y divide-vihem-line overflow-hidden rounded-xl border border-vihem-line">
-        {rooms.map((room, i) => (
-          <div key={i} className="bg-white">
-            <button
-              type="button"
-              aria-expanded={expanded === i}
-              aria-controls={`inspection-room-${i}`}
-              className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left hover:bg-vihem-canvas"
-              onClick={() => setExpanded(expanded === i ? null : i)}
-            >
-              <span
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm ${room.reviewed ? "bg-blue-50 text-vihem-blue" : "bg-vihem-canvas text-vihem-muted"}`}
-              >
-                {room.reviewed ? <Check size={17} /> : i + 1}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-vihem-ink">
-                  {room.name || "Nytt rum"}
-                </span>
-                <span className="mt-0.5 block text-sm text-vihem-muted">
-                  {conditions.find(
-                    ([value]) => value === room.condition,
-                  )?.[1] || room.condition}
-                  {room.photos.length
-                    ? " · " + room.photos.length + " bilder"
-                    : ""}
-                </span>
-              </span>
-              <ChevronDown
-                size={18}
-                className={`text-vihem-muted transition-transform motion-reduce:transition-none ${expanded === i ? "rotate-180" : ""}`}
-              />
-            </button>
-            {expanded === i && (
-              <div id={`inspection-room-${i}`} className="space-y-4 px-4 pb-5">
-                {(rename === i || !room.name) && (
-                  <Input
-                    label="Rumsnamn"
-                    autoFocus={rename === i}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        setRename(null);
-                      }
-                    }}
-                    value={room.name}
-                    onChange={(e) =>
-                      change(i, { name: e.target.value, reviewed: false })
-                    }
-                  />
-                )}
-                <fieldset>
-                  <legend className="mb-2 text-sm font-medium text-vihem-ink">
-                    Rummets skick
-                  </legend>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {conditions.map(([value, label]) => (
-                      <button
-                        type="button"
-                        key={value}
-                        aria-pressed={room.condition === value}
-                        onClick={() =>
-                          change(i, { condition: value, reviewed: false })
-                        }
-                        className={`min-h-11 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${room.condition === value ? "border-blue-600 bg-blue-50 text-blue-800" : "border-vihem-line bg-white text-vihem-muted hover:bg-vihem-canvas"}`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </fieldset>
-                <Textarea
-                  label="Noteringar"
-                  rows={3}
-                  placeholder={
-                    room.condition === "poor"
-                      ? "Beskriv vad som behöver åtgärdas…"
-                      : "Beskriv observationer eller lämna tomt…"
-                  }
-                  value={room.notes}
-                  onChange={(e) =>
-                    change(i, { notes: e.target.value, reviewed: false })
-                  }
-                />
-                <div className="flex flex-wrap gap-3">
-                  {room.photos.map((url, pi) => (
-                    <div key={url + pi} className="relative">
-                      <InspectionImage reference={url} label={`${room.name}, bild ${pi+1}`} />
-                      <button
-                        type="button"
-                        aria-label={`Ta bort bild ${pi + 1} för ${room.name}`}
-                        className="vihem-icon-button absolute -right-2 -top-2 rounded-full bg-white text-red-700 shadow-sm"
-                        disabled={busy}
-                        onClick={() => removePhoto(url, i)}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => camera(i)}
-                  >
-                    <Camera size={17} />
-                    Ta bilder
-                  </Button>
-                  <label
-                    className={`vihem-touch-target flex cursor-pointer items-center gap-2 rounded-xl border border-vihem-line px-3 text-sm font-medium ${busy ? "pointer-events-none opacity-50" : ""}`}
-                  >
-                    <ImagePlus size={17} />
-                    Välj bilder
-                    <input
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      disabled={busy}
-                      className="sr-only"
-                      aria-label={`Välj bilder för ${room.name}`}
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files || []);
-                        e.target.value = "";
-                        if (files.length) upload(files, i);
-                      }}
-                    />
-                  </label>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-vihem-line pt-4">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => setPendingRemove(i)}
-                  >
-                    <Trash2 size={16} />
-                    Ta bort rum
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => setRename(rename === i ? null : i)}
-                  >
-                    <Pencil size={16} />
-                    {rename === i ? "Klart" : "Byt namn"}
-                  </Button>
-                  <Button
-                    variant={room.reviewed ? "secondary" : "primary"}
-                    disabled={busy}
-                    onClick={() => {
-                      change(i, { reviewed: !room.reviewed });
-                      if (!room.reviewed && i < rooms.length - 1)
-                        setExpanded(i + 1);
-                    }}
-                  >
-                    <Check size={17} />
-                    {room.reviewed
-                      ? "Markerat som genomgånget"
-                      : "Rum genomgånget"}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-      <Modal
-        open={pendingRemove !== null}
-        onClose={() => setPendingRemove(null)}
-        title="Ta bort rum?"
-        size="sm"
-      >
-        <p className="text-sm text-vihem-muted">
-          {pendingRemove !== null
-            ? rooms[pendingRemove]?.name || "Rummet"
-            : "Rummet"}{" "}
-          och dess noteringar tas bort från besiktningen när du sparar.
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setPendingRemove(null)}>
-            Avbryt
-          </Button>
-          <Button
-            variant="danger"
-            disabled={busy}
-            onClick={() => {
-              if (pendingRemove !== null) {
-                remove(pendingRemove);
-                setExpanded(Math.max(0, pendingRemove - 1));
-                setRename(null);
-              }
-              setPendingRemove(null);
-            }}
-          >
-            Ta bort rum
-          </Button>
-        </div>
-      </Modal>
-    </section>
-  );
+ const [active,setActive]=useState(0),[rename,setRename]=useState(false),[pendingRemove,setPendingRemove]=useState<number|null>(null),[notesOpen,setNotesOpen]=useState<Record<string,boolean>>({});
+ const index=Math.min(active,Math.max(0,rooms.length-1)),room=rooms[index],reviewed=rooms.filter(r=>r.reviewed).length;
+ const workspace=useRef<HTMLElement>(null);
+ const select=(i:number)=>{setActive(i);setRename(false);requestAnimationFrame(()=>workspace.current?.closest('.vihem-dialog-body')?.scrollTo({top:0,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'}));};
+ return <section ref={workspace} aria-label="Rumsobservationer" className="space-y-6">
+  <header className="space-y-3">
+   <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-vihem-muted">Besiktningens rum</p><p className="mt-1 text-lg font-semibold text-vihem-ink">{reviewed} av {rooms.length} genomgångna</p></div><Button type="button" size="sm" variant="ghost" disabled={busy} className="shrink-0 whitespace-nowrap gap-1" onClick={()=>{add();select(rooms.length);}}><Plus size={17}/>Lägg till rum</Button></div>
+   <div role="progressbar" aria-label="Genomgångna rum" aria-valuenow={reviewed} aria-valuemin={0} aria-valuemax={Math.max(1,rooms.length)} className="h-1 overflow-hidden rounded-full bg-vihem-line"><div className="h-full rounded-full bg-vihem-blue transition-[width] motion-reduce:transition-none" style={{width:rooms.length?`${reviewed/rooms.length*100}%`:'0%'}}/></div>
+  </header>
+  <nav aria-label="Välj rum" className="inspection-room-nav flex gap-2 overflow-x-auto pb-1">
+   {rooms.map((r,i)=><button type="button" key={r.id} disabled={busy} aria-current={i===index?'step':undefined} onClick={()=>select(i)} className={`vihem-focus flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 text-sm font-medium ${i===index?'bg-vihem-navy text-white':'bg-vihem-canvas text-vihem-muted'}`}><span aria-label={r.reviewed?'Genomgånget':'Ej genomgånget'}>{r.reviewed?<Check size={15}/>:i+1}</span>{r.name||'Nytt rum'}</button>)}
+  </nav>
+  {room && <div key={room.id} className="space-y-6">
+   <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-sm text-vihem-muted">Rum {index+1} av {rooms.length}{room.reviewed?' · Genomgånget':''}</p><h3 className="mt-1 break-words text-2xl font-semibold tracking-tight text-vihem-ink">{room.name||'Nytt rum'}</h3></div><div className="flex shrink-0"><button type="button" disabled={busy||index===0} aria-label="Föregående rum" className="vihem-icon-button disabled:opacity-30" onClick={()=>select(index-1)}><ChevronLeft size={21}/></button><button type="button" disabled={busy||index===rooms.length-1} aria-label="Nästa rum" className="vihem-icon-button disabled:opacity-30" onClick={()=>select(index+1)}><ChevronRight size={21}/></button></div></div>
+   {(rename||!room.name)&&<Input label="Rumsnamn" value={room.name} onChange={e=>change(index,{name:e.target.value,reviewed:false})}/>}
+   <fieldset><legend className="mb-3 text-sm font-semibold text-vihem-ink">Hur är skicket?</legend><div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{conditions.map(([value,label,hint])=>{const selected=hasRoomAssessment(room)&&room.condition===value;return <button type="button" key={value} disabled={busy} aria-pressed={selected} onClick={()=>change(index,{condition:value,condition_selected:true,reviewed:false})} className={`vihem-focus relative min-h-20 rounded-xl border px-3 py-3 text-left transition-colors ${selected?'border-vihem-blue bg-blue-50 text-vihem-ink':'border-vihem-line text-vihem-ink hover:bg-vihem-canvas'}`}><span className="block text-base font-semibold">{label}</span><span className="mt-1 block text-xs text-vihem-muted">{hint}</span>{selected&&<Check size={15} className="absolute right-2 top-2 text-vihem-blue"/>}</button>})}</div>{!hasRoomAssessment(room)&&<p className="mt-2 text-sm text-vihem-muted">Ingen bedömning vald ännu.</p>}</fieldset>
+   <section aria-label="Anmärkningar och foton" className="space-y-4 border-t border-vihem-line pt-5">
+    {room.notes||room.condition==='poor'&&hasRoomAssessment(room)||notesOpen[room.id]?<Textarea label="Observation eller anmärkning" rows={3} placeholder="Vad såg du? Beskriv plats och eventuell skada…" value={room.notes} onChange={e=>change(index,{notes:e.target.value,reviewed:false})}/>:<Button type="button" variant="ghost" className="gap-2 px-0" onClick={()=>setNotesOpen(p=>({...p,[room.id]:true}))}><MessageSquare size={18}/>Lägg till en notering</Button>}
+    {room.photos.length>0&&<div className="flex gap-3 overflow-x-auto pb-2">{room.photos.map((url,pi)=><div key={url} className="relative shrink-0 pr-2 pt-2"><InspectionImage reference={url} label={`${room.name}, bild ${pi+1}`}/><button type="button" aria-label={`Ta bort bild ${pi+1} för ${room.name}`} disabled={busy} onClick={()=>removePhoto(url,index)} className="vihem-icon-button absolute right-0 top-0 rounded-full bg-white text-vihem-danger shadow-sm"><Trash2 size={16}/></button></div>)}</div>}
+    <div className="grid grid-cols-2 gap-3"><Button type="button" variant="secondary" disabled={busy} className="min-h-14 gap-2 whitespace-nowrap" onClick={()=>camera(index)}><Camera size={21}/>Ta foto</Button><label className={`vihem-focus flex min-h-14 cursor-pointer items-center justify-center gap-2 rounded-xl border border-vihem-line text-sm font-medium focus-within:ring-2 focus-within:ring-vihem-blue ${busy?'pointer-events-none opacity-50':''}`}><ImagePlus size={21}/>Bildbibliotek<input type="file" accept="image/*" multiple disabled={busy} className="sr-only" aria-label={`Välj bilder för ${room.name}`} onChange={e=>{const files=Array.from(e.target.files||[]);e.target.value='';if(files.length)upload(files,index);}}/></label></div>
+   </section>
+   <div className="space-y-3 border-t border-vihem-line pt-5"><Button type="button" variant={room.reviewed?'secondary':'primary'} disabled={busy||!hasRoomAssessment(room)} className="w-full gap-2" onClick={()=>{change(index,{reviewed:true});if(index<rooms.length-1)select(index+1);}}><Check size={18}/>{index<rooms.length-1?'Klart – nästa rum':'Markera rummet klart'}</Button><div className="flex justify-between"><Button type="button" size="sm" variant="ghost" disabled={busy} className="gap-1 text-vihem-muted" onClick={()=>setRename(!rename)}><Pencil size={15}/>Byt namn</Button><Button type="button" size="sm" variant="ghost" disabled={busy} className="gap-1 text-vihem-muted" onClick={()=>setPendingRemove(index)}><Trash2 size={15}/>Ta bort rum</Button></div></div>
+  </div>}
+  <Modal open={pendingRemove!==null} onClose={()=>setPendingRemove(null)} title="Ta bort rum?" size="sm"><p className="text-sm text-vihem-muted">{pendingRemove!==null?rooms[pendingRemove]?.name:'Rummet'} och dess noteringar tas bort från utkastet när du sparar. Arkiverade filer och tidigare protokoll bevaras.</p><div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={()=>setPendingRemove(null)}>Avbryt</Button><Button variant="danger" disabled={busy} onClick={()=>{if(pendingRemove!==null){remove(pendingRemove);select(Math.max(0,pendingRemove-1));}setPendingRemove(null);}}>Ta bort rum</Button></div></Modal>
+ </section>;
 }

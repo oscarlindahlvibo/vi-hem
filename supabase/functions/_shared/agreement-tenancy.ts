@@ -91,7 +91,7 @@ export async function createTenancyFromAgreement(db: any, agreementId: string, a
   const { rent, vat } = extractRent(blocks);
   const startDate = extractStartDate(blocks);
   if (!startDate) return { status: "skipped", reason: "Tillträdesdatumet i det signerade avtalet saknas eller är otydligt. Hyresförhållandet behöver granskas innan det skapas." };
-  const monthlyRent = rent ?? Number(apartment.rent) ?? 0;
+  const monthlyRent = rent ?? Number(apartment.rent ?? 0);
 
   const { data: tenancy, error } = await db.from("vihem_tenancies").insert({
     tenant_id: tenantId,

@@ -68,7 +68,7 @@ export async function inspectionProtocol(input: ProtocolInput, loadImage: (refer
     await photos(room.photos, room.name || 'Rum');
   }
   if (input.notes) { heading('Övriga anteckningar'); text(input.notes); }
-  if (input.photos.length) { heading('Allmänna fotografier'); await photos(input.photos, 'Allmän bild'); }
+  if (input.photos.length) { space(370); heading('Allmänna fotografier'); await photos(input.photos, 'Allmän bild'); }
   pages.forEach((sheet, index) => {
     sheet.drawText(input.organisation || 'VI-HEM', { x: margin, y: height - 32, size: 10, font: bold, color: navy });
     sheet.drawLine({ start: { x: margin, y: 48 }, end: { x: width - margin, y: 48 }, thickness: .5, color: line });

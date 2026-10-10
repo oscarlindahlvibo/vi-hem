@@ -51,12 +51,14 @@ export function DialogSurface({
   toolbar,
   onClose,
   size,
+  mobileFullscreen = false,
 }: {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
   toolbar?: ReactNode;
   onClose: () => void;
+  mobileFullscreen?: boolean;
   size: "sm" | "md" | "lg" | "xl" | "xxl" | "fullscreen";
 }) {
   const id = useId(),
@@ -152,7 +154,7 @@ export function DialogSurface({
         role="dialog"
         aria-modal="true"
         aria-labelledby={id}
-        className={`vihem-dialog vihem-dialog-${size}`}
+        className={`vihem-dialog vihem-dialog-${size} ${mobileFullscreen ? 'vihem-dialog-mobile-fullscreen' : ''}`}
       >
         <div className="vihem-dialog-handle" aria-hidden="true" />
         <header className="vihem-dialog-header">

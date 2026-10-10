@@ -77,3 +77,18 @@
 .vihem-dialog-footer { border-bottom-left-radius: inherit; border-bottom-right-radius: inherit; flex-shrink: 0; padding: 16px 20px max(16px,env(safe-area-inset-bottom)); border-top: 1px solid var(--vihem-line); background: var(--vihem-surface); }
 
 .vihem-dialog-toolbar { padding: 12px 20px; border-bottom: 1px solid var(--vihem-line); flex-shrink: 0; }
+
+/* Inspection workspaces use the shared dialog's focus/safe-area contract. */
+@media (max-width: 639px) {
+  .vihem-dialog-mobile-fullscreen {
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+  .vihem-dialog-mobile-fullscreen .vihem-dialog-handle { display: none; }
+  .vihem-dialog-mobile-fullscreen .vihem-dialog-header {
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
+}
+.inspection-room-nav { scrollbar-width: none; }
+.inspection-room-nav::-webkit-scrollbar { display: none; }

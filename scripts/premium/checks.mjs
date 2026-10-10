@@ -83,3 +83,13 @@ assert.equal(registry.hasUnsavedForms(), true, "cleanup is idempotent");
 closeSecond();
 assert.equal(registry.hasUnsavedForms(), false);
 console.log("PASS: independent dirty forms and idempotent cleanup.");
+
+const assessmentSource=fs.readFileSync(new URL('../../src/lib/inspections/roomAssessment.ts',import.meta.url),'utf8');
+const assessmentCode=ts.transpileModule(assessmentSource,{compilerOptions:{module:ts.ModuleKind.ESNext}}).outputText;
+const {hasRoomAssessment}=await import('data:text/javascript;base64,'+Buffer.from(assessmentCode).toString('base64'));
+assert.equal(hasRoomAssessment({condition:'good',reviewed:false,condition_selected:false}),false);
+assert.equal(hasRoomAssessment({condition:'good',reviewed:false,condition_selected:true}),true);
+assert.equal(hasRoomAssessment({condition:'good'}),true);
+assert.equal(hasRoomAssessment({condition:'poor',reviewed:false}),true);
+assert.equal(hasRoomAssessment({condition:'good',reviewed:false}),false);
+console.log('PASS room assessment: explicit new selection, legacy conditions and ambiguous default remain distinct.');

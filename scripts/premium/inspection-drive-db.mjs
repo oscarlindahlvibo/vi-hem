@@ -7,7 +7,7 @@ const apt=(await clients.oscar.from('vihem_apartments').select('id,property_id')
 const tenancy=(await clients.oscar.from('vihem_tenancies').select('id').eq('tenant_id',c.users.tenant.id).eq('apartment_id',apt.id).limit(1).single()).data;
 const insp=randomUUID(),room=randomUUID();
 const form={apartment_id:apt.id,property_id:apt.property_id,tenancy_id:tenancy.id,inspection_type:'routine',inspection_date:'2026-10-10',tenant_present:false,overall_condition:'good',rooms:[{id:room,name:'Kök',condition:'good',notes:'',photos:[],reviewed:true}],notes:'Drive ledger QA',action_required:'',photo_urls:[],status:'draft'};
-assert.equal((await clients.oscar.rpc('vihem_save_inspection',{p_id:insp,p_form:form})).error,null);
+assert.equal((await clients.oscar.rpc('vihem_save_inspection_draft',{p_id:insp,p_form:form})).error,null);
 const bytes=fs.readFileSync(new URL('./fixtures/profile.jpg',import.meta.url)),sha=createHash('sha256').update(bytes).digest('hex');
 const make=(id,kind='photo')=>({p_id:id,p_inspection:insp,p_kind:kind,p_room:kind==='photo'?room:'general',p_filename:kind==='photo'?'Kök.jpg':'Protokoll.pdf',p_mime:kind==='photo'?'image/jpeg':'application/pdf',p_size:bytes.length,p_sha256:sha});
 const id=randomUUID(),args=make(id);
@@ -41,7 +41,8 @@ console.log('PASS: real QA JWT ledger authorization, concurrent begin/lease, imm
 assert.ok((await clients.oscar.from('vihem_apartment_inspections').update({notes:'Tamper completed protocol'}).eq('id',insp)).error,'completed contents must match verified snapshot');
 const anon=createClient(url,c.anon,{auth:{persistSession:false}});assert.ok((await anon.from('vihem_inspection_file_jobs').select('id').eq('id',id)).error||!(await anon.from('vihem_inspection_file_jobs').select('id').eq('id',id)).data?.length);
 const stale=randomUUID();assert.equal((await clients.oscar.rpc('vihem_begin_inspection_file',make(stale,'protocol'))).error,null);
-assert.equal((await clients.oscar.from('vihem_apartment_inspections').update({status:'draft',notes:'Changed after PDF snapshot'}).eq('id',insp)).error,null);
+const currentDraft=(await clients.oscar.from('vihem_apartment_inspections').select('*').eq('id',insp).single()).data;
+assert.equal((await clients.oscar.rpc('vihem_save_inspection_draft',{p_id:insp,p_form:{...currentDraft,status:'draft',notes:'Changed after PDF snapshot'},p_expected:currentDraft.revision})).error,null);
 const staleToken=randomUUID();assert.equal((await service.rpc('vihem_claim_inspection_file',{p_id:stale,p_token:staleToken})).error,null);
 assert.equal((await service.from('vihem_inspection_file_jobs').update({drive_file_id:'synthetic-stale-'+stale}).eq('id',stale)).error,null);
 assert.ok((await service.rpc('vihem_commit_inspection_file',{p_id:stale,p_token:staleToken,p_file:'synthetic-stale-'+stale,p_folder:'synthetic-folder',p_web:null})).error,'stale PDF cannot finalize changed inspection');

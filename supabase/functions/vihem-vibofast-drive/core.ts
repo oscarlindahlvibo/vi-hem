@@ -1,6 +1,6 @@
 export const BUCKET = 'vihem-vibofast-drive-images';
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-export const folderLabel = (name: string, id: string) => `${name.replace(/[\/\\\u0000-\u001f]/g,' ').trim().slice(0,120)} – ${id.slice(0,8)}`;
+export const folderLabel = (name: string, id: string) => `${Array.from(name).map(c=>c.charCodeAt(0)<32||c==='/'||c==='\\'?' ':c).join('').trim().slice(0,120)} – ${id.slice(0,8)}`;
 export function folderId(input: string): string {
  const match=input.trim().match(/(?:\/folders\/|\/drives\/)([\w-]+)/);
  const value=match?.[1] || input.trim();

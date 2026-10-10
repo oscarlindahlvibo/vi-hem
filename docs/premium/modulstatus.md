@@ -76,3 +76,7 @@ Besiktningar har nu första Drive-jobbflödet, lokal filkö, filarkiv/versioner 
 ### Pass 3 / kontrollpunkt 8
 
 Tidrapportering: atomiska självregistreringsövergångar implementerade och verifierade med riktiga QA-databasresultat; browser in/rast/återgång/out provat. Inte DoD-Klar: fysisk offline/omstart, rollmatris, midnatt/DST, administrativ korrigering och äldre klienters kö återstår. Drive/besiktningar är fortsatt implementerade delvis, inte fullt verifierade. Övriga moduler har inte fått individuell slutgranskning i detta pass. Gemensamma ändringar räknas inte som färdig modul.
+
+## Kontrollpunkt 10 – andra besiktningsiteration
+
+Fokuserad mobil helskärm, rumsväljare/progress, explicit bedömningsval och fotografering/notering i rumsflödet. Revisionsskydd och browserkonflikt/återöppning/sparning samt DB-race/behörighet/retry verifierade. Fem slutviewports granskade. PDF 16 sidor granskad och sidbrytning korrigerad. Besiktningar fortsatt Delvis: riktig QA-Drive, full äldre-fil-migrering, fysisk kamera/tangentbord och full matris återstår. Tillfällig cleanup har säker verifierad-kandidatmodell med mockprov och read-only QA-körning; ingen gallring utförd. Ingen övrig modul räknas individuellt färdig av dessa ändringar.
