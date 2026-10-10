@@ -269,3 +269,9 @@ Finance V2: uppgiftsorienterad översikt med direkta ingångar, gemensamma flika
 - Ny säkerhetsobservation: fleet/lager tillät tenant SELECT inom org. Separat restrictive rollvakt QA-applicerad; tenant/foreign nekas och staff/admin bibehålls. Full barn-/RPC-/storage-matris återstår, publika legacy-buckets är inte stängda. Se fleet-inventory-read-hotfix.md.
 
 Ingen modul är fullt DoD-verifierad. Main/produktion har inte ändrats. Fysiska native-enheter, externa leverantörer och alla kvarvarande moduler återstår. Bilder i outputs/vihem-3-premium-pass6; vissa tidiga viewportbilder har fel storlek och får inte användas som breakpointbevis. Se pass6-verification.md för faktiskt kontrollerade bilder/tester.
+
+## Kontrollpunkt 13A – atomiskt lagerartikelsskapande
+
+20261011120000_atomic_inventory_create.sql samlar artikel, positivt startsaldo, lagerrörelse och kvitto för operation-ID i en transaktion. Samma aktör/operation låses; oförändrat återförsök returnerar samma artikel, ändrad payload nekas. Organisation/skapare hämtas serverbaserat, aktiv admin krävs, lagerplats måste vara aktiv i samma org. Befintlig lagerrörelsefunktion och kostnadssnapshot återanvänds. Frontend behåller operation-ID/QR vid oförändrat återförsök; ingen osäker fallback. Gamla appar fortsätter den gamla flerstegsvägen tills de uppdaterats.
+
+Verklig QA integration PASS: två samtidiga anrop → en artikel/saldo7/en rörelse/kostnad12,50; ändrad replay nekad; numeriskt overflow efter artikelinsert rullar tillbaka artikel och operationskvitto; staff/tenant/foreign/anon/okända fält/saknad plats nekade. Disponibla testrader städade. Endast QA-migration. Legacy etikettutskrift escapear nu användartext i HTML/title, ingen ändring av barcodeinnehållet. TypeScript PASS, riktad lint 0 errors/en befintlig hookvarning. Artikeluppdateringar/lagerkorg/rörelser/inventering är ännu inte atomiserade/idempotenta av denna ändring.
