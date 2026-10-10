@@ -8,9 +8,9 @@
 // Only rent invoices created via Finance V2 (src/modules/finance-v2) show
 // up here -- there is no fallback to legacy vihem_invoices, since that path
 // isn't linked to a tenant the way vihem_accounted_invoice_links is.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Badge, Card, EmptyState, LoadingPage, PageHeader } from '../components/ui';
+import { Badge, Card, EmptyState, LoadingPage, PageHeader, Button, SearchInput, Tabs } from '../components/ui';
 import { formatCurrency, formatDate, saveOrShareFile } from '../lib/utils';
 import { fetchMyInvoicePdfBlob, listMyRentInvoices } from '../modules/finance-v2/api';
 import type { AccountedInvoiceLink } from '../modules/finance-v2/types';
@@ -30,7 +30,7 @@ const STATUS_COLORS: Record<string, string> = {
   paid: 'bg-green-100 text-green-700',
   partially_paid: 'bg-amber-100 text-amber-700',
   overdue: 'bg-red-100 text-red-700',
-  sent: 'bg-blue-100 text-blue-700',
+  sent: 'bg-slate-100 text-slate-600',
   cancelled: 'bg-slate-100 text-slate-500',
   credited: 'bg-slate-100 text-slate-500',
   draft: 'bg-slate-100 text-slate-500',
@@ -40,16 +40,20 @@ export function TenantInvoicesPage() {
   const [invoices, setInvoices] = useState<AccountedInvoiceLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [filter,setFilter]=useState('all');
+  const [search,setSearch]=useState('');
+  const visibleInvoices=useMemo(()=>invoices.filter(invoice=>(filter==='all'||(filter==='paid'?invoice.status==='paid':['sent','partially_paid','overdue'].includes(invoice.status)))&&[invoice.accounted_invoice_number,invoice.invoice_date,invoice.due_date].filter(Boolean).join(' ').toLowerCase().includes(search.toLowerCase())),[invoices,filter,search]);
+  const [failedPdf,setFailedPdf]=useState<{id:string;number:string}|null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError('');
+    setError('');setFailedPdf(null);
     try {
       const data = await listMyRentInvoices();
       setInvoices(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Kunde inte läsa fakturor.');
+      setError('Fakturorna kunde inte hämtas. Försök igen.');
     } finally {
       setLoading(false);
     }
@@ -60,8 +64,9 @@ export function TenantInvoicesPage() {
   }, [load]);
 
   const handleOpenPdf = async (invoiceId: string, invoiceNumber: string) => {
+    if(openingId)return;
     setOpeningId(invoiceId);
-    setError('');
+    setError('');setFailedPdf(null);
     try {
       const blob = await fetchMyInvoicePdfBlob(invoiceId);
       if (Capacitor.isNativePlatform()) {
@@ -74,7 +79,7 @@ export function TenantInvoicesPage() {
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Kunde inte öppna fakturan.');
+      setError('Fakturan kunde inte öppnas. Försök igen.');setFailedPdf({id:invoiceId,number:invoiceNumber});
     } finally {
       setOpeningId(null);
     }
@@ -83,58 +88,61 @@ export function TenantInvoicesPage() {
   if (loading) return <LoadingPage />;
 
   return (
-    <div className="p-4 md:p-6">
-      <PageHeader icon={Receipt} title="Mina fakturor" subtitle="Fakturor för din hyra, skickade via Accounted." />
+    <div className="mx-auto max-w-5xl space-y-4">
+      <PageHeader icon={Receipt} title="Mina fakturor" subtitle="Din hyra, betalstatus och fakturadokument." />
 
       {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+        <div role="alert" className="vihem-feedback vihem-feedback-error">{error}<Button variant="secondary" size="sm" disabled={!!openingId} onClick={()=>void(failedPdf?handleOpenPdf(failedPdf.id,failedPdf.number):load())}>Försök igen</Button></div>
       )}
 
-      {invoices.length === 0 ? (
+      {invoices.length>0&&<div className="space-y-3"><SearchInput value={search} onChange={setSearch} placeholder="Sök fakturanummer eller datum…"/><Tabs tabs={[{key:'all',label:'Alla'},{key:'unpaid',label:'Att betala'},{key:'paid',label:'Betalda'}]} active={filter} onChange={setFilter}/></div>}
+      {error&&invoices.length===0?null:visibleInvoices.length === 0 ? (
         <Card>
           <EmptyState
             icon={Receipt}
-            title="Inga fakturor ännu"
-            description="Dina hyresfakturor visas här så snart de har skapats."
+            title={invoices.length?'Inga fakturor matchar':'Inga fakturor ännu'}
+            description={invoices.length?'Ändra sökningen eller välj en annan status.':'Dina hyresfakturor visas här så snart de har skapats.'}
           />
         </Card>
       ) : (
         <div className="space-y-3">
-          {invoices.map((invoice) => (
+          {visibleInvoices.map((invoice) => (
             <Card key={invoice.id} className="p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-slate-900">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div className="min-w-0">
+                  <p className="break-words font-semibold text-slate-900">
                     {invoice.accounted_invoice_number || 'Faktura under förberedelse'}
                   </p>
                   <p className="text-sm text-slate-500">
                     {invoice.invoice_date ? `Fakturadatum ${formatDate(invoice.invoice_date)}` : ''}
-                    {invoice.due_date ? ` · Förfaller ${formatDate(invoice.due_date)}` : ''}
-                  </p>
+
+                  </p>{invoice.due_date&&<p className="mt-1 text-sm text-vihem-muted">Förfaller {formatDate(invoice.due_date)}</p>}
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
+                <div className="flex flex-wrap items-center justify-between gap-3 sm:justify-end">
+                  <div className="text-left tabular-nums sm:text-right">
                     <p className="font-semibold text-slate-900">
                       {invoice.total !== null ? formatCurrency(invoice.total) : '–'}
                     </p>
                     {invoice.remaining_amount !== null && invoice.remaining_amount > 0 && invoice.status !== 'paid' && (
-                      <p className="text-xs text-slate-500">Kvar att betala: {formatCurrency(invoice.remaining_amount)}</p>
+                      <p className="text-sm text-slate-500">Kvar att betala: {formatCurrency(invoice.remaining_amount)}</p>
                     )}
                   </div>
                   <Badge
                     text={STATUS_LABELS[invoice.status] ?? invoice.status}
                     className={STATUS_COLORS[invoice.status] ?? ''}
                   />
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={openingId===invoice.id}
                     onClick={() => handleOpenPdf(invoice.id, invoice.accounted_invoice_number || invoice.id)}
-                    disabled={openingId === invoice.id || !invoice.accounted_invoice_number}
+                    disabled={!!openingId || !invoice.accounted_invoice_number}
                     className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
                     title={invoice.accounted_invoice_number ? 'Öppna PDF' : 'Fakturan är inte klar än'}
                   >
                     <FileText className="h-4 w-4" />
-                    {openingId === invoice.id ? 'Öppnar…' : 'PDF'}
-                  </button>
+                    {openingId === invoice.id ? 'Öppnar…' : 'Öppna faktura'}
+                  </Button>
                 </div>
               </div>
             </Card>
