@@ -1,0 +1,9 @@
+BEGIN READ ONLY;
+SELECT jsonb_build_object('kind','server','version',current_setting('server_version'),'database',current_database());
+SELECT jsonb_build_object('kind','policy','table',tablename,'name',policyname,'roles',roles,'command',cmd,'permissive',permissive,'using',qual,'check',with_check) FROM pg_policies WHERE (schemaname='public' AND (tablename='vihem_work_order_comments' OR tablename='vihem_profiles' OR tablename LIKE 'vihem_fleet_%' OR tablename LIKE 'vihem_inventory_%')) OR schemaname='storage' ORDER BY tablename,policyname;
+SELECT jsonb_build_object('kind','function','name',p.proname,'signature',p.oid::regprocedure::text,'definer',p.prosecdef,'config',p.proconfig,'acl',p.proacl,'definition',pg_get_functiondef(p.oid)) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('vihem_inventory_apply_transaction','get_my_role','get_my_org_id','vihem_vibofast_guard_profile_authority');
+SELECT jsonb_build_object('kind','trigger','name',t.tgname,'definition',pg_get_triggerdef(t.oid)) FROM pg_trigger t WHERE t.tgrelid='public.vihem_profiles'::regclass AND NOT t.tgisinternal;
+SELECT jsonb_build_object('kind','bucket','id',id,'public',public,'file_size_limit',file_size_limit,'allowed_mime_types',allowed_mime_types) FROM storage.buckets WHERE id LIKE 'vihem%' ORDER BY id;
+SELECT jsonb_build_object('kind','role_constraints','definition',pg_get_constraintdef(oid)) FROM pg_constraint WHERE conrelid='public.vihem_profiles'::regclass AND contype='c';
+SELECT jsonb_build_object('kind','rls','table',relname,'enabled',relrowsecurity,'forced',relforcerowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND (relname LIKE 'vihem_fleet_%' OR relname LIKE 'vihem_inventory_%' OR relname='vihem_work_order_comments');
+COMMIT;
