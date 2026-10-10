@@ -15,6 +15,8 @@ import {
   Bell,
   Check,
   CheckCheck,
+  Mail,
+  RefreshCw,
   MessageCircle,
   FileText,
   Wrench,
@@ -40,6 +42,8 @@ export function NotificationsPage({
     [actionError, setActionError] = useState(""),
     [filter, setFilter] = useState<"all" | "unread">("all"),
     [query, setQuery] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const [connected, setConnected] = useState(true);
   const [pending, setPending] = useState<string | null>(null),
     [remove, setRemove] = useState<Notification | null>(null);
   const generation = useRef(0),
@@ -101,6 +105,10 @@ export function NotificationsPage({
     setRows([]);
     setMore(false);
     setActionError("");
+    setFeedback("");
+    setRemove(null);
+    setPending(null);
+    acting.current = false;
     void fetchRows(true);
     return () => {
       generation.current = epoch + 1;
@@ -112,6 +120,19 @@ export function NotificationsPage({
   useEffect(() => {
     setNewActivity(false);
     if (!user?.id) return;
+    let stopped = false;
+    let subscribed = false;
+    const recover = () => {
+      if (!stopped) setNewActivity(true);
+    };
+    const foreground = () => {
+      if (document.visibilityState === "visible") recover();
+    };
+    const offline = () => setConnected(false);
+    setConnected(false);
+    window.addEventListener("online", recover);
+    window.addEventListener("offline", offline);
+    document.addEventListener("visibilitychange", foreground);
     const channel = supabase
       .channel(`notifications-inbox:${user.id}`)
       .on(
@@ -122,15 +143,29 @@ export function NotificationsPage({
           table: "vihem_notifications",
           filter: `user_id=eq.${user.id}`,
         },
-        () => setNewActivity(true),
+        () => {
+          if (!stopped) setNewActivity(true);
+        },
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (stopped) return;
+        setConnected(status === "SUBSCRIBED");
+        if (status === "SUBSCRIBED") {
+          if (subscribed) recover();
+          subscribed = true;
+        }
+      });
     return () => {
+      stopped = true;
+      window.removeEventListener("online", recover);
+      window.removeEventListener("offline", offline);
+      document.removeEventListener("visibilitychange", foreground);
       void supabase.removeChannel(channel);
     };
   }, [user?.id]);
-  async function act(id: string, kind: "read" | "all" | "delete") {
-    if (!user?.id || acting.current) return false;
+  async function act(id: string, kind: "read" | "unread" | "all" | "delete") {
+    if (!user?.id || acting.current || fetching.current) return false;
+    const epoch = generation.current;
     acting.current = true;
     setPending(id);
     setActionError("");
@@ -144,27 +179,41 @@ export function NotificationsPage({
           .select("id")
           .single();
         if (result.error) throw result.error;
+        if (epoch !== generation.current) return false;
         setRows((old) => old.filter((r) => r.id !== id));
         setRemove(null);
       } else {
-        const now = new Date().toISOString();
+        const now = kind === "unread" ? null : new Date().toISOString();
         let q = supabase
           .from("vihem_notifications")
           .update({ read_at: now })
-          .eq("user_id", user.id)
-          .is("read_at", null);
-        if (kind === "read") q = q.eq("id", id);
+          .eq("user_id", user.id);
+        if (kind === "unread") {
+          const expected = rows.find((r) => r.id === id)?.read_at;
+          if (!expected) return false;
+          q = q.eq("id", id).eq("read_at", expected);
+        } else {
+          q = q.is("read_at", null);
+          if (kind === "read") q = q.eq("id", id);
+        }
         const result = await q.select("id");
         if (result.error) throw result.error;
+        if (epoch !== generation.current) return false;
         const ids = new Set((result.data || []).map((r) => r.id));
-        if (kind === "read" && !ids.size) {
+        if ((kind === "read" || kind === "unread") && !ids.size) {
           const current = await supabase
             .from("vihem_notifications")
             .select("id,read_at")
             .eq("id", id)
             .eq("user_id", user.id)
             .single();
-          if (current.error || !current.data?.read_at)
+          if (epoch !== generation.current) return false;
+          if (
+            current.error ||
+            (kind === "read"
+              ? !current.data?.read_at
+              : current.data?.read_at !== null)
+          )
             throw current.error || new Error("Not read");
           ids.add(id);
         }
@@ -174,16 +223,28 @@ export function NotificationsPage({
             : old.map((r) => (ids.has(r.id) ? { ...r, read_at: now } : r)),
         );
       }
+      setFeedback(
+        kind === "delete"
+          ? "Aviseringen har tagits bort."
+          : kind === "unread"
+            ? "Aviseringen är oläst."
+            : kind === "all"
+              ? "Alla aviseringar har markerats som lästa."
+              : "Aviseringen är läst.",
+      );
       if (kind === "all") void fetchRows(true);
       return true;
     } catch {
+      if (epoch !== generation.current) return false;
       setActionError(
         "Åtgärden kunde inte sparas. Aviseringarna finns kvar. Försök igen.",
       );
       return false;
     } finally {
-      acting.current = false;
-      setPending(null);
+      if (epoch === generation.current) {
+        acting.current = false;
+        setPending(null);
+      }
     }
   }
   const unread = rows.filter((r) => !r.read_at).length,
@@ -200,21 +261,36 @@ export function NotificationsPage({
         subtitle="Händelser som berör dig, samlade på ett ställe."
         icon={Bell}
         action={
-          <Button
-            variant="secondary"
-            disabled={!!pending}
-            loading={pending === "all"}
-            onClick={() => void act("all", "all")}
-          >
-            <CheckCheck className="h-4 w-4" />
-            Markera alla som lästa
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="ghost"
+              disabled={!!pending || loading}
+              onClick={() => {
+                setNewActivity(false);
+                void fetchRows(true);
+              }}
+              aria-label="Uppdatera inkorgen"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Uppdatera
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={!!pending || loading || (!rows.length && !more)}
+              loading={pending === "all"}
+              onClick={() => void act("all", "all")}
+            >
+              <CheckCheck className="h-4 w-4" />
+              Markera alla som lästa
+            </Button>
+          </div>
         }
       />
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-2">
           <Button
             variant={filter === "all" ? "primary" : "ghost"}
+            disabled={!!pending || loading}
             aria-pressed={filter === "all"}
             onClick={() => setFilter("all")}
           >
@@ -222,19 +298,30 @@ export function NotificationsPage({
           </Button>
           <Button
             variant={filter === "unread" ? "primary" : "ghost"}
+            disabled={!!pending || loading}
             aria-pressed={filter === "unread"}
             onClick={() => setFilter("unread")}
           >
             Olästa{unread ? ` (${unread}${more ? "+" : ""})` : ""}
           </Button>
         </div>
-        <div className="w-full sm:w-80"><Input
-          aria-label="Sök i hämtade aviseringar"
-          placeholder="Sök i hämtade aviseringar"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        /></div>
+        <div className="w-full sm:w-80">
+          <Input
+            aria-label="Sök i hämtade aviseringar"
+            placeholder="Sök i hämtade aviseringar"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
       </div>
+      <p role="status" aria-live="polite" className="sr-only">
+        {feedback}
+      </p>
+      {!connected && (
+        <p role="status" className="mb-4 text-sm text-vihem-muted">
+          Liveanslutningen återställs. Du kan fortfarande uppdatera inkorgen.
+        </p>
+      )}
       {newActivity && (
         <Button
           className="mb-4"
@@ -319,7 +406,7 @@ export function NotificationsPage({
                       const link = resolveLink(n);
                       if (link) onNavigate(link);
                     }}
-                    disabled={!!pending}
+                    disabled={!!pending || loading}
                   >
                     <ArrowUpRight className="h-4 w-4" />
                     Öppna
@@ -327,13 +414,26 @@ export function NotificationsPage({
                 )}
               </div>
               <div className="col-start-2 flex items-center gap-2 sm:col-start-3 sm:row-start-1 sm:self-start">
+                {n.read_at && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Markera ${n.title} som oläst`}
+                    loading={pending === n.id}
+                    disabled={!!pending || loading}
+                    onClick={() => void act(n.id, "unread")}
+                  >
+                    <Mail className="h-4 w-4" />
+                    Oläst
+                  </Button>
+                )}
                 {!n.read_at && (
                   <Button
                     variant="ghost"
                     size="sm"
                     aria-label={`Markera ${n.title} som läst`}
                     loading={pending === n.id}
-                    disabled={!!pending}
+                    disabled={!!pending || loading}
                     onClick={() => void act(n.id, "read")}
                   >
                     <Check className="h-4 w-4" />
@@ -344,8 +444,11 @@ export function NotificationsPage({
                   variant="ghost"
                   size="sm"
                   aria-label={`Ta bort ${n.title}`}
-                  disabled={!!pending}
-                  onClick={() => setRemove(n)}
+                  disabled={!!pending || loading}
+                  onClick={() => {
+                    setActionError("");
+                    setRemove(n);
+                  }}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -391,7 +494,7 @@ export function NotificationsPage({
           <>
             <Button
               variant="secondary"
-              disabled={!!pending}
+              disabled={!!pending || loading}
               onClick={() => setRemove(null)}
             >
               Avbryt

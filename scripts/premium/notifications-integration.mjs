@@ -33,15 +33,13 @@ try {
     const id = randomUUID();
     ids.push(id);
     ok(
-      await s
-        .from("vihem_notifications")
-        .insert({
-          id,
-          user_id: c.users[who].id,
-          title: "Disposable owner notification QA",
-          message: "ÅÄÖ",
-          type: "info",
-        }),
+      await s.from("vihem_notifications").insert({
+        id,
+        user_id: c.users[who].id,
+        title: "Disposable owner notification QA",
+        message: "ÅÄÖ",
+        type: "info",
+      }),
     );
     for (const reader of Object.keys(clients)) {
       const rows = ok(
@@ -92,11 +90,117 @@ try {
       ).read_at,
     );
   }
+  // Compare-and-set unread protects a newer read on another device.
+  const ownerId = ids[0];
+  const before = ok(
+    await s
+      .from("vihem_notifications")
+      .select("read_at")
+      .eq("id", ownerId)
+      .single(),
+  ).read_at;
+  const newer = "2026-10-10T12:00:00.000Z";
+  ok(
+    await clients.oscar
+      .from("vihem_notifications")
+      .update({ read_at: newer })
+      .eq("id", ownerId),
+  );
+  assert.equal(
+    ok(
+      await clients.oscar
+        .from("vihem_notifications")
+        .update({ read_at: null })
+        .eq("id", ownerId)
+        .eq("read_at", before)
+        .select("id"),
+    ).length,
+    0,
+  );
+  assert.equal(
+    ok(
+      await clients.oscar
+        .from("vihem_notifications")
+        .update({ read_at: null })
+        .eq("id", ownerId)
+        .eq("read_at", newer)
+        .select("id"),
+    ).length,
+    1,
+  );
+  assert.equal(
+    ok(
+      await s
+        .from("vihem_notifications")
+        .select("read_at")
+        .eq("id", ownerId)
+        .single(),
+    ).read_at,
+    null,
+  );
+  assert.ok(
+    ok(
+      await s
+        .from("vihem_notifications")
+        .select("read_at")
+        .eq("id", ids[1])
+        .single(),
+    ).read_at,
+    "another inbox is unaffected",
+  );
+  // Temporarily revoke exactly this synthetic QA profile, restoring in finally.
+  ok(
+    await s
+      .from("vihem_profiles")
+      .update({ active: false })
+      .eq("id", c.users.tenant.id),
+  );
+  try {
+    assert.equal(
+      ok(
+        await clients.tenant
+          .from("vihem_notifications")
+          .select("id")
+          .eq("id", ids[2]),
+      ).length,
+      0,
+    );
+    assert.equal(
+      ok(
+        await clients.tenant
+          .from("vihem_notifications")
+          .update({ read_at: null })
+          .eq("id", ids[2])
+          .select("id"),
+      ).length,
+      0,
+    );
+    assert.equal(
+      ok(
+        await clients.tenant
+          .from("vihem_notifications")
+          .delete()
+          .eq("id", ids[2])
+          .select("id"),
+      ).length,
+      0,
+    );
+  } finally {
+    ok(
+      await s
+        .from("vihem_profiles")
+        .update({ active: true })
+        .eq("id", c.users.tenant.id),
+    );
+  }
   const anonymous = createClient(url, c.anon, {
     auth: { persistSession: false },
   });
-  const anonymousRead=await anonymous.from('vihem_notifications').select('id').in('id',ids);
-  assert.ok(anonymousRead.error || anonymousRead.data.length===0);
+  const anonymousRead = await anonymous
+    .from("vihem_notifications")
+    .select("id")
+    .in("id", ids);
+  assert.ok(anonymousRead.error || anonymousRead.data.length === 0);
   const history = Array.from({ length: 54 }, (_, i) => ({
     id: randomUUID(),
     user_id: c.users.tenant.id,
