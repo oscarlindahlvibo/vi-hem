@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Bot, Copy, KeyRound, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Badge, Button, Card, Input, Select, Textarea } from '../components/ui';
+import { Badge, Button, Card, Input, Select, Textarea, Tabs, PageHeader } from '../components/ui';
 
 type OcrProviderSettings = {
   provider: 'google_vision' | 'none';
@@ -80,6 +80,15 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
   const [driveFallbackEnabled, setDriveFallbackEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const actionLock = useRef(false);
+  const [actionError, setActionError] = useState('');
+  const [unavailable, setUnavailable] = useState<string[]>([]);
+  const runAction = async (action: () => Promise<void>) => {
+    if (actionLock.current) return;
+    actionLock.current = true; setActionError(''); setSaving(true);
+    try { await action(); } catch { setActionError('Åtgärden kunde inte slutföras. Dina uppgifter finns kvar. Kontrollera anslutningen och försök igen.'); }
+    finally { actionLock.current = false; setSaving(false); }
+  };
 
   const organisationId = user?.organisation_id || '';
 
@@ -118,12 +127,13 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
     ]);
 
     if (ocrResult.error) {
-      setOcrSettingsMessage(ocrResult.error.message || 'Kunde inte hämta AI/OCR-inställningar.');
+      setOcrSettingsMessage('Kunde inte hämta AI/OCR-inställningar. Försök hämta dem igen innan du sparar.');
     } else {
       applyOcrSettings((ocrResult.data?.settings ?? null) as OcrProviderSettings | null);
     }
 
     const { data: smsSettings, error: smsError } = await supabase.functions.invoke('vihem-manage-cellsynth-settings', { body: { action: 'get' } });
+    setUnavailable([...(ocrResult.error ? ['ai'] : []),...(googleResult.error ? ['google'] : []),...(bankIdResult.error || (!bankIdResult.data?.settings && organisationResult.error) ? ['bankid'] : []),...(smsError ? ['cellsynth'] : [])]);
     const sms = smsSettings?.settings;
     setSmsForm({ enabled: Boolean(sms?.enabled), sender: String(sms?.sender || ''), username: '', password: '', api_url: '', delivery_report_token: String(sms?.delivery_report_token || ''), delivery_report_enabled: sms?.delivery_report_enabled !== false });
     setSmsDeliveryUrl(buildDeliveryReportUrl(String(sms?.delivery_report_token || '')));
@@ -136,12 +146,12 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
       setDriveStorageEnabled(Boolean(settings?.drive_storage_enabled));
       setDriveFallbackEnabled(settings?.drive_fallback_enabled !== false);
     } else {
-      setGoogleMessage(googleResult.error.message || 'Kunde inte hämta Google Workspace-inställningar.');
+      setGoogleMessage('Kunde inte hämta Google Workspace-inställningar.');
     }
-    if (smsError) setSmsMessage(await getFunctionErrorMessage(smsError, 'Kunde inte hämta Cellsynt-inställningar.'));
+    if (smsError) setSmsMessage('Kunde inte hämta Cellsynt-inställningar.');
 
     if (bankIdResult.error) {
-      setBankIdMessage(bankIdResult.error.message || 'Kunde inte hämta BankID-inställningar.');
+      setBankIdMessage('Kunde inte hämta BankID-inställningar.');
     } else if (bankIdResult.data?.settings) {
       const settings = bankIdResult.data.settings;
       setBankIdForm(prev => ({ ...prev, enabled: Boolean(settings.enabled), environment: String(settings.environment || 'test'), login_enabled: Boolean(settings.login_enabled), signing_enabled: Boolean(settings.signing_enabled), provider_note: String(settings.provider_note || '') }));
@@ -318,36 +328,11 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 pb-24">
-      <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">Inställningar</p>
-        <h1 className="mt-2 text-3xl font-bold text-slate-950">Tilläggstjänster & automationer</h1>
-        <p className="mt-2 max-w-3xl text-slate-600">
-          Samla nycklar, AI-modeller, BankID och andra externa tjänster på organisationsnivå. Modulerna använder sedan dessa inställningar utan att nycklar exponeras i frontend.
-        </p>
-      </div>
-
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {[
-          ['ai', 'AI & OCR'],
-          ['google', 'Google Workspace / E-post'],
-          ['bankid', 'BankID'],
-          ['cellsynth', 'Cellsynt SMS'],
-          ['services', 'Tilläggstjänster'],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setActiveSection(key as typeof activeSection)}
-            className={[
-              'whitespace-nowrap rounded-xl px-4 py-2 text-sm font-bold transition',
-              activeSection === key ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50',
-            ].join(' ')}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
+      <PageHeader title="Tilläggstjänster & automationer" subtitle="Hantera organisationens kopplingar och dokumentlagring. Hemliga nycklar hanteras på serversidan." />
+      <Tabs tabs={[{key:'ai',label:'AI & OCR'},{key:'google',label:'Google & Drive'},{key:'bankid',label:'BankID'},{key:'cellsynth',label:'SMS'},{key:'services',label:'Tjänster'}]} active={activeSection} onChange={key=>setActiveSection(key as typeof activeSection)} />
+      {unavailable.includes(activeSection) && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 p-4 text-sm text-amber-900"><span>Inställningarna kunde inte hämtas. Sparning är spärrad för att skydda befintlig konfiguration.</span><Button variant="secondary" onClick={()=>void runAction(loadSettings)} loading={saving}>Hämta igen</Button></div>}
+      {actionError && <div role="alert" className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{actionError}</div>}
+      <details className="border-b border-slate-200 pb-4"><summary className="cursor-pointer text-sm font-semibold text-slate-600">Anslutningsöversikt</summary>
       <div className="grid gap-3 sm:grid-cols-2">
         <button
           type="button"
@@ -381,6 +366,7 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
         </button>
       </div>
 
+      </details>
       {activeSection === 'ai' && (
         <Card className="p-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -406,8 +392,8 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
             </div>
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={testOcrSettings} loading={saving}>Testa koppling</Button>
-                <Button onClick={saveOcrSettings} loading={saving}>Spara koppling</Button>
+                <Button variant="secondary" onClick={()=>void runAction(testOcrSettings)} loading={saving}>Testa koppling</Button>
+                <Button onClick={()=>void runAction(saveOcrSettings)} disabled={unavailable.includes('ai')} loading={saving}>Spara koppling</Button>
               </div>
               {ocrSettingsMessage && (
                 <p className={[
@@ -472,8 +458,8 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
               Använd dyrare visionmodell bara när billig pipeline inte räcker
             </label>
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" size="sm" onClick={() => deleteOcrSecret('openai')} disabled={!ocrSettings?.has_openai_key || saving}>Ta bort OpenAI-nyckel</Button>
-              <Button variant="secondary" size="sm" onClick={() => deleteOcrSecret('google_vision')} disabled={!ocrSettings?.has_google_vision_key || saving}>Ta bort Google-nyckel</Button>
+              <Button variant="secondary" size="sm" onClick={() => void runAction(()=>deleteOcrSecret('openai'))} disabled={!ocrSettings?.has_openai_key || saving}>Ta bort OpenAI-nyckel</Button>
+              <Button variant="secondary" size="sm" onClick={() => void runAction(()=>deleteOcrSecret('google_vision'))} disabled={!ocrSettings?.has_google_vision_key || saving}>Ta bort Google-nyckel</Button>
             </div>
           </div>
 
@@ -513,13 +499,13 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
                   <label className="flex items-center gap-2"><input type="checkbox" checked={driveStorageEnabled} onChange={e => setDriveStorageEnabled(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" /> Använd Google Drive för nya filer</label>
                   <label className="flex items-center gap-2"><input type="checkbox" checked={driveFallbackEnabled} onChange={e => setDriveFallbackEnabled(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" /> Behåll Supabase som fallback om Drive inte svarar</label>
                 </div>
-                <Button className="mt-3" onClick={saveDriveStorage} loading={saving}>Spara Drive-lagring</Button>
+                <Button className="mt-3" onClick={()=>void runAction(saveDriveStorage)} disabled={unavailable.includes('google')} loading={saving}>Spara Drive-lagring</Button>
               </div>
               <div className="mt-4 rounded-xl border border-slate-200 p-4">
                 <p className="font-semibold text-slate-900">Service account</p>
                 <p className="mt-1 text-sm text-slate-500">{googleSettings?.has_service_account ? `Sparad: ${googleSettings.service_account_hint}` : 'Ingen service account är sparad ännu.'}</p>
                 <Textarea className="mt-3" label="Service account-JSON" value={googleJson} onChange={e => setGoogleJson(e.target.value)} placeholder="Klistra in hela JSON-filen från Google Cloud" />
-                <div className="mt-3 flex flex-wrap gap-2"><Button onClick={saveGoogleSettings} loading={saving}>Spara krypterat</Button>{googleSettings?.has_service_account && <Button variant="secondary" onClick={deleteGoogleSettings} loading={saving}>Ta bort koppling</Button>}</div>
+                <div className="mt-3 flex flex-wrap gap-2"><Button onClick={()=>void runAction(saveGoogleSettings)} disabled={unavailable.includes('google')} loading={saving}>Spara krypterat</Button>{googleSettings?.has_service_account && <Button variant="secondary" onClick={()=>void runAction(deleteGoogleSettings)} loading={saving}>Ta bort koppling</Button>}</div>
                 {googleMessage && <p className="mt-3 text-sm font-semibold text-slate-700">{googleMessage}</p>}
               </div>
               <Button className="mt-4" onClick={() => onNavigate?.('mail-search')}>
@@ -542,7 +528,7 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
                 Grundinställningar för kommande BankID-inloggning och signering. Certifikat och hemligheter ska fortsatt hanteras server-side.
               </p>
             </div>
-            <Button onClick={saveBankIdSettings} loading={saving}>Spara BankID</Button>
+            <Button onClick={()=>void runAction(saveBankIdSettings)} disabled={unavailable.includes('bankid')} loading={saving}>Spara BankID</Button>
           </div>
           <div className="mt-5 grid gap-4 lg:grid-cols-2">
             <Select
@@ -590,7 +576,7 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
             <Input label="Avsändare (max 11 tecken)" maxLength={11} value={smsForm.sender} onChange={event => setSmsForm(prev => ({ ...prev, sender: event.target.value }))} />
             <label className="flex items-center gap-3 self-end rounded-xl border border-slate-200 p-3 text-sm font-semibold"><input type="checkbox" checked={smsForm.enabled} onChange={event => setSmsForm(prev => ({ ...prev, enabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-blue-600" /> Tillåt SMS från VI-HEM</label>
           </div>
-          <div className="mt-5 flex flex-wrap items-center gap-3"><Button onClick={saveSmsSettings} loading={saving}>Spara Cellsynt</Button>{smsMessage && <span className="text-sm font-semibold text-slate-600">{smsMessage}</span>}</div>
+          <div className="mt-5 flex flex-wrap items-center gap-3"><Button onClick={()=>void runAction(saveSmsSettings)} disabled={unavailable.includes('cellsynth')} loading={saving}>Spara Cellsynt</Button>{smsMessage && <span className="text-sm font-semibold text-slate-600">{smsMessage}</span>}</div>
           <div className="mt-6 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -603,7 +589,7 @@ export function PlatformSettingsPage({ initialSection = 'ai', onNavigate }: { in
               <Input className="min-w-0 flex-1" label="URL för leveransrapporter" value={smsDeliveryUrl} readOnly placeholder="Spara Cellsynt för att skapa länken" />
               <div className="flex gap-2">
                 <Button variant="secondary" onClick={copySmsDeliveryUrl} disabled={!smsDeliveryUrl} title="Kopiera leveransrapportlänk"><Copy className="h-4 w-4" /> Kopiera</Button>
-                <Button variant="secondary" onClick={regenerateSmsDeliveryUrl} loading={saving} title="Generera ny leveransrapportlänk"><RefreshCw className="h-4 w-4" /> Ny länk</Button>
+                <Button variant="secondary" onClick={()=>void runAction(regenerateSmsDeliveryUrl)} disabled={unavailable.includes('cellsynth')} loading={saving} title="Generera ny leveransrapportlänk"><RefreshCw className="h-4 w-4" /> Ny länk</Button>
               </div>
             </div>
             <p className="mt-3 text-xs text-slate-500">Klistra in länken i Cellsynts inställning för leveransrapporter. Ändra inte parametrarna som läggs till av Cellsynt.</p>

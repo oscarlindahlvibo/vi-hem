@@ -338,3 +338,11 @@ Bas be8d944. Åtta nya områden: 47/60 aktiva bearbetade, 13 orörda; Finance/Fi
 QA PASS: atomisk jourdelning parallellt/replay/revisionskonflikt/negativa roller/org/rollback; artikelimport metadata/startsaldo/replay/rollback och textvalidering. Browser CSV save/återförsök, möte/beslut och V2-utkast samt fredagsserie; granskning/avbryt av massutskick. Representativa 390/768/1440-kontroller (inte alla vyer i alla storlekar). Inga riktiga SMS/mejl/push eller BankID. SMS systemadmin-vy och riktig Gmail saknar runtimeverifiering.
 
 20261012110000 utökar befintlig artikel-RPC (beroende 20261011120000); 20261012111000 ny jour-RPC. Endast QA applicerad, backend före frontend. Tenantimportens Auth/boendekoppling och möte/autoagenda förblir flerstegsoperationer; sändningslås är endast lokalt och garanterar inte replay vid förlorat transportsvar. Externa/legacy/native/releaseblockerare och hotfixgodkännanden kvar enligt pass9/10. Main/produktion oförändrade. Nästa: organisation/plattform och kvarvarande publika/adminvyer.
+
+### Nattfortsättning – organisation, inloggning och webbadmin
+
+Utgångspunkt dd573dc (de åtta påbörjade områdena pushade). Ytterligare sex individuella områden: 53/60 aktiva, 7 orörda. Organisationens tre editorsektioner/utkastskydd och inställningarnas tjänstnavigation; misslyckad konfigurationshämtning spärrar nu sparning av standardvärden. Inloggning/återställning får fokuserade flöden och tillgängliga mobilfält. Intresseinkorg och Drive-bilder har kontrollerade API-mockprov; en okänd lägenhet får inte längre starta synkning av samtliga fastigheter.
+
+Disponibla QA-superadmin/systemadmin används, inga verkliga uppgifter/nycklar/utskick ändrade. Browser organisation avbryt/fortsätt och inställningsfel/spärr; inloggning fungerar. Reset endast rendering/fältattribut, ingen lösenordsändring. Riktig RPC/Drive för de två webbadminvyerna ej verifierad. Modulrader anger återstående flöden. Begärd schematid 2026-10-11 01.00 hade redan passerat när instruktionen kördes; ingen återkommande automation skapad, arbetet fortsatte direkt.
+
+TypeScript/build/mobilebundle PASS. Lint 0 errors; tillfällig UI-harness avlägsnas före leverans. Inga nya databasmigrationer i denna grupp.

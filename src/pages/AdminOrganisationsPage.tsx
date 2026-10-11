@@ -11,8 +11,10 @@ import {
 import { supabase } from '../lib/supabase';
 import {
   Card, Badge, Button, Modal, Input, PageHeader,
-  EmptyState, LoadingPage, SearchInput,
+  EmptyState, LoadingPage, SearchInput, Tabs,
 } from '../components/ui';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { Avatar } from '../components/ui';
 import { createClientId, formatDate } from '../lib/utils';
 import type { ModuleKey, Organisation, Profile, Role } from '../types';
 import { createUserAccount, sendUserPasswordResetEmail, updateUserAccount } from '../lib/userAdmin';
@@ -178,6 +180,8 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [editorSection, setEditorSection] = useState('identity');
+  const [discard, setDiscard] = useState(false);
   const [editingOrg, setEditingOrg] = useState<Organisation | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -203,6 +207,8 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
   const [resettingSuperadminId, setResettingSuperadminId] = useState<string | null>(null);
   const [resetMessage, setResetMessage] = useState('');
 
+  const dirty = useUnsavedChanges({form, initialAdminForm}, showModal);
+  const closeEditor = () => { if (saving) return; if (dirty) { setDiscard(true); return; } setShowModal(false); };
   useEffect(() => { fetchOrgs(); }, []);
 
   const fetchOrgs = async () => {
@@ -298,10 +304,12 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
   };
 
   const handleSave = async () => {
+    if (saving) return;
     setSaveError('');
     setSaving(true);
     let createdOrgIdForRollback: string | null = null;
     try {
+      if (!form.name.trim() || !form.slug.trim()) { setEditorSection('identity'); throw new Error('Ange organisationsnamn och URL-identifierare.'); }
       if (!editingOrg && initialAdminForm.create) {
         if (!initialAdminForm.name.trim()) throw new Error('Ange namn på organisationens admin.');
         if (!initialAdminForm.email.trim()) throw new Error('Ange e-post till organisationens admin.');
@@ -569,6 +577,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
     setEditingOrg(org);
     setInitialAdminForm(defaultInitialAdminForm);
     setSaveError('');
+    setEditorSection('identity');
     setShowModal(true);
 
     const { data, error } = await supabase
@@ -599,6 +608,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
     setInitialAdminForm(defaultInitialAdminForm);
     setEditingOrg(null);
     setSaveError('');
+    setEditorSection('identity');
     setShowModal(true);
   };
 
@@ -809,7 +819,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
           />
         </div>
 
-        <Card className="p-5 mb-6">
+        <details className="mb-6 rounded-xl border border-slate-200 bg-white p-5"><summary className="cursor-pointer font-semibold text-slate-800">Plattformsadministratörer · {superadmins.length}</summary><div className="mt-4">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
             <div>
               <div className="flex items-center gap-2 mb-1">
@@ -841,7 +851,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                   key={profile.id}
                   className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
                 >
-                  <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-3"><Avatar name={profile.name || profile.email} userId={profile.id} size="md" /><div>
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-semibold text-slate-900 break-words">{profile.name || 'Superadmin'}</p>
                       <Badge className={profile.active ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}>
@@ -856,7 +866,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                       {profile.phone && <span>{profile.phone}</span>}
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  </div><div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={() => openEditSuperadmin(profile)}>
                       <Edit2 className="w-3.5 h-3.5" />
                       Redigera
@@ -875,38 +885,18 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
               ))}
             </div>
           )}
-        </Card>
+        </div></details>
 
-        {/* Summary cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <Card className="p-4">
-            <p className="text-xs text-slate-500 mb-1">Totalt organisationer</p>
-            <p className="text-2xl font-bold text-slate-900">{orgs.length}</p>
-          </Card>
-          <Card className="p-4">
-            <p className="text-xs text-slate-500 mb-1">Aktiva</p>
-            <p className="text-2xl font-bold text-green-600">{orgs.filter(o => o.active).length}</p>
-          </Card>
-          <Card className="p-4">
-            <p className="text-xs text-slate-500 mb-1">Totalt användare</p>
-            <p className="text-2xl font-bold text-blue-600">{stats.reduce((s, o) => s + o.member_count, 0)}</p>
-          </Card>
-          <Card className="p-4">
-            <p className="text-xs text-slate-500 mb-1">Totalt fastigheter</p>
-            <p className="text-2xl font-bold text-indigo-600">{stats.reduce((s, o) => s + o.property_count, 0)}</p>
-          </Card>
-          <Card className="p-4">
-            <p className="text-xs text-slate-500 mb-1">Totalt lägenheter</p>
-            <p className="text-2xl font-bold text-teal-600">{stats.reduce((s, o) => s + o.apartment_count, 0)}</p>
-          </Card>
-        </div>
+        <dl className="mb-6 grid grid-cols-2 gap-y-4 border-y border-slate-200 py-5 sm:grid-cols-3 xl:grid-cols-5">{[
+          ['Organisationer',orgs.length],['Aktiva',orgs.filter(o=>o.active).length],['Användare',stats.reduce((sum,o)=>sum+o.member_count,0)],['Fastigheter',stats.reduce((sum,o)=>sum+o.property_count,0)],['Lägenheter',stats.reduce((sum,o)=>sum+o.apartment_count,0)]
+        ].map(([label,value])=><div key={label} className="px-3"><dt className="text-sm text-slate-500">{label}</dt><dd className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{value}</dd></div>)}</dl>
 
         <div className="mb-5">
           <SearchInput placeholder="Sök organisation..." value={searchQuery} onChange={setSearchQuery} />
         </div>
 
         {filtered.length === 0 ? (
-          <EmptyState icon={<Globe className="w-12 h-12" />} title="Inga organisationer" description="Skapa din första kundorganisation" />
+          <EmptyState icon={<Globe className="w-12 h-12" />} title={searchQuery ? "Inga träffar" : "Inga organisationer"} description={searchQuery ? "Prova ett annat namn eller en annan sökning." : "Skapa din första kundorganisation."} />
         ) : (
           <div className="space-y-3">
             {filtered.map((org) => {
@@ -1078,7 +1068,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                       </div>
 
                       {/* Contact + created */}
-                      <div className="flex items-center gap-4 mt-3 text-xs text-slate-400">
+                      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
                         <span>{org.contact_email}</span>
                         {org.contact_phone && <span>{org.contact_phone}</span>}
                         <span>Skapad {formatDate(org.created_at)}</span>
@@ -1121,6 +1111,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                     {/* Edit button */}
                     <button
                       onClick={() => openEdit(org)}
+                      aria-label={`Redigera ${org.name}`}
                       className="p-2 hover:bg-slate-100 rounded-lg transition-colors flex-shrink-0"
                     >
                       <Edit2 className="w-4 h-4 text-slate-500" />
@@ -1133,17 +1124,18 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         )}
       </div>
 
+      <Modal open={discard} onClose={()=>setDiscard(false)} title="Lämna osparade ändringar?" footer={<><Button variant="secondary" onClick={()=>setDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscard(false);setShowModal(false);}}>Lämna utan att spara</Button></>}><p className="text-sm text-slate-600">Dina ändringar i organisationen har inte sparats.</p></Modal>
       {/* Create / Edit modal */}
       <Modal
         open={showModal}
-        onClose={() => {
-          setShowModal(false);
-          setEditingOrg(null);
-          setInitialAdminForm(defaultInitialAdminForm);
-        }}
+        onClose={closeEditor}
+        size="xl"
+        mobileFullscreen
+        toolbar={<Tabs tabs={[{key:'identity',label:'Organisation'},{key:'capacity',label:'Plan & kvoter'},{key:'modules',label:'Moduler & admin'}]} active={editorSection} onChange={setEditorSection} />}
+        footer={<div className="flex flex-wrap justify-end gap-3"><Button variant="secondary" disabled={saving} onClick={closeEditor}>Avbryt</Button><Button onClick={handleSave} loading={saving}>{editingOrg ? 'Spara ändringar' : 'Skapa organisation'}</Button></div>}
         title={editingOrg ? 'Redigera organisation' : 'Ny organisation'}
       >
-        <div className="space-y-4">
+        <div className="space-y-4"><section className={editorSection === 'identity' ? 'space-y-4' : 'hidden'}>
           <Input
             label="Organisationsnamn"
             value={form.name}
@@ -1156,7 +1148,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             onChange={e => setForm({ ...form, slug: e.target.value })}
             placeholder="bergstrom-fastigheter"
           />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <Input
               label="Kontakt-e-post"
               type="email"
@@ -1182,9 +1174,10 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
           </div>
 
           {/* Plan + auto-fill limits */}
+          </section><section className={editorSection === 'capacity' ? 'space-y-4' : 'hidden'}>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Plan</label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {Object.entries(PLAN_LABELS).map(([value, label]) => (
                 <button
                   key={value}
@@ -1235,6 +1228,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             </div>
           </div>
 
+          </section><section className={editorSection === 'modules' ? 'space-y-4' : 'hidden'}>
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
             <label className="flex items-start gap-3 cursor-pointer">
               <input
@@ -1507,27 +1501,14 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             </div>
           )}
 
+          </section>
           {saveError && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
               {saveError}
             </div>
           )}
 
-          <div className="flex gap-3 justify-end pt-2">
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setShowModal(false);
-                setEditingOrg(null);
-                setInitialAdminForm(defaultInitialAdminForm);
-              }}
-            >
-              Avbryt
-            </Button>
-            <Button variant="primary" onClick={handleSave} loading={saving}>
-              {editingOrg ? 'Spara ändringar' : initialAdminForm.create ? 'Skapa organisation och admin' : 'Skapa organisation'}
-            </Button>
-          </div>
+
         </div>
       </Modal>
 
