@@ -13,6 +13,8 @@ import {
   writeLocal,
 } from "../lib/chat";
 
+const realtimeError = "Realtidsanslutningen kunde inte startas. Meddelanden synkroniseras vid återanslutning.";
+
 export function useChat(userId: string, org: string, initialThread?: string) {
   const [current, setCurrent] = useState<Conversation | null>(null);
   const threadsRef = useRef<Conversation[]>([]);
@@ -30,6 +32,9 @@ export function useChat(userId: string, org: string, initialThread?: string) {
     [connection, setConnection] = useState("connecting"),
     [online, setOnline] = useState(navigator.onLine);
   const [draft, setDraftState] = useState("");
+  const [recoveryEpoch, setRecoveryEpoch] = useState(0);
+  const [threadConnected, setThreadConnected] = useState(false);
+  const threadReady = useRef(false);
   const selectedRef = useRef(selected),
     messagesRef = useRef(messages),
     inboxEpoch = useRef(0),
@@ -278,8 +283,14 @@ export function useChat(userId: string, org: string, initialThread?: string) {
   }, [selected, fetchRecent, key]);
   useEffect(() => {
     let disposed = false;
+    let ready = false;
+    let hidden = document.visibilityState !== "visible";
+    let lastRefresh = 0;
+    let unhealthySince = Date.now();
+    setConnection("connecting");
     const refresh = () => {
       if (disposed) return;
+      lastRefresh = Date.now();
       supabase.realtime.connect();
       void refreshInbox();
       if (selectedRef.current) void fetchRecent(selectedRef.current);
@@ -292,15 +303,17 @@ export function useChat(userId: string, org: string, initialThread?: string) {
           payload.extension === "postgres_changes" &&
           payload.status === "error"
         ) {
+          ready = false;
+          unhealthySince = Date.now();
           setConnection("reconnecting");
-          setError(
-            "Realtidsanslutningen kunde inte startas. Meddelanden synkroniseras vid återanslutning.",
-          );
+          setError(realtimeError);
         } else if (
           payload.extension === "postgres_changes" &&
           payload.status === "ok"
         ) {
+          ready = true;
           setConnection("connected");
+          setError((previous) => previous === realtimeError ? "" : previous);
           // A cold self-hosted instance may accept the socket before CDC is
           // ready. Catch messages/read receipts written during that interval.
           refresh();
@@ -343,19 +356,42 @@ export function useChat(userId: string, org: string, initialThread?: string) {
       )
       .subscribe((status) => {
         if (disposed) return;
-        if (status !== "SUBSCRIBED") setConnection("reconnecting");
-        if (status === "SUBSCRIBED") refresh();
-      });
+        ready = status === "SUBSCRIBED";
+        setConnection(ready ? "connected" : "reconnecting");
+        // SUBSCRIBED confirms the SDK's server-validated CDC bindings. Some
+        // self-hosted versions do not also emit a system/ok notification.
+        if (ready) {
+          setError((previous) => previous === realtimeError ? "" : previous);
+          refresh();
+        } else unhealthySince = Date.now();
+      }, 8000);
     // The SDK ignores connect() while its last socket is still closing (up to 100 ms).
     const connectionRecovery = window.setTimeout(() => {
       if (!disposed) supabase.realtime.connect();
     }, 200);
     const foreground = () => {
-      if (document.visibilityState === "visible") refresh();
+      if (document.visibilityState !== "visible") {
+        hidden = true;
+        return;
+      }
+      refresh();
+      if (hidden && navigator.onLine) {
+        hidden = false;
+        // Rejoin our own channels immediately after suspension, without
+        // disconnecting the shared socket used by other app features.
+        void supabase.realtime.sendHeartbeat();
+        setRecoveryEpoch((value) => value + 1);
+      }
     };
     const network = () => {
       setOnline(navigator.onLine);
-      if (navigator.onLine) refresh();
+      if (navigator.onLine) {
+        refresh();
+        setRecoveryEpoch((value) => value + 1);
+      } else {
+        ready = false;
+        setConnection("reconnecting");
+      }
     };
     document.addEventListener("visibilitychange", foreground);
     window.addEventListener("focus", foreground);
@@ -363,8 +399,17 @@ export function useChat(userId: string, org: string, initialThread?: string) {
     window.addEventListener("offline", network);
     // Catch missed events, permission revocation and browser/native background reconnects.
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible" && navigator.onLine) refresh();
-    }, 30000);
+      if (document.visibilityState !== "visible" || !navigator.onLine) return;
+      const healthy = ready && (!selectedRef.current || threadReady.current);
+      const now = Date.now();
+      // Keep the chat useful while CDC recovers; never report HTTP polling as
+      // a live subscription. Healthy connections retain the 30-second check.
+      if (now - lastRefresh >= (healthy ? 30000 : 3000)) refresh();
+      if (healthy) unhealthySince = now;
+      else if (now - unhealthySince >= 15000) {
+        setRecoveryEpoch((value) => value + 1);
+      }
+    }, 1000);
     return () => {
       disposed = true;
       void supabase.removeChannel(channel);
@@ -375,8 +420,10 @@ export function useChat(userId: string, org: string, initialThread?: string) {
       window.removeEventListener("online", network);
       window.removeEventListener("offline", network);
     };
-  }, [org, userId, refreshInbox, fetchRecent]);
+  }, [org, userId, refreshInbox, fetchRecent, recoveryEpoch]);
   useEffect(() => {
+    threadReady.current = false;
+    setThreadConnected(false);
     if (!selected) return;
     let disposed = false;
     const thread = selected;
@@ -400,8 +447,10 @@ export function useChat(userId: string, org: string, initialThread?: string) {
       .channel(`chat-thread:${thread}:${userId}`)
       .on("system", {}, (payload) => {
         if (disposed || selectedRef.current !== thread) return;
-        if (payload.extension === "postgres_changes" && payload.status === "ok")
-          void fetchRecent(thread);
+        if (payload.extension !== "postgres_changes") return;
+        threadReady.current = payload.status === "ok";
+        setThreadConnected(threadReady.current);
+        if (threadReady.current) void fetchRecent(thread);
       })
       .on(
         "postgres_changes",
@@ -457,13 +506,17 @@ export function useChat(userId: string, org: string, initialThread?: string) {
         },
       )
       .subscribe((status) => {
-        if (!disposed && status === "SUBSCRIBED") void fetchRecent(thread);
-      });
+        if (disposed) return;
+        threadReady.current = status === "SUBSCRIBED";
+        setThreadConnected(threadReady.current);
+        if (threadReady.current) void fetchRecent(thread);
+      }, 8000);
     return () => {
       disposed = true;
+      threadReady.current = false;
       void supabase.removeChannel(channel);
     };
-  }, [selected, org, userId, fetchRecent, refreshInbox]);
+  }, [selected, org, userId, fetchRecent, refreshInbox, recoveryEpoch]);
   useEffect(() => {
     const last =
       visibleMessage?.thread === selected
@@ -749,7 +802,9 @@ export function useChat(userId: string, org: string, initialThread?: string) {
     moreThreads: () => void moreThreads(),
     error,
     setError,
-    connection,
+    connection: connection === "connected" && selected && !threadConnected
+      ? "reconnecting"
+      : connection,
     online,
     draft,
     setDraft,
