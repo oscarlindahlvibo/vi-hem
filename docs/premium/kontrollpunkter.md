@@ -381,3 +381,5 @@ Se pass13-beta-release.md för konkret installations- och återgångsordning. Ma
 ## 2026-10-11 – lämna aktiv chatt
 
 Tillbakaknapp på alla skärmstorlekar, även utan hämtad konversation eller vid laddfel; minst 44 px tryckyta. Ingen ändring av meddelanden, medlemskap eller utkast. TypeScript/build/chat-invarianter/riktad lint PASS. Browser med isolerade hook-fixtures: laddad/laddar/fel × 390/768/1440, klick återställer listan och chat-focus=false PASS; representativa bilder granskade. Fysisk enhet och liveinstallation ej verifierade.
+
+2026-10-11: chattens arbetsorderväljare exkluderar completed/cancelled på serversidan före 100-gränsen; gamla listresultat rensas vid öppning/byte. Befintliga meddelandelänkar och projektval oförändrade. TypeScript/build/riktad lint/chat-invarianter PASS; faktisk väljareffekt med mockad PostgREST verifierar 110 avslutade före aktiv order och oförändrade projekt.

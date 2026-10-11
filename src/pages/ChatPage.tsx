@@ -177,14 +177,19 @@ function ChatWorkspace({
   useEffect(() => {
     if (!shareOpen) return;
     let live = true;
-    void supabase
+    setEntities([]);
+    let query = supabase
       .from(
         shareType === "workorder"
           ? "vihem_work_orders"
           : "vihem_customer_projects",
       )
       .select("id,title")
-      .eq("organisation_id", user.organisation_id)
+      .eq("organisation_id", user.organisation_id);
+    if (shareType === "workorder") {
+      query = query.not("status", "in", "(completed,cancelled)");
+    }
+    void query
       .order("created_at", { ascending: false })
       .limit(100)
       .then(({ data, error }) => {
