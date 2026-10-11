@@ -7,11 +7,14 @@ import { supabase } from '../lib/supabase';
 import { Button, Input } from './ui';
 
 const suppliers = [
-  { name: 'Jula', searchUrl: 'https://www.jula.se/search/' },
-  { name: 'Biltema', searchUrl: 'https://www.biltema.se/soksida/' },
+  { name: 'Jula', searchUrl: 'https://www.jula.se/search/', parameter: 'query' },
+  { name: 'Biltema', searchUrl: 'https://www.biltema.se/soksida/', parameter: 'query' },
+  { name: 'Byggmax', searchUrl: 'https://www.byggmax.se/catalogsearch/result/', parameter: 'q' },
+  { name: 'BAUHAUS', searchUrl: 'https://www.bauhaus.se/catalogsearch/result/', parameter: 'q' },
+  { name: 'jem & fix', searchUrl: 'https://www.jemfix.se/soek/', parameter: 'q' },
 ];
 
-/** Opens the retailer's own search; no product data is imported or purchased. */
+/** Search the retailer and review product metadata before applying it to a draft. */
 export function SupplierProductSearch({ query, disabled = false, onImport }: { query: string; disabled?: boolean; onImport: (product: SupplierProduct) => void }) {
   const [error, setError] = useState('');
   const [productUrl, setProductUrl] = useState('');
@@ -31,7 +34,7 @@ export function SupplierProductSearch({ query, disabled = false, onImport }: { q
       <div className="mt-3 grid grid-cols-2 gap-2">
         {suppliers.map((supplier) => {
           const url = new URL(supplier.searchUrl);
-          url.searchParams.set('query', search);
+          url.searchParams.set(supplier.parameter, search);
           return (
             <a
               key={supplier.name}

@@ -19,5 +19,18 @@ try {
  const {validateSupplierProduct,productExtractionScript}=await module(client,'client');
  const document={querySelector(selector){return selector==='main'?{innerText:'Artnr. 18-319'}:{textContent:'Skruv ÅÄÖ'};},querySelectorAll(){return [{textContent:JSON.stringify({'@graph':[{'@type':'Product',name:'Wrong related item',sku:'wrong'},{'@type':'Product',name:'Skruv ÅÄÖ',sku:'18-319'}]})}];}};
  const result=vm.runInNewContext(productExtractionScript,{document,location:{href:url}});assert.equal(validateSupplierProduct(result).sku,'18-319');assert.equal(validateSupplierProduct(result).supplier,'Biltema');assert.throws(()=>validateSupplierProduct({name:'Bad',url:'javascript:alert(1)'}));
- console.log('PASS supplier URL restrictions, variants, Unicode, redirects, blocked/oversized responses, product extraction and review data validation');
+ const retailers = [
+  ['https://www.byggmax.se/lantbruksstro-p45521','Byggmax','let productStructuredData = [{"@type":"Product","name":"Lantbruksströ","sku":"45521"}];','45521'],
+  ['https://www.bauhaus.se/skruvdragare-bl186kb-qw-18v-2x1-5ah','BAUHAUS','<body itemscope itemtype="http://schema.org/Product"><h1><span>Skruvdragare ÅÄÖ &amp; bits</span></h1><meta itemprop="sku" content="1076354"><h2>Relaterade produkter</h2>','1076354'],
+  ['https://www.jemfix.se/borrskruvdragare-18v-falke/3100/9073414/','jem & fix','<script type="application/ld&#x2B;json">{"@type":"Product","name":"Borrskruvdragare ÅÄÖ","sku":"9073414"}</script>','9073414'],
+ ];
+ for (const [link,supplier,markup,sku] of retailers) {
+  const result=await parser.fetchProducts(link,async()=>new Response(markup,{headers:{'content-type':'text/html'}}));
+  assert.equal(result.length,1);assert.equal(result[0].sku,sku);assert.equal(result[0].supplier,supplier);
+  assert.equal(validateSupplierProduct(result[0]).supplier,supplier);
+  assert.throws(()=>parser.productUrl(link.replace(new URL(link).hostname,new URL(link).hostname+'.evil.test')));
+ }
+ assert.equal(parser.parseProducts('<h1>Category</h1>',new URL(retailers[1][0])).length,0);
+ for(const link of ['https://www.byggmax.se/catalogsearch/result/','https://www.bauhaus.se/catalogsearch/result/','https://www.jemfix.se/skruvdragare/140102/'])assert.throws(()=>parser.productUrl(link));
+ console.log('PASS supplier URL restrictions, variants, Unicode, redirects, blocked/oversized responses, product extraction, five suppliers and review data validation');
 }finally{await fs.rm(temp,{recursive:true,force:true});}

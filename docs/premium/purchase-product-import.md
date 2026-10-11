@@ -1,6 +1,6 @@
 # Produktval i inköpslistan
 
-Bygge 12: separat native-butiksvy för Jula/Biltema på iOS och Android. Sök, öppna produkt, välj ”Välj produkt”, granska i VI-HEM och använd uppgifterna. Produktnamn/butik/länk förs över till befintliga fält; artikelnummer läggs i anteckningen. Antal, prioritet och befintlig kommentar bevaras. Ingen automatisk sparning eller beställning. Bilder, priser och produktbeskrivningar importeras inte.
+Bygge 12: separat native-butiksvy för Jula/Biltema/Byggmax/BAUHAUS/jem & fix på iOS och Android. Sök, öppna produkt, välj ”Välj produkt”, granska i VI-HEM och använd uppgifterna. Produktnamn/butik/länk förs över till befintliga fält; artikelnummer läggs i anteckningen. Antal, prioritet och befintlig kommentar bevaras. Ingen automatisk sparning eller beställning. Bilder, priser och produktbeskrivningar importeras inte.
 
 Webb/äldre binärer: befintlig butikssökning samt ”Importera från produktlänk”. Edge-funktionen `vihem-supplier-product` läser offentlig produktmetadata efter aktiv personalautentisering. Biltemas publicerade JSON-varianter kan granskas separat. Jula gav Cloudflare 403 vid serverprov: ingen kringgång eller garanti om serverimport. Native hämtar uppgifter från den sida användaren själv öppnat, men riktig butik i WKWebView/Android WebView är ännu ej verifierad.
 
@@ -8,7 +8,7 @@ Webb/äldre binärer: befintlig butikssökning samt ”Importera från produktl�
 
 Native-vyn har separat WebView utan Capacitor-bridge/autentiseringsheaders; huvudnavigation tillåts endast på vald HTTPS-butik. iOS använder icke permanent webbdatastore; Android använder vanlig domänavgränsad WebView-lagring, inga VI-HEM-headers eller JavascriptInterface. URL och returnerad metadata valideras igen i frontend. Ingen osignerad TLS eller CAPTCHA-kringgång.
 
-Edge använder användarens JWT/RLS för egen aktiv profil, accepterar endast de två butikerna och produktvägar, följer inga redirects, vidarebefordrar inga autentiseringsuppgifter och begränsar svar till 2 MB/8 s. Request max 3 kB. Enkel workerlokal begränsning 10 försök/minut; inte en distribuerad trafikspärr. Ingen service-role-klient och inga databas-/lagringsskrivningar.
+Edge använder användarens JWT/RLS för egen aktiv profil, accepterar endast de fem godkända butiksvärdarna och produktvägar, följer inga redirects, vidarebefordrar inga autentiseringsuppgifter och begränsar svar till 2 MB/8 s. Request max 3 kB. Enkel workerlokal begränsning 10 försök/minut; inte en distribuerad trafikspärr. Ingen service-role-klient och inga databas-/lagringsskrivningar.
 
 ## Verifierat
 
@@ -24,3 +24,5 @@ Edge använder användarens JWT/RLS för egen aktiv profil, accepterar endast de
 2. Publicera frontend med befintlig kontrollerad VI-HEM-deploy. Det vanliga skriptet installerar inte denna Edge-funktion automatiskt.
 3. `npm run mobile:build` och `npx cap sync`, bygg och prova mobilversion 3.0/12 i TestFlight/Android innan distribution. Native-installerade appar måste uppdateras för inbyggd butik/produktval; äldre binärer behåller sökwebbläsaren.
 4. Återställning: tidigare frontend/binär; ta bort den nya funktionen endast när klienter inte använder den. Inga dokument eller databasposter behöver migreras/återställas.
+
+2026-10-11 tillägg: Byggmax (`catalogsearch/result/?q=`), BAUHAUS (`catalogsearch/result/?q=`) och jem & fix (`soek/?q=`) finns i samma sök-/importflöde. Byggmax offentlig JSON, BAUHAUS huvudproduktens mikrodata och jem & fix JSON-LD läses utan eval. Verklig isolerad QA Edge-hämtning verifierade artikelnummer 45521, 1076354 respektive 9073414. Sökvägar/parametrar kontrollerade mot butikernas offentliga HTML. Inga katalogkopior, prisuppdateringar eller databasändringar. Native-värdlistan utökad; BAUHAUS produktval kräver artikelnummer. Fysisk butiksnavigation återstår. Samma installationsordning gäller för alla fem butiker.

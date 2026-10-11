@@ -88,3 +88,5 @@ Fokuserad mobil helskärm, rumsväljare/progress, explicit bedömningsval och fo
 ## Pass 6 / kontrollpunkt 12
 
 Nio områden vidareutvecklade individuellt, ingen modul fullt verifierad och klar. Frånvaro, personalschemats översiktsmodul, övriga driftundersidor och administrativa moduler prioriteras i nästa pass tillsammans med fullständiga ekonomiflödens verifiering. QA-rollvakten för fleet/lager är en separat releasekandidat, inga publika filer har migrerats. Se pass6-verification.md och fleet-inventory-read-hotfix.md.
+
+Inköpstillägg 2026-10-11: fem butiker (Jula, Biltema, Byggmax, BAUHAUS, jem & fix) i samma sök-/importflöde. Verklig QA-import för de tre nytillagda PASS. Inga nya områden eller ändrad releasestatus.

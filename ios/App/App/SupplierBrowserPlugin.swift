@@ -15,7 +15,7 @@ public class SupplierBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func open(_ call: CAPPluginCall) {
         guard let raw = call.getString("url"), let url = URL(string: raw),
-              url.scheme == "https", ["www.jula.se", "www.biltema.se"].contains(url.host ?? ""),
+              url.scheme == "https", ["www.jula.se", "www.biltema.se", "www.byggmax.se", "www.bauhaus.se", "www.jemfix.se"].contains(url.host ?? ""),
               url.user == nil, url.password == nil, url.port == nil,
               let script = call.getString("script"), script.count < 8000 else {
             call.reject("Ogiltig butikssökning"); return
@@ -50,7 +50,7 @@ private class SupplierPage: UIViewController, WKNavigationDelegate {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = initialURL.host == "www.jula.se" ? "Jula" : "Biltema"
+        title = ["www.jula.se":"Jula", "www.biltema.se":"Biltema", "www.byggmax.se":"Byggmax", "www.bauhaus.se":"BAUHAUS", "www.jemfix.se":"jem & fix"][initialURL.host ?? ""]
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         // Separate WKWebView: no Capacitor bridge, app cookies or injected credentials.
@@ -83,11 +83,16 @@ private class SupplierPage: UIViewController, WKNavigationDelegate {
             guard error == nil, let data = result as? [String: Any], let name = data["name"] as? String, !name.isEmpty,
                   let resultURL = data["url"] as? String, let parsed = URL(string: resultURL), self.allowed(parsed),
                   self.web.url == parsed,
-                  (parsed.host == "www.jula.se" && parsed.path.hasPrefix("/catalog/") || parsed.host == "www.biltema.se" && parsed.path.range(of: "-200[0-9]{7}/?$", options: .regularExpression) != nil) else {
+                  self.productPage(parsed, sku: data["sku"] as? String ?? "") else {
                 self.message("Öppna en produktsida och tryck på Välj produkt igen."); return
             }
             self.complete(["name": String(name.prefix(300)), "sku": String((data["sku"] as? String ?? "").prefix(80)), "url": parsed.absoluteString])
         }
+    }
+    private func productPage(_ url: URL, sku: String) -> Bool {
+        let patterns = ["www.jula.se":"^/catalog/.+-[0-9]+/$", "www.biltema.se":"-200[0-9]{7}/?$", "www.byggmax.se":"^/[^/]+-p[0-9]+/?$", "www.bauhaus.se":"^/[a-z0-9]+(-[a-z0-9]+)+/?$", "www.jemfix.se":"^/[^/]+/[0-9]{4}/[0-9]{7}/$"]
+        guard let pattern = patterns[url.host ?? ""] else { return false }
+        return url.path.range(of: pattern, options: .regularExpression) != nil && (url.host != "www.bauhaus.se" || !sku.isEmpty)
     }
     private func allowed(_ url: URL) -> Bool { url.scheme == "https" && url.host == initialURL.host && url.user == nil && url.password == nil && url.port == nil }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {

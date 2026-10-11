@@ -22,7 +22,7 @@ public class SupplierBrowserPlugin extends Plugin {
     @PluginMethod public void open(PluginCall call) {
         String raw = call.getString("url", ""), script = call.getString("script", "");
         Uri initial = Uri.parse(raw);
-        if (!allowed(initial, initial.getHost()) || !("www.jula.se".equals(initial.getHost()) || "www.biltema.se".equals(initial.getHost())) || script.length() > 8000 || script.isEmpty()) { call.reject("Ogiltig butikssökning"); return; }
+        if (!allowed(initial, initial.getHost()) || !java.util.Arrays.asList("www.jula.se", "www.biltema.se", "www.byggmax.se", "www.bauhaus.se", "www.jemfix.se").contains(initial.getHost()) || script.length() > 8000 || script.isEmpty()) { call.reject("Ogiltig butikssökning"); return; }
         getActivity().runOnUiThread(() -> {
             if (dialog != null) { call.reject("Butiksvyn är redan öppen"); return; }
             Dialog current = new Dialog(getActivity()); dialog = current;
@@ -64,7 +64,7 @@ public class SupplierBrowserPlugin extends Plugin {
                     try {
                         String json = new org.json.JSONTokener(encoded).nextValue().toString();
                         JSONObject p = new JSONObject(json); Uri selected = Uri.parse(p.optString("url"));
-                        boolean productPage = "www.jula.se".equals(selected.getHost()) ? selected.getPath().startsWith("/catalog/") : selected.getPath().matches(".*-200[0-9]{7}/?");
+                        boolean productPage = productPage(selected, p.optString("sku"));
                         if (!allowed(selected, initial.getHost()) || !productPage || p.optString("name").isEmpty() || !selected.toString().equals(web.getUrl())) throw new Exception();
                         JSObject product = new JSObject(); product.put("name", p.getString("name")); product.put("sku", p.optString("sku")); product.put("url", selected.toString()); result[0].put("product", product); current.dismiss();
                     } catch (Exception error) { Toast.makeText(getActivity(), "Öppna en produktsida och välj produkten igen.", Toast.LENGTH_LONG).show(); }
@@ -72,6 +72,17 @@ public class SupplierBrowserPlugin extends Plugin {
             });
             current.show(); current.getWindow().setLayout(-1, -1); web.loadUrl(raw);
         });
+    }
+    private boolean productPage(Uri url, String sku) {
+        String path = url.getPath(); if (path == null) return false;
+        switch (url.getHost() == null ? "" : url.getHost()) {
+            case "www.jula.se": return path.matches("/catalog/.+-[0-9]+/");
+            case "www.biltema.se": return path.matches(".*-200[0-9]{7}/?");
+            case "www.byggmax.se": return path.matches("/[^/]+-p[0-9]+/?");
+            case "www.bauhaus.se": return !sku.isEmpty() && path.matches("/[a-z0-9]+(-[a-z0-9]+)+/?");
+            case "www.jemfix.se": return path.matches("/[^/]+/[0-9]{4}/[0-9]{7}/");
+            default: return false;
+        }
     }
     private boolean allowed(Uri url, String host) {
         return "https".equals(url.getScheme()) && host != null && host.equals(url.getHost()) && url.getUserInfo() == null && url.getPort() == -1;
