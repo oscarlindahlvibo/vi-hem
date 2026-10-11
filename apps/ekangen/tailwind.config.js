@@ -5,11 +5,11 @@ export default {
     extend: {
       fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'], serif: ['Fraunces', 'Georgia', 'serif'] },
       colors: {
-        fjord: { 50: '#eef6f7', 100: '#d6e8eb', 200: '#aed2d8', 300: '#7ab4be', 400: '#4a909e', 500: '#2f7482', 600: '#265e6b', 700: '#214d58', 800: '#1d414a', 900: '#173941', 950: '#0b2228' },
-        paper: { 50: '#fcfbf8', 100: '#f6f3ec', 200: '#ece6d8' },
-        amber: { 400: '#f0b04a', 500: '#e69a2a', 600: '#c97f17' },
+        fjord: { 50: '#f5f7ef', 100: '#e8edda', 200: '#cfd8b6', 300: '#adbb8b', 400: '#8d9e5e', 500: '#788840', 600: '#61712f', 700: '#4a5830', 800: '#313a25', 900: '#262e1c', 950: '#161b10' },
+        paper: { 50: '#fbf9f3', 100: '#f4f0e4', 200: '#e9e3d0' },
+        amber: { 400: '#e0aa45', 500: '#cf9630', 600: '#b07c1f' },
       },
-      boxShadow: { card: '0 1px 2px rgba(11,34,40,.05), 0 8px 28px rgba(11,34,40,.07)' },
+      boxShadow: { card: '0 1px 2px rgba(38,46,28,.05), 0 8px 28px rgba(38,46,28,.08)' },
     },
   },
   plugins: [],

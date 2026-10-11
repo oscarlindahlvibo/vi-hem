@@ -18,8 +18,7 @@ export function Layout({ children, path }: { children: ReactNode; path: string }
       <header className="sticky top-0 z-40 border-b border-fjord-100 bg-paper-50/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
           <Link to="/" className="flex items-center gap-2.5" onClick={() => setOpen(false)}>
-            <img src="/favicon.svg" alt="" className="h-9 w-9" />
-            <span className="font-serif text-lg font-semibold leading-tight text-fjord-900">{c?.name || 'Ekängens vandrarhem'}</span>
+            <img src="/logo.png" alt={c?.name || 'Ekängens vandrarhem'} className="h-14 w-auto sm:h-16" />
           </Link>
           <nav className="hidden items-center gap-1 md:flex" aria-label="Huvudmeny">
             {NAV.map((n) => (
@@ -42,8 +41,8 @@ export function Layout({ children, path }: { children: ReactNode; path: string }
       <footer className="mt-16 bg-fjord-950 text-fjord-100">
         <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:px-6 md:grid-cols-3">
           <div>
-            <p className="font-serif text-lg font-semibold text-white">{c?.name || 'Ekängens vandrarhem'}</p>
-            <p className="mt-2 text-sm text-fjord-200">{c?.tagline}</p>
+            <img src="/logo-light.png" alt={c?.name || 'Ekängens vandrarhem'} className="h-20 w-auto" />
+            <p className="mt-3 text-sm text-fjord-200">{c?.tagline}</p>
           </div>
           <div className="space-y-2 text-sm">
             {c?.address && <p className="flex items-start gap-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0" />{c.address}, {c.postalCode} {c.city}</p>}

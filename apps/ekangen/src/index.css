@@ -6,6 +6,7 @@
   html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
   body { @apply bg-paper-50 font-sans text-fjord-950; }
   h1, h2, h3 { @apply font-serif; }
+  ::selection { @apply bg-fjord-500/30; }
   :focus-visible { @apply outline-2 outline-offset-2 outline-fjord-500; }
 }
 @layer components {

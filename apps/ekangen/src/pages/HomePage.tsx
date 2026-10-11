@@ -11,8 +11,9 @@ export function HomePage() {
   const bookingEnabled = site?.settings.bookingEnabled;
   return (
     <>
-      <section className="relative isolate overflow-hidden bg-fjord-900">
+      <section className="relative isolate overflow-hidden bg-gradient-to-br from-fjord-800 to-fjord-950">
         {hero && <img src={hero} alt="" className="absolute inset-0 -z-10 h-full w-full object-cover opacity-40" />}
+        <img src="/emblem-light.png" alt="" aria-hidden className="pointer-events-none absolute -bottom-16 -right-10 -z-10 h-[26rem] w-auto opacity-[0.07] sm:right-10 sm:h-[34rem]" />
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-24">
           <h1 className="max-w-3xl text-4xl font-semibold leading-tight text-white sm:text-5xl">{text.heroTitle || 'Välkommen till Ekängens vandrarhem'}</h1>
           <p className="mt-4 max-w-2xl text-lg text-fjord-100">{text.heroText}</p>
