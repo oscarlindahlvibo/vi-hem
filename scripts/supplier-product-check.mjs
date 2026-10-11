@@ -34,5 +34,11 @@ try {
  assert.equal(validateSupplierProduct(nativeByggmax).sku,'45521');
  assert.equal(parser.parseProducts('<h1>Category</h1>',new URL(retailers[1][0])).length,0);
  for(const link of ['https://www.byggmax.se/catalogsearch/result/','https://www.bauhaus.se/catalogsearch/result/','https://www.jemfix.se/skruvdragare/140102/'])assert.throws(()=>parser.productUrl(link));
+ const searchMarkup='<a href="https://www.byggmax.se/skruv-p123"><img alt="Bild"></a><a href="https://www.byggmax.se/skruv-p123">Skruv ÅÄÖ</a><a href="https://www.byggmax.se.evil.test/skruv-p456">Bad</a><a href="https://www.byggmax.se/skruv-p123">Duplicate</a>';
+ let searchRequest;
+ const hits=await parser.searchProducts('skruv & bits','Byggmax',async url=>{searchRequest=url;return new Response(searchMarkup,{headers:{'content-type':'text/html'}});});
+ assert.equal(searchRequest.searchParams.get('q'),'skruv & bits');assert.equal(hits.length,1);assert.equal(hits[0].name,'Skruv ÅÄÖ');assert.equal(hits[0].sku,'123');
+ await assert.rejects(parser.searchProducts('skruv','https://127.0.0.1',async()=>{throw Error('must not fetch');}));
+ assert.deepEqual(await parser.searchProducts('unknown','Byggmax',async()=>new Response('<h1>No results</h1>',{headers:{'content-type':'text/html'}})),[]);
  console.log('PASS supplier URL restrictions, variants, Unicode, redirects, blocked/oversized responses, product extraction, five suppliers and review data validation');
 }finally{await fs.rm(temp,{recursive:true,force:true});}

@@ -1,5 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { fetchProducts } from './product.ts';
+import { fetchProducts, searchProducts } from './product.ts';
 const cors = { 'Access-Control-Allow-Origin':'*', 'Access-Control-Allow-Headers':'authorization, apikey, content-type, x-client-info', 'Access-Control-Allow-Methods':'POST, OPTIONS' };
 const json = (body: unknown, status=200) => new Response(JSON.stringify(body), { status, headers:{...cors,'Content-Type':'application/json','Cache-Control':'no-store'} });
 const limits = new Map<string, {start:number; count:number}>();
@@ -21,6 +21,6 @@ Deno.serve(async req => {
     const bytes=new Uint8Array(size); let offset=0; for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
     const text=new TextDecoder().decode(bytes);
     const body=JSON.parse(text);
-    return json({products:await fetchProducts(body.url)});
+    return json({products: body.action === 'search' ? await searchProducts(body.query, body.supplier) : await fetchProducts(body.url)});
   } catch(error) { return json({error:error instanceof Error && ['TimeoutError','AbortError'].includes(error.name) ? 'Butiken svarar inte just nu. Försök igen.' : error instanceof Error?error.message:'Kunde inte hämta produkten. Försök igen.'},400); }
 });

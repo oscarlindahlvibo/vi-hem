@@ -59,8 +59,7 @@ export function parseProducts(html: string, url: URL): Product[] {
   }
   return found.slice(0,30);
 }
-export async function fetchProducts(raw: unknown, transport: typeof fetch = fetch): Promise<Product[]> {
-  const url = productUrl(raw);
+async function readPage(url: URL, transport: typeof fetch): Promise<string> {
   const response = await transport(url, { redirect: 'manual', signal: AbortSignal.timeout(8000), headers: { Accept: 'text/html' } });
   if (!response.ok) throw new Error('Butiken tillåter inte hämtning just nu. Öppna produkten i den nya mobilappens butiksvy eller fyll i uppgifterna själv.');
   // No redirects, private hosts, arbitrary URLs, cookies or authentication forwarding.
@@ -70,7 +69,29 @@ export async function fetchProducts(raw: unknown, transport: typeof fetch = fetc
   try { while (true) { const {done,value} = await reader.read(); if (done) break; size += value.length; if (size > 2_000_000) throw new Error('Produktsidan är för stor.'); chunks.push(value); } }
   finally { await reader.cancel(); }
   const bytes = new Uint8Array(size); let offset=0; for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
-  const products = parseProducts(new TextDecoder().decode(bytes), url);
+  return new TextDecoder().decode(bytes);
+}
+export async function fetchProducts(raw: unknown, transport: typeof fetch = fetch): Promise<Product[]> {
+  const url = productUrl(raw);
+  const products = parseProducts(await readPage(url, transport), url);
   if (!products.length) throw new Error('Kunde inte hitta produktuppgifter på sidan. Dina inköpsuppgifter finns kvar.');
+  return products;
+}
+
+export async function searchProducts(query: unknown, supplier: unknown, transport: typeof fetch = fetch): Promise<Product[]> {
+  if (supplier !== 'Byggmax') throw new Error('Direktsökning är ännu inte tillgänglig för den butiken. Använd Välj produkt i den nya mobilappen.');
+  if (typeof query !== 'string' || query.trim().length < 2 || query.length > 128) throw new Error('Ange 2–128 tecken för att söka.');
+  const url = new URL('https://www.byggmax.se/catalogsearch/result/'); url.searchParams.set('q',query.trim());
+  const html = await readPage(url,transport);
+  const products: Product[] = [];
+  for (const match of html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const name = decodeHtml(match[2].replace(/<[^>]*>/g,' ')).replace(/\s+/g,' ').trim();
+    if (!name || name.length > 300) continue; // Image-only links are not product names.
+    let link: URL;
+    try { link = productUrl(new URL(decodeHtml(match[1]),url).href); } catch { continue; }
+    if (link.hostname !== url.hostname || products.some(p=>p.url===link.href)) continue;
+    products.push({name,sku:link.pathname.match(/-p(\d+)/)?.[1] || '',url:link.href,supplier:'Byggmax'});
+    if (products.length === 20) break;
+  }
   return products;
 }
