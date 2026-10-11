@@ -71,3 +71,9 @@ Kontrollera remote/main och production schema read-only på nytt. Upprepa stagin
 ## Pass10-tillägg
 
 Migration 20261012100000 är premiummigration 33: befintliga termination/tenancy/profile-tabeller och RLS behövs; nullable metadata + SECURITY INVOKER-RPC är additiva. Backend före AdminTerminations-frontend. Äldre appar kan fortsätta direktflödet men får inte dess nya atomiska garanti; full äldre-klientmatris återstår. QA RPC concurrency/replay/rollback/rollprov passerar; inget nytt installationsprov på produktionsschemaklon utfört/påstås. Åtkomst-Edge har en separat säkerhetskandidat utan premiummigrationsberoende, se access-entry-hotfix.md. Ingen deployment godkänd eller utförd.
+
+## Pass12-tillägg – skärminställningar
+
+`20261012120000_atomic_screen_settings.sql` kräver befintliga organisations/profil/skärm/tvätt/mötestabeller och unik `(organisation_id, screen_key)` samt auth.uid; ingen ny premiummigration krävs. Installera RPC/reload PostgREST före ny ScreenSettings-frontend; saknad RPC visas som fel och inget osäkert fallback-save görs. SECURITY DEFINER har låst search_path, aktiv admin/superadmin i egen organisation, referensvalidering, organisationslås, CAS/PT409 och exakt read-only replay. Endast screen_settings-nyckeln sammanfogas; övriga integrationer bevaras. Skärm- och organisationsposter sparas/återställs tillsammans.
+
+QA SQL/HTTP race/retry/rollback/org/roller PASS. Inget nytt installationsprov på produktionsschemaklon påstås. Gamla klienters läsformat och direktoperationer finns kvar; de har inte den nya atomiska garantin och samtidiga legacy-UPDATE måste verifieras före blandad release. Rollback av frontend kan behålla additiv RPC; databasbackup/restore och aktuellt produktionsschema ska granskas separat. Ingen produktionsinstallation utförd.

@@ -3,7 +3,7 @@ import { AlertCircle, CalendarDays, ClipboardList, Monitor, Newspaper, RefreshCw
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from '../components/AppLogo';
-import { Button, LoadingPage } from '../components/ui';
+import { Button, Input, LoadingPage } from '../components/ui';
 import type { CalendarEvent, CustomerProject, LaundryBooking, LaundryRoom, LaundrySlot, MaintenanceRequest, Meeting, MeetingActionItem, MeetingAgendaItem, MeetingDecision, News, Profile, ShortStayBooking, ShortStayUnit, TimeEntry, WorkOrder } from '../types';
 import { formatDate, formatDateTime, MR_PRIORITY_LABELS, MR_STATUS_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS, entryKindLabel, clockTone } from '../lib/utils';
 import { useTimeCategories } from '../contexts/TimeCategoriesContext';
@@ -177,14 +177,20 @@ export function ScreenDisplayPage() {
   const [laundryBookings, setLaundryBookings] = useState<LaundryBooking[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState('');
+  const [dataOrganisation, setDataOrganisation] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [screenSize, setScreenSize] = useState(() => ({
     width: window.innerWidth || 1920,
     height: window.innerHeight || 1080,
   }));
+  const fetchDataRef = useRef<() => Promise<void>>(async () => {});
+  fetchDataRef.current = fetchScreenData;
+  const dataRequestRef = useRef(0);
+  const screenContextRef = useRef('');
+  screenContextRef.current = `${user?.organisation_id || ''}:${selectedScreenKey}`;
   const screenSessionRefreshRef = useRef<Promise<boolean> | null>(null);
 
-  const allowed = user && ['screen', 'admin', 'staff'].includes(user.role);
+  const allowed = user && ['screen', 'admin', 'staff', 'superadmin'].includes(user.role);
   const selectedScreenConfig = screenConfigs.find(screen => screen.screenKey === selectedScreenKey) || screenConfigs[0] || defaultScreenConfig(1);
   const dayCount = screenSize.width < 1400 ? 8 : screenSize.width < 1700 ? 9 : 10;
   // A TV can stay open for days without a reload (see checkScreenVersion
@@ -344,6 +350,7 @@ export function ScreenDisplayPage() {
     // when they wake up so the display can continue without a manual login.
     const refreshWhenActive = () => {
       if (document.visibilityState === 'hidden') return;
+      void fetchDataRef.current();
       ensureScreenSession().catch(() => {
         // A temporary network error should not blank an already rendered screen.
       });
@@ -381,8 +388,8 @@ export function ScreenDisplayPage() {
 
   useEffect(() => {
     if (!allowed || !user?.organisation_id) return;
-    fetchScreenData();
-    const interval = window.setInterval(fetchScreenData, SCREEN_REFRESH_INTERVAL_MS);
+    void fetchDataRef.current();
+    const interval = window.setInterval(() => void fetchDataRef.current(), SCREEN_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(interval);
   }, [allowed, user?.organisation_id, days, selectedScreenKey]);
 
@@ -395,10 +402,10 @@ export function ScreenDisplayPage() {
     if (!allowed || !user?.organisation_id || view !== 'meeting') return;
     const channel = supabase
       .channel(`screen-meeting-${user.organisation_id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_meeting_agenda_items', filter: `organisation_id=eq.${user.organisation_id}` }, () => fetchScreenData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_meeting_decisions', filter: `organisation_id=eq.${user.organisation_id}` }, () => fetchScreenData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_meeting_action_items', filter: `organisation_id=eq.${user.organisation_id}` }, () => fetchScreenData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_ai_suggestions', filter: `organisation_id=eq.${user.organisation_id}` }, () => fetchScreenData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_meeting_agenda_items', filter: `organisation_id=eq.${user.organisation_id}` }, () => void fetchDataRef.current())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_meeting_decisions', filter: `organisation_id=eq.${user.organisation_id}` }, () => void fetchDataRef.current())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_meeting_action_items', filter: `organisation_id=eq.${user.organisation_id}` }, () => void fetchDataRef.current())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vihem_ai_suggestions', filter: `organisation_id=eq.${user.organisation_id}` }, () => void fetchDataRef.current())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [allowed, user?.organisation_id, view]);
@@ -419,19 +426,24 @@ export function ScreenDisplayPage() {
 
   async function fetchScreenData() {
     if (!user?.organisation_id) return;
+    const request = ++dataRequestRef.current;
+    const context = screenContextRef.current;
+    const isCurrent = () => request === dataRequestRef.current && context === screenContextRef.current;
     setDataLoading(true);
     setDataError('');
 
     try {
+    try {
       const sessionAvailable = await ensureScreenSession();
       if (!sessionAvailable) {
+        if (!isCurrent()) return;
         setDataError('Skärmanslutningen har gått ut. Logga in igen för att fortsätta visa aktuell information.');
         setDataLoading(false);
         return;
       }
     } catch {
       // Keep the last rendered data visible during a short network interruption.
-      setDataLoading(false);
+      if (isCurrent()) setDataError('Anslutningen kunde inte återställas. Tidigare information visas tills nästa uppdatering lyckas.');
       return;
     }
 
@@ -541,6 +553,7 @@ export function ScreenDisplayPage() {
         .order('name'),
     ]);
 
+    if (!isCurrent()) return;
     const screenSettingsUnavailable = isMissingScreenSettingsTable(screenSettingsResult.error);
 
     if (organisationResult.error || (screenSettingsResult.error && !screenSettingsUnavailable) || staffResult.error || unitsResult.error || bookingsResult.error || workOrdersResult.error || newsResult.error || clockedInResult.error || meetingsResult.error || maintenanceRequestsResult.error || calendarEventsResult.error || laundryRoomsResult.error) {
@@ -575,6 +588,7 @@ export function ScreenDisplayPage() {
           .order('date')
           .order('start_time');
 
+        if (!isCurrent()) return;
         if (slotsResult.error) {
           setDataError(slotsResult.error.message);
           setDataLoading(false);
@@ -590,6 +604,7 @@ export function ScreenDisplayPage() {
             .in('laundry_slot_id', slotIds)
             .eq('status', 'active');
 
+          if (!isCurrent()) return;
           if (laundryBookingsResult.error) {
             setDataError(laundryBookingsResult.error.message);
             setDataLoading(false);
@@ -655,6 +670,7 @@ export function ScreenDisplayPage() {
           // plockar bara den första träffen för det just nu visade mötet.
           supabase.from('vihem_ai_suggestions').select('source_id, payload, created_at').eq('source_type', 'meeting').in('source_id', meetingIds).order('created_at', { ascending: false }).limit(20),
         ]);
+        if (!isCurrent()) return;
         setMeetingAgendaItems(agendaResult.error ? [] : (agendaResult.data || []) as MeetingAgendaItem[]);
         setMeetingDecisions(decisionsResult.error ? [] : (decisionsResult.data || []) as MeetingDecision[]);
         setMeetingActionItems(actionItemsResult.error ? [] : (actionItemsResult.data || []) as MeetingActionItem[]);
@@ -671,10 +687,14 @@ export function ScreenDisplayPage() {
         setMeetingActionItems([]);
         setMeetingAiSummary('');
       }
+      if (!isCurrent()) return;
+      setDataOrganisation(user.organisation_id);
       setLastUpdated(new Date());
     }
 
-    setDataLoading(false);
+    } catch {
+      if (isCurrent()) setDataError('Kunde inte uppdatera skärmen. Tidigare information finns kvar. Försök igen.');
+    } finally { if (isCurrent()) setDataLoading(false); }
   }
 
   if (loading || tokenLoginBusy) return <LoadingPage />;
@@ -682,13 +702,13 @@ export function ScreenDisplayPage() {
   if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
-        <form onSubmit={handleLogin} className="w-full max-w-md rounded-3xl bg-white p-8 text-slate-950 shadow-2xl">
+        <form onSubmit={handleLogin} className="w-full max-w-md rounded-3xl bg-white p-5 sm:p-8 text-slate-950 shadow-2xl">
           <div className="mb-7 flex items-center gap-3">
             <div className="h-12 w-12 overflow-hidden rounded-2xl">
               <AppLogo className="h-full w-full" />
             </div>
             <div>
-              <h1 className="text-2xl font-black">VI-HEM Skärm</h1>
+              <h1 className="text-2xl font-semibold">VI-HEM Skärm</h1>
               <p className="text-sm text-slate-500">Logga in med organisationens TV-konto.</p>
             </div>
           </div>
@@ -696,23 +716,9 @@ export function ScreenDisplayPage() {
             <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
               Efter inloggning väljer du om den här TV:n är Skärm 1, Skärm 2 osv. Admin styr sedan vad varje skärm visar.
             </div>
-            <input
-              type="email"
-              value={email}
-              onChange={event => setEmail(event.target.value)}
-              placeholder="skarm@organisation.se"
-              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-base outline-none ring-blue-500 focus:ring-2"
-              required
-            />
-            <input
-              type="password"
-              value={password}
-              onChange={event => setPassword(event.target.value)}
-              placeholder="Lösenord"
-              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-base outline-none ring-blue-500 focus:ring-2"
-              required
-            />
-            {loginError && <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{loginError}</div>}
+            <Input label="Skärmkontots e-post" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} placeholder="skarm@organisation.se" required />
+            <Input label="Lösenord" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required />
+            {loginError && <div role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{loginError}</div>}
             <Button type="submit" loading={loggingIn} className="w-full" size="lg">
               Logga in som skärm
             </Button>
@@ -727,7 +733,7 @@ export function ScreenDisplayPage() {
       <div className="flex min-h-screen items-center justify-center bg-slate-950 p-8 text-white">
         <div className="max-w-lg rounded-3xl bg-white p-8 text-center text-slate-950">
           <Monitor className="mx-auto mb-4 h-12 w-12 text-slate-400" />
-          <h1 className="text-2xl font-black">Kontot saknar skärmbehörighet</h1>
+          <h1 className="text-2xl font-semibold">Kontot saknar skärmbehörighet</h1>
           <p className="mt-2 text-slate-500">Logga in med ett TV-skärmskonto för organisationen.</p>
           <Button
             onClick={() => {
@@ -743,16 +749,18 @@ export function ScreenDisplayPage() {
     );
   }
 
+  if (dataOrganisation !== user.organisation_id) return <div className="flex min-h-dvh items-center justify-center bg-slate-950 p-6 text-white"><div className="max-w-lg space-y-4 text-center"><Monitor className="mx-auto h-10 w-10 text-blue-300" /><h1 className="text-xl font-semibold">Ansluter till organisationens skärmar</h1><p role={dataError ? 'alert' : 'status'} className="text-sm text-slate-300">{dataError || 'Hämtar skärmprofiler och aktuell information.'}</p><Button loading={dataLoading} onClick={() => void fetchDataRef.current()}>Försök igen</Button></div></div>;
+
   if (showViewChooser) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
-        <div className="w-full max-w-4xl rounded-3xl bg-white p-8 text-slate-950 shadow-2xl">
+        <div className="w-full max-w-4xl rounded-3xl bg-white p-5 sm:p-8 text-slate-950 shadow-2xl">
           <div className="mb-7 flex items-center gap-3">
             <div className="h-12 w-12 overflow-hidden rounded-2xl">
               <AppLogo className="h-full w-full" />
             </div>
             <div>
-              <h1 className="text-2xl font-black">Välj TV-skärm</h1>
+              <h1 className="text-2xl font-semibold">Välj TV-skärm</h1>
               <p className="text-sm text-slate-500">Välj vilken administrerad skärm den här TV:n ska vara.</p>
             </div>
           </div>
@@ -763,16 +771,17 @@ export function ScreenDisplayPage() {
                 key={screen.screenKey}
                 type="button"
                 onClick={() => chooseScreenConfig(screen)}
-                className={`rounded-3xl border px-5 py-6 text-left transition ${
+                aria-pressed={selectedScreenKey === screen.screenKey}
+                className={`rounded-2xl border px-5 py-5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                   selectedScreenKey === screen.screenKey
                     ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
                     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                 }`}
               >
                 <Monitor className="mb-3 h-8 w-8" />
-                <span className="block text-xl font-black">{screen.name}</span>
+                <span className="block text-xl font-semibold">{screen.name}</span>
                 <span className="mt-2 block text-sm text-slate-500">{screenViewLabel(screen.screenView)}</span>
-                <span className="mt-3 inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-500">{screen.screenKey}</span>
+                <span className="mt-3 block text-sm text-slate-500">{screen.screenKey === selectedScreenKey ? 'Vald på den här enheten' : 'Visa på den här enheten'}</span>
               </button>
             ))}
           </div>
@@ -798,38 +807,38 @@ export function ScreenDisplayPage() {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-slate-950 p-2 text-white">
-      <header className="mb-1 flex h-10 items-center justify-between gap-3 rounded-xl bg-white/10 px-3 ring-1 ring-white/10">
+    <div className="min-h-dvh overflow-x-hidden bg-slate-950 p-2 text-white lg:h-dvh lg:overflow-hidden">
+      <header className="mb-2 flex min-h-12 items-center justify-between gap-3 rounded-xl bg-white/10 px-3 ring-1 ring-white/10">
         <div className="flex min-w-0 items-center gap-2">
           <button
             type="button"
             onClick={() => setShowViewChooser(true)}
-            className="h-7 w-7 shrink-0 overflow-hidden rounded-lg outline-none ring-blue-300 transition-transform hover:scale-105 focus:ring-2"
+            className="h-10 w-10 shrink-0 overflow-hidden rounded-lg outline-none ring-blue-300 transition-transform hover:scale-105 focus:ring-2"
             aria-label="Välj skärmläge"
           >
             <AppLogo className="h-full w-full" />
           </button>
-          <h1 className="truncate text-sm font-black">VI-HEM</h1>
+          <div className="min-w-0"><h1 className="truncate text-sm font-semibold">{selectedScreenConfig.name}</h1><p className="truncate text-xs text-slate-300">{screenViewLabel(view)}</p></div>
           <ScreenHeaderClock />
         </div>
-        <div className="flex shrink-0 items-center gap-2 text-xs font-semibold text-slate-300">
-          <RefreshCw className={`h-3.5 w-3.5 ${dataLoading ? 'animate-spin' : ''}`} />
-          <span>{lastUpdated ? lastUpdated.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : 'Laddar'}</span>
-        </div>
+        <button type="button" disabled={dataLoading} onClick={() => void fetchScreenData()} aria-label="Uppdatera skärmen" className="flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-2 text-sm text-slate-300 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300">
+          <RefreshCw className={`h-4 w-4 ${dataLoading ? 'animate-spin motion-reduce:animate-none' : ''}`} />
+          <span>{dataLoading ? 'Uppdaterar' : lastUpdated ? lastUpdated.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : 'Uppdatera'}</span>
+        </button>
       </header>
 
-      {dataError && <div className="mb-4 rounded-2xl bg-red-500/20 px-5 py-4 text-red-100 ring-1 ring-red-400/30">{dataError}</div>}
+      {dataError && <div role="alert" className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-amber-500/15 px-4 py-3 text-sm text-amber-100 ring-1 ring-amber-400/30"><span>{lastUpdated ? 'Informationen kan vara inaktuell. ' : ''}{dataError}</span><button type="button" disabled={dataLoading} onClick={() => void fetchScreenData()} className="min-h-11 rounded-lg px-3 font-semibold underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-amber-200">Försök igen</button></div>}
 
       {screenOverride ? (
         <MeetingSegmentScreen
           meetingId={screenOverride.meeting_id}
           displayMode={screenOverride.display_mode}
-          screenHeight={screenSize.height}
+          screenHeight={Math.max(320, screenSize.height - 20 - (dataError ? 72 : 0))}
         />
       ) : view === 'short-stay' ? (
-        <ShortStayScreen units={units} bookings={bookings} days={days} screenHeight={screenSize.height} />
+        <ShortStayScreen units={units} bookings={bookings} days={days} screenWidth={screenSize.width} screenHeight={Math.max(320, screenSize.height - 20 - (dataError ? 72 : 0))} />
       ) : view === 'work-orders' ? (
-        <WorkOrderScreen workOrders={workOrders} customerProjects={customerProjects} staffMembers={staffMembers} screenHeight={screenSize.height} />
+        <WorkOrderScreen workOrders={workOrders} customerProjects={customerProjects} staffMembers={staffMembers} screenHeight={Math.max(320, screenSize.height - 20 - (dataError ? 72 : 0))} />
       ) : view === 'meeting' ? (
         <MeetingScreen
           screen={selectedScreenConfig}
@@ -846,16 +855,17 @@ export function ScreenDisplayPage() {
           calendarEvents={calendarEvents}
           staffMembers={staffMembers}
           screenWidth={screenSize.width}
-          screenHeight={screenSize.height}
+          screenHeight={Math.max(320, screenSize.height - 20 - (dataError ? 72 : 0))}
           lastUpdated={lastUpdated}
         />
       ) : view === 'laundry' ? (
         <LaundryScreen
           screen={selectedScreenConfig}
+          screenWidth={screenSize.width}
           rooms={laundryRooms}
           slots={laundrySlots}
           bookings={laundryBookings}
-          screenHeight={screenSize.height}
+          screenHeight={Math.max(320, screenSize.height - 20 - (dataError ? 72 : 0))}
           lastUpdated={lastUpdated}
         />
       ) : (
@@ -871,7 +881,7 @@ export function ScreenDisplayPage() {
           staffMembers={staffMembers}
           lastUpdated={lastUpdated}
           screenWidth={screenSize.width}
-          screenHeight={screenSize.height}
+          screenHeight={Math.max(320, screenSize.height - 20 - (dataError ? 72 : 0))}
         />
       )}
     </div>
@@ -1123,7 +1133,7 @@ function MeetingScreen({
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-500 text-xs font-black">{agendaNumberByItemId.get(currentAgendaItem.id)}</span>
                   <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-200">Pågår nu</span>
                 </div>
-                <p className="mt-1.5 text-2xl font-black leading-snug">{currentAgendaItem.title}</p>
+                <p className="mt-1.5 text-2xl font-semibold leading-snug">{currentAgendaItem.title}</p>
                 {currentAgendaItem.notes && (
                   <p className="mt-1.5 text-sm font-semibold leading-snug text-blue-50" style={{ display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{currentAgendaItem.notes}</p>
                 )}
@@ -1359,6 +1369,12 @@ function MeetingScreen({
     </section>
   );
 
+  if (screenWidth < 1024) return <div className="space-y-3">
+    <section className="rounded-2xl bg-white/10 p-4"><p className="text-sm text-blue-200">{organisationName} · {partLabel}</p><h2 className="mt-1 text-xl font-semibold">{currentMeeting?.title || 'Mötesvy'}</h2><p className="mt-2 text-sm text-slate-300">{currentMeeting?.starts_at ? formatDateTime(currentMeeting.starts_at) : 'Inget aktivt möte'}</p></section>
+    {meetingPart !== 'part-2' && <>{agendaPanel}{workOrderPanel}{projectPanel}</>}
+    {meetingPart !== 'part-1' && <>{decisionsAndTasksPanel}{maintenancePanel}{calendarPanel}{meetingsPanel}</>}
+  </div>;
+
   return (
     <div
       className="grid gap-2 overflow-hidden rounded-xl bg-slate-950 text-white"
@@ -1478,6 +1494,7 @@ function PresentationScreen({
   const absentToday = absenceRequests.filter(request => request.start_date <= todayKey && request.end_date >= todayKey);
   const availableHeight = Math.max(screenHeight - 54, 480);
   const compact = true;
+  const narrow = screenWidth < 1024;
 
   // Drives the orange/red lunch-overrun coloring on the Instämplade panel
   // below -- ticks independently of the ~60s data refresh so a lunch entry
@@ -1560,9 +1577,9 @@ function PresentationScreen({
   const assigneeLabel = (order: WorkOrder) => workOrderAssigneeLabel(order, staffMembers, true);
   const rightPanelCount = [settings.showNews, settings.showClockedIn, settings.showMeetings].filter(Boolean).length;
   const rightPanelRows = rightPanelCount === 0 ? '1fr' : rightPanelCount === 1 ? '1fr' : rightPanelCount === 2 ? '0.62fr 1.38fr' : '0.66fr 1.15fr 0.35fr';
-  const scrollingNews = activeNews.length > 1;
+  const scrollingNews = !narrow && activeNews.length > 1;
   const visibleNews = scrollingNews ? [...activeNews, ...activeNews] : activeNews;
-  const scrollingWorkOrders = activeWorkOrders.length > 10;
+  const scrollingWorkOrders = !narrow && activeWorkOrders.length > 10;
   const visibleWorkOrders = scrollingWorkOrders ? [...activeWorkOrders, ...activeWorkOrders] : activeWorkOrders;
   const workOrderScrollSeconds = Math.max(40, activeWorkOrders.length * 8);
 
@@ -1570,9 +1587,9 @@ function PresentationScreen({
     <div
       className="relative overflow-hidden rounded-xl bg-slate-950 p-2 text-white"
       style={{
-        height: availableHeight,
+        height: narrow ? undefined : availableHeight,
         display: 'grid',
-        gridTemplateRows: 'minmax(0, 1fr) 42px',
+        gridTemplateRows: narrow ? 'auto auto' : 'minmax(0, 1fr) 42px',
         gap: 8,
       }}
     >
@@ -1582,7 +1599,7 @@ function PresentationScreen({
         className="relative min-h-0"
         style={{
           display: 'grid',
-          gridTemplateColumns: rightPanelCount > 0 ? 'minmax(0, 1.35fr) minmax(300px, 0.95fr)' : '1fr',
+          gridTemplateColumns: !narrow && settings.showWorkOrders && rightPanelCount > 0 ? 'minmax(0, 1.35fr) minmax(300px, 0.95fr)' : '1fr',
           gap: 8,
         }}
       >
@@ -1604,19 +1621,19 @@ function PresentationScreen({
                   style={scrollingWorkOrders ? { animation: `vihemNewsScroll ${workOrderScrollSeconds}s linear infinite` } : undefined}
                 >
                   {visibleWorkOrders.map((order, index) => (
-                    <div key={`${order.id}-${index}`} className="grid grid-cols-[minmax(0,1.15fr)_minmax(96px,0.45fr)_minmax(120px,0.55fr)] items-center gap-2 rounded-lg bg-white/10 px-2.5 py-1.5">
+                    <div key={`${order.id}-${index}`} className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1.15fr)_minmax(96px,0.45fr)_minmax(120px,0.55fr)] items-center gap-2 rounded-lg bg-white/10 px-2.5 py-1.5">
                       <div className="min-w-0">
                         <p className="truncate font-black" style={{ fontSize: 14 }}>{order.title}</p>
-                        <p className="truncate font-semibold text-slate-300" style={{ fontSize: 10.5 }}>
+                        <p className="truncate font-semibold text-slate-300" style={{ fontSize: narrow ? 13 : 10.5 }}>
                           {order.property?.name || 'Ingen fastighet'}{order.due_date ? ` · ${formatDate(order.due_date)}` : ''}
                         </p>
                       </div>
                       <div className="flex min-w-0 justify-start gap-1">
-                        <span className="truncate rounded-full bg-amber-400/15 px-2 py-0.5 font-black text-amber-100" style={{ fontSize: 10 }}>
+                        <span className="truncate rounded-full bg-amber-400/15 px-2 py-0.5 font-black text-amber-100" style={{ fontSize: narrow ? 12 : 10 }}>
                           {isOrderOverdue(order) ? 'Försenad' : WO_STATUS_LABELS[order.status]}
                         </span>
                       </div>
-                      <span className="truncate rounded-full bg-blue-400/15 px-2 py-0.5 text-center font-black text-blue-100" style={{ fontSize: 10 }}>
+                      <span className="truncate rounded-full bg-blue-400/15 px-2 py-0.5 text-center font-black text-blue-100" style={{ fontSize: narrow ? 12 : 10 }}>
                         {assigneeLabel(order)}
                       </span>
                     </div>
@@ -1628,7 +1645,7 @@ function PresentationScreen({
         )}
 
         {rightPanelCount > 0 && (
-          <div className="min-h-0 overflow-hidden" style={{ display: 'grid', gridTemplateRows: rightPanelRows, gap: 8 }}>
+          <div className="min-h-0 overflow-hidden" style={{ display: 'grid', gridTemplateRows: narrow ? 'auto' : rightPanelRows, gap: 8 }}>
             {settings.showNews && (
               <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white/10 p-2.5 ring-1 ring-white/10">
                 <div className="mb-1.5 flex items-center gap-2">
@@ -1691,7 +1708,7 @@ function PresentationScreen({
                         return (
                           <div key={entry.id} className={`grid grid-cols-[minmax(76px,0.85fr)_minmax(92px,1.15fr)_auto] items-center gap-1.5 rounded-md px-2 py-1 ${rowClass}`}>
                             <p className="truncate font-black" style={{ fontSize: 11.5 }}>{entry.user?.name || 'Personal'}</p>
-                            <p className={`truncate font-semibold ${labelClass}`} style={{ fontSize: 10.5 }}>{timeEntryTitle(entry)}</p>
+                            <p className={`truncate font-semibold ${labelClass}`} style={{ fontSize: narrow ? 13 : 10.5 }}>{timeEntryTitle(entry)}</p>
                             <p className="whitespace-nowrap font-bold text-slate-400" style={{ fontSize: 9.5 }}>
                               {new Date(entry.start_time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
                             </p>
@@ -1701,7 +1718,7 @@ function PresentationScreen({
                       {absentToday.slice(0, 6).map(request => (
                         <div key={`${request.user_id}-${request.start_date}`} className="grid grid-cols-[minmax(76px,0.85fr)_minmax(92px,1.15fr)_auto] items-center gap-1.5 rounded-md bg-rose-400/10 px-2 py-1 ring-1 ring-rose-300/20">
                           <p className="truncate font-black" style={{ fontSize: 11.5 }}>{staffMembers.find(staff => staff.id === request.user_id)?.name || 'Personal'}</p>
-                          <p className="truncate font-semibold text-rose-100" style={{ fontSize: 10.5 }}>Frånvarande</p>
+                          <p className="truncate font-semibold text-rose-100" style={{ fontSize: narrow ? 13 : 10.5 }}>Frånvarande</p>
                           <p className="whitespace-nowrap font-bold text-rose-200/70" style={{ fontSize: 9.5 }}>Borta</p>
                         </div>
                       ))}
@@ -1739,9 +1756,9 @@ function PresentationScreen({
       </main>
 
       <footer className="relative overflow-hidden rounded-xl border border-white/10 bg-black/35">
-        <div className="animate-[vihemTicker_38s_linear_infinite] whitespace-nowrap font-black text-white" style={{ fontSize: 18, lineHeight: '42px' }}>
-          {[...tickerParts, ...tickerParts].map((part, index) => (
-            <span key={`${part}-${index}`} className="mx-10 inline-flex items-center gap-4">
+        <div className={narrow ? 'space-y-2 p-3 text-sm text-slate-300' : 'animate-[vihemTicker_38s_linear_infinite] whitespace-nowrap font-black text-white'} style={narrow ? undefined : { fontSize: 18, lineHeight: '42px' }}>
+          {(narrow ? tickerParts : [...tickerParts, ...tickerParts]).map((part, index) => (
+            <span key={`${part}-${index}`} className={narrow ? 'flex items-center gap-2' : 'mx-10 inline-flex items-center gap-4'}>
               <span className="h-2 w-2 rounded-full bg-blue-300" />
               {part}
             </span>
@@ -1753,7 +1770,8 @@ function PresentationScreen({
   );
 }
 
-function ShortStayScreen({ units, bookings, days, screenHeight }: { units: ShortStayUnit[]; bookings: ShortStayBooking[]; days: string[]; screenHeight: number }) {
+function ShortStayScreen({ units, bookings, days, screenWidth, screenHeight }: { units: ShortStayUnit[]; bookings: ShortStayBooking[]; days: string[]; screenWidth: number; screenHeight: number }) {
+  const narrow = screenWidth < 1024;
   const availableHeight = Math.max(screenHeight - 54, 420);
   const rowHeight = units.length > 0 ? Math.max(36, Math.min(68, Math.floor((availableHeight - 34) / units.length))) : 56;
   const compact = rowHeight < 52;
@@ -1764,8 +1782,8 @@ function ShortStayScreen({ units, bookings, days, screenHeight }: { units: Short
   const denseBookingBand = bookingBandHeight < 40;
 
   return (
-    <div className="grid gap-2" style={{ gridTemplateColumns: 'minmax(0, 1fr) 320px', height: availableHeight }}>
-      <div className="overflow-hidden rounded-xl bg-slate-950 text-white ring-1 ring-white/10">
+    <div className="grid gap-2" style={{ gridTemplateColumns: narrow ? '1fr' : 'minmax(0, 1fr) 320px', height: narrow ? undefined : availableHeight }}>
+      <div tabIndex={0} aria-label="Bokningskalender, rulla i sidled för fler datum" className="overflow-x-auto rounded-xl bg-slate-950 text-white ring-1 ring-white/10 focus-visible:ring-2 focus-visible:ring-blue-300"><div style={{ minWidth: unitColumnWidth + days.length * 50 }}>
         <div className="grid border-b border-white/[0.07] bg-slate-900" style={{ gridTemplateColumns: `${unitColumnWidth}px repeat(${days.length}, minmax(50px, 1fr))`, height: calendarHeaderHeight }}>
           <div className="px-2 py-2 text-[11px] font-black uppercase tracking-wide text-slate-300">Rum/lgh</div>
           {days.map(day => (
@@ -1837,7 +1855,7 @@ function ShortStayScreen({ units, bookings, days, screenHeight }: { units: Short
             );
           })}
         </div>
-      </div>
+      </div></div>
       <TodayEventsPanel units={units} bookings={bookings} />
     </div>
   );
@@ -1935,6 +1953,7 @@ function LaundryScreen({
   slots,
   bookings,
   screenHeight,
+  screenWidth,
   lastUpdated,
 }: {
   screen: ScreenConfig;
@@ -1942,9 +1961,11 @@ function LaundryScreen({
   slots: LaundrySlot[];
   bookings: LaundryBooking[];
   screenHeight: number;
+  screenWidth: number;
   lastUpdated: Date | null;
 }) {
   const room = rooms.find(item => item.id === screen.laundryRoomId) || rooms[0];
+  const narrow = screenWidth < 1024;
   const availableHeight = Math.max(screenHeight - 54, 420);
   const dayGap = 8;
   const dayRowHeight = Math.max(72, Math.floor((availableHeight - dayGap * 6) / 7));
@@ -1980,14 +2001,14 @@ function LaundryScreen({
 
   if (!room) {
     return (
-      <div className="flex items-center justify-center rounded-2xl bg-white p-12 text-center text-2xl font-black text-slate-700" style={{ height: availableHeight }}>
+      <div className="flex items-center justify-center rounded-2xl bg-white p-12 text-center text-2xl font-semibold text-slate-700" style={{ height: narrow ? undefined : availableHeight }}>
         Ingen tvättstuga vald för den här skärmen.
       </div>
     );
   }
 
   return (
-    <div className="grid gap-3 overflow-hidden text-white xl:grid-cols-[0.9fr_1.1fr]" style={{ height: availableHeight }}>
+    <div className="grid gap-3 overflow-hidden text-white xl:grid-cols-[0.9fr_1.1fr]" style={{ height: narrow ? undefined : availableHeight }}>
       <section className="flex min-h-0 flex-col rounded-3xl bg-slate-900 p-6 ring-1 ring-white/10">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -1997,7 +2018,7 @@ function LaundryScreen({
           </div>
           <div className="rounded-2xl bg-white/10 px-4 py-3 text-right ring-1 ring-white/10">
             <p className="text-sm font-bold text-slate-300">Idag</p>
-            <p className="text-2xl font-black">{new Date(`${todayValue}T12:00:00`).toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+            <p className="text-2xl font-semibold">{new Date(`${todayValue}T12:00:00`).toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
           </div>
         </div>
 
@@ -2009,7 +2030,7 @@ function LaundryScreen({
                 <p className="text-4xl font-black">{currentSlot.start_time.slice(0, 5)}-{currentSlot.end_time.slice(0, 5)}</p>
                 <p className="mt-2 text-xl font-bold text-slate-300">{currentBooking ? 'Pågående bokning' : currentSlot.is_blocked ? currentSlot.block_reason || 'Blockerad tid' : 'Ledig just nu'}</p>
               </div>
-              <span className={`rounded-full px-5 py-3 text-2xl font-black ring-1 ${slotStatus(currentSlot).className}`}>{slotStatus(currentSlot).label}</span>
+              <span className={`rounded-full px-5 py-3 text-2xl font-semibold ring-1 ${slotStatus(currentSlot).className}`}>{slotStatus(currentSlot).label}</span>
             </div>
           ) : (
             <p className="mt-3 text-3xl font-black text-slate-200">Ingen aktiv tid just nu</p>
@@ -2018,7 +2039,7 @@ function LaundryScreen({
 
         <div className="mt-5 min-h-0 flex-1 rounded-3xl bg-white/10 p-5 ring-1 ring-white/10">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-2xl font-black">Nästa bokningar</h2>
+            <h2 className="text-2xl font-semibold">Nästa bokningar</h2>
             <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-black">{nextBookedSlots.length}</span>
           </div>
           <div className="space-y-3">
@@ -2043,7 +2064,7 @@ function LaundryScreen({
 
       <section
         className="grid min-h-0 grid-cols-1 overflow-hidden"
-        style={{ gap: dayGap, gridTemplateRows: 'repeat(7, minmax(0, 1fr))' }}
+        style={{ gap: dayGap, gridTemplateRows: narrow ? 'auto' : 'repeat(7, minmax(0, 1fr))' }}
       >
         {days.map(day => (
           <div
@@ -2084,7 +2105,7 @@ function LaundryScreen({
 
 function WorkOrderScreen({ workOrders, customerProjects, staffMembers, screenHeight }: { workOrders: WorkOrder[]; customerProjects: CustomerProject[]; staffMembers: Pick<Profile, 'id' | 'name'>[]; screenHeight: number }) {
   if (workOrders.length === 0 && customerProjects.length === 0) {
-    return <div className="rounded-2xl bg-white p-12 text-center text-2xl font-black text-slate-700">Inga aktiva arbetsordrar eller kundprojekt.</div>;
+    return <div className="rounded-2xl bg-white p-12 text-center text-2xl font-semibold text-slate-700">Inga aktiva arbetsordrar eller kundprojekt.</div>;
   }
 
   const availableHeight = Math.max(screenHeight - 54, 420);
