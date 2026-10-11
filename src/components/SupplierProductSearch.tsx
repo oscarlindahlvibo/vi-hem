@@ -2,6 +2,9 @@ import { useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { ExternalLink, Search } from 'lucide-react';
+import { supplierBrowser, productExtractionScript, validateSupplierProduct, type SupplierProduct } from '../lib/supplierProducts';
+import { supabase } from '../lib/supabase';
+import { Button, Input } from './ui';
 
 const suppliers = [
   { name: 'Jula', searchUrl: 'https://www.jula.se/search/' },
@@ -9,8 +12,10 @@ const suppliers = [
 ];
 
 /** Opens the retailer's own search; no product data is imported or purchased. */
-export function SupplierProductSearch({ query, disabled = false }: { query: string; disabled?: boolean }) {
+export function SupplierProductSearch({ query, disabled = false, onImport }: { query: string; disabled?: boolean; onImport: (product: SupplierProduct) => void }) {
   const [error, setError] = useState('');
+  const [productUrl, setProductUrl] = useState('');
+  const [products, setProducts] = useState<SupplierProduct[]>([]);
   const [opening, setOpening] = useState(false);
   const pending = useRef(false);
   const search = query.trim();
@@ -45,9 +50,12 @@ export function SupplierProductSearch({ query, disabled = false }: { query: stri
                 pending.current = true;
                 setOpening(true);
                 try {
-                  await Browser.open({ url: url.href });
-                } catch {
-                  setError('Kunde inte öppna butiken. Försök igen.');
+                  if (Capacitor.isPluginAvailable('SupplierBrowser')) {
+                    const result = await supplierBrowser.open({ url: url.href, script: productExtractionScript });
+                    if (result.product) setProducts([validateSupplierProduct(result.product)]);
+                  } else { await Browser.open({ url: url.href }); }
+                } catch (failure) {
+                  setError(failure instanceof Error ? failure.message : 'Kunde inte öppna butiken. Försök igen.');
                 } finally {
                   pending.current = false;
                   setOpening(false);
@@ -60,8 +68,33 @@ export function SupplierProductSearch({ query, disabled = false }: { query: stri
         })}
       </div>
       <p className="mt-3 text-xs leading-relaxed text-vihem-muted">
-        Resultaten öppnas hos butiken. Kopiera produktens länk och klistra in den nedan när du kommer tillbaka. Inköpet sparas först när du trycker på spara.
+        {Capacitor.isPluginAvailable('SupplierBrowser') ? 'Öppna en produkt och tryck på Välj produkt. Granska uppgifterna här innan du lägger till dem.' : 'Öppna en produkt hos butiken och kopiera dess länk till fältet nedan för att hämta uppgifterna. Den nya mobilappen har en inbyggd butiksvy.'}
       </p>
+      <div className="mt-3 space-y-2">
+        <Input label="Importera från produktlänk" value={productUrl} onChange={e=>setProductUrl(e.target.value)} placeholder="https://www.biltema.se/..." disabled={disabled || opening} type="url" />
+        <Button type="button" variant="secondary" disabled={disabled || !productUrl.trim()} loading={opening} onClick={async () => {
+          if (pending.current) return;
+          pending.current = true; setOpening(true); setError(''); setProducts([]);
+          try {
+            // Validate before sending a URL to the backend; the backend repeats all checks.
+            validateSupplierProduct({name:'Produkt',url:productUrl});
+            const {data,error:requestError} = await supabase.functions.invoke('vihem-supplier-product',{body:{url:productUrl.trim()}});
+            if (requestError) {
+              let message='Kunde inte hämta produkten. Försök igen eller fyll i uppgifterna själv.';
+              try { message=(await requestError.context.json()).error || message; } catch { /* transport failure */ }
+              throw new Error(message);
+            }
+            if (!Array.isArray(data?.products) || !data.products.length) throw new Error('Inga produktuppgifter hittades.');
+            setProducts(data.products.map(validateSupplierProduct));
+          } catch (failure) { setError(failure instanceof Error ? failure.message : 'Kunde inte hämta produkten.'); }
+          finally { pending.current=false; setOpening(false); }
+        }}>Hämta produkt</Button>
+      </div>
+      {products.map(product => <div key={product.url+product.sku} className="mt-3 border-t border-[color:var(--vihem-line)] pt-3">
+        <p className="text-sm font-semibold text-vihem-ink">{product.name}</p>
+        <p className="mt-1 text-sm text-vihem-muted">{product.supplier}{product.sku ? ` · Artikel ${product.sku}` : ''}</p>
+        <Button type="button" className="mt-2" disabled={disabled || opening} onClick={()=>{onImport(product);setProducts([]);setProductUrl('');}}>Använd produkten</Button>
+      </div>)}
       {error && <p role="alert" className="mt-2 text-sm text-vihem-danger">{error}</p>}
     </section>
   );

@@ -385,7 +385,11 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
             />
           </div>
 
-          <SupplierProductSearch query={form.item_name} disabled={saving} />
+          <SupplierProductSearch query={form.item_name} disabled={saving} onImport={product=>{
+            setForm(current=>({...current, item_name:product.name, store_name:product.supplier, product_url:product.url,
+              notes:product.sku && !current.notes.includes(`Artikelnummer: ${product.sku}`) ? [current.notes,`Artikelnummer: ${product.sku}`].filter(Boolean).join('\n') : current.notes}));
+            toast.show('Produktuppgifter hämtade. Kontrollera antal och spara inköpet.');
+          }} />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
