@@ -32,6 +32,11 @@ try {
  }
  const nativeByggmax=vm.runInNewContext(productExtractionScript,{document:{querySelector(selector){return selector==='main'?{innerText:'ART.NR: 45521'}:selector.startsWith('meta')?null:{textContent:'Lantbruksströ'};},querySelectorAll(){return [];}},location:{href:retailers[0][0]}});
  assert.equal(validateSupplierProduct(nativeByggmax).sku,'45521');
+ for(const suffix of ['/', '']) {
+  const link='https://www.jula.se/catalog/bygg/maskeringstejp-021489'+suffix;
+  assert.equal(validateSupplierProduct({name:'Maskeringstejp 50 m',sku:'021489',url:link}).supplier,'Jula');
+  assert.equal(parser.productUrl(link).hostname,'www.jula.se');
+ }
  assert.equal(parser.parseProducts('<h1>Category</h1>',new URL(retailers[1][0])).length,0);
  for(const link of ['https://www.byggmax.se/catalogsearch/result/','https://www.bauhaus.se/catalogsearch/result/','https://www.jemfix.se/skruvdragare/140102/'])assert.throws(()=>parser.productUrl(link));
  const searchMarkup='<a href="https://www.byggmax.se/skruv-p123"><img alt="Bild"></a><a href="https://www.byggmax.se/skruv-p123">Skruv ÅÄÖ</a><a href="https://www.byggmax.se.evil.test/skruv-p456">Bad</a><a href="https://www.byggmax.se/skruv-p123">Duplicate</a>';

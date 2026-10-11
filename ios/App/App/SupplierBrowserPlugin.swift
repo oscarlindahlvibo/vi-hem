@@ -82,15 +82,21 @@ private class SupplierPage: UIViewController, WKNavigationDelegate {
             self.reading = false; self.choose.isEnabled = true
             guard error == nil, let data = result as? [String: Any], let name = data["name"] as? String, !name.isEmpty,
                   let resultURL = data["url"] as? String, let parsed = URL(string: resultURL), self.allowed(parsed),
-                  self.web.url == parsed,
+                  self.samePage(parsed),
                   self.productPage(parsed, sku: data["sku"] as? String ?? "") else {
-                self.message("Öppna en produktsida och tryck på Välj produkt igen."); return
+                self.message(error != nil ? "Produktuppgifterna kunde inte läsas. Ladda om produktsidan och försök igen." : "Produktnamnet eller produktadressen kunde inte verifieras. Vänta tills sidan laddat klart och välj produkten igen."); return
             }
             self.complete(["name": String(name.prefix(300)), "sku": String((data["sku"] as? String ?? "").prefix(80)), "url": parsed.absoluteString])
         }
     }
+    // WebKit and location.href can differ in fragments/URL encoding after
+    // product variant changes. Compare the document identity, not raw strings.
+    private func samePage(_ selected: URL) -> Bool {
+        guard let current = web.url, allowed(current), allowed(selected) else { return false }
+        return current.path == selected.path && URLComponents(url: current, resolvingAgainstBaseURL: false)?.query == URLComponents(url: selected, resolvingAgainstBaseURL: false)?.query
+    }
     private func productPage(_ url: URL, sku: String) -> Bool {
-        let patterns = ["www.jula.se":"^/catalog/.+-[0-9]+/$", "www.biltema.se":"-200[0-9]{7}/?$", "www.byggmax.se":"^/[^/]+-p[0-9]+/?$", "www.bauhaus.se":"^/[a-z0-9]+(-[a-z0-9]+)+/?$", "www.jemfix.se":"^/[^/]+/[0-9]{4}/[0-9]{7}/$"]
+        let patterns = ["www.jula.se":"^/catalog/.+-[0-9]+/?$", "www.biltema.se":"-200[0-9]{7}/?$", "www.byggmax.se":"^/[^/]+-p[0-9]+/?$", "www.bauhaus.se":"^/[a-z0-9]+(-[a-z0-9]+)+/?$", "www.jemfix.se":"^/[^/]+/[0-9]{4}/[0-9]{7}/?$"]
         guard let pattern = patterns[url.host ?? ""] else { return false }
         return url.path.range(of: pattern, options: .regularExpression) != nil && (url.host != "www.bauhaus.se" || !sku.isEmpty)
     }

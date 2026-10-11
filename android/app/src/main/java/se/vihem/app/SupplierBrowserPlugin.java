@@ -65,7 +65,7 @@ public class SupplierBrowserPlugin extends Plugin {
                         String json = new org.json.JSONTokener(encoded).nextValue().toString();
                         JSONObject p = new JSONObject(json); Uri selected = Uri.parse(p.optString("url"));
                         boolean productPage = productPage(selected, p.optString("sku"));
-                        if (!allowed(selected, initial.getHost()) || !productPage || p.optString("name").isEmpty() || !selected.toString().equals(web.getUrl())) throw new Exception();
+                        if (!allowed(selected, initial.getHost()) || !productPage || p.optString("name").isEmpty() || !samePage(selected, Uri.parse(web.getUrl()))) throw new Exception();
                         JSObject product = new JSObject(); product.put("name", p.getString("name")); product.put("sku", p.optString("sku")); product.put("url", selected.toString()); result[0].put("product", product); current.dismiss();
                     } catch (Exception error) { Toast.makeText(getActivity(), "Öppna en produktsida och välj produkten igen.", Toast.LENGTH_LONG).show(); }
                 });
@@ -73,14 +73,17 @@ public class SupplierBrowserPlugin extends Plugin {
             current.show(); current.getWindow().setLayout(-1, -1); web.loadUrl(raw);
         });
     }
+    private boolean samePage(Uri selected, Uri current) {
+        return java.util.Objects.equals(selected.getScheme(), current.getScheme()) && java.util.Objects.equals(selected.getHost(), current.getHost()) && java.util.Objects.equals(selected.getPath(), current.getPath()) && java.util.Objects.equals(selected.getQuery(), current.getQuery());
+    }
     private boolean productPage(Uri url, String sku) {
         String path = url.getPath(); if (path == null) return false;
         switch (url.getHost() == null ? "" : url.getHost()) {
-            case "www.jula.se": return path.matches("/catalog/.+-[0-9]+/");
+            case "www.jula.se": return path.matches("/catalog/.+-[0-9]+/?");
             case "www.biltema.se": return path.matches(".*-200[0-9]{7}/?");
             case "www.byggmax.se": return path.matches("/[^/]+-p[0-9]+/?");
             case "www.bauhaus.se": return !sku.isEmpty() && path.matches("/[a-z0-9]+(-[a-z0-9]+)+/?");
-            case "www.jemfix.se": return path.matches("/[^/]+/[0-9]{4}/[0-9]{7}/");
+            case "www.jemfix.se": return path.matches("/[^/]+/[0-9]{4}/[0-9]{7}/?");
             default: return false;
         }
     }

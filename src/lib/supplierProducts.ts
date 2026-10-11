@@ -10,11 +10,11 @@ export function validateSupplierProduct(value: unknown): SupplierProduct {
   if (!p || typeof p.url !== 'string' || typeof p.name !== 'string') throw new Error('Öppna en produktsida och försök igen.');
   let url: URL;
   try { url = new URL(p.url); } catch { throw new Error('Ange en giltig produktlänk från någon av de valda butikerna.'); }
-  const supplier = url.hostname === 'www.jula.se' && /^\/catalog\/.+-\d+\/$/.test(url.pathname) ? 'Jula'
+  const supplier = url.hostname === 'www.jula.se' && /^\/catalog\/.+-\d+\/?$/.test(url.pathname) ? 'Jula'
     : url.hostname === 'www.biltema.se' && /-200\d{7}\/?$/.test(url.pathname) ? 'Biltema'
     : url.hostname === 'www.byggmax.se' && /^\/[^/]+-p\d+\/?$/.test(url.pathname) ? 'Byggmax'
     : url.hostname === 'www.bauhaus.se' && /^\/[a-z0-9]+(?:-[a-z0-9]+)+\/?$/.test(url.pathname) ? 'BAUHAUS'
-    : url.hostname === 'www.jemfix.se' && /^\/[^/]+\/\d{4}\/\d{7}\/$/.test(url.pathname) ? 'jem & fix' : '';
+    : url.hostname === 'www.jemfix.se' && /^\/[^/]+\/\d{4}\/\d{7}\/?$/.test(url.pathname) ? 'jem & fix' : '';
   if (!supplier || url.protocol !== 'https:' || url.port || url.username || url.password) throw new Error('Välj en produkt hos någon av de valda butikerna.');
   const name = cleanText(p.name);
   if (!name || name.length > 300) throw new Error('Produkten saknar ett giltigt namn.');
