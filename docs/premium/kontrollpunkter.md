@@ -346,3 +346,5 @@ Utgångspunkt dd573dc (de åtta påbörjade områdena pushade). Ytterligare sex 
 Disponibla QA-superadmin/systemadmin används, inga verkliga uppgifter/nycklar/utskick ändrade. Browser organisation avbryt/fortsätt och inställningsfel/spärr; inloggning fungerar. Reset endast rendering/fältattribut, ingen lösenordsändring. Riktig RPC/Drive för de två webbadminvyerna ej verifierad. Modulrader anger återstående flöden. Begärd schematid 2026-10-11 01.00 hade redan passerat när instruktionen kördes; ingen återkommande automation skapad, arbetet fortsatte direkt.
 
 TypeScript/build/mobilebundle PASS. Lint 0 errors; tillfällig UI-harness avlägsnas före leverans. Inga nya databasmigrationer i denna grupp.
+
+Publik signering/verifiering: två ytterligare områden (55/60, 5 orörda). Fokuserad dokumentläsning, samtyckesnavigation, safe-area-footer, avböj-dialog och hämtfel/retry. Kontrollerad mocktransport 390/768/1440 enligt modulrader; ingen verklig signatur/BankID/utskick. Befintlig backend/kryptografi/paketvalssparning oförändrad; full säkerhets-/token-/bilagsmatris kvar.

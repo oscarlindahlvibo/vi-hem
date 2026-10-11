@@ -2,7 +2,7 @@
 // isAgreementSignRoute() in App.tsx, same convention as
 // isGuestLaundryRoute()/GuestLaundryPage.tsx). No VI-HEM login, no Layout
 // chrome -- a standalone mobile-first page.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { declineSigning, getAttachmentDownloadUrl, getSignView, submitSignature, updatePackageSelection, AgreementApiError } from '../api';
 import type { PublicSignView } from '../types';
 import { BlockRenderer } from '../components/BlockRenderer';
@@ -10,6 +10,7 @@ import { SignaturePad } from '../components/SignaturePad';
 import { useBankIdFlow } from '../../../hooks/useBankIdFlow';
 import { initiateBankIDAgreementSign } from '../../../lib/bankid';
 import { CheckCircle2, Download, FileText, ShieldCheck, XCircle } from 'lucide-react';
+import { Button, Input, Modal } from '../../../components/ui';
 
 function getTokenFromUrl(): string {
   return new URLSearchParams(window.location.search).get('token') || '';
@@ -24,6 +25,9 @@ export function PublicAgreementSignPage() {
   const [signatureImage, setSignatureImage] = useState<string | null>(null);
   const [signatureName, setSignatureName] = useState('');
   const [saving, setSaving] = useState(false);
+  const submission = useRef(false);
+  const [declineOpen, setDeclineOpen] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [packageSelection, setPackageSelection] = useState<Record<string, boolean>>({});
   const [consentSelection, setConsentSelection] = useState<Record<string, boolean>>({});
   const allConsentsAccepted = (view?.version.blocks ?? []).filter(block => block.block_type === 'checkbox_consent').every(block => consentSelection[block.id]);
@@ -31,6 +35,8 @@ export function PublicAgreementSignPage() {
   const bankIdBusy = bankId.status === 'starting' || bankId.status === 'redirecting' || bankId.status === 'pending';
 
   useEffect(() => {
+    let active = true;
+    setLoading(true); setError('');
     if (!token) {
       setError('Länken saknar token.');
       setLoading(false);
@@ -38,15 +44,17 @@ export function PublicAgreementSignPage() {
     }
     getSignView(token)
       .then((data) => {
+        if (!active) return;
         setView(data);
         setSignatureName(data.signer.name || '');
         setPackageSelection(Object.fromEntries(data.selected_package_ids.map((id) => [id, true])));
         if (data.already_signed || data.signer.status === 'signed') setMode('signed');
         else if (data.signer.status === 'declined') setMode('declined');
       })
-      .catch((err) => setError(err instanceof AgreementApiError ? err.message : 'Kunde inte ladda dokumentet.'))
-      .finally(() => setLoading(false));
-  }, [token]);
+      .catch((err) => { if (active) setError(err instanceof AgreementApiError && err.code !== 'EDGE_FUNCTION_ERROR' ? err.message : 'Kunde inte ladda dokumentet.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [token, attempt]);
 
   // The signature itself is already written to vihem_agreement_signatures
   // server-side by vihem-bankid's "collect" action once the order
@@ -73,7 +81,7 @@ export function PublicAgreementSignPage() {
     setPackageSelection((prev) => {
       const next = { ...prev, [blockId]: selected };
       const ids = Object.entries(next).filter(([, v]) => v).map(([id]) => id);
-      updatePackageSelection(token, ids).catch((err) => setError(err instanceof AgreementApiError ? err.message : 'Kunde inte spara valet.'));
+      updatePackageSelection(token, ids).catch((err) => setError(err instanceof AgreementApiError && err.code !== 'EDGE_FUNCTION_ERROR' ? err.message : 'Kunde inte spara valet.'));
       return next;
     });
   }, [token]);
@@ -85,31 +93,34 @@ export function PublicAgreementSignPage() {
   };
 
   const handleSign = async () => {
+    if (submission.current || bankIdBusy) return;
     if (!checkConsent()) return;
     if (!signatureImage) { setError('Skriv din namnteckning innan du signerar.'); return; }
     if (!signatureName.trim()) { setError('Ange ditt namn.'); return; }
+    submission.current = true;
     setSaving(true);
     setError('');
     try {
       await submitSignature(token, { signature_image: signatureImage, signature_name: signatureName.trim() });
       setMode('signed');
     } catch (err) {
-      setError(err instanceof AgreementApiError ? err.message : 'Signeringen misslyckades.');
+      setError(err instanceof AgreementApiError && err.code !== 'EDGE_FUNCTION_ERROR' ? err.message : 'Signeringen misslyckades.');
     } finally {
-      setSaving(false);
+      submission.current = false; setSaving(false);
     }
   };
 
   const handleDecline = async () => {
-    if (!confirm('Är du säker på att du vill avböja detta dokument?')) return;
+    if (submission.current || bankIdBusy) return;
+    submission.current = true; setError('');
     setSaving(true);
     try {
       await declineSigning(token);
-      setMode('declined');
+      setMode('declined'); setDeclineOpen(false);
     } catch (err) {
-      setError(err instanceof AgreementApiError ? err.message : 'Det gick inte att avböja.');
+      setError(err instanceof AgreementApiError && err.code !== 'EDGE_FUNCTION_ERROR' ? err.message : 'Det gick inte att avböja.');
     } finally {
-      setSaving(false);
+      submission.current = false; setSaving(false);
     }
   };
 
@@ -137,21 +148,21 @@ export function PublicAgreementSignPage() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24">
-      <div className="mx-auto max-w-2xl px-4 py-6">
-        <div className="mb-4 flex items-center gap-2 text-slate-400">
+    <div className="min-h-[100dvh] bg-slate-50 pb-[calc(7rem+env(safe-area-inset-bottom))]">
+      <div className="mx-auto max-w-3xl px-4 py-6 sm:py-10">
+        <div className="mb-4 flex items-center gap-2 text-vihem-navy">
           <FileText className="h-5 w-5" />
           <span className="text-sm font-medium">VI-HEM</span>
         </div>
 
-        {loading && <p className="text-sm text-slate-500">Laddar dokument...</p>}
-        {error && !view && <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+        {loading && <p role="status" className="text-sm text-slate-500">Laddar dokument…</p>}
+        {error && !view && <section className="rounded-2xl border border-slate-200 bg-white p-6"><h1 className="text-xl font-semibold text-slate-900">Dokumentet kunde inte öppnas</h1><p role="alert" className="mt-3 text-sm text-red-700">{error}</p><p className="mt-3 text-sm leading-relaxed text-slate-600">Öppna länken från avsändarens meddelande. Kontakta avsändaren om länken har gått ut.</p>{token && <Button className="mt-4" variant="secondary" onClick={() => setAttempt(previous => previous + 1)}>Försök igen</Button>}</section>}
 
         {view && (
           <>
-            <div className="mb-4 rounded-2xl bg-white p-5 shadow-sm">
+            <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 sm:p-8">
               <p className="text-xs font-medium uppercase text-slate-400">{view.agreement.document_number}</p>
-              <h1 className="mt-0.5 text-xl font-bold tracking-tight text-slate-900">{view.agreement.title}</h1>
+              <h1 className="mt-0.5 break-words text-2xl font-semibold tracking-tight text-slate-900">{view.agreement.title}</h1>
               <p className="mt-1 text-sm text-slate-500">Till: {view.signer.name}{view.signer.role_title ? ` (${view.signer.role_title})` : ''}</p>
             </div>
 
@@ -168,9 +179,10 @@ export function PublicAgreementSignPage() {
               </div>
             )}
 
+            {(mode === 'read' || mode === 'sign') && <ol aria-label="Signeringssteg" className="mb-5 flex items-center gap-6 text-sm"><li aria-current={mode === 'read' ? 'step' : undefined} className={mode === 'read' ? 'font-semibold text-vihem-navy' : 'text-slate-500'}>1. Läs och granska</li><li aria-current={mode === 'sign' ? 'step' : undefined} className={mode === 'sign' ? 'font-semibold text-vihem-navy' : 'text-slate-500'}>2. Signera</li></ol>}
             {(mode === 'read' || mode === 'sign') && (
               <>
-                <div className="mb-4 rounded-2xl bg-white p-5 shadow-sm">
+                <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 sm:p-8">
                   <BlockRenderer
                     blocks={view.version.blocks}
                     parties={view.parties}
@@ -185,13 +197,13 @@ export function PublicAgreementSignPage() {
                 </div>
 
                 {view.attachments.length > 0 && (
-                  <div className="mb-4 rounded-2xl bg-white p-5 shadow-sm">
+                  <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 sm:p-8">
                     <p className="mb-2 text-sm font-semibold text-slate-700">Bilagor</p>
                     <div className="space-y-2">
                       {view.attachments.map((a) => (
-                        <button key={a.id} onClick={() => handleDownloadAttachment(a.id)} className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition-colors hover:bg-slate-50">
-                          <span>{a.name}</span>
-                          <Download className="h-4 w-4 text-slate-400" />
+                        <button key={a.id} onClick={() => handleDownloadAttachment(a.id)} className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left text-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600">
+                          <span className="min-w-0 break-words">{a.name}</span>
+                          <Download className="h-4 w-4 shrink-0 text-slate-400" />
                         </button>
                       ))}
                     </div>
@@ -201,20 +213,20 @@ export function PublicAgreementSignPage() {
                 {!allConsentsAccepted && <p className="mb-4 text-sm text-slate-600">Kryssa i godkännandet i avtalet innan du går vidare till signering.</p>}
 
                 {mode === 'read' && (
-                  <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white p-4 shadow-lg">
-                    <div className="mx-auto flex max-w-2xl gap-3">
-                      <button onClick={handleDecline} disabled={saving} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50">
+                  <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur">
+                    <div className="mx-auto flex max-w-3xl gap-3">
+                      <Button variant="secondary" onClick={() => setDeclineOpen(true)} disabled={saving || bankIdBusy} className="shrink-0">
                         Avböj
-                      </button>
-                      <button onClick={() => { if (checkConsent()) setMode('sign'); }} disabled={!allConsentsAccepted} className="flex-[2] rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
-                        {view.signer.signing_method === 'bankid' ? 'Granska & signera med BankID' : 'Granska & signera'}
-                      </button>
+                      </Button>
+                      <Button onClick={() => { if (checkConsent()) setMode('sign'); }} disabled={!allConsentsAccepted || saving} className="min-w-0 flex-1">
+                        Till signering
+                      </Button>
                     </div>
                   </div>
                 )}
 
                 {mode === 'sign' && view.signer.signing_method === 'bankid' && (
-                  <div className="rounded-2xl bg-white p-5 shadow-sm">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-8">
                     <p className="mb-3 text-sm font-semibold text-slate-700">Signera med BankID</p>
                     {bankIdBusy ? (
                       <div className="rounded-xl border-2 border-vihem-navy/20 bg-slate-50 p-5 text-center">
@@ -242,34 +254,36 @@ export function PublicAgreementSignPage() {
                         <ShieldCheck className="h-4 w-4" /> Starta BankID
                       </button>
                     )}
-                    {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+                    {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
                     <div className="mt-4">
-                      <button onClick={() => { setMode('read'); bankId.reset(); }} className="w-full rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50">
+                      <Button variant="secondary" onClick={() => { setMode('read'); bankId.reset(); }} className="w-full">
                         Tillbaka
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
 
                 {mode === 'sign' && view.signer.signing_method !== 'bankid' && (
-                  <div className="rounded-2xl bg-white p-5 shadow-sm">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-8">
                     <p className="mb-3 text-sm font-semibold text-slate-700">Din signatur</p>
-                    <input
+                    <Input
+                      label="Namn för signaturen"
+                      autoComplete="name"
                       type="text"
                       value={signatureName}
                       onChange={(e) => setSignatureName(e.target.value)}
                       placeholder="Ditt namn"
-                      className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      className="mb-3"
                     />
                     <SignaturePad onChange={setSignatureImage} />
-                    {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+                    {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
                     <div className="mt-4 flex gap-3">
-                      <button onClick={() => setMode('read')} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50">
+                      <Button variant="secondary" disabled={saving} onClick={() => setMode('read')} className="flex-1">
                         Tillbaka
-                      </button>
-                      <button onClick={handleSign} disabled={saving || !allConsentsAccepted} className="flex-[2] rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50">
-                        {saving ? 'Signerar...' : 'Signera dokumentet'}
-                      </button>
+                      </Button>
+                      <Button onClick={handleSign} loading={saving} disabled={!allConsentsAccepted} className="flex-[2]">
+                        Signera dokumentet
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -278,6 +292,7 @@ export function PublicAgreementSignPage() {
           </>
         )}
       </div>
+      <Modal open={declineOpen} onClose={() => { if (!saving) setDeclineOpen(false); }} title="Avböj dokumentet?" footer={<><Button variant="secondary" disabled={saving} onClick={() => setDeclineOpen(false)}>Fortsätt granska</Button><Button variant="danger" loading={saving} onClick={() => void handleDecline()}>Avböj dokumentet</Button></>}><p className="text-sm leading-relaxed text-slate-600">Avsändaren får veta att du har avböjt dokumentet. Du kan fortsätta granska innan du bestämmer dig.</p>{error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}</Modal>
     </div>
   );
 }
