@@ -348,3 +348,5 @@ Disponibla QA-superadmin/systemadmin används, inga verkliga uppgifter/nycklar/u
 TypeScript/build/mobilebundle PASS. Lint 0 errors; tillfällig UI-harness avlägsnas före leverans. Inga nya databasmigrationer i denna grupp.
 
 Publik signering/verifiering: två ytterligare områden (55/60, 5 orörda). Fokuserad dokumentläsning, samtyckesnavigation, safe-area-footer, avböj-dialog och hämtfel/retry. Kontrollerad mocktransport 390/768/1440 enligt modulrader; ingen verklig signatur/BankID/utskick. Befintlig backend/kryptografi/paketvalssparning oförändrad; full säkerhets-/token-/bilagsmatris kvar.
+
+Webbplatsadmin: annons/villkor/bilder och bevarade kontakt/kunskapsbank/sidtexter, utkastskydd vid objektbyte samt spärr vid lyckad skrivning men misslyckad återläsning. Mock save/fault/reload/retry och publiceringsvalidering PASS; representativ 390/768/1440. 56/60 aktiva, 4 orörda. Riktig publicering, RPC-roller och bildtransport ej nyverifierade.
