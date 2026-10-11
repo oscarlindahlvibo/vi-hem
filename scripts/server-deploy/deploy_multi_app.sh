@@ -226,6 +226,12 @@ build_and_publish_app() {
 
   run_in_repo "$repo" git pull --ff-only
   prepare_build_output "$repo" "$output_dir"
+  prepare_node_modules "$repo"
+  if [[ "$app_name" == ekangen ]]; then
+    prepare_node_modules "$repo" apps/ekangen/node_modules
+  elif [[ "$app_name" == viborent ]]; then
+    prepare_node_modules "$repo" apps/viborent/node_modules
+  fi
   run_in_repo "$repo" npm install
   run_in_repo "$repo" npm run "$build_command"
 
@@ -256,6 +262,20 @@ if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
   die "Run this script as vibo, without sudo. It requests sudo only for file ownership/publication."
 fi
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# npm's .bin symlinks are normal; chown -P --no-dereference never follows them.
+prepare_node_modules() {
+  local repo="$1" relative="${2:-node_modules}" target owner
+  target="$repo/$relative"
+  [[ ! -L "$target" ]] || die "Symlinked node_modules root requires review: $target"
+  [[ -d "$target" ]] || return 0
+  [[ "$(realpath "$target")" == "$(realpath "$repo")/"* ]] || die "Dependency directory escapes repository: $target"
+  owner="$(id -un):$(id -gn)"
+  if [[ -n "$(find "$target" ! -user "$(id -un)" -print -quit)" ]]; then
+    log "Repairing ownership only in dependency directory: $target"
+    run_root chown -R -P --no-dereference "$owner" "$target"
+  fi
+}
 
 prepare_build_output() {
   local repo="$1" output="$2" target owner
@@ -377,6 +397,7 @@ if [[ "$SKIP_BUILD" == false ]]; then
   build_and_publish_app "vote" "$VOTE_REPO" "$VOTE_WEB_ROOT"
   if [[ "$SKIP_VIHEM" == false ]]; then
     prepare_build_output "$VI_HEM_REPO" dist
+    prepare_node_modules "$VI_HEM_REPO"
     run_in_repo "$VI_HEM_REPO" npm ci
     run_in_repo "$VI_HEM_REPO" env VITE_PUBLIC_APP_URL=https://app.vi-hem.se npm run mobile:build
     if [[ -n "$VI_HEM_WEB_ROOT" ]]; then
