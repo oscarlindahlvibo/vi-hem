@@ -4,3 +4,5 @@ export const betaArchiveNotice = 'I denna beta är nya besiktningsbilder och slu
 export const betaInvoiceNotice = 'PDF-hämtning från Accounted är tillfälligt avstängd i denna beta. Fakturauppgifterna och originaldokumenten ändras inte.';
 
 export const betaLegacyFileNotice = 'Äldre chatt-, besiktnings-, arbetsorder- och fordonsbilagor är tillfälligt spärrade i denna beta medan privat åtkomst färdigställs. Filerna bevaras. Nya chattbilagor använder privat lagring.';
+
+export const betaWorkOrderFileNotice = 'Nya arbetsorderbilagor är tillfälligt avstängda i denna beta. Ta bort de valda bilagorna för att skapa arbetsordern utan dem. Dina övriga uppgifter finns kvar.';

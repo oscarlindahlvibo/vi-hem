@@ -1,4 +1,4 @@
-import { betaExternalRestricted, betaLegacyFileNotice } from '../lib/betaCapabilities';
+import { betaExternalRestricted, betaLegacyFileNotice, betaWorkOrderFileNotice } from '../lib/betaCapabilities';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { WorkOrderChatFiles } from '../components/chat/WorkOrderChatFiles';
 import { ContextChatLauncher } from '../components/chat/ContextChatLauncher';
@@ -607,7 +607,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
   const createSubmission = useRef(false);
   async function createWorkOrder() {
     if (!user || !createForm.title.trim() || createSubmission.current) return;
-    if (betaExternalRestricted && createForm.files.length) { setCreateError(betaLegacyFileNotice); return; }
+    if (betaExternalRestricted && createForm.files.length) { setCreateError(betaWorkOrderFileNotice); return; }
     createSubmission.current = true;
 
     try {
@@ -1749,7 +1749,13 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
           <fieldset disabled={submittingCreate} aria-label="Arbetsorderuppgifter" className="min-w-0 space-y-6">
             {createError && (
               <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {createError}
+                <p>{createError}</p>
+                {betaExternalRestricted && createForm.files.length > 0 && (
+                  <Button type="button" variant="secondary" className="mt-3" onClick={() => {
+                    setCreateForm(current => ({ ...current, files: [] }));
+                    setCreateError('');
+                  }}>Ta bort valda bilagor</Button>
+                )}
               </div>
             )}
             <Input
@@ -1888,7 +1894,11 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
 
             <div className="space-y-2">
               <p className="text-sm font-medium text-slate-700">Bilder/filer</p>
-              <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center text-sm text-slate-600 hover:bg-slate-100">
+              {betaExternalRestricted ? (
+                <p role="status" className="rounded-lg bg-vihem-canvas px-4 py-3 text-sm text-vihem-muted">
+                  Nya bilagor är tillfälligt avstängda medan privat filåtkomst färdigställs. Du kan skapa arbetsordern utan bilagor.
+                </p>
+              ) : <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center text-sm text-slate-600 hover:bg-slate-100">
                 <Paperclip className="mb-2 h-5 w-5 text-slate-400" />
                 Välj bilder eller filer att bifoga
                 <input
@@ -1897,7 +1907,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                   className="sr-only"
                   onChange={(event) => { const chosen = Array.from(event.target.files || []); setCreateForm(current => ({ ...current, files: [...current.files, ...chosen] })); event.target.value = ""; }}
                 />
-              </label>
+              </label>}
               {chatSourceFile&&<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeChatFile} disabled={!!createdFromChat.current} onChange={e=>setIncludeChatFile(e.target.checked)}/>Kopiera {chatSourceFile.name} från chatten till arbetsordern (privat bilaga)</label>}
               {createForm.files.length > 0 && (
                 <div className="space-y-1">
@@ -1907,10 +1917,10 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                       <span className="min-w-0 flex-1 truncate">{file.name}</span>
                       <button
                         type="button"
-                        onClick={() => setCreateForm({
-                          ...createForm,
-                          files: createForm.files.filter((_, fileIndex) => fileIndex !== index),
-                        })}
+                        onClick={() => {
+                          setCreateForm(current => ({ ...current, files: current.files.filter((_, fileIndex) => fileIndex !== index) }));
+                          if (createForm.files.length === 1 && createError === betaWorkOrderFileNotice) setCreateError('');
+                        }}
                         className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-red-600"
                         aria-label={`Ta bort ${file.name}`}
                       >
