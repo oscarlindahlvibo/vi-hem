@@ -1,6 +1,7 @@
 import { CreateChatDialog } from "../components/chat/CreateChatDialog";
 import { ChatGroupInfo } from "../components/chat/ChatGroupInfo";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowLeft, MessageCircle, Plus, X } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
@@ -88,6 +89,15 @@ function ChatWorkspace({
     [editOpen, setEditOpen] = useState(false),
     [infoOpen, setInfoOpen] = useState(false),
     [groupTitle, setGroupTitle] = useState("");
+  const [mobileViewport, setMobileViewport] = useState(
+    () => window.matchMedia("(max-width: 767px)").matches,
+  );
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const update = () => setMobileViewport(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   const [viewport, setViewport] = useState({
     height: window.visualViewport?.height || window.innerHeight,
     top: window.visualViewport?.offsetTop || 0,
@@ -288,7 +298,7 @@ function ChatWorkspace({
     current?.chat_type === "group" &&
     (current.created_by === user.id ||
       ["admin", "superadmin"].includes(user.role));
-  return (
+  const workspace = (
     <div className={`space-y-4 ${chat.selected ? "chat-mobile-active" : ""}`}>
       <div className={chat.selected ? "hidden md:block" : ""}>
         <PageHeader
@@ -848,4 +858,9 @@ function ChatWorkspace({
       />
     </div>
   );
+  // Escape the native shell's scrolling/clipping layers so the conversation
+  // header and back button remain above the app chrome on iOS.
+  return chat.selected && mobileViewport
+    ? createPortal(workspace, document.body)
+    : workspace;
 }

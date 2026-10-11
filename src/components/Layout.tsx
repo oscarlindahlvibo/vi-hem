@@ -310,7 +310,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       </aside>
 
       {/* Mobile top bar */}
-      <div className="vihem-mobile-header fixed left-0 right-0 top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-xl lg:hidden">
+      <div className={`vihem-mobile-header fixed left-0 right-0 top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-xl lg:hidden ${chatFocused ? "max-md:hidden" : ""}`}>
         <div className="flex items-center gap-3">
           <div className="h-8 w-8 overflow-hidden rounded-xl shadow-sm ring-1 ring-slate-200">
             <AppLogo className="w-full h-full" />
