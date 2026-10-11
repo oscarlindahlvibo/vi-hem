@@ -1,161 +1,527 @@
 // Administration av ekangensvandrarhem.se (publik sajt + direktbokning). Monteras i VI-HEM med inloggad Supabase-klient.
 // Samma modell som Vibo hemsida: allt innehåll, priser och bokningar ägs av VI-HEM; sajten läser bara publika RPC:er.
-import { useCallback, useEffect, useState } from 'react';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { Globe, HelpCircle, ImagePlus, Plus, Settings2, Trash2, CalendarCheck, BedDouble, FileText, CheckCircle2, XCircle, Copy, Download } from 'lucide-react';
-import { Badge, Button, Card, Input, LoadingPage, PageHeader, SegmentedControl, Select, Textarea } from '../../components/ui';
-import { useToast } from '../../components/toast';
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  Globe,
+  HelpCircle,
+  ImagePlus,
+  Plus,
+  Settings2,
+  Trash2,
+  CalendarCheck,
+  BedDouble,
+  CheckCircle2,
+  XCircle,
+  Copy,
+  Download,
+} from "lucide-react";
+import {
+  Badge,
+  Button,
+  Card,
+  Input,
+  LoadingPage,
+  Modal,
+  PageHeader,
+  SegmentedControl,
+  Select,
+  Tabs,
+  Textarea,
+} from "../../components/ui";
+import { uploadImageBatch } from "./imageUploads";
+import { useUnsavedChanges } from "../../hooks/useUnsavedChanges";
+import { hasUnsavedForms } from "../../lib/unsavedForms";
+import { useToast } from "../../components/toast";
 
-type Tab = 'bookings' | 'units' | 'content' | 'faq' | 'settings';
-interface Img { url: string; alt: string }
-interface UnitPayload { title?: string; slug?: string; kind?: string; shortDescription?: string; description?: string; beds?: string; features?: string[]; images?: Img[] }
-interface Unit { unit_id: string; name: string; max_guests: number; is_active: boolean; published: boolean; sort_order: number; payload: UnitPayload; revision: number; has_prices: boolean }
-interface Faq { category: string; question: string; answer: string }
-interface Content { company: Record<string, string>; text: Record<string, string>; faq: Faq[]; images?: Record<string, string> }
-interface Settings {
-  booking_enabled: boolean; discount_percent: number; free_cancel_days: number; hold_minutes: number; min_nights: number; max_nights: number;
-  check_in_time: string; check_out_time: string; notification_email: string; sender_email: string; revision: number;
+type Tab = "bookings" | "units" | "content" | "faq" | "settings";
+interface Img {
+  url: string;
+  alt: string;
 }
-interface Snapshot { content: { content: Content; revision: number }; settings: Settings; units: Unit[] }
-interface BookingRow { id: string; reference: string; unit: string; start_date: string; end_date: string; guests: number; guest_name: string; guest_email: string; guest_phone: string; message: string; total: number; currency: string; status: string; free_cancel_until: string | null; paid_at: string | null; created_at: string }
+interface UnitPayload {
+  title?: string;
+  slug?: string;
+  kind?: string;
+  shortDescription?: string;
+  description?: string;
+  beds?: string;
+  features?: string[];
+  images?: Img[];
+}
+interface Unit {
+  unit_id: string;
+  name: string;
+  max_guests: number;
+  is_active: boolean;
+  published: boolean;
+  sort_order: number;
+  payload: UnitPayload;
+  revision: number;
+  has_prices: boolean;
+}
+interface Faq {
+  category: string;
+  question: string;
+  answer: string;
+}
+interface Content {
+  company: Record<string, string>;
+  text: Record<string, string>;
+  faq: Faq[];
+  images?: Record<string, string>;
+}
+interface Settings {
+  booking_enabled: boolean;
+  discount_percent: number;
+  free_cancel_days: number;
+  hold_minutes: number;
+  min_nights: number;
+  max_nights: number;
+  check_in_time: string;
+  check_out_time: string;
+  notification_email: string;
+  sender_email: string;
+  revision: number;
+}
+interface Snapshot {
+  content: { content: Content; revision: number };
+  settings: Settings;
+  units: Unit[];
+}
+interface BookingRow {
+  id: string;
+  reference: string;
+  unit: string;
+  start_date: string;
+  end_date: string;
+  guests: number;
+  guest_name: string;
+  guest_email: string;
+  guest_phone: string;
+  message: string;
+  total: number;
+  currency: string;
+  status: string;
+  free_cancel_until: string | null;
+  paid_at: string | null;
+  created_at: string;
+}
 
-const BUCKET = 'vihem-ekangen-images';
+const BUCKET = "vihem-ekangen-images";
 const STATUS: Record<string, { label: string; tone: string }> = {
-  pending: { label: 'Väntar på betalning', tone: 'bg-amber-100 text-amber-800' },
-  paid: { label: 'Betald', tone: 'bg-emerald-100 text-emerald-700' },
-  expired: { label: 'Utgången', tone: 'bg-slate-100 text-slate-600' },
-  cancelled: { label: 'Avbokad', tone: 'bg-slate-100 text-slate-600' },
-  refunded: { label: 'Återbetald', tone: 'bg-blue-100 text-blue-700' },
-  conflict: { label: 'Behöver åtgärd', tone: 'bg-red-100 text-red-700' },
+  pending: {
+    label: "Väntar på betalning",
+    tone: "bg-amber-100 text-amber-800",
+  },
+  paid: { label: "Betald", tone: "bg-emerald-100 text-emerald-700" },
+  expired: { label: "Utgången", tone: "bg-slate-100 text-slate-600" },
+  cancelled: { label: "Avbokad", tone: "bg-slate-100 text-slate-600" },
+  refunded: { label: "Återbetald", tone: "bg-blue-100 text-blue-700" },
+  conflict: { label: "Behöver åtgärd", tone: "bg-red-100 text-red-700" },
 };
 
 function errorText(error: unknown, fallback: string) {
-  const { code, message } = (error ?? {}) as { code?: string; message?: string };
-  if (code === '40001') return 'Någon annan har ändrat samma sak. Ladda om sidan och försök igen.';
-  if (code === '42501') return 'Du saknar behörighet. Du behöver vara aktiv administratör i Vibogruppen AB.';
-  if (code === '23514') return 'Rummet saknar rubrik, beskrivning eller bild och kan inte publiceras.';
-  if (message?.includes('Missing prices')) return 'Rummet saknar priser i Korttid. Lägg in priser innan du publicerar det.';
+  const { code, message } = (error ?? {}) as {
+    code?: string;
+    message?: string;
+  };
+  if (code === "40001")
+    return "Någon annan har ändrat samma sak. Ladda om sidan och försök igen.";
+  if (code === "42501")
+    return "Du saknar behörighet. Du behöver vara aktiv administratör i Vibogruppen AB.";
+  if (code === "23514")
+    return "Rummet saknar rubrik, beskrivning eller bild och kan inte publiceras.";
+  if (message?.includes("Missing prices"))
+    return "Rummet saknar priser i Korttid. Lägg in priser innan du publicerar det.";
   return message || fallback;
 }
 
 export function EkangenAdmin({ client }: { client: SupabaseClient }) {
   const toast = useToast();
-  const [tab, setTab] = useState<Tab>('bookings');
+  const [tab, setTab] = useState<Tab>("bookings");
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [bookings, setBookings] = useState<BookingRow[]>([]);
-  const [loadError, setLoadError] = useState('');
+  const [loadError, setLoadError] = useState("");
+  const [pendingTab, setPendingTab] = useState<Tab | null>(null);
 
   const load = useCallback(async () => {
-    const [site, list] = await Promise.all([client.rpc('vihem_ekangen_admin_site'), client.rpc('vihem_ekangen_admin_bookings')]);
+    const [site, list] = await Promise.all([
+      client.rpc("vihem_ekangen_admin_site"),
+      client.rpc("vihem_ekangen_admin_bookings"),
+    ]);
     if (site.error) throw site.error;
+    if (list.error) throw list.error;
+    setLoadError("");
     setSnap(site.data as Snapshot);
     setBookings((list.data || []) as BookingRow[]);
   }, [client]);
 
-  useEffect(() => { load().catch((e) => setLoadError(errorText(e, 'Kunde inte läsa hemsidans inställningar.'))); }, [load]);
+  useEffect(() => {
+    load().catch((e) =>
+      setLoadError(errorText(e, "Kunde inte läsa hemsidans inställningar.")),
+    );
+  }, [load]);
 
-  if (loadError) return <Card className="p-6 text-sm text-red-700">{loadError}</Card>;
+  if (loadError && !snap)
+    return (
+      <Card className="space-y-3 p-6">
+        <p role="alert" className="text-sm text-red-700">
+          {loadError}
+        </p>
+        <Button
+          variant="secondary"
+          onClick={() =>
+            void load().catch((e) =>
+              setLoadError(errorText(e, "Kunde inte läsa hemsidan.")),
+            )
+          }
+        >
+          Försök igen
+        </Button>
+      </Card>
+    );
   if (!snap) return <LoadingPage />;
 
-  const attention = bookings.filter((b) => b.status === 'conflict').length;
+  const attention = bookings.filter((b) => b.status === "conflict").length;
   return (
     <div className="space-y-5">
-      <PageHeader title="Ekängens hemsida" subtitle="ekangensvandrarhem.se – innehåll, rum, priser och direktbokningar" icon={Globe} />
+      <PageHeader
+        title="Ekängens hemsida"
+        subtitle="ekangensvandrarhem.se – innehåll, rum, priser och direktbokningar"
+        icon={Globe}
+      />
       {!snap.settings.booking_enabled && (
-        <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">Direktbokning är avstängd. Hemsidan visar information men går inte att boka förrän du slår på den under Inställningar.</p>
+        <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+          Direktbokning är avstängd. Hemsidan visar information men går inte att
+          boka förrän du slår på den under Inställningar.
+        </p>
       )}
-      <SegmentedControl<Tab>
-        value={tab}
-        onChange={setTab}
-        options={[
-          { value: 'bookings', label: attention ? `Bokningar (${attention}!)` : 'Bokningar' },
-          { value: 'units', label: 'Rum' },
-          { value: 'content', label: 'Texter' },
-          { value: 'faq', label: 'Frågor' },
-          { value: 'settings', label: 'Inställningar' },
+      <Tabs
+        active={tab}
+        onChange={(next) => {
+          if (next === tab) return;
+          if (hasUnsavedForms()) setPendingTab(next as Tab);
+          else setTab(next as Tab);
+        }}
+        tabs={[
+          {
+            key: "bookings",
+            label: attention ? `Bokningar (${attention})` : "Bokningar",
+          },
+          { key: "units", label: "Rum" },
+          { key: "content", label: "Texter" },
+          { key: "faq", label: "Frågor" },
+          { key: "settings", label: "Inställningar" },
         ]}
       />
-      {tab === 'bookings' && <Bookings rows={bookings} />}
-      {tab === 'units' && <Units client={client} units={snap.units} reload={load} toast={toast.show} />}
-      {tab === 'content' && <ContentTab client={client} snap={snap} reload={load} toast={toast.show} />}
-      {tab === 'faq' && <FaqTab client={client} snap={snap} reload={load} toast={toast.show} />}
-      {tab === 'settings' && <SettingsTab client={client} settings={snap.settings} reload={load} toast={toast.show} />}
+      {tab === "bookings" && <Bookings rows={bookings} />}
+      {tab === "units" && (
+        <Units
+          client={client}
+          units={snap.units}
+          reload={load}
+          toast={toast.show}
+        />
+      )}
+      {tab === "content" && (
+        <ContentTab
+          client={client}
+          snap={snap}
+          reload={load}
+          toast={toast.show}
+        />
+      )}
+      {tab === "faq" && (
+        <FaqTab client={client} snap={snap} reload={load} toast={toast.show} />
+      )}
+      {tab === "settings" && (
+        <SettingsTab
+          client={client}
+          settings={snap.settings}
+          reload={load}
+          toast={toast.show}
+        />
+      )}
+      <Modal
+        open={pendingTab !== null}
+        onClose={() => setPendingTab(null)}
+        title="Lämna osparade ändringar?"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setPendingTab(null)}>
+              Fortsätt redigera
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                if (pendingTab) setTab(pendingTab);
+                setPendingTab(null);
+              }}
+            >
+              Lämna utan att spara
+            </Button>
+          </>
+        }
+      >
+        <p>Ändringarna i den här vyn har inte publicerats.</p>
+      </Modal>
     </div>
   );
 }
 
-type ToastFn = (message: string, options?: { tone?: 'success' | 'error' | 'info' }) => void;
+type ToastFn = (
+  message: string,
+  options?: { tone?: "success" | "error" | "info" },
+) => void;
 
 // ── Bokningar ──────────────────────────────────────────────────────────────
 function Bookings({ rows }: { rows: BookingRow[] }) {
-  if (!rows.length) return <Card className="p-8 text-center text-sm text-slate-500"><CalendarCheck className="mx-auto mb-2 h-8 w-8 text-slate-300" />Inga direktbokningar än.</Card>;
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("all");
+  const filtered = rows.filter(
+    (b) =>
+      (status === "all" || b.status === status) &&
+      `${b.guest_name} ${b.reference} ${b.unit} ${b.guest_email}`
+        .toLocaleLowerCase("sv-SE")
+        .includes(search.toLocaleLowerCase("sv-SE")),
+  );
+  const date = (value: string) =>
+    new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString("sv-SE", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
   return (
-    <div className="space-y-2.5">
-      {rows.map((b) => {
-        const s = STATUS[b.status] || { label: b.status, tone: 'bg-slate-100 text-slate-600' };
-        return (
-          <Card key={b.id} className="p-4">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="font-bold text-slate-900">{b.guest_name} <span className="font-mono text-xs font-semibold text-slate-400">{b.reference}</span></p>
-                <p className="text-sm text-slate-600">{b.unit} · {b.start_date} → {b.end_date} · {b.guests} gäst{b.guests > 1 ? 'er' : ''}</p>
-                <p className="text-xs text-slate-500">{b.guest_email}{b.guest_phone ? ` · ${b.guest_phone}` : ''}</p>
-                {b.message && <p className="mt-1 text-xs italic text-slate-500">”{b.message}”</p>}
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-[1fr_15rem]">
+        <Input
+          label="Sök bokning"
+          placeholder="Gäst, rum eller bokningsnummer"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <Select
+          label="Bokningsstatus"
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          options={[
+            { value: "all", label: "Alla bokningar" },
+            ...Object.entries(STATUS).map(([value, item]) => ({
+              value,
+              label: item.label,
+            })),
+          ]}
+        />
+      </div>
+      <p className="text-sm text-slate-500" aria-live="polite">
+        {filtered.length} av {rows.length} bokningar
+      </p>
+      <Card className="divide-y divide-slate-100 overflow-hidden">
+        {!filtered.length && (
+          <div className="p-8 text-center text-sm text-slate-500">
+            <CalendarCheck className="mx-auto mb-3 h-8 w-8 text-slate-400" />
+            {rows.length
+              ? "Inga bokningar matchar sökningen."
+              : "Inga direktbokningar än."}
+          </div>
+        )}
+        {filtered.map((b) => {
+          const status = STATUS[b.status] || {
+            label: b.status,
+            tone: "bg-slate-100 text-slate-600",
+          };
+          return (
+            <article key={b.id} className="p-4 sm:p-5">
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-slate-900">
+                    {b.guest_name}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {b.reference} · {b.unit}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-slate-800">
+                    {date(b.start_date)} – {date(b.end_date)}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {b.guests} gäster
+                  </p>
+                </div>
+                <div className="flex items-center justify-between gap-3 md:flex-col md:items-end">
+                  <Badge className={status.tone}>{status.label}</Badge>
+                  <p className="font-semibold tabular-nums text-slate-900">
+                    {Number(b.total).toLocaleString("sv-SE")} {b.currency}
+                  </p>
+                </div>
               </div>
-              <div className="text-right">
-                <Badge className={s.tone}>{s.label}</Badge>
-                <p className="mt-1 text-sm font-bold text-slate-900">{Number(b.total).toLocaleString('sv-SE')} {b.currency}</p>
-                {b.free_cancel_until && b.status === 'paid' && <p className="text-xs text-slate-500">Gratis avbokning till {b.free_cancel_until}</p>}
-              </div>
-            </div>
-            {b.status === 'conflict' && <p className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Gästen har betalat men datumen hann bli upptagna. Återbetala i Stripe och kontakta gästen.</p>}
-          </Card>
-        );
-      })}
+              <details className="mt-3 text-sm">
+                <summary className="cursor-pointer py-2 font-medium text-vihem-blue">
+                  Kontakt och bokningsinformation
+                </summary>
+                <div className="space-y-2 py-2 text-slate-600">
+                  <p className="break-words">
+                    {b.guest_email}
+                    {b.guest_phone ? ` · ${b.guest_phone}` : ""}
+                  </p>
+                  {b.message && (
+                    <p className="whitespace-pre-wrap">{b.message}</p>
+                  )}
+                  {b.free_cancel_until && b.status === "paid" && (
+                    <p>Gratis avbokning till {date(b.free_cancel_until)}</p>
+                  )}
+                </div>
+              </details>
+              {b.status === "conflict" && (
+                <p className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">
+                  Gästen har betalat men datumen hann bli upptagna. Återbetala i
+                  Stripe och kontakta gästen.
+                </p>
+              )}
+            </article>
+          );
+        })}
+      </Card>
     </div>
   );
 }
 
 // ── Bilder ─────────────────────────────────────────────────────────────────
-async function uploadImage(client: SupabaseClient, file: File, folder: string): Promise<string> {
-  const ext = ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' } as Record<string, string>)[file.type];
-  if (!ext || file.size > 10 * 1024 * 1024) throw new Error('Välj en JPG, PNG eller WebP på högst 10 MB.');
+async function uploadImage(
+  client: SupabaseClient,
+  file: File,
+  folder: string,
+): Promise<string> {
+  const ext = (
+    { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" } as Record<
+      string,
+      string
+    >
+  )[file.type];
+  if (!ext || file.size > 10 * 1024 * 1024)
+    throw new Error("Välj en JPG, PNG eller WebP på högst 10 MB.");
   const path = `${folder}/${crypto.randomUUID()}.${ext}`;
-  const { error } = await client.storage.from(BUCKET).upload(path, file, { contentType: file.type, cacheControl: '31536000' });
+  const { error } = await client.storage
+    .from(BUCKET)
+    .upload(path, file, { contentType: file.type, cacheControl: "31536000" });
   if (error) throw error;
   return client.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
-function ImageEditor({ client, folder, images, onChange, toast }: { client: SupabaseClient; folder: string; images: Img[]; onChange: (next: Img[]) => void; toast: ToastFn }) {
+function ImageEditor({
+  client,
+  folder,
+  images,
+  onChange,
+  toast,
+  onUploadingChange,
+}: {
+  client: SupabaseClient;
+  folder: string;
+  images: Img[];
+  onChange: (next: Img[]) => void;
+  toast: ToastFn;
+  onUploadingChange?: (busy: boolean) => void;
+}) {
   const [busy, setBusy] = useState(false);
+  const uploadLock = useRef(false);
+  useUnsavedChanges(busy, true, false);
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {images.map((img, i) => (
-          <div key={img.url} className="group relative overflow-hidden rounded-xl ring-1 ring-slate-200">
-            <img src={img.url} alt={img.alt} className="aspect-[4/3] w-full object-cover" />
-            <div className="absolute inset-x-0 bottom-0 flex justify-between bg-black/50 p-1 text-white opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
-              <button type="button" disabled={i === 0} onClick={() => { const n = [...images]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; onChange(n); }} className="px-1.5 text-xs font-bold disabled:opacity-30">←</button>
-              <button type="button" onClick={() => onChange(images.filter((_, j) => j !== i))} aria-label="Ta bort bild" className="px-1.5"><Trash2 className="h-3.5 w-3.5" /></button>
-              <button type="button" disabled={i === images.length - 1} onClick={() => { const n = [...images]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; onChange(n); }} className="px-1.5 text-xs font-bold disabled:opacity-30">→</button>
+          <div
+            key={img.url}
+            className="group relative overflow-hidden rounded-xl ring-1 ring-slate-200"
+          >
+            <img
+              src={img.url}
+              alt={img.alt}
+              className="aspect-[4/3] w-full object-cover"
+            />
+            <div className="flex justify-between bg-slate-50 p-1 text-slate-600">
+              <button
+                type="button"
+                aria-label={`Flytta bild ${i + 1} åt vänster`}
+                disabled={busy || i === 0}
+                onClick={() => {
+                  const n = [...images];
+                  [n[i - 1], n[i]] = [n[i], n[i - 1]];
+                  onChange(n);
+                }}
+                className="p-2 text-xs font-bold disabled:opacity-30"
+              >
+                ←
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                aria-label={`Ta bort bild ${i + 1}`}
+                onClick={() => onChange(images.filter((_, j) => j !== i))}
+                className="p-2"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label={`Flytta bild ${i + 1} åt höger`}
+                disabled={busy || i === images.length - 1}
+                onClick={() => {
+                  const n = [...images];
+                  [n[i + 1], n[i]] = [n[i], n[i + 1]];
+                  onChange(n);
+                }}
+                className="p-2 text-xs font-bold disabled:opacity-30"
+              >
+                →
+              </button>
             </div>
-            {i === 0 && <span className="absolute left-1 top-1 rounded-full bg-vihem-blue px-2 py-0.5 text-[10px] font-bold text-white">Huvudbild</span>}
+            {i === 0 && (
+              <span className="absolute left-1 top-1 rounded-full bg-vihem-blue px-2 py-0.5 text-[10px] font-bold text-white">
+                Huvudbild
+              </span>
+            )}
           </div>
         ))}
         <label className="flex aspect-[4/3] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-slate-300 text-xs font-semibold text-slate-500 hover:bg-slate-50">
-          <ImagePlus className="h-5 w-5" />{busy ? 'Laddar upp...' : 'Lägg till bild'}
-          <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" disabled={busy} onChange={async (e) => {
-            const files = Array.from(e.target.files || []);
-            e.target.value = '';
-            if (!files.length) return;
-            setBusy(true);
-            try {
-              const added: Img[] = [];
-              for (const f of files) added.push({ url: await uploadImage(client, f, folder), alt: '' });
-              onChange([...images, ...added]);
-            } catch (err) { toast(errorText(err, 'Kunde inte ladda upp bilden.'), { tone: 'error' }); }
-            finally { setBusy(false); }
-          }} />
+          <ImagePlus className="h-5 w-5" />
+          {busy ? "Laddar upp..." : "Lägg till bild"}
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            className="hidden"
+            disabled={busy}
+            onChange={async (e) => {
+              const files = Array.from(e.target.files || []);
+              e.target.value = "";
+              if (!files.length || uploadLock.current) return;
+              uploadLock.current = true;
+              setBusy(true);
+              onUploadingChange?.(true);
+              try {
+                const result = await uploadImageBatch(files, (f) =>
+                  uploadImage(client, f, folder),
+                );
+                if (result.uploaded.length)
+                  onChange([
+                    ...images,
+                    ...result.uploaded.map((url) => ({ url, alt: "" })),
+                  ]);
+                if (result.failed.length)
+                  toast(
+                    `${result.uploaded.length} bilder uppladdade. ${result.failed.length} kunde inte laddas upp. Välj dessa bilder igen för att försöka på nytt.`,
+                    { tone: "error" },
+                  );
+              } finally {
+                uploadLock.current = false;
+                setBusy(false);
+                onUploadingChange?.(false);
+              }
+            }}
+          />
         </label>
       </div>
     </div>
@@ -163,97 +529,316 @@ function ImageEditor({ client, folder, images, onChange, toast }: { client: Supa
 }
 
 // ── Rum ────────────────────────────────────────────────────────────────────
-function Units({ client, units, reload, toast }: { client: SupabaseClient; units: Unit[]; reload: () => Promise<void>; toast: ToastFn }) {
+function Units({
+  client,
+  units,
+  reload,
+  toast,
+}: {
+  client: SupabaseClient;
+  units: Unit[];
+  reload: () => Promise<void>;
+  toast: ToastFn;
+}) {
   return (
     <div className="space-y-3">
-      <p className="text-sm text-slate-500">Alla korttidsenheter finns här. Bara enheter du publicerar (och som har priser i Korttid) visas och kan bokas på hemsidan. Priser och tillgänglighet styrs i Korttid.</p>
-      {units.map((u) => <UnitCard key={u.unit_id} client={client} unit={u} reload={reload} toast={toast} />)}
+      <p className="text-sm text-slate-500">
+        Alla korttidsenheter finns här. Bara enheter du publicerar (och som har
+        priser i Korttid) visas och kan bokas på hemsidan. Priser och
+        tillgänglighet styrs i Korttid.
+      </p>
+      {units.map((u) => (
+        <UnitCard
+          key={u.unit_id}
+          client={client}
+          unit={u}
+          reload={reload}
+          toast={toast}
+        />
+      ))}
     </div>
   );
 }
 
-function UnitCard({ client, unit, reload, toast }: { client: SupabaseClient; unit: Unit; reload: () => Promise<void>; toast: ToastFn }) {
+function UnitCard({
+  client,
+  unit,
+  reload,
+  toast,
+}: {
+  client: SupabaseClient;
+  unit: Unit;
+  reload: () => Promise<void>;
+  toast: ToastFn;
+}) {
   const [open, setOpen] = useState(false);
   const [published, setPublished] = useState(unit.published);
-  const [p, setP] = useState<UnitPayload>({ kind: 'room', features: [], images: [], ...unit.payload, title: unit.payload.title ?? unit.name });
+  const [p, setP] = useState<UnitPayload>({
+    kind: "room",
+    features: [],
+    images: [],
+    ...unit.payload,
+    title: unit.payload.title ?? unit.name,
+  });
   const [sort, setSort] = useState(String(unit.sort_order));
   const [busy, setBusy] = useState(false);
+  const requestLock = useRef(false);
+  const [saved, setSaved] = useState(() => ({ p, published, sort }));
+  const dirty = useUnsavedChanges({ p, published, sort }, true, saved);
+  const [uploading, setUploading] = useState(false);
+  const [section, setSection] = useState("description");
   const [importing, setImporting] = useState(false);
-  const set = (patch: Partial<UnitPayload>) => setP((cur) => ({ ...cur, ...patch }));
+  const set = (patch: Partial<UnitPayload>) =>
+    setP((cur) => ({ ...cur, ...patch }));
 
   async function importFromBeds24() {
+    if (requestLock.current || uploading) return;
+    requestLock.current = true;
     setImporting(true);
     try {
-      const { data, error } = await client.functions.invoke('vihem-ekangen-admin', { body: { action: 'beds24_room', unit_id: unit.unit_id } });
+      const { data, error } = await client.functions.invoke(
+        "vihem-ekangen-admin",
+        { body: { action: "beds24_room", unit_id: unit.unit_id } },
+      );
       if (error) {
         const ctx = (error as { context?: Response }).context;
-        const parsed = ctx ? await ctx.clone().json().catch(() => null) : null;
+        const parsed = ctx
+          ? await ctx
+              .clone()
+              .json()
+              .catch(() => null)
+          : null;
         throw new Error(parsed?.error?.message || error.message);
       }
-      const r = data.data as { title: string; kind: string; beds: string; features: string[]; description: string };
-      const filled: string[] = [];
+      const r = data.data as {
+        title: string;
+        kind: string;
+        beds: string;
+        features: string[];
+        description: string;
+      };
+
       setP((cur) => {
         const next = { ...cur };
-        if (!cur.title?.trim() || cur.title === unit.name) { next.title = r.title || cur.title; filled.push('rubrik'); }
-        if (!cur.beds?.trim() && r.beds) { next.beds = r.beds; filled.push('sängar'); }
-        if (!cur.description?.trim() && r.description) { next.description = r.description; filled.push('beskrivning'); }
+        if (!cur.title?.trim() || cur.title === unit.name) {
+          next.title = r.title || cur.title;
+        }
+        if (!cur.beds?.trim() && r.beds) {
+          next.beds = r.beds;
+        }
+        if (!cur.description?.trim() && r.description) {
+          next.description = r.description;
+        }
         const merged = [...new Set([...(cur.features || []), ...r.features])];
-        if (merged.length !== (cur.features || []).length) { next.features = merged; filled.push('bekvämligheter'); }
-        next.kind = cur.kind === 'apartment' || r.kind === 'apartment' ? 'apartment' : 'room';
+        if (merged.length !== (cur.features || []).length) {
+          next.features = merged;
+        }
+        next.kind =
+          cur.kind === "apartment" || r.kind === "apartment"
+            ? "apartment"
+            : "room";
         return next;
       });
-      toast(filled.length ? 'Hämtade från Beds24. Granska och spara.' : 'Inget nytt att hämta – fälten är redan ifyllda.');
-    } catch (e) { toast(errorText(e, 'Kunde inte hämta från Beds24.'), { tone: 'error' }); }
-    finally { setImporting(false); }
+      toast(
+        "Uppgifterna har hämtats. Granska och spara. Befintliga texter behålls.",
+      );
+    } catch (e) {
+      toast(errorText(e, "Kunde inte hämta från Beds24."), { tone: "error" });
+    } finally {
+      requestLock.current = false;
+      setImporting(false);
+    }
   }
 
   async function save() {
+    if (requestLock.current || uploading || importing) return;
+    requestLock.current = true;
     setBusy(true);
     try {
-      const payload = { ...p, slug: (p.slug || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') };
-      const { error } = await client.rpc('vihem_ekangen_save_unit', { p_unit_id: unit.unit_id, p_published: published, p_payload: payload, p_sort: Number(sort) || 0, p_revision: unit.revision });
+      const payload = {
+        ...p,
+        slug: (p.slug || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9-]+/g, "-")
+          .replace(/^-+|-+$/g, ""),
+      };
+      const { error } = await client.rpc("vihem_ekangen_save_unit", {
+        p_unit_id: unit.unit_id,
+        p_published: published,
+        p_payload: payload,
+        p_sort: Number(sort) || 0,
+        p_revision: unit.revision,
+      });
       if (error) throw error;
-      toast(published ? 'Sparat. Rummet visas på hemsidan.' : 'Sparat som utkast.');
-      await reload();
-    } catch (e) { toast(errorText(e, 'Kunde inte spara.'), { tone: 'error' }); }
-    finally { setBusy(false); }
+      toast(
+        published ? "Sparat. Rummet visas på hemsidan." : "Sparat som utkast.",
+      );
+      setSaved({ p, published, sort });
+      await reload().catch(() =>
+        toast(
+          "Sparat, men vyn kunde inte uppdateras. Ladda om innan nästa ändring.",
+          { tone: "info" },
+        ),
+      );
+    } catch (e) {
+      toast(errorText(e, "Kunde inte spara."), { tone: "error" });
+    } finally {
+      requestLock.current = false;
+      setBusy(false);
+    }
   }
 
   return (
     <Card className="overflow-hidden">
-      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-3 p-4 text-left">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between gap-3 p-4 text-left"
+      >
         <div className="flex min-w-0 items-center gap-3">
           <BedDouble className="h-5 w-5 shrink-0 text-vihem-blue" />
           <div className="min-w-0">
             <p className="truncate font-semibold text-slate-900">{unit.name}</p>
-            <p className="text-xs text-slate-500">Upp till {unit.max_guests} gäster{unit.has_prices ? '' : ' · saknar priser i Korttid'}</p>
+            <p className="text-xs text-slate-500">
+              Upp till {unit.max_guests} gäster
+              {unit.has_prices ? "" : " · saknar priser i Korttid"}
+            </p>
           </div>
         </div>
-        <Badge className={unit.published ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}>{unit.published ? 'Publicerad' : 'Utkast'}</Badge>
+        <Badge
+          className={
+            unit.published
+              ? "bg-emerald-100 text-emerald-700"
+              : "bg-slate-100 text-slate-600"
+          }
+        >
+          {unit.published ? "Publicerad" : "Utkast"}
+        </Badge>
       </button>
       {open && (
-        <div className="space-y-4 border-t border-slate-100 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-              <input type="checkbox" checked={published} onChange={(e) => setPublished(e.target.checked)} className="h-4 w-4 accent-blue-600" /> Visa och tillåt bokning på hemsidan
-            </label>
-            <Button size="sm" variant="secondary" onClick={importFromBeds24} loading={importing}><Download className="h-4 w-4" />Hämta från Beds24</Button>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Input label="Rubrik" value={p.title || ''} onChange={(e) => set({ title: e.target.value })} />
-            <Input label="Adress på sajten (t.ex. rum-1)" value={p.slug || ''} onChange={(e) => set({ slug: e.target.value })} />
-            <Select label="Typ" value={p.kind || 'room'} onChange={(e) => set({ kind: e.target.value })} options={[{ value: 'room', label: 'Rum' }, { value: 'apartment', label: 'Lägenhet' }]} />
-            <Input label="Sängar (t.ex. 2 enkelsängar + 1 bäddsoffa)" value={p.beds || ''} onChange={(e) => set({ beds: e.target.value })} />
-            <Input label="Sorteringsordning" type="number" value={sort} onChange={(e) => setSort(e.target.value)} />
-          </div>
-          <Input label="Kort beskrivning (visas i listan)" value={p.shortDescription || ''} onChange={(e) => set({ shortDescription: e.target.value })} />
-          <Textarea label="Beskrivning" rows={5} value={p.description || ''} onChange={(e) => set({ description: e.target.value })} />
-          <Textarea label="Bekvämligheter (en per rad)" rows={4} value={(p.features || []).join('\n')} onChange={(e) => set({ features: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })} />
-          <div>
-            <p className="mb-1.5 text-sm font-semibold text-slate-700">Bilder (första bilden är huvudbild)</p>
-            <ImageEditor client={client} folder={`units/${unit.unit_id}`} images={p.images || []} onChange={(images) => set({ images })} toast={toast} />
-          </div>
-          <Button onClick={save} loading={busy}>Spara rum</Button>
+        <div className="space-y-4 border-t border-slate-100 p-4 sm:p-5">
+          <fieldset
+            disabled={busy || importing || uploading}
+            className="space-y-4 min-w-0"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={published}
+                  onChange={(e) => setPublished(e.target.checked)}
+                  className="h-4 w-4 accent-blue-600"
+                />{" "}
+                Visa och tillåt bokning på hemsidan
+              </label>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={importFromBeds24}
+                loading={importing}
+              >
+                <Download className="h-4 w-4" />
+                Hämta från Beds24
+              </Button>
+            </div>
+            <SegmentedControl
+              value={section}
+              onChange={setSection}
+              options={[
+                { value: "description", label: "Beskrivning" },
+                { value: "features", label: "Bekvämligheter" },
+                { value: "photos", label: "Bilder" },
+              ]}
+            />
+            <div className={section === "description" ? "space-y-3" : "hidden"}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input
+                  label="Rubrik"
+                  value={p.title || ""}
+                  onChange={(e) => set({ title: e.target.value })}
+                />
+                <Input
+                  label="Adress på sajten (t.ex. rum-1)"
+                  value={p.slug || ""}
+                  onChange={(e) => set({ slug: e.target.value })}
+                />
+                <Select
+                  label="Typ"
+                  value={p.kind || "room"}
+                  onChange={(e) => set({ kind: e.target.value })}
+                  options={[
+                    { value: "room", label: "Rum" },
+                    { value: "apartment", label: "Lägenhet" },
+                  ]}
+                />
+                <Input
+                  label="Sängar (t.ex. 2 enkelsängar + 1 bäddsoffa)"
+                  value={p.beds || ""}
+                  onChange={(e) => set({ beds: e.target.value })}
+                />
+                <Input
+                  label="Sorteringsordning"
+                  type="number"
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value)}
+                />
+              </div>
+              <Input
+                label="Kort beskrivning (visas i listan)"
+                value={p.shortDescription || ""}
+                onChange={(e) => set({ shortDescription: e.target.value })}
+              />
+              <Textarea
+                label="Beskrivning"
+                rows={5}
+                value={p.description || ""}
+                onChange={(e) => set({ description: e.target.value })}
+              />
+            </div>
+            <div className={section === "features" ? "space-y-3" : "hidden"}>
+              <Textarea
+                label="Bekvämligheter (en per rad)"
+                rows={4}
+                value={(p.features || []).join("\n")}
+                onChange={(e) =>
+                  set({
+                    features: e.target.value
+                      .split("\n")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+            </div>
+            <div className={section === "photos" ? "space-y-3" : "hidden"}>
+              <p className="mb-1.5 text-sm font-semibold text-slate-700">
+                Bilder (första bilden är huvudbild)
+              </p>
+              <ImageEditor
+                client={client}
+                folder={`units/${unit.unit_id}`}
+                images={p.images || []}
+                onChange={(images) => set({ images })}
+                toast={toast}
+                onUploadingChange={setUploading}
+              />
+            </div>
+          </fieldset>
+          <p className="text-sm text-slate-500" aria-live="polite">
+            {uploading
+              ? "Laddar upp bilder…"
+              : dirty
+                ? "Osparade ändringar"
+                : "Inga osparade ändringar"}
+          </p>
+          <Button
+            onClick={save}
+            loading={busy}
+            disabled={!dirty || uploading || importing}
+          >
+            Spara rum
+          </Button>
         </div>
       )}
     </Card>
@@ -261,187 +846,620 @@ function UnitCard({ client, unit, reload, toast }: { client: SupabaseClient; uni
 }
 
 // ── Texter ─────────────────────────────────────────────────────────────────
-function ContentTab({ client, snap, reload, toast }: { client: SupabaseClient; snap: Snapshot; reload: () => Promise<void>; toast: ToastFn }) {
+function ContentTab({
+  client,
+  snap,
+  reload,
+  toast,
+}: {
+  client: SupabaseClient;
+  snap: Snapshot;
+  reload: () => Promise<void>;
+  toast: ToastFn;
+}) {
   const [content, setContent] = useState<Content>(snap.content.content);
   const [busy, setBusy] = useState(false);
-  const company = (k: string) => content.company?.[k] ?? '';
-  const text = (k: string) => content.text?.[k] ?? '';
-  const setCompany = (k: string, v: string) => setContent((c) => ({ ...c, company: { ...c.company, [k]: v } }));
-  const setText = (k: string, v: string) => setContent((c) => ({ ...c, text: { ...c.text, [k]: v } }));
-  const hero: Img[] = content.images?.hero ? [{ url: content.images.hero, alt: '' }] : [];
+  const requestLock = useRef(false);
+  const [saved, setSaved] = useState(() => content);
+  const dirty = useUnsavedChanges(content, true, saved);
+  const [section, setSection] = useState("site");
+  const [uploading, setUploading] = useState(false);
+  const company = (k: string) => content.company?.[k] ?? "";
+  const text = (k: string) => content.text?.[k] ?? "";
+  const setCompany = (k: string, v: string) =>
+    setContent((c) => ({ ...c, company: { ...c.company, [k]: v } }));
+  const setText = (k: string, v: string) =>
+    setContent((c) => ({ ...c, text: { ...c.text, [k]: v } }));
+  const hero: Img[] = content.images?.hero
+    ? [{ url: content.images.hero, alt: "" }]
+    : [];
 
   async function save() {
+    if (requestLock.current || uploading) return;
+    requestLock.current = true;
     setBusy(true);
     try {
-      const { error } = await client.rpc('vihem_ekangen_save_content', { p_content: content, p_revision: snap.content.revision });
+      const { error } = await client.rpc("vihem_ekangen_save_content", {
+        p_content: content,
+        p_revision: snap.content.revision,
+      });
       if (error) throw error;
-      toast('Sparat. Hemsidan visar ändringarna inom en minut.');
-      await reload();
-    } catch (e) { toast(errorText(e, 'Kunde inte spara.'), { tone: 'error' }); }
-    finally { setBusy(false); }
+      toast("Sparat. Hemsidan visar ändringarna inom en minut.");
+      setSaved(content);
+      await reload().catch(() =>
+        toast(
+          "Sparat, men vyn kunde inte uppdateras. Ladda om innan nästa ändring.",
+          { tone: "info" },
+        ),
+      );
+    } catch (e) {
+      toast(errorText(e, "Kunde inte spara."), { tone: "error" });
+    } finally {
+      requestLock.current = false;
+      setBusy(false);
+    }
   }
   return (
     <Card className="space-y-5 p-5">
-      <h3 className="flex items-center gap-2 font-semibold text-slate-900"><FileText className="h-4 w-4" />Företagsuppgifter</h3>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Input label="Namn" value={company('name')} onChange={(e) => setCompany('name', e.target.value)} />
-        <Input label="Slogan" value={company('tagline')} onChange={(e) => setCompany('tagline', e.target.value)} />
-        <Input label="Adress" value={company('address')} onChange={(e) => setCompany('address', e.target.value)} />
-        <div className="grid grid-cols-2 gap-3">
-          <Input label="Postnummer" value={company('postalCode')} onChange={(e) => setCompany('postalCode', e.target.value)} />
-          <Input label="Ort" value={company('city')} onChange={(e) => setCompany('city', e.target.value)} />
+      <SegmentedControl
+        value={section}
+        onChange={setSection}
+        options={[
+          { value: "site", label: "Hemsidan" },
+          { value: "contact", label: "Kontakt" },
+          { value: "booking", label: "Bokning" },
+        ]}
+      />
+      <fieldset disabled={busy || uploading} className="min-w-0 space-y-4">
+        <div className={section === "contact" ? "space-y-4" : "hidden"}>
+          <h3 className="font-semibold text-slate-900">Företagsuppgifter</h3>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input
+              label="Namn"
+              value={company("name")}
+              onChange={(e) => setCompany("name", e.target.value)}
+            />
+            <Input
+              label="Slogan"
+              value={company("tagline")}
+              onChange={(e) => setCompany("tagline", e.target.value)}
+            />
+            <Input
+              label="Adress"
+              value={company("address")}
+              onChange={(e) => setCompany("address", e.target.value)}
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Postnummer"
+                value={company("postalCode")}
+                onChange={(e) => setCompany("postalCode", e.target.value)}
+              />
+              <Input
+                label="Ort"
+                value={company("city")}
+                onChange={(e) => setCompany("city", e.target.value)}
+              />
+            </div>
+            <Input
+              label="Telefon"
+              type="tel"
+              value={company("phone")}
+              onChange={(e) => setCompany("phone", e.target.value)}
+            />
+            <Input
+              label="E-post"
+              type="email"
+              value={company("email")}
+              onChange={(e) => setCompany("email", e.target.value)}
+            />
+          </div>
+          <Textarea
+            label="Incheckningsinformation"
+            rows={2}
+            value={company("checkInInfo")}
+            onChange={(e) => setCompany("checkInInfo", e.target.value)}
+          />
         </div>
-        <Input label="Telefon" value={company('phone')} onChange={(e) => setCompany('phone', e.target.value)} />
-        <Input label="E-post" value={company('email')} onChange={(e) => setCompany('email', e.target.value)} />
-      </div>
-      <Textarea label="Incheckningsinformation" rows={2} value={company('checkInInfo')} onChange={(e) => setCompany('checkInInfo', e.target.value)} />
-      <h3 className="font-semibold text-slate-900">Startsidan och sidor</h3>
-      <Input label="Rubrik på startsidan" value={text('heroTitle')} onChange={(e) => setText('heroTitle', e.target.value)} />
-      <Textarea label="Text under rubriken" rows={2} value={text('heroText')} onChange={(e) => setText('heroText', e.target.value)} />
-      <div>
-        <p className="mb-1.5 text-sm font-semibold text-slate-700">Bild på startsidan</p>
-        <ImageEditor client={client} folder="site" images={hero} onChange={(imgs) => setContent((c) => ({ ...c, images: { ...(c.images || {}), hero: imgs[imgs.length - 1]?.url || '' } }))} toast={toast} />
-      </div>
-      <Input label="Rubrik: Om oss" value={text('aboutTitle')} onChange={(e) => setText('aboutTitle', e.target.value)} />
-      <Textarea label="Text: Om oss" rows={6} value={text('aboutText')} onChange={(e) => setText('aboutText', e.target.value)} />
-      <Textarea label="Text ovanför bokningsformuläret" rows={2} value={text('bookingIntro')} onChange={(e) => setText('bookingIntro', e.target.value)} />
-      <Textarea label="Bokningsvillkor (visas vid bokning och på egen sida)" rows={8} value={text('terms')} onChange={(e) => setText('terms', e.target.value)} />
-      <Button onClick={save} loading={busy}>Spara texter</Button>
+        <div className={section === "site" ? "space-y-4" : "hidden"}>
+          <h3 className="font-semibold text-slate-900">Startsidan och sidor</h3>
+          <Input
+            label="Rubrik på startsidan"
+            value={text("heroTitle")}
+            onChange={(e) => setText("heroTitle", e.target.value)}
+          />
+          <Textarea
+            label="Text under rubriken"
+            rows={2}
+            value={text("heroText")}
+            onChange={(e) => setText("heroText", e.target.value)}
+          />
+          <div>
+            <p className="mb-1.5 text-sm font-semibold text-slate-700">
+              Bild på startsidan
+            </p>
+            <ImageEditor
+              client={client}
+              folder="site"
+              images={hero}
+              onChange={(imgs) =>
+                setContent((c) => ({
+                  ...c,
+                  images: {
+                    ...(c.images || {}),
+                    hero: imgs[imgs.length - 1]?.url || "",
+                  },
+                }))
+              }
+              toast={toast}
+              onUploadingChange={setUploading}
+            />
+          </div>
+          <Input
+            label="Rubrik: Om oss"
+            value={text("aboutTitle")}
+            onChange={(e) => setText("aboutTitle", e.target.value)}
+          />
+          <Textarea
+            label="Text: Om oss"
+            rows={6}
+            value={text("aboutText")}
+            onChange={(e) => setText("aboutText", e.target.value)}
+          />
+        </div>
+        <div className={section === "booking" ? "space-y-4" : "hidden"}>
+          <Textarea
+            label="Text ovanför bokningsformuläret"
+            rows={2}
+            value={text("bookingIntro")}
+            onChange={(e) => setText("bookingIntro", e.target.value)}
+          />
+          <Textarea
+            label="Bokningsvillkor (visas vid bokning och på egen sida)"
+            rows={8}
+            value={text("terms")}
+            onChange={(e) => setText("terms", e.target.value)}
+          />
+        </div>
+      </fieldset>
+      <p className="text-sm text-slate-500" aria-live="polite">
+        {uploading
+          ? "Laddar upp bild…"
+          : dirty
+            ? "Osparade ändringar"
+            : "Inga osparade ändringar"}
+      </p>
+      <Button onClick={save} loading={busy} disabled={!dirty || uploading}>
+        Spara texter
+      </Button>
     </Card>
   );
 }
 
 // ── Vanliga frågor ─────────────────────────────────────────────────────────
-function FaqTab({ client, snap, reload, toast }: { client: SupabaseClient; snap: Snapshot; reload: () => Promise<void>; toast: ToastFn }) {
+function FaqTab({
+  client,
+  snap,
+  reload,
+  toast,
+}: {
+  client: SupabaseClient;
+  snap: Snapshot;
+  reload: () => Promise<void>;
+  toast: ToastFn;
+}) {
   const [faq, setFaq] = useState<Faq[]>(snap.content.content.faq || []);
   const [busy, setBusy] = useState(false);
-  const update = (i: number, patch: Partial<Faq>) => setFaq((cur) => cur.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+  const requestLock = useRef(false);
+  const [saved, setSaved] = useState(() => faq);
+  const dirty = useUnsavedChanges(faq, true, saved);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const update = (i: number, patch: Partial<Faq>) =>
+    setFaq((cur) => cur.map((f, j) => (j === i ? { ...f, ...patch } : f)));
   async function save() {
+    if (requestLock.current) return;
+    requestLock.current = true;
     setBusy(true);
     try {
-      const cleaned = faq.filter((f) => f.question.trim() && f.answer.trim());
-      const { error } = await client.rpc('vihem_ekangen_save_content', { p_content: { ...snap.content.content, faq: cleaned }, p_revision: snap.content.revision });
+      if (faq.some((f) => !f.question.trim() || !f.answer.trim()))
+        throw new Error(
+          "Fyll i både fråga och svar, eller ta bort den tomma frågan.",
+        );
+      const cleaned = faq.map((f) => ({
+        ...f,
+        question: f.question.trim(),
+        answer: f.answer.trim(),
+      }));
+      const { error } = await client.rpc("vihem_ekangen_save_content", {
+        p_content: { ...snap.content.content, faq: cleaned },
+        p_revision: snap.content.revision,
+      });
       if (error) throw error;
-      toast('Frågorna är sparade.');
-      await reload();
-    } catch (e) { toast(errorText(e, 'Kunde inte spara.'), { tone: 'error' }); }
-    finally { setBusy(false); }
+      toast("Frågorna är sparade.");
+      setSaved(faq);
+      await reload().catch(() =>
+        toast(
+          "Sparat, men vyn kunde inte uppdateras. Ladda om innan nästa ändring.",
+          { tone: "info" },
+        ),
+      );
+    } catch (e) {
+      toast(errorText(e, "Kunde inte spara."), { tone: "error" });
+    } finally {
+      requestLock.current = false;
+      setBusy(false);
+    }
   }
   return (
     <Card className="space-y-4 p-5">
-      <h3 className="flex items-center gap-2 font-semibold text-slate-900"><HelpCircle className="h-4 w-4" />Vanliga frågor och svar</h3>
-      {faq.map((f, i) => (
-        <div key={i} className="space-y-2 rounded-2xl bg-slate-50 p-3">
-          <div className="grid gap-2 sm:grid-cols-[10rem_1fr]">
-            <Input label="Kategori" value={f.category} onChange={(e) => update(i, { category: e.target.value })} />
-            <Input label="Fråga" value={f.question} onChange={(e) => update(i, { question: e.target.value })} />
-          </div>
-          <Textarea label="Svar" rows={3} value={f.answer} onChange={(e) => update(i, { answer: e.target.value })} />
-          <div className="flex gap-2">
-            <Button size="sm" variant="ghost" disabled={i === 0} onClick={() => setFaq((c) => { const n = [...c]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n; })}>Flytta upp</Button>
-            <Button size="sm" variant="ghost" onClick={() => setFaq((c) => c.filter((_, j) => j !== i))}><Trash2 className="h-4 w-4" />Ta bort</Button>
-          </div>
-        </div>
-      ))}
+      <h3 className="flex items-center gap-2 font-semibold text-slate-900">
+        <HelpCircle className="h-4 w-4" />
+        Vanliga frågor och svar
+      </h3>
+      <fieldset disabled={busy} className="space-y-3">
+        {faq.map((f, i) => (
+          <details
+            key={i}
+            open={expanded === i}
+            className="border-b border-slate-100 py-3"
+          >
+            <summary
+              onClick={(e) => {
+                e.preventDefault();
+                setExpanded(expanded === i ? null : i);
+              }}
+              className="cursor-pointer py-2 font-medium text-slate-900"
+            >
+              {f.question || "Ny fråga"}
+              <span className="ml-2 text-sm font-normal text-slate-500">
+                {f.category}
+              </span>
+            </summary>
+            <div className="space-y-3 pt-3">
+              <div className="grid gap-2 sm:grid-cols-[10rem_1fr]">
+                <Input
+                  label="Kategori"
+                  value={f.category}
+                  onChange={(e) => update(i, { category: e.target.value })}
+                />
+                <Input
+                  label="Fråga"
+                  value={f.question}
+                  onChange={(e) => update(i, { question: e.target.value })}
+                />
+              </div>
+              <Textarea
+                label="Svar"
+                rows={3}
+                value={f.answer}
+                onChange={(e) => update(i, { answer: e.target.value })}
+              />
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={i === 0}
+                  onClick={() =>
+                    setFaq((c) => {
+                      const n = [...c];
+                      [n[i - 1], n[i]] = [n[i], n[i - 1]];
+                      return n;
+                    })
+                  }
+                >
+                  Flytta upp
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setFaq((c) => c.filter((_, j) => j !== i))}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Ta bort
+                </Button>
+              </div>
+            </div>
+          </details>
+        ))}
+      </fieldset>
       <div className="flex gap-2">
-        <Button variant="secondary" onClick={() => setFaq((c) => [...c, { category: c[c.length - 1]?.category || 'Allmänt', question: '', answer: '' }])}><Plus className="h-4 w-4" />Ny fråga</Button>
-        <Button onClick={save} loading={busy}>Spara frågor</Button>
+        <Button
+          variant="secondary"
+          disabled={busy}
+          onClick={() => {
+            setExpanded(faq.length);
+            setFaq((c) => [
+              ...c,
+              {
+                category: c[c.length - 1]?.category || "Allmänt",
+                question: "",
+                answer: "",
+              },
+            ]);
+          }}
+        >
+          <Plus className="h-4 w-4" />
+          Ny fråga
+        </Button>
+        <Button onClick={save} loading={busy} disabled={!dirty}>
+          Spara frågor
+        </Button>
       </div>
     </Card>
   );
 }
 
 // ── Inställningar ──────────────────────────────────────────────────────────
-function SettingsTab({ client, settings, reload, toast }: { client: SupabaseClient; settings: Settings; reload: () => Promise<void>; toast: ToastFn }) {
+function SettingsTab({
+  client,
+  settings,
+  reload,
+  toast,
+}: {
+  client: SupabaseClient;
+  settings: Settings;
+  reload: () => Promise<void>;
+  toast: ToastFn;
+}) {
   const [s, setS] = useState<Settings>(settings);
   const [busy, setBusy] = useState(false);
-  const num = (k: keyof Settings) => (e: React.ChangeEvent<HTMLInputElement>) => setS((c) => ({ ...c, [k]: Number(e.target.value) }));
+  const requestLock = useRef(false);
+  const [saved, setSaved] = useState(() => s);
+  const dirty = useUnsavedChanges(s, true, saved);
+  const num = (k: keyof Settings) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setS((c) => ({ ...c, [k]: Number(e.target.value) }));
   async function save() {
+    if (requestLock.current) return;
+    requestLock.current = true;
     setBusy(true);
     try {
-      const { error } = await client.rpc('vihem_ekangen_save_settings', { p_settings: s, p_revision: settings.revision });
+      const { error } = await client.rpc("vihem_ekangen_save_settings", {
+        p_settings: s,
+        p_revision: settings.revision,
+      });
       if (error) throw error;
-      toast('Inställningarna är sparade.');
-      await reload();
-    } catch (e) { toast(errorText(e, 'Kunde inte spara.'), { tone: 'error' }); }
-    finally { setBusy(false); }
+      toast("Inställningarna är sparade.");
+      setSaved(s);
+      await reload().catch(() =>
+        toast(
+          "Sparat, men vyn kunde inte uppdateras. Ladda om innan nästa ändring.",
+          { tone: "info" },
+        ),
+      );
+    } catch (e) {
+      toast(errorText(e, "Kunde inte spara."), { tone: "error" });
+    } finally {
+      requestLock.current = false;
+      setBusy(false);
+    }
   }
   return (
     <div className="space-y-4">
-    <PaymentStatus client={client} />
-    <Card className="space-y-4 p-5">
-      <h3 className="flex items-center gap-2 font-semibold text-slate-900"><Settings2 className="h-4 w-4" />Direktbokning</h3>
-      <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-        <input type="checkbox" checked={s.booking_enabled} onChange={(e) => setS({ ...s, booking_enabled: e.target.checked })} className="h-4 w-4 accent-blue-600" />
-        Öppna för bokning och betalning på hemsidan
-      </label>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Input label="Direktrabatt jämfört med VI-HEM-priset (%)" type="number" value={s.discount_percent} onChange={num('discount_percent')} hint="Dras av ovanpå priser och längdrabatter i Korttid." />
-        <Input label="Gratis avbokning (dagar före ankomst)" type="number" value={s.free_cancel_days} onChange={num('free_cancel_days')} hint="0 = ingen gratis avbokning." />
-        <Input label="Minsta antal nätter" type="number" value={s.min_nights} onChange={num('min_nights')} />
-        <Input label="Längsta antal nätter" type="number" value={s.max_nights} onChange={num('max_nights')} />
-        <Input label="Incheckning från" value={s.check_in_time} onChange={(e) => setS({ ...s, check_in_time: e.target.value })} placeholder="15:00" />
-        <Input label="Utcheckning senast" value={s.check_out_time} onChange={(e) => setS({ ...s, check_out_time: e.target.value })} placeholder="11:00" />
-        <Input label="Avsändare för bekräftelsemejl" value={s.sender_email} onChange={(e) => setS({ ...s, sender_email: e.target.value })} hint="Måste vara en Google Workspace-adress, t.ex. info@ekangensvandrarhem.se. Tomt = inga mejl." />
-        <Input label="Mejla nya bokningar till" value={s.notification_email} onChange={(e) => setS({ ...s, notification_email: e.target.value })} hint="Admins får alltid en notis i VI-HEM." />
-      </div>
-      <Button onClick={save} loading={busy}>Spara inställningar</Button>
-    </Card>
+      <PaymentStatus client={client} />
+      <Card className="space-y-4 p-5">
+        <h3 className="flex items-center gap-2 font-semibold text-slate-900">
+          <Settings2 className="h-4 w-4" />
+          Direktbokning
+        </h3>
+        <fieldset disabled={busy} className="space-y-4 min-w-0">
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+            <input
+              type="checkbox"
+              checked={s.booking_enabled}
+              onChange={(e) =>
+                setS({ ...s, booking_enabled: e.target.checked })
+              }
+              className="h-4 w-4 accent-blue-600"
+            />
+            Öppna för bokning och betalning på hemsidan
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input
+              label="Direktrabatt jämfört med VI-HEM-priset (%)"
+              type="number"
+              value={s.discount_percent}
+              onChange={num("discount_percent")}
+              hint="Dras av ovanpå priser och längdrabatter i Korttid."
+            />
+            <Input
+              label="Gratis avbokning (dagar före ankomst)"
+              type="number"
+              value={s.free_cancel_days}
+              onChange={num("free_cancel_days")}
+              hint="0 = ingen gratis avbokning."
+            />
+            <Input
+              label="Minsta antal nätter"
+              type="number"
+              value={s.min_nights}
+              onChange={num("min_nights")}
+            />
+            <Input
+              label="Längsta antal nätter"
+              type="number"
+              value={s.max_nights}
+              onChange={num("max_nights")}
+            />
+            <Input
+              label="Incheckning från"
+              type="time"
+              value={s.check_in_time}
+              onChange={(e) => setS({ ...s, check_in_time: e.target.value })}
+              placeholder="15:00"
+            />
+            <Input
+              label="Utcheckning senast"
+              type="time"
+              value={s.check_out_time}
+              onChange={(e) => setS({ ...s, check_out_time: e.target.value })}
+              placeholder="11:00"
+            />
+            <Input
+              label="Avsändare för bekräftelsemejl"
+              type="email"
+              value={s.sender_email}
+              onChange={(e) => setS({ ...s, sender_email: e.target.value })}
+              hint="Måste vara en Google Workspace-adress, t.ex. info@ekangensvandrarhem.se. Tomt = inga mejl."
+            />
+            <Input
+              label="Mejla nya bokningar till"
+              type="email"
+              value={s.notification_email}
+              onChange={(e) =>
+                setS({ ...s, notification_email: e.target.value })
+              }
+              hint="Admins får alltid en notis i VI-HEM."
+            />
+          </div>
+        </fieldset>
+        <Button onClick={save} loading={busy} disabled={!dirty}>
+          Spara inställningar
+        </Button>
+      </Card>
     </div>
   );
 }
 
 // ── Betalning (Stripe) ─────────────────────────────────────────────────────
-interface PaymentInfo { stripe: { secretKeySet: boolean; webhookSecretSet: boolean; mode: 'live' | 'test' | null; verified: boolean | null; error: string }; webhookUrl: string; siteUrl: string }
+interface PaymentInfo {
+  stripe: {
+    secretKeySet: boolean;
+    webhookSecretSet: boolean;
+    mode: "live" | "test" | null;
+    verified: boolean | null;
+    error: string;
+  };
+  webhookUrl: string;
+  siteUrl: string;
+}
 
 function PaymentStatus({ client }: { client: SupabaseClient }) {
   const [info, setInfo] = useState<PaymentInfo | null>(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const check = useCallback(async () => {
-    setBusy(true); setError('');
+    setBusy(true);
+    setError("");
     try {
-      const { data, error: err } = await client.functions.invoke('vihem-ekangen-admin', { body: { action: 'status' } });
+      const { data, error: err } = await client.functions.invoke(
+        "vihem-ekangen-admin",
+        { body: { action: "status" } },
+      );
       if (err) throw err;
       setInfo(data.data as PaymentInfo);
-    } catch (e) { setError(errorText(e, 'Kunde inte kontrollera betalningen.')); }
-    finally { setBusy(false); }
+    } catch (e) {
+      setError(errorText(e, "Kunde inte kontrollera betalningen."));
+    } finally {
+      setBusy(false);
+    }
   }, [client]);
-  useEffect(() => { void check(); }, [check]);
+  useEffect(() => {
+    void check();
+  }, [check]);
 
   const row = (ok: boolean | null, label: string, detail?: string) => (
     <li className="flex items-start gap-2 text-sm">
-      {ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />}
-      <span><span className="font-semibold text-slate-800">{label}</span>{detail && <span className="text-slate-500"> – {detail}</span>}</span>
+      {ok ? (
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+      ) : (
+        <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+      )}
+      <span>
+        <span className="font-semibold text-slate-800">{label}</span>
+        {detail && <span className="text-slate-500"> – {detail}</span>}
+      </span>
     </li>
   );
-  const ready = info?.stripe.secretKeySet && info.stripe.webhookSecretSet && info.stripe.verified;
+  const ready =
+    info?.stripe.secretKeySet &&
+    info.stripe.webhookSecretSet &&
+    info.stripe.verified;
   return (
     <Card className="space-y-3 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-semibold text-slate-900">Betalning via Stripe</h3>
         <div className="flex items-center gap-2">
-          {info && <Badge className={ready ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}>{ready ? (info.stripe.mode === 'test' ? 'Redo (testläge)' : 'Redo') : 'Nycklar saknas'}</Badge>}
-          <Button size="sm" variant="secondary" onClick={check} loading={busy}>Kontrollera</Button>
+          {info && (
+            <Badge
+              className={
+                ready
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-amber-100 text-amber-800"
+              }
+            >
+              {ready
+                ? info.stripe.mode === "test"
+                  ? "Redo (testläge)"
+                  : "Redo"
+                : "Behöver kontrolleras"}
+            </Badge>
+          )}
+          <Button size="sm" variant="secondary" onClick={check} loading={busy}>
+            Kontrollera
+          </Button>
         </div>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
       {info && (
         <>
           <ul className="space-y-1.5">
-            {row(info.stripe.secretKeySet, 'Stripe-nyckel', info.stripe.secretKeySet ? (info.stripe.verified ? `giltig${info.stripe.mode ? `, ${info.stripe.mode === 'live' ? 'skarpt läge' : 'testläge'}` : ''}` : info.stripe.error || 'kunde inte verifieras') : 'saknas på servern')}
-            {row(info.stripe.webhookSecretSet, 'Webhook-hemlighet', info.stripe.webhookSecretSet ? 'finns' : 'saknas på servern')}
+            {row(
+              info.stripe.secretKeySet,
+              "Stripe-nyckel",
+              info.stripe.secretKeySet
+                ? info.stripe.verified
+                  ? `giltig${info.stripe.mode ? `, ${info.stripe.mode === "live" ? "skarpt läge" : "testläge"}` : ""}`
+                  : info.stripe.error || "kunde inte verifieras"
+                : "saknas på servern",
+            )}
+            {row(
+              info.stripe.webhookSecretSet,
+              "Webhook-hemlighet",
+              info.stripe.webhookSecretSet ? "finns" : "saknas på servern",
+            )}
           </ul>
           <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
-            <p className="font-semibold text-slate-800">Webhook-adress att lägga in i Stripe</p>
+            <p className="font-semibold text-slate-800">
+              Webhook-adress att lägga in i Stripe
+            </p>
             <div className="mt-1 flex items-center gap-2">
-              <code className="min-w-0 flex-1 break-all rounded bg-white px-2 py-1 ring-1 ring-slate-200">{info.webhookUrl}</code>
-              <Button size="sm" variant="secondary" onClick={() => { void navigator.clipboard?.writeText(info.webhookUrl); toast.show('Adressen är kopierad.'); }}><Copy className="h-3.5 w-3.5" /></Button>
+              <code className="min-w-0 flex-1 break-all rounded bg-white px-2 py-1 ring-1 ring-slate-200">
+                {info.webhookUrl}
+              </code>
+              <Button
+                size="sm"
+                variant="secondary"
+                aria-label="Kopiera webhook-adress"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(info.webhookUrl);
+                    toast.show("Adressen är kopierad.");
+                  } catch {
+                    toast.show("Kunde inte kopiera adressen.", {
+                      tone: "error",
+                    });
+                  }
+                }}
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
             </div>
-            <p className="mt-2">Händelser: <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>, <code>checkout.session.expired</code>, <code>charge.refunded</code></p>
+            <p className="mt-2">
+              Händelser: <code>checkout.session.completed</code>,{" "}
+              <code>checkout.session.async_payment_succeeded</code>,{" "}
+              <code>checkout.session.expired</code>,{" "}
+              <code>charge.refunded</code>
+            </p>
           </div>
-          {!ready && <p className="text-xs text-slate-500">Nycklarna läggs in på servern med <code>bash ~/vi-hem/apps/ekangen/deploy/set-stripe-keys.sh</code> – de visas aldrig här. Tills de finns kan hemsidan visas men inte ta betalt.</p>}
+          {!ready && (
+            <p className="text-xs text-slate-500">
+              Nycklarna läggs in på servern med{" "}
+              <code>bash ~/vi-hem/apps/ekangen/deploy/set-stripe-keys.sh</code>{" "}
+              – de visas aldrig här. Tills de finns kan hemsidan visas men inte
+              ta betalt.
+            </p>
+          )}
         </>
       )}
     </Card>
