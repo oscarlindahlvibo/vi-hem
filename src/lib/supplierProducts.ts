@@ -36,6 +36,6 @@ export const productExtractionScript = `(() => {
   document.querySelectorAll('script[type="application/ld+json"]').forEach(el => { try { visit(JSON.parse(el.textContent)); } catch {} });
   const product = products.find(p => p.name?.trim() === title) || products.find(p => p.url === location.href);
   const text = document.querySelector('main')?.innerText || '';
-  const sku = document.querySelector('meta[itemprop="sku"]')?.content || text.match(/(?:Artikelnr\\.?|Artnr\\.?|Artikelnummer)\\s*:?\\s*([0-9][0-9 -]{2,20})/i)?.[1]?.trim() || product?.sku || '';
+  const sku = document.querySelector('meta[itemprop="sku"]')?.content || text.match(/(?:Artikelnr\\.?|Art\\.?\\s*nr\\.?|Artikelnummer)\\s*:?\\s*([0-9][0-9 -]{2,20})/i)?.[1]?.trim() || product?.sku || '';
   return { name: title || product?.name || '', sku: String(sku), url: location.href };
 })()`;

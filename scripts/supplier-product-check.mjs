@@ -30,6 +30,8 @@ try {
   assert.equal(validateSupplierProduct(result[0]).supplier,supplier);
   assert.throws(()=>parser.productUrl(link.replace(new URL(link).hostname,new URL(link).hostname+'.evil.test')));
  }
+ const nativeByggmax=vm.runInNewContext(productExtractionScript,{document:{querySelector(selector){return selector==='main'?{innerText:'ART.NR: 45521'}:selector.startsWith('meta')?null:{textContent:'Lantbruksströ'};},querySelectorAll(){return [];}},location:{href:retailers[0][0]}});
+ assert.equal(validateSupplierProduct(nativeByggmax).sku,'45521');
  assert.equal(parser.parseProducts('<h1>Category</h1>',new URL(retailers[1][0])).length,0);
  for(const link of ['https://www.byggmax.se/catalogsearch/result/','https://www.bauhaus.se/catalogsearch/result/','https://www.jemfix.se/skruvdragare/140102/'])assert.throws(()=>parser.productUrl(link));
  console.log('PASS supplier URL restrictions, variants, Unicode, redirects, blocked/oversized responses, product extraction, five suppliers and review data validation');
