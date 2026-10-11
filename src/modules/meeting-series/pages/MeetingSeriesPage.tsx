@@ -5,7 +5,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
-import { Card, Button, Badge, PageHeader, LoadingPage, EmptyState, Tabs, Modal, Input, Select, Textarea } from '../../../components/ui';
+import { Card, Button, Badge, PageHeader, LoadingPage, EmptyState, Tabs, Modal, Input, Select, Textarea, SearchInput } from '../../../components/ui';
 import { formatDate } from '../../../lib/utils';
 import { HandoffComposer } from '../components/HandoffComposer';
 import { ReviewQueuePanel } from '../components/ReviewQueuePanel';
@@ -39,6 +39,9 @@ const NOTE_TAG_OPTIONS: { value: NoteTag; label: string }[] = [
 
 export function MeetingSeriesPage({ onNavigate: _onNavigate }: { onNavigate: (page: string) => void }) {
   const { user, loading: authLoading } = useAuth();
+  const [query,setQuery]=useState('');
+  const [scope,setScope]=useState('active');
+  const [error,setError]=useState('');
   const [loading, setLoading] = useState(true);
   const [seriesList, setSeriesList] = useState<MeetingSeries[]>([]);
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
@@ -55,10 +58,11 @@ export function MeetingSeriesPage({ onNavigate: _onNavigate }: { onNavigate: (pa
   }, [user?.organisation_id]);
 
   const fetchSeriesList = useCallback(async () => {
-    setLoading(true);
+    setLoading(true);setError('');
     try {
       const list = await api.listFridaySeries();
       setSeriesList(list);
+    } catch (err) {setError(err instanceof Error ? err.message : 'Kunde inte hämta fredagsmöten.');
     } finally {
       setLoading(false);
     }
@@ -75,12 +79,14 @@ export function MeetingSeriesPage({ onNavigate: _onNavigate }: { onNavigate: (pa
   useEffect(() => { refreshSegments(); }, [refreshSegments]);
 
   async function handleStartFriday() {
-    setStarting(true);
+    if(starting)return;
+    setError('');setStarting(true);
     try {
       const seriesId = await api.getOrCreateFridaySeries();
       await fetchSeriesList();
       setSelectedSeriesId(seriesId);
       setActiveSegment('owner');
+    } catch(err) {setError(err instanceof Error ? err.message : 'Kunde inte öppna veckans möte.');
     } finally {
       setStarting(false);
     }
@@ -93,9 +99,9 @@ export function MeetingSeriesPage({ onNavigate: _onNavigate }: { onNavigate: (pa
       <div className="space-y-5">
         <PageHeader
           title="Fredagsmöte"
-          subtitle="Ägarmöte, Ekonomi/admin och Personalmöte i ett sammanhängande flöde -- separat från Möten/Möten V2."
+          subtitle="Veckans dagordningar, överlämningar och uppföljning."
           action={
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {(user.role === 'admin' || user.role === 'superadmin') && (
                 <Button variant="secondary" onClick={() => setShowPermissions(true)} className="gap-2"><ShieldCheck className="h-4 w-4" /> Mötesbehörigheter</Button>
               )}
@@ -103,13 +109,15 @@ export function MeetingSeriesPage({ onNavigate: _onNavigate }: { onNavigate: (pa
             </div>
           }
         />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center"><SearchInput value={query} onChange={setQuery} placeholder="Sök vecka eller möte" /><Tabs active={scope} onChange={setScope} tabs={[{key:'active',label:'Aktiva'},{key:'all',label:'Alla'}]} /></div>
+        {error && <div role="alert" className="text-sm text-red-700">{error}<Button variant="secondary" onClick={fetchSeriesList}>Försök igen</Button></div>}
         {showPermissions && <MeetingPermissionsPanel organisationId={user.organisation_id} staff={staff} currentUserId={user.id} onClose={() => setShowPermissions(false)} />}
         {loading ? <LoadingPage /> : seriesList.length === 0 ? (
           <EmptyState icon={<Calendar className="h-10 w-10" />} title="Inga fredagsmöten ännu" description={'Klicka på "Starta veckans fredagsmöte" för att komma igång.'} />
         ) : (
-          <div className="space-y-2">
-            {seriesList.map(s => (
-              <Card key={s.id} onClick={() => setSelectedSeriesId(s.id)} className="cursor-pointer p-4 hover:border-blue-300">
+          <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
+            {seriesList.filter(s => (scope === 'all' || s.active) && `${s.title} ${formatDate(s.series_week_date)}`.toLocaleLowerCase('sv').includes(query.toLocaleLowerCase('sv'))).map(s => (
+              <button key={s.id} onClick={() => setSelectedSeriesId(s.id)} className="w-full text-left p-4 hover:bg-slate-50 focus-visible:outline-blue-600">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-semibold text-slate-800">{s.title}</p>
@@ -117,7 +125,7 @@ export function MeetingSeriesPage({ onNavigate: _onNavigate }: { onNavigate: (pa
                   </div>
                   <Badge className={s.active ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}>{s.active ? 'Aktiv' : 'Arkiverad'}</Badge>
                 </div>
-              </Card>
+              </button>
             ))}
           </div>
         )}
@@ -431,17 +439,19 @@ function AgendaItemRow({ item, onSave, onHandoff }: { item: SegmentAgendaItem; o
   const [tags, setTags] = useState<NoteTag[]>(item.note_tags || []);
   const [sensitivity, setSensitivity] = useState<'normal' | 'sensitive'>(item.sensitivity);
   const [saving, setSaving] = useState(false);
+  const [noteError,setNoteError]=useState('');
 
   function toggleTag(tag: NoteTag) {
     setTags(t => t.includes(tag) ? t.filter(x => x !== tag) : [...t, tag]);
   }
 
   async function handleSave() {
-    setSaving(true);
+    if(saving)return;setNoteError('');setSaving(true);
     try {
       await api.updateAgendaItemNote(item.id, notes, tags, sensitivity);
       setEditing(false);
       onSave();
+    } catch(err) {setNoteError(err instanceof Error ? err.message : 'Kunde inte spara. Anteckningen finns kvar.');
     } finally {
       setSaving(false);
     }
@@ -461,7 +471,7 @@ function AgendaItemRow({ item, onSave, onHandoff }: { item: SegmentAgendaItem; o
       {!editing && item.notes && <p className="mt-1 text-xs text-slate-500">{item.notes}</p>}
       {editing && (
         <div className="mt-2 space-y-2">
-          <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Anteckning..." />
+          <Textarea label="Anteckning" value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Anteckning..." />
           <div className="flex flex-wrap gap-1.5">
             {NOTE_TAG_OPTIONS.map(opt => (
               <button key={opt.value} type="button" onClick={() => toggleTag(opt.value)}
@@ -476,6 +486,7 @@ function AgendaItemRow({ item, onSave, onHandoff }: { item: SegmentAgendaItem; o
               Känslig (döljs alltid på skärm)
             </label>
           </div>
+          <p role="status" className="text-sm text-red-700">{noteError}</p>
           <Button size="sm" variant="primary" loading={saving} onClick={handleSave}>Spara anteckning</Button>
         </div>
       )}

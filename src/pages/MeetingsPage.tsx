@@ -1,3 +1,4 @@
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
@@ -18,7 +19,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea, Tabs, SearchInput, Avatar } from '../components/ui';
 import { formatDate, formatDateTime } from '../lib/utils';
 import type { MaintenanceRequest, Meeting, MeetingActionItem, MeetingAgendaItem, MeetingDecision, MeetingTemplate, Profile, WorkOrder } from '../types';
 
@@ -199,7 +200,7 @@ const protocolTypeLabels = Object.fromEntries(protocolTypeOptions.map(option => 
 
 const defaultMeetingForm: MeetingForm = {
   title: '',
-  starts_at: new Date().toISOString().slice(0, 16),
+  starts_at: localMeetingDate(new Date()),
   meeting_type: 'weekly_operations',
   template_id: '',
   participant_ids: [],
@@ -281,8 +282,15 @@ function isSchemaCacheMiss(error: any) {
   return error?.code === 'PGRST204' || error?.code === 'PGRST205' || message.includes('schema cache');
 }
 
+function localMeetingDate(date: Date) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => void }) {
   const { user } = useAuth();
+  const [meetingQuery, setMeetingQuery] = useState('');
+  const [createStep, setCreateStep] = useState('details');
   const [tab, setTab] = useState<MeetingTab>('dashboard');
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [templates, setTemplates] = useState<MeetingTemplate[]>([]);
@@ -315,6 +323,10 @@ export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => voi
   const [saving, setSaving] = useState(false);
 
   const canManage = user?.role === 'admin' || user?.role === 'superadmin';
+
+  const [discardCreate,setDiscardCreate]=useState(false);
+  const createDirty=useUnsavedChanges(meetingForm,showMeetingModal);
+  const closeCreate=()=>{if(saving)return;if(createDirty)setDiscardCreate(true);else setShowMeetingModal(false);};
 
   useEffect(() => {
     fetchData();
@@ -385,9 +397,10 @@ export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => voi
   }
 
   function openMeetingModal() {
+    setCreateStep('details');
     setMeetingForm({
       ...defaultMeetingForm,
-      starts_at: new Date().toISOString().slice(0, 16),
+      starts_at: localMeetingDate(new Date()),
       template_id: templates[0]?.id || '',
     });
     setSaveError('');
@@ -868,27 +881,9 @@ export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => voi
         )}
       />
 
-      <div className="flex flex-wrap gap-2">
-        {[
-          { id: 'dashboard', label: 'Översikt', icon: ClipboardList },
-          { id: 'meetings', label: 'Möten', icon: CalendarDays },
-          { id: 'templates', label: 'Mallar', icon: FileText },
-          { id: 'ai', label: 'AI-granskning', icon: Bot },
-        ].map(item => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-              onClick={() => setTab(item.id as MeetingTab)}
-              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                tab === item.id ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <Icon className="w-4 h-4" /> {item.label}
-            </button>
-          );
-        })}
-      </div>
+      <Tabs active={tab} onChange={key => setTab(key as MeetingTab)} tabs={[
+        {key:'dashboard',label:'Översikt'},{key:'meetings',label:'Möten'},{key:'templates',label:'Mallar'},{key:'ai',label:'AI-granskning'}
+      ]} />
 
       {tab === 'dashboard' && (
         <div className="space-y-4">
@@ -934,13 +929,13 @@ export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => voi
       )}
 
       {tab === 'meetings' && (
-        <div className="grid grid-cols-1 xl:grid-cols-[20rem_minmax(0,1fr)] gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-[16rem_minmax(0,1fr)] items-start gap-4">
           <Card className="overflow-hidden">
             <div className="p-4 border-b border-slate-100">
-              <h2 className="font-bold text-slate-800">Möten</h2>
+              <SearchInput value={meetingQuery} onChange={setMeetingQuery} placeholder="Sök möte eller mötestyp" />
             </div>
             <div className="divide-y divide-slate-100 max-h-[42rem] overflow-y-auto">
-              {meetings.length === 0 ? <EmptyState icon={<CalendarDays className="w-10 h-10" />} title="Inga möten" /> : meetings.map(meeting => (
+              {meetings.length === 0 ? <EmptyState icon={<CalendarDays className="w-10 h-10" />} title="Inga möten" /> : meetings.filter(meeting => `${meeting.title} ${meetingTypeLabels[meeting.meeting_type] || ''}`.toLocaleLowerCase('sv').includes(meetingQuery.toLocaleLowerCase('sv'))).map(meeting => (
                 <button
                   key={meeting.id}
                   onClick={() => setSelectedMeeting(meeting)}
@@ -1050,9 +1045,12 @@ export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => voi
         </Card>
       )}
 
-      <Modal open={showMeetingModal} onClose={() => setShowMeetingModal(false)} title="Nytt möte" size="lg">
-        <div className="space-y-4">
+      <Modal open={discardCreate} onClose={()=>setDiscardCreate(false)} title="Lämna osparat möte?" footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={()=>setDiscardCreate(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscardCreate(false);setShowMeetingModal(false);}}>Kasta ändringar</Button></div>}>Dina ändringar har inte sparats.</Modal>
+      <Modal open={showMeetingModal} onClose={closeCreate} title="Nytt möte" size="lg" mobileFullscreen>
+        <Tabs active={createStep} onChange={setCreateStep} tabs={[{key:'details',label:'Mötesplan'},{key:'people',label:`Deltagare · ${meetingForm.participant_ids.length}`}]} />
+        <div className="space-y-4 mt-4">
           {saveError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{saveError}</div>}
+          <div hidden={createStep !== 'details'} className="space-y-4">
           <Input label="Titel" value={meetingForm.title} onChange={event => setMeetingForm({ ...meetingForm, title: event.target.value })} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input label="Datum och tid" type="datetime-local" value={meetingForm.starts_at} onChange={event => setMeetingForm({ ...meetingForm, starts_at: event.target.value })} />
@@ -1060,7 +1058,8 @@ export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => voi
           </div>
           <Select label="Mall" value={meetingForm.template_id} onChange={event => setMeetingForm({ ...meetingForm, template_id: event.target.value })} options={[{ value: '', label: 'Ingen mall' }, ...templates.map(template => ({ value: template.id, label: template.name }))]} />
           <Textarea label="Syfte/beskrivning" rows={3} value={meetingForm.description} onChange={event => setMeetingForm({ ...meetingForm, description: event.target.value })} />
-          <div>
+          </div>
+          <div hidden={createStep !== 'people'}>
             <p className="text-sm font-medium text-slate-700 mb-2">Deltagare</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {staff.map(profile => (
@@ -1075,7 +1074,7 @@ export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => voi
                         : current.participant_ids.filter(id => id !== profile.id),
                     }))}
                   />
-                  {profile.name}
+                  <Avatar userId={profile.id} name={profile.name} size="sm" />{profile.name}
                 </label>
               ))}
             </div>
@@ -1085,8 +1084,8 @@ export function MeetingsPage({ onNavigate }: { onNavigate: (page: string) => voi
             Generera dagordning från öppna arbetsorder, felanmälningar, kundprojekt och tidigare möten
           </label>
           <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
-            <Button variant="secondary" onClick={() => setShowMeetingModal(false)} className="flex-1">Avbryt</Button>
-            <Button onClick={handleCreateMeeting} loading={saving} className="flex-1">Skapa möte</Button>
+            <Button variant="secondary" onClick={closeCreate} className="flex-1">Avbryt</Button>
+            <Button onClick={() => createStep === 'details' ? setCreateStep('people') : handleCreateMeeting()} loading={saving} className="flex-1">{createStep === 'details' ? 'Välj deltagare' : 'Skapa möte'}</Button>
           </div>
         </div>
       </Modal>
@@ -1330,6 +1329,7 @@ function MeetingDetail(props: {
   onActionDone: (action: MeetingActionItem) => void;
   onAgendaStatus: (item: MeetingAgendaItemMvp, status: 'open' | 'done') => void;
 }) {
+  const [detailTab,setDetailTab]=useState('notes');
   const { meeting, selectedAgenda } = props;
   const participantCount = ((meeting as any).participant_ids || []).length;
   const selectedSystemLinks = props.systemLinks.filter(link => {
@@ -1391,7 +1391,7 @@ function MeetingDetail(props: {
         />
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[17rem_minmax(0,1fr)_18rem] gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-[14rem_minmax(0,1fr)] items-start gap-4">
         <Card className="overflow-hidden">
           <div className="p-3 border-b border-slate-100 bg-slate-50">
             <h3 className="font-bold text-slate-800">Dagordning</h3>
@@ -1431,7 +1431,8 @@ function MeetingDetail(props: {
         </Card>
 
         <div className="space-y-4">
-          <Card className="p-4">
+          <Tabs active={detailTab} onChange={setDetailTab} tabs={[{key:'notes',label:'Protokoll'},{key:'decisions',label:`Beslut · ${props.decisions.length}`},{key:'tasks',label:`Uppgifter · ${props.actionItems.length}`}]} />
+          <Card className={detailTab === 'notes' ? 'p-4' : 'hidden'}>
             <h3 className="font-bold text-slate-800">Protokoll</h3>
             <p className="text-sm text-slate-500">{selectedAgenda?.title || 'Välj dagordningspunkt'}</p>
             <div className="mt-4 space-y-3">
@@ -1455,8 +1456,8 @@ function MeetingDetail(props: {
             )}
           </Card>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Card className="p-4">
+          <div className="space-y-4">
+            <Card className={detailTab === 'decisions' ? 'p-4' : 'hidden'}>
               <h3 className="font-bold text-slate-800">Beslut</h3>
               <div className="mt-3 space-y-2">
                 {props.decisions.map(decision => <FollowUpRow key={decision.id} title={decision.title} status={decision.status} due={decision.due_date} />)}
@@ -1473,7 +1474,7 @@ function MeetingDetail(props: {
               )}
             </Card>
 
-            <Card className="p-4">
+            <Card className={detailTab === 'tasks' ? 'p-4' : 'hidden'}>
               <h3 className="font-bold text-slate-800">Att göra</h3>
               <div className="mt-3 space-y-2">
                 {props.actionItems.map(action => (
@@ -1500,12 +1501,12 @@ function MeetingDetail(props: {
           </div>
         </div>
 
-        <Card className="overflow-hidden">
+        <Card className="overflow-hidden xl:col-span-2">
           <div className="p-3 border-b border-slate-100 bg-slate-50">
             <h3 className="font-bold text-slate-800">Systemdata</h3>
             <p className="text-xs text-slate-500">Relevanta kopplingar till vald punkt</p>
           </div>
-          <div className="p-3 space-y-2 max-h-[44rem] overflow-y-auto">
+          <details><summary className="cursor-pointer p-3 text-sm text-slate-600">Visa kopplade objekt</summary><div className="p-3 space-y-2 max-h-[44rem] overflow-y-auto">
             {selectedSystemLinks.map(link => (
               <div key={`${link.type}-${link.id}`} className="rounded-lg border border-slate-200 p-3">
                 <Badge className="bg-blue-100 text-blue-700">{link.subtitle}</Badge>
@@ -1513,7 +1514,7 @@ function MeetingDetail(props: {
                 <p className="text-xs text-slate-500">{link.status}{link.due_date ? ` · ${formatDate(link.due_date)}` : ''}</p>
               </div>
             ))}
-          </div>
+          </div></details>
         </Card>
       </div>
     </div>

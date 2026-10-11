@@ -1,3 +1,4 @@
+import { useUnsavedChanges } from '../../../hooks/useUnsavedChanges';
 // Möten V2 -- ny mötestjänst vid sidan om legacy (src/pages/MeetingsPage.tsx,
 // orörd). Se planen (composed-kindling-lemur.md) för hela resonemanget.
 // Kärnidé: en stor autosparande fritextruta per dagordningspunkt istället
@@ -9,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import { CalendarDays, ClipboardList, Lock, Plus, Sparkles } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
-import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea } from '../../../components/ui';
+import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea, SearchInput, Tabs } from '../../../components/ui';
 import { formatDate, formatDateTime } from '../../../lib/utils';
 import type { MeetingAgendaItem, MeetingDecision, MeetingActionItem } from '../../../types';
 import type { MeetingAiAnalysis, MeetingObjectLink, MeetingObjectLinkEntityType, MeetingV2, MeetingV2Form, SystemLinkOption } from '../types';
@@ -70,6 +71,9 @@ export function MeetingsV2Page({ onNavigate }: { onNavigate: (page: string) => v
   const [actionItems, setActionItems] = useState<MeetingActionItem[]>([]);
   const [objectLinks, setObjectLinks] = useState<MeetingObjectLink[]>([]);
 
+  const [query,setQuery]=useState('');
+  const [listError,setListError]=useState('');
+  const [createStep,setCreateStep]=useState('details');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState<MeetingV2Form>(EMPTY_MEETING_FORM);
   const [createError, setCreateError] = useState('');
@@ -88,12 +92,16 @@ export function MeetingsV2Page({ onNavigate }: { onNavigate: (page: string) => v
   const [aiApplied, setAiApplied] = useState<Set<string>>(new Set());
   const [aiApplying, setAiApplying] = useState<Set<string>>(new Set());
 
+  const [discardCreate,setDiscardCreate]=useState(false);
+  const createDirty=useUnsavedChanges(createForm,showCreateModal);
+  const closeCreate=()=>{if(creating)return;if(createDirty)setDiscardCreate(true);else setShowCreateModal(false);};
+
   useEffect(() => { loadList(); }, [orgId, includeLegacy]);
   useEffect(() => { if (selectedMeeting) loadDetail(selectedMeeting.id); }, [selectedMeeting?.id]);
 
   async function loadList() {
     if (!orgId) return;
-    setLoading(true);
+    setLoading(true);setListError('');
     try {
       const [meetingsRows, staffRows, templateRows, entities] = await Promise.all([
         api.fetchMeetingsV2(orgId, includeLegacy),
@@ -106,6 +114,8 @@ export function MeetingsV2Page({ onNavigate }: { onNavigate: (page: string) => v
       setTemplates(templateRows);
       setRawSystemEntities(entities);
       setSystemLinkOptions(api.buildSystemLinkOptions(entities.workOrders, entities.maintenanceRequests, entities.customerProjects));
+    } catch (error) {
+      setListError(error instanceof Error ? error.message : 'Kunde inte hämta möten.');
     } finally {
       setLoading(false);
     }
@@ -134,6 +144,7 @@ export function MeetingsV2Page({ onNavigate }: { onNavigate: (page: string) => v
   }
 
   function openCreateModal() {
+    setCreateStep('details');
     setCreateForm({ ...EMPTY_MEETING_FORM, starts_at: toLocalDatetimeInputValue(new Date()) });
     setCreateError('');
     setShowCreateModal(true);
@@ -323,16 +334,17 @@ export function MeetingsV2Page({ onNavigate }: { onNavigate: (page: string) => v
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <PageHeader
-        title="Möten V2 (beta)"
-        subtitle="Skriv fritt under varje dagordningspunkt, koppla in arbetsordrar och kundprojekt direkt, och låt AI-analysen ligga kvar mellan flikbyten."
+        title="Möten V2"
+        subtitle="Dagordning, beslut och uppföljning i en gemensam arbetsyta."
         icon={Sparkles}
         action={canManage ? <Button onClick={openCreateModal}><Plus className="h-4 w-4" /> Nytt möte</Button> : undefined}
       />
 
+      {listError && <div role="alert" className="mb-4 text-sm text-red-700">{listError}<Button variant="secondary" onClick={loadList}>Försök igen</Button></div>}
       {!selectedMeeting ? (
         <Card className="overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-200 p-4">
-            <h3 className="font-semibold text-slate-900">Möten</h3>
+            <SearchInput value={query} onChange={setQuery} placeholder="Sök möte eller status" />
             <label className="flex items-center gap-2 text-xs font-medium text-slate-500">
               <input type="checkbox" checked={includeLegacy} onChange={(e) => setIncludeLegacy(e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
               Visa äldre möten också
@@ -340,7 +352,7 @@ export function MeetingsV2Page({ onNavigate }: { onNavigate: (page: string) => v
           </div>
           {meetings.length ? (
             <div className="divide-y divide-slate-100">
-              {meetings.map((meeting) => (
+              {meetings.filter(meeting => `${meeting.title} ${statusLabels[meeting.status] || ''}`.toLocaleLowerCase('sv').includes(query.toLocaleLowerCase('sv'))).map((meeting) => (
                 <button key={meeting.id} onClick={() => setSelectedMeeting(meeting)} className="flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-slate-50">
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-slate-800">{meeting.title}</p>
@@ -379,12 +391,13 @@ export function MeetingsV2Page({ onNavigate }: { onNavigate: (page: string) => v
 
           {detailLoading ? <LoadingPage /> : (
             <>
+              <details className="rounded-xl border border-slate-200 bg-white"><summary className="cursor-pointer p-4 text-sm font-semibold text-slate-700">AI-analys och förslag</summary>
               <AiAnalysisPanel
                 analysis={aiAnalysis} loading={aiLoading} error={aiError} actionItems={actionItems}
                 applied={aiApplied} applying={aiApplying} onRunAnalysis={handleRunAiAnalysis}
                 onCreateTask={handleAiCreateTask} onUpdateTask={handleAiUpdateTask}
                 onAddPurchaseItem={handleAiAddPurchaseItem} onCreateWorkOrder={handleAiCreateWorkOrder}
-              />
+              /></details>
 
               <Card className="p-4">
                 <h3 className="mb-3 flex items-center gap-2 font-bold text-slate-900"><ClipboardList className="h-4 w-4" /> Dagordning</h3>
@@ -467,23 +480,29 @@ export function MeetingsV2Page({ onNavigate }: { onNavigate: (page: string) => v
         </div>
       )}
 
-      <Modal open={showCreateModal} onClose={() => setShowCreateModal(false)} title="Nytt möte">
-        <div className="space-y-4">
+      <Modal open={discardCreate} onClose={()=>setDiscardCreate(false)} title="Lämna osparat möte?" footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={()=>setDiscardCreate(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={()=>{setDiscardCreate(false);setShowCreateModal(false);}}>Kasta ändringar</Button></div>}>Dina ändringar har inte sparats.</Modal>
+      <Modal open={showCreateModal} onClose={closeCreate} title="Nytt möte" mobileFullscreen>
+        <Tabs active={createStep} onChange={setCreateStep} tabs={[{key:'details',label:'Mötesplan'},{key:'agenda',label:'Dagordning'}]} />
+        <div className="space-y-4 mt-4">
+          <div hidden={createStep !== 'details'} className="space-y-4">
           <Input label="Titel" value={createForm.title} onChange={(e) => setCreateForm({ ...createForm, title: e.target.value })} />
           <div className="grid gap-3 sm:grid-cols-2">
             <Input label="Datum och tid" type="datetime-local" value={createForm.starts_at} onChange={(e) => setCreateForm({ ...createForm, starts_at: e.target.value })} />
             <Select label="Mötestyp" value={createForm.meeting_type} onChange={(e) => setCreateForm({ ...createForm, meeting_type: e.target.value })} options={meetingTypeOptions} />
           </div>
+          </div>
+          <div hidden={createStep !== 'agenda'} className="space-y-4">
           <Select label="Mall" value={createForm.template_id} onChange={(e) => setCreateForm({ ...createForm, template_id: e.target.value })} options={[{ value: '', label: 'Ingen mall' }, ...templates.map((t) => ({ value: t.id, label: t.name }))]} />
           <Textarea label="Syfte/beskrivning" value={createForm.description} onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })} rows={2} />
           <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
             <input type="checkbox" checked={createForm.generate_agenda} onChange={(e) => setCreateForm({ ...createForm, generate_agenda: e.target.checked })} className="h-4 w-4 rounded border-slate-300" />
             Generera dagordning från öppna arbetsorder, felanmälningar, kundprojekt och tidigare möten
           </label>
+          </div>
           {createError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{createError}</p>}
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowCreateModal(false)}>Avbryt</Button>
-            <Button onClick={handleCreateMeeting} loading={creating}>Skapa möte</Button>
+            <Button variant="secondary" onClick={closeCreate}>Avbryt</Button>
+            <Button onClick={() => createStep === 'details' ? setCreateStep('agenda') : handleCreateMeeting()} loading={creating}>{createStep === 'details' ? 'Välj dagordning' : 'Skapa möte'}</Button>
           </div>
         </div>
       </Modal>
