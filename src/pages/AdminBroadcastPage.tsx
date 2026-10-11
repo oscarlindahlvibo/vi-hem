@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Bell, Send, Users2 } from 'lucide-react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Button, Card, EmptyState, Input, LoadingPage, PageHeader, SearchInput, Select, Textarea } from '../components/ui';
+import { Button, Card, EmptyState, Input, LoadingPage, PageHeader, SearchInput, Select, Textarea, Modal, Avatar } from '../components/ui';
 import type { Profile } from '../types';
 
 type Audience = 'tenant' | 'staff' | 'all' | 'individual';
@@ -37,6 +38,8 @@ export function AdminBroadcastPage() {
   const { user } = useAuth();
   const canManage = user?.role === 'admin' || user?.role === 'superadmin';
 
+  const sendLock=useRef(false);
+  const [review,setReview]=useState(false);
   const [audience, setAudience] = useState<Audience>('all');
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
@@ -51,6 +54,7 @@ export function AdminBroadcastPage() {
   const [history, setHistory] = useState<BroadcastRow[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
 
+  useUnsavedChanges({audience,title,message,recipientId},true);
   useEffect(() => {
     fetchHistory();
     fetchPeople();
@@ -65,6 +69,7 @@ export function AdminBroadcastPage() {
       .eq('active', true)
       .in('role', ['tenant', 'staff', 'admin'])
       .order('name');
+    if(fetchError)setError('Mottagarna kunde inte hämtas. Ladda om innan du väljer en person.');
     if (!fetchError) setPeople((data || []) as Profile[]);
   }
 
@@ -80,6 +85,7 @@ export function AdminBroadcastPage() {
       .eq('organisation_id', user.organisation_id)
       .order('created_at', { ascending: false })
       .limit(20);
+    if(fetchError)setError('Utskickshistoriken kunde inte hämtas. Kontrollera historiken innan ett eventuellt återförsök.');
     if (!fetchError) setHistory((data || []) as BroadcastRow[]);
     setLoadingHistory(false);
   }
@@ -94,6 +100,7 @@ export function AdminBroadcastPage() {
   const selectedPerson = people.find((person) => person.id === recipientId) || null;
 
   async function handleSend() {
+    if(sendLock.current)return;
     setError('');
     setSuccess('');
 
@@ -103,17 +110,14 @@ export function AdminBroadcastPage() {
     if (!trimmedMessage) { setError('Skriv ett meddelande.'); return; }
     if (audience === 'individual' && !recipientId) { setError('Välj en mottagare.'); return; }
 
-    const confirmTarget = audience === 'individual' ? (selectedPerson?.name || 'vald person') : AUDIENCE_LABELS[audience].toLowerCase();
-    if (!window.confirm(`Skicka "${trimmedTitle}" till ${confirmTarget}?`)) return;
-
-    setSending(true);
+    sendLock.current=true;setSending(true);
+    try {
     const { data, error: invokeError } = await supabase.functions.invoke('vihem-admin-broadcast', {
       body: { title: trimmedTitle, message: trimmedMessage, audience, recipient_id: audience === 'individual' ? recipientId : undefined },
     });
-    setSending(false);
 
     if (invokeError || data?.error) {
-      setError(data?.error || invokeError?.message || 'Utskicket misslyckades.');
+      setReview(false);setError((data?.error || invokeError?.message || 'Utskicket misslyckades.') + ' Kontrollera historiken innan du försöker igen.');
       return;
     }
 
@@ -122,7 +126,9 @@ export function AdminBroadcastPage() {
     setMessage('');
     setRecipientId('');
     setPersonQuery('');
-    fetchHistory();
+    setReview(false);void fetchHistory();
+    }catch(e){setError(e instanceof Error?e.message:'Utskicket kunde inte skickas. Kontrollera historiken innan du försöker igen.');}
+    finally{sendLock.current=false;setSending(false);}
   }
 
   if (!canManage) {
@@ -197,7 +203,7 @@ export function AdminBroadcastPage() {
                           onChange={() => setRecipientId(person.id)}
                           className="h-4 w-4"
                         />
-                        <span className="min-w-0">
+                        <Avatar userId={person.id} name={person.name} size="sm"/><span className="min-w-0">
                           <span className="block truncate text-sm font-medium text-slate-800">{person.name}</span>
                           <span className="block truncate text-xs text-slate-500">{person.email} · {ROLE_LABELS[person.role] || person.role}</span>
                         </span>
@@ -225,12 +231,12 @@ export function AdminBroadcastPage() {
             <p className="text-xs text-slate-500">{message.length}/{MAX_MESSAGE_LENGTH} tecken</p>
 
             <Button
-              onClick={handleSend}
+              onClick={()=>setReview(true)}
               loading={sending}
               disabled={!title.trim() || !message.trim() || (audience === 'individual' && !recipientId)}
             >
               <Send className="h-4 w-4" />
-              Skicka
+              Granska utskick
             </Button>
           </div>
         </Card>
@@ -244,9 +250,9 @@ export function AdminBroadcastPage() {
               Inga utskick ännu.
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="divide-y divide-slate-100">
               {history.map((row) => (
-                <div key={row.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div key={row.id} className="py-4">
                   <div className="flex items-start justify-between gap-3">
                     <h3 className="font-black text-slate-900">{row.title}</h3>
                     <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-black text-slate-500">
@@ -263,6 +269,9 @@ export function AdminBroadcastPage() {
           )}
         </Card>
       </div>
+      <Modal open={review} onClose={()=>!sending&&setReview(false)} title="Granska utskick" footer={<div className="flex justify-end gap-2"><Button variant="secondary" disabled={sending} onClick={()=>setReview(false)}>Tillbaka</Button><Button loading={sending} onClick={()=>void handleSend()}>Bekräfta och skicka</Button></div>}>
+        <p className="text-sm text-slate-500">{audience==='individual'?selectedPerson?.name:AUDIENCE_LABELS[audience]}</p><h3 className="mt-3 text-lg font-semibold">{title}</h3><p className="mt-3 whitespace-pre-wrap">{message}</p><p className="mt-4 text-sm text-slate-500">Mottagare väljs av servern enligt aktuella konton och organisation. Telefonpush förutsätter fungerande pushinställningar.</p>{error&&<p role="alert" className="mt-3 text-red-700">{error}</p>}
+      </Modal>
     </div>
   );
 }

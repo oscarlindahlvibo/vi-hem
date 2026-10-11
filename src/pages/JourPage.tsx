@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Avatar, Tabs, Select } from '../components/ui';
 import type { JourDutyType, JourEligibility, JourRotationRule, JourShift, JourSwapOffer, Profile } from '../types';
 import { ArrowLeft, ArrowRight, Plus, RefreshCw, ShieldAlert, ShieldCheck, Snowflake, Trash2, Users } from 'lucide-react';
 
@@ -104,17 +104,7 @@ export function JourPage() {
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-7xl px-4 py-8">
         <PageHeader title="Jour" subtitle="Fastighetsjour och snöjour -- schema, dagbesked och passbyten" icon={ShieldAlert} />
-        <div className="mb-6 flex flex-wrap gap-1 border-b border-slate-200">
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${tab === t.key ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        <Tabs tabs={tabs} active={tab} onChange={key => setTab(key as typeof tab)} />
 
         {tab === 'dagbesked' && <DagbeskedTab organisationId={user.organisation_id} profilesById={profilesById} profiles={profiles} isAdmin={isAdmin} userId={user.id} />}
         {tab === 'byten' && <BytenTab userId={user.id} organisationId={user.organisation_id} profilesById={profilesById} isAdmin={isAdmin} onChanged={reload} />}
@@ -134,8 +124,8 @@ function anchorForMode(mode: ViewMode, base: Date) {
 }
 
 function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId }: { organisationId: string; profilesById: Map<string, Pick<Profile, 'id' | 'name'>>; profiles: Pick<Profile, 'id' | 'name'>[]; isAdmin: boolean; userId: string }) {
-  const [viewMode, setViewMode] = useState<ViewMode>('twoweeks');
-  const [anchor, setAnchor] = useState(() => anchorForMode('twoweeks', new Date()));
+  const [viewMode, setViewMode] = useState<ViewMode>('day');
+  const [anchor, setAnchor] = useState(() => anchorForMode('day', new Date()));
   const [shifts, setShifts] = useState<JourShift[]>([]);
   const [offers, setOffers] = useState<JourSwapOffer[]>([]);
   const [absences, setAbsences] = useState<{ user_id: string; start_date: string; end_date: string }[]>([]);
@@ -143,6 +133,8 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
   const [scrubTime, setScrubTime] = useState(() => new Date());
   const mobileRowsRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
+  const splitOperation = useRef<{body:string;id:string}|null>(null);
+  const [loadError,setLoadError] = useState('');
   const [managing, setManaging] = useState<JourShift | null>(null);
   const [manageMode, setManageMode] = useState<'menu' | 'offer' | 'split' | 'assign' | 'delete'>('menu');
   const [manageError, setManageError] = useState('');
@@ -164,11 +156,12 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
     setLoading(true);
     const from = days[0].toISOString();
     const to = new Date(days[days.length - 1].getTime() + 86400000).toISOString();
-    const [{ data: shiftRows }, { data: offerRows }, { data: absenceRows }] = await Promise.all([
+    const [{ data: shiftRows, error: shiftError }, { data: offerRows, error: offerError }, { data: absenceRows, error: absenceError }] = await Promise.all([
       supabase.from('vihem_jour_shifts').select('*').eq('organisation_id', organisationId).lt('starts_at', to).gt('ends_at', from).order('starts_at'),
       supabase.from('vihem_jour_swap_offers').select('*').eq('organisation_id', organisationId).in('status', ['open', 'claimed']),
       supabase.rpc('vihem_jour_absence_overlaps', { p_from: dateKey(days[0]), p_to: dateKey(days[days.length - 1]) }),
     ]);
+    setLoadError((shiftError || offerError || absenceError)?.message || '');
     setShifts((shiftRows || []) as JourShift[]);
     setOffers((offerRows || []) as JourSwapOffer[]);
     setAbsences((absenceRows || []) as { user_id: string; start_date: string; end_date: string }[]);
@@ -379,19 +372,12 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
     setManageSaving(true);
     setManageError('');
     try {
-      const { error: shrinkErr } = await supabase.from('vihem_jour_shifts').update({ ends_at: splitDate.toISOString() }).eq('id', managing.id);
-      if (shrinkErr) throw shrinkErr;
-      const { error: insertErr } = await supabase.from('vihem_jour_shifts').insert({
-        organisation_id: organisationId,
-        duty_type: managing.duty_type,
-        user_id: splitSecondOwner || null,
-        starts_at: splitDate.toISOString(),
-        ends_at: managing.ends_at,
-        source: 'manual',
-        notes: managing.notes,
-        created_by: userId,
-      });
-      if (insertErr) throw insertErr;
+      const payload={p_id:managing.id,p_revision:managing.updated_at,p_split:splitDate.toISOString(),p_end:managing.ends_at,p_owner:splitSecondOwner||null};
+      const body=JSON.stringify(payload);
+      if(!splitOperation.current || splitOperation.current.body!==body) splitOperation.current={body,id:crypto.randomUUID()};
+      const {error:splitError}=await supabase.rpc('vihem_split_jour_shift',{...payload,p_child:splitOperation.current.id});
+      if(splitError) throw splitError;
+      splitOperation.current=null;
       setManaging(null);
       load();
     } catch (err) {
@@ -435,9 +421,10 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
 
   return (
     <Card className="overflow-hidden">
+      {loadError && <div role="alert" className="p-4 text-sm text-red-700">{loadError}<Button variant="secondary" size="sm" onClick={() => void load()}>Försök igen</Button></div>}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
         <div>
-          <h2 className="font-semibold text-slate-900">Dagbesked</h2>
+          <h2 className="font-semibold text-slate-900">Jouröversikt</h2>
           <p className="text-sm text-slate-500">Vem som har jour, {windowDays} {windowDays === 1 ? 'dag' : 'dagar'} framåt från valt datum.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -453,9 +440,9 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
             ))}
           </div>
           <div className="flex gap-2">
-            <Button size="sm" variant="secondary" onClick={() => { const next = new Date(anchor); next.setDate(anchor.getDate() - windowDays); setAnchor(next); }}><ArrowLeft className="h-4 w-4" /></Button>
+            <Button size="sm" variant="secondary" onClick={() => { const next = new Date(anchor); next.setDate(anchor.getDate() - windowDays); setAnchor(next); }}><ArrowLeft aria-label="Föregående period" className="h-4 w-4" /></Button>
             <Button size="sm" variant="secondary" onClick={() => setAnchor(anchorForMode(viewMode, new Date()))}>Idag</Button>
-            <Button size="sm" variant="secondary" onClick={() => { const next = new Date(anchor); next.setDate(anchor.getDate() + windowDays); setAnchor(next); }}><ArrowRight className="h-4 w-4" /></Button>
+            <Button size="sm" variant="secondary" onClick={() => { const next = new Date(anchor); next.setDate(anchor.getDate() + windowDays); setAnchor(next); }}><ArrowRight aria-label="Nästa period" className="h-4 w-4" /></Button>
           </div>
         </div>
       </div>
@@ -548,7 +535,7 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
                 <div className="space-y-2">
                   {onDutyAtScrub.map(({ user_id, duty_type }) => (
                     <div key={`${user_id}:${duty_type}`} className="flex items-center gap-2 text-sm">
-                      <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-slate-900 ${SCHEDULED_CLASS[duty_type]}`}>{initials(profilesById.get(user_id)?.name || '?')}</span>
+                      <Avatar userId={user_id} name={profilesById.get(user_id)?.name || '?'} size="sm" />
                       <Badge className={DUTY_BADGE_CLASS[duty_type]}>{DUTY_LABELS[duty_type]}</Badge>
                       <span className="truncate font-medium text-slate-800">{profilesById.get(user_id)?.name || 'Okänd'}</span>
                     </div>
@@ -627,7 +614,7 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
       )}
 
       {isAdmin && (
-        <Modal open={!!managing} onClose={() => setManaging(null)} title="Hantera jourpass">
+        <Modal open={!!managing} onClose={() => !manageSaving && setManaging(null)} title="Hantera jourpass" mobileFullscreen>
           {managing && (
             <div className="space-y-4">
               <div>

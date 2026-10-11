@@ -1,11 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import { AlertTriangle, Building2, CheckCircle2, Download, FileSpreadsheet, Home, MapPin, Package, Truck, Upload, Users } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { validateImportRows, decodeImportText } from '../lib/importValidation.mjs';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { createUserAccount } from '../lib/userAdmin';
 import { saveOrShareFile } from '../lib/utils';
-import { Button, Card, EmptyState, PageHeader } from '../components/ui';
+import { Button, Card, EmptyState, PageHeader, Modal, Select } from '../components/ui';
 
 type ImportKind = 'properties' | 'apartments' | 'tenants' | 'inventory_locations' | 'inventory_items' | 'rental_products' | 'rental_pricing' | 'rental_assets';
 type ImportRow = Record<string, string>;
@@ -44,10 +46,14 @@ const templateRows: Record<ImportKind, ImportRow[]> = {
   rental_assets: [{ product_name: 'Släpvagn 750 kg', product_slug: 'slapvagn-750-kg', name: 'Släpvagn 1', internal_identifier: 'SLAP-001', registration_number: 'ABC123', serial_number: '', status: 'available', active: 'true', location: '', notes: '' }],
 };
 
+function checkedRows<T>(result:{data:T[]|null;error:{message:string}|null}):T[]{if(result.error)throw new Error(result.error.message);return result.data||[];}
 function clean(value: unknown) { return String(value ?? '').trim(); }
 function readRows(file: File): Promise<ImportRow[]> {
   return file.arrayBuffer().then(buffer => {
-    const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
+    const textFile = /\.(csv|txt)$/i.test(file.name);
+    const workbook = textFile
+      ? XLSX.read(decodeImportText(buffer), { type: 'string', cellDates: false })
+      : XLSX.read(buffer, { type: 'array', cellDates: false });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     return (XLSX.utils.sheet_to_json(sheet, { defval: '' }) as Record<string, unknown>[]).map(row => Object.fromEntries(Object.entries(row).map(([key, value]) => [key.trim().toLowerCase(), clean(value)])));
   });
@@ -68,6 +74,12 @@ export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page
   const [results, setResults] = useState<ImportResult[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [confirm,setConfirm]=useState(false);
+  const [progress,setProgress]=useState(0);
+  const importLock=useRef(false);
+  const operations=useRef(new Map<number,{id:string;qr:string;done?:boolean}>());
+  useUnsavedChanges({kind,rows}, rows.length>0 && !results.length);
+  const canImport=user?.role==='admin'||user?.role==='superadmin';
 
   const required = useMemo(() => {
     if (kind === 'properties') return ['name', 'address', 'city', 'zip'];
@@ -79,7 +91,7 @@ export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page
     if (kind === 'rental_pricing') return ['product_slug', 'rule_type', 'price'];
     return ['product_name', 'name'];
   }, [kind]);
-  const rowErrors = useMemo(() => rows.map((row, index) => ({ row: index + 2, message: required.filter(field => !clean(row[field])).map(field => `saknar ${field}`).join(', ') })).filter(item => item.message), [rows, required]);
+  const rowErrors = useMemo(() => validateImportRows(rows,required,kind),[rows,required,kind]);
 
   async function downloadExcelTemplate() {
     const workbook = XLSX.utils.book_new();
@@ -92,20 +104,25 @@ export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page
   }
 
   async function importRows() {
-    if (!user?.organisation_id || rowErrors.length || !rows.length) return;
+    if (!canImport || !user?.organisation_id || rowErrors.length || !rows.length || importLock.current) return;
+    importLock.current=true;setConfirm(false);setProgress(0);
     setBusy(true); setError(''); setResults([]); const output: ImportResult[] = [];
     try {
       if (kind === 'properties') {
-        const existing = (await supabase.from('vihem_properties').select('id,name,address').eq('organisation_id', user.organisation_id)).data || [];
+        const existing = checkedRows(await supabase.from('vihem_properties').select('id,name,address').eq('organisation_id', user.organisation_id));
         for (const [index, row] of rows.entries()) {
+          setProgress(index+1);
           const duplicate = existing.find(item => item.name.toLowerCase() === clean(row.name).toLowerCase() && item.address.toLowerCase() === clean(row.address).toLowerCase());
           if (duplicate) { output.push({ row: index + 2, status: 'skipped', message: 'Fastigheten finns redan.' }); continue; }
-          const result = await supabase.from('vihem_properties').insert({ organisation_id: user.organisation_id, name: clean(row.name), address: clean(row.address), city: clean(row.city), zip: clean(row.zip), description: clean(row.description), contact_info: {} });
+          const result = await supabase.from('vihem_properties').insert({ organisation_id: user.organisation_id, name: clean(row.name), address: clean(row.address), city: clean(row.city), zip: clean(row.zip), description: clean(row.description), contact_info: {} }).select('id,name,address').single();
+          if(!result.error) existing.push(result.data);
           output.push(result.error ? { row: index + 2, status: 'error', message: result.error.message } : { row: index + 2, status: 'created', message: 'Fastighet skapad.' });
         }
       } else if (kind === 'apartments') {
         const [properties, apartments, companies] = await Promise.all([supabase.from('vihem_properties').select('id,name,address').eq('organisation_id', user.organisation_id), supabase.from('vihem_apartments').select('id,property_id,apartment_number').eq('organisation_id', user.organisation_id), supabase.from('vihem_companies').select('id,name,legal_name,organisation_number').eq('organisation_id', user.organisation_id)]);
+        [properties,apartments,companies].forEach(result=>{if(result.error)throw new Error(result.error.message);});
         for (const [index, row] of rows.entries()) {
+          setProgress(index+1);
           const property = (properties.data || []).find(item => item.name.toLowerCase() === clean(row.property_name).toLowerCase() && (!clean(row.property_address) || item.address.toLowerCase() === clean(row.property_address).toLowerCase()));
           if (!property) { output.push({ row: index + 2, status: 'error', message: `Hittar inte fastigheten "${row.property_name}".` }); continue; }
           if ((apartments.data || []).some(item => item.property_id === property.id && String(item.apartment_number) === clean(row.apartment_number))) { output.push({ row: index + 2, status: 'skipped', message: 'Lägenheten finns redan på fastigheten.' }); continue; }
@@ -114,12 +131,14 @@ export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page
           if ((companyName || companyNumber) && !company) { output.push({ row: index + 2, status: 'error', message: `Hittar inte bolaget "${companyName || companyNumber}".` }); continue; }
           let keyIds: unknown[] = []; let networkOutletIds: unknown[] = [];
           try { if (clean(row.key_ids)) keyIds = JSON.parse(row.key_ids); if (clean(row.network_outlet_ids)) networkOutletIds = JSON.parse(row.network_outlet_ids); } catch { output.push({ row: index + 2, status: 'error', message: 'key_ids och network_outlet_ids måste vara giltig JSON, exempelvis [] eller ["K1"].' }); continue; }
-          const result = await supabase.from('vihem_apartments').insert({ organisation_id: user.organisation_id, property_id: property.id, apartment_number: clean(row.apartment_number), size: Number(row.size) || 0, rooms: Number(row.rooms) || 0, rent: Number(row.rent) || 0, floor: Number(row.floor) || 0, storage: clean(row.storage), parking: clean(row.parking), balcony: ['true', '1', 'ja', 'yes'].includes(clean(row.balcony).toLowerCase()), balcony_size: Number(row.balcony_size) || 0, status: clean(row.status) || 'vacant', storage_id: clean(row.storage_id), parking_spot_id: clean(row.parking_spot_id), cellar_id: clean(row.cellar_id), mailbox_id: clean(row.mailbox_id), lock_cylinder_id: clean(row.lock_cylinder_id), door_code: clean(row.door_code), entry_code_updated_at: clean(row.entry_code_updated_at) || null, key_ids: keyIds, network_outlet_ids: networkOutletIds, electricity_fuse_box: clean(row.electricity_fuse_box), electricity_meter_id: clean(row.electricity_meter_id), water_meter_id: clean(row.water_meter_id), heat_meter_id: clean(row.heat_meter_id), ventilation_unit_id: clean(row.ventilation_unit_id), last_renovation_year: clean(row.last_renovation_year) ? Number(row.last_renovation_year) : null, technical_notes: clean(row.technical_notes), company_id: company?.id || null });
+          const result = await supabase.from('vihem_apartments').insert({ organisation_id: user.organisation_id, property_id: property.id, apartment_number: clean(row.apartment_number), size: Number(row.size) || 0, rooms: Number(row.rooms) || 0, rent: Number(row.rent) || 0, floor: Number(row.floor) || 0, storage: clean(row.storage), parking: clean(row.parking), balcony: ['true', '1', 'ja', 'yes'].includes(clean(row.balcony).toLowerCase()), balcony_size: Number(row.balcony_size) || 0, status: clean(row.status) || 'vacant', storage_id: clean(row.storage_id), parking_spot_id: clean(row.parking_spot_id), cellar_id: clean(row.cellar_id), mailbox_id: clean(row.mailbox_id), lock_cylinder_id: clean(row.lock_cylinder_id), door_code: clean(row.door_code), entry_code_updated_at: clean(row.entry_code_updated_at) || null, key_ids: keyIds, network_outlet_ids: networkOutletIds, electricity_fuse_box: clean(row.electricity_fuse_box), electricity_meter_id: clean(row.electricity_meter_id), water_meter_id: clean(row.water_meter_id), heat_meter_id: clean(row.heat_meter_id), ventilation_unit_id: clean(row.ventilation_unit_id), last_renovation_year: clean(row.last_renovation_year) ? Number(row.last_renovation_year) : null, technical_notes: clean(row.technical_notes), company_id: company?.id || null }).select('id,property_id,apartment_number').single();
+          if(!result.error) apartments.data?.push(result.data);
           output.push(result.error ? { row: index + 2, status: 'error', message: result.error.message } : { row: index + 2, status: 'created', message: 'Lägenhet skapad.' });
         }
       } else if (kind === 'inventory_locations') {
-        const existing = (await supabase.from('vihem_inventory_locations').select('id,name,type,code,parent_location_id').eq('organisation_id', user.organisation_id)).data || [];
+        const existing = checkedRows(await supabase.from('vihem_inventory_locations').select('id,name,type,code,parent_location_id').eq('organisation_id', user.organisation_id));
         for (const [index, row] of rows.entries()) {
+          setProgress(index+1);
           const parentName = clean(row.parent_location);
           const parent = parentName ? existing.find(item => item.code.toLowerCase() === parentName.toLowerCase() || item.name.toLowerCase() === parentName.toLowerCase()) : null;
           if (parentName && !parent) { output.push({ row: index + 2, status: 'error', message: `Hittar inte överordnad lagerplats "${parentName}".` }); continue; }
@@ -134,25 +153,26 @@ export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page
           supabase.from('vihem_inventory_stock_items').select('id,article_number').eq('organisation_id', user.organisation_id),
           supabase.from('vihem_inventory_locations').select('id,name,code').eq('organisation_id', user.organisation_id),
         ]);
+        [items,locations].forEach(result=>{if(result.error)throw new Error(result.error.message);});
         const existing = items.data || [];
         for (const [index, row] of rows.entries()) {
-          if (existing.some(item => item.article_number.toLowerCase() === clean(row.article_number).toLowerCase())) { output.push({ row: index + 2, status: 'skipped', message: 'Lagerartikeln finns redan.' }); continue; }
+          setProgress(index+1);
+          if (operations.current.get(index)?.done || existing.some(item => item.article_number.toLowerCase() === clean(row.article_number).toLowerCase())) { output.push({ row: index + 2, status: 'skipped', message: 'Lagerartikeln finns redan.' }); continue; }
           const initialQuantity = Number(row.initial_quantity) || 0;
           const locationName = clean(row.initial_location);
           const location = locationName ? (locations.data || []).find(item => item.code.toLowerCase() === locationName.toLowerCase() || item.name.toLowerCase() === locationName.toLowerCase()) : null;
           if (initialQuantity > 0 && !location) { output.push({ row: index + 2, status: 'error', message: `Startsaldot kräver en lagerplats som matchar "${locationName}".` }); continue; }
-          const result = await supabase.from('vihem_inventory_stock_items').insert({ organisation_id: user.organisation_id, article_number: clean(row.article_number), name: clean(row.name), description: clean(row.description), category: clean(row.category), manufacturer: clean(row.manufacturer), supplier: clean(row.supplier), supplier_article_number: clean(row.supplier_article_number), barcode: clean(row.barcode), qr_identifier: crypto.randomUUID(), unit: clean(row.unit) || 'st', purchase_price: Number(row.purchase_price) || 0, minimum_stock: Number(row.minimum_stock) || 0, target_stock: Number(row.target_stock) || 0, reorder_quantity: Number(row.reorder_quantity) || 0, active: true, notes: clean(row.notes), created_by: user.id }).select('id').single();
-          if (result.error) { output.push({ row: index + 2, status: 'error', message: result.error.message }); continue; }
-          if (initialQuantity > 0) {
-            const transaction = await supabase.rpc('vihem_inventory_apply_transaction', { p_item_id: result.data.id, p_quantity: initialQuantity, p_transaction_type: 'stock_in', p_source_location_id: null, p_destination_location_id: location?.id || null, p_project_id: null, p_work_order_id: null, p_other_reference: 'opening_balance_import', p_notes: 'Startsaldo från import' });
-            if (transaction.error) { output.push({ row: index + 2, status: 'error', message: `Artikel skapad men startsaldo kunde inte läggas in: ${transaction.error.message}` }); continue; }
-          }
-          existing.push({ id: result.data.id, article_number: clean(row.article_number) });
+          if(!operations.current.has(index)) operations.current.set(index,{id:crypto.randomUUID(),qr:crypto.randomUUID()});
+          const result=await supabase.rpc('vihem_create_inventory_item',{p_operation:operations.current.get(index)!.id,p_item:{ article_number: clean(row.article_number), name: clean(row.name), description: clean(row.description), category: clean(row.category), manufacturer: clean(row.manufacturer), supplier: clean(row.supplier), supplier_article_number: clean(row.supplier_article_number), barcode: clean(row.barcode), qr_identifier: operations.current.get(index)!.qr, unit: clean(row.unit) || 'st', purchase_price: Number(row.purchase_price) || 0, minimum_stock: Number(row.minimum_stock) || 0, target_stock: Number(row.target_stock) || 0, reorder_quantity: Number(row.reorder_quantity) || 0, notes: clean(row.notes) },p_quantity:initialQuantity,p_location:location?.id||null});
+          if(result.error){output.push({row:index+2,status:'error',message:result.error.message});continue;}
+          operations.current.get(index)!.done=true;
+          existing.push({ id: result.data, article_number: clean(row.article_number) });
           output.push({ row: index + 2, status: 'created', message: initialQuantity > 0 ? 'Lagerartikel och startsaldo skapade.' : 'Lagerartikel skapad.' });
         }
       } else if (kind === 'rental_products') {
-        const existing = (await supabase.from('vihem_rental_products').select('id,name,slug').eq('organisation_id', user.organisation_id)).data || [];
+        const existing = checkedRows(await supabase.from('vihem_rental_products').select('id,name,slug').eq('organisation_id', user.organisation_id));
         for (const [index, row] of rows.entries()) {
+          setProgress(index+1);
           if (existing.some(item => item.slug.toLowerCase() === clean(row.slug).toLowerCase())) { output.push({ row: index + 2, status: 'skipped', message: 'Uthyrningsprodukten finns redan.' }); continue; }
           const result = await supabase.from('vihem_rental_products').insert({ organisation_id: user.organisation_id, name: clean(row.name), slug: clean(row.slug), description: clean(row.description), short_description: clean(row.short_description), category: clean(row.category), images: [], active: clean(row.active).toLowerCase() !== 'false', visible_publicly: clean(row.visible_publicly).toLowerCase() === 'true', vat_rate: clean(row.vat_rate) ? Number(row.vat_rate) : null, deposit: Number(row.deposit) || 0, quantity: Number(row.quantity) || 0, minimum_duration: Number(row.minimum_duration) || 1, maximum_duration: clean(row.maximum_duration) ? Number(row.maximum_duration) : null, pickup_instructions: clean(row.pickup_instructions), return_instructions: clean(row.return_instructions), location: clean(row.location), sort_order: Number(row.sort_order) || 0, seo_title: clean(row.seo_title), seo_description: clean(row.seo_description), created_by: user.id }).select('id,name,slug').single();
           if (result.error) output.push({ row: index + 2, status: 'error', message: result.error.message });
@@ -163,8 +183,10 @@ export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page
           supabase.from('vihem_rental_products').select('id,name,slug').eq('organisation_id', user.organisation_id),
           supabase.from('vihem_rental_pricing_rules').select('id,product_id,rule_type,price,duration,duration_unit,valid_from,valid_until').eq('organisation_id', user.organisation_id),
         ]);
+        [products,rules].forEach(result=>{if(result.error)throw new Error(result.error.message);});
         const existing = rules.data || [];
         for (const [index, row] of rows.entries()) {
+          setProgress(index+1);
           const product = (products.data || []).find(item => item.slug.toLowerCase() === clean(row.product_slug).toLowerCase());
           if (!product) { output.push({ row: index + 2, status: 'error', message: `Hittar inte uthyrningsprodukten med slug "${row.product_slug}".` }); continue; }
           const duration = Number(row.duration) || 1;
@@ -182,8 +204,10 @@ export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page
           supabase.from('vihem_rental_products').select('id,name,slug').eq('organisation_id', user.organisation_id),
           supabase.from('vihem_rental_assets').select('id,product_id,internal_identifier').eq('organisation_id', user.organisation_id),
         ]);
+        [products,assets].forEach(result=>{if(result.error)throw new Error(result.error.message);});
         const existing = assets.data || [];
         for (const [index, row] of rows.entries()) {
+          setProgress(index+1);
           const productName = clean(row.product_name); const productSlug = clean(row.product_slug);
           const product = (products.data || []).find(item => (productSlug && item.slug.toLowerCase() === productSlug.toLowerCase()) || (productName && item.name.toLowerCase() === productName.toLowerCase()));
           if (!product) { output.push({ row: index + 2, status: 'error', message: `Hittar inte uthyrningsprodukten "${productName || productSlug}".` }); continue; }
@@ -195,15 +219,21 @@ export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page
         }
       } else {
         const [properties, apartments] = await Promise.all([supabase.from('vihem_properties').select('id,name,address').eq('organisation_id', user.organisation_id), supabase.from('vihem_apartments').select('id,property_id,apartment_number').eq('organisation_id', user.organisation_id)]);
+        [properties,apartments].forEach(result=>{if(result.error)throw new Error(result.error.message);});
+        const tenants=checkedRows(await supabase.from('vihem_profiles').select('id,email').eq('organisation_id',user.organisation_id));
         for (const [index, row] of rows.entries()) {
+          setProgress(index+1);
+          if(tenants.some(p=>p.email?.toLowerCase()===clean(row.email).toLowerCase())){output.push({row:index+2,status:'skipped',message:'Kontot finns redan. Granska dess boendekoppling separat.'});continue;}
           try {
             const property = (properties.data || []).find(item => item.name.toLowerCase() === clean(row.property_name).toLowerCase());
             const apartment = property && (apartments.data || []).find(item => item.property_id === property.id && String(item.apartment_number) === clean(row.apartment_number));
             const account = await createUserAccount({ name: clean(row.name), email: clean(row.email), phone: clean(row.phone), role: 'tenant', organisation_id: user.organisation_id });
+            tenants.push({id:account.user_id,email:clean(row.email)});
             if (apartment && account.user_id) {
               const tenancy = await supabase.from('vihem_tenancies').insert({ organisation_id: user.organisation_id, tenant_id: account.user_id, property_id: property?.id || null, apartment_id: apartment.id, start_date: clean(row.start_date) || new Date().toISOString().slice(0, 10), monthly_rent: Number(row.monthly_rent) || 0, status: 'active' });
               if (tenancy.error) throw tenancy.error;
-              await supabase.from('vihem_apartments').update({ status: 'rented' }).eq('id', apartment.id);
+              const update=await supabase.from('vihem_apartments').update({ status: 'rented' }).eq('id', apartment.id);
+              if(update.error) throw new Error('Konto och hyresförhållande skapade men lägenhetsstatus kunde inte uppdateras. Granska boendekopplingen.');
             }
             output.push({ row: index + 2, status: 'created', message: apartment ? 'Konto och hyresförhållande skapade.' : 'Konto skapat utan kopplad lägenhet.', credentials: { email: clean(row.email), password: account.temp_password } });
           } catch (rowError: any) { output.push({ row: index + 2, status: 'error', message: rowError?.message || 'Kunde inte skapa hyresgästen.' }); }
@@ -211,22 +241,24 @@ export function AdminImportPage({ onNavigate: _onNavigate }: { onNavigate: (page
       }
       setResults(output);
     } catch (importError: any) { setError(importError?.message || 'Importen kunde inte slutföras.'); }
-    finally { setBusy(false); }
+    finally { setResults([...output]);importLock.current=false;setBusy(false); }
   }
 
+  if(!canImport) return <EmptyState title="Import kräver administratör" description="Kontakta en administratör i organisationen." />;
   return <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
     <PageHeader title="Importera data" subtitle="Lägg in boende-, lager- och uthyrningsdata med mall och förhandsgranskning." icon={FileSpreadsheet} />
     <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
-      <Card className="p-5"><div className="mb-5 flex flex-wrap gap-2">{(Object.keys(labels) as ImportKind[]).map(value => { const Icon = labels[value].icon; return <Button key={value} size="sm" variant={kind === value ? 'primary' : 'secondary'} onClick={() => { setKind(value); setRows([]); setResults([]); setFileName(''); }}>{<Icon className="h-4 w-4" />}{labels[value].title}</Button>; })}</div>
-        <div className="rounded-xl border border-blue-100 bg-blue-50 p-4"><h2 className="font-semibold text-blue-950">{labels[kind].title}</h2><p className="mt-1 text-sm text-blue-800">{labels[kind].description}</p><p className="mt-2 text-xs text-blue-700">Kolumner: {columns[kind].join(', ')}</p></div>
-        <div className="mt-5 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => void downloadCsv(kind)}><Download className="h-4 w-4" /> CSV-mall</Button><Button variant="secondary" onClick={() => void downloadExcelTemplate()}><Download className="h-4 w-4" /> Excel-mall (.xlsx)</Button><label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Upload className="h-4 w-4" /> Välj fil<input className="hidden" type="file" accept=".csv,.xlsx,.xls,.txt" onChange={async event => { const file = event.target.files?.[0]; if (!file) return; try { setError(''); setRows(await readRows(file)); setFileName(file.name); setResults([]); } catch { setError('Filen kunde inte läsas. Använd mallen och kontrollera rubrikerna.'); } }} /></label></div>
+      <Card className="p-5"><div className="mb-5 grid gap-3 sm:grid-cols-[1fr_auto]"><Select label="Vad vill du importera?" value={kind} disabled={busy} onChange={e=>{setKind(e.target.value as ImportKind);setRows([]);setResults([]);setFileName('');operations.current.clear();}} options={Object.entries(labels).map(([value,item])=>({value,label:item.title}))}/><p className="self-end py-3 text-sm text-slate-500">{results.length ? '3 · Resultat' : rows.length ? '2 · Granska' : '1 · Välj material'}</p></div>
+        <div className="rounded-xl border border-blue-100 bg-blue-50 p-4"><h2 className="font-semibold text-blue-950">{labels[kind].title}</h2><p className="mt-1 text-sm text-blue-800">{labels[kind].description}</p><details className="mt-2 text-sm text-blue-700"><summary className="cursor-pointer">Visa formatets kolumner</summary><p className="mt-2 break-words">{columns[kind].join(', ')}</p></details></div>
+        <div className="mt-5 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => void downloadCsv(kind)}><Download className="h-4 w-4" /> CSV-mall</Button><Button variant="secondary" onClick={() => void downloadExcelTemplate()}><Download className="h-4 w-4" /> Excel-mall (.xlsx)</Button><label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Upload className="h-4 w-4" /> Välj fil<input className="hidden" disabled={busy} aria-label="Välj importfil" type="file" accept=".csv,.xlsx,.xls,.txt" onChange={async event => { const file = event.target.files?.[0]; if (!file) return; try { setError(''); const nextRows=await readRows(file); if(!nextRows.length) throw new Error('empty'); operations.current.clear();setRows(nextRows); setFileName(file.name); setResults([]); } catch { setError('Filen kunde inte läsas. Använd mallen och kontrollera rubrikerna.'); } }} /></label></div>
         {fileName && <p className="mt-3 text-sm text-slate-600">Vald fil: <strong>{fileName}</strong> · {rows.length} rader</p>}
         {rowErrors.length > 0 && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"><p className="font-semibold">Importen kan inte starta ännu</p>{rowErrors.slice(0, 8).map(item => <p key={item.row}>Rad {item.row}: {item.message}</p>)}{rowErrors.length > 8 && <p>…och {rowErrors.length - 8} fler rader.</p>}</div>}
-        {rows.length > 0 && <><div className="mt-5 overflow-x-auto rounded-lg border border-slate-200"><table className="min-w-full text-left text-sm"><thead className="bg-slate-50"><tr>{columns[kind].map(column => <th key={column} className="px-3 py-2 font-semibold">{column}</th>)}</tr></thead><tbody>{rows.slice(0, 10).map((row, index) => <tr key={index} className="border-t border-slate-100">{columns[kind].map(column => <td key={column} className="max-w-[220px] truncate px-3 py-2">{row[column] || '—'}</td>)}</tr>)}</tbody></table></div>{rows.length > 10 && <p className="mt-2 text-xs text-slate-500">Visar de första 10 av {rows.length} rader.</p>}<Button className="mt-4" onClick={importRows} loading={busy} disabled={Boolean(rowErrors.length)}>Importera {rows.length} {labels[kind].title.toLowerCase()}</Button></>}
-        {error && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-        {results.length > 0 && <div className="mt-5 space-y-2"><h3 className="font-semibold">Importresultat</h3>{results.map(result => <div key={`${result.row}-${result.message}`} className={`rounded-lg border p-3 text-sm ${result.status === 'error' ? 'border-red-200 bg-red-50' : result.status === 'skipped' ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}><p className="font-semibold">Rad {result.row}: {result.status === 'created' ? 'Skapad' : result.status === 'skipped' ? 'Hoppades över' : 'Fel'}</p><p>{result.message}</p>{result.credentials && <p className="mt-1 font-mono text-xs">Inloggning: {result.credentials.email} · tillfälligt lösenord: {result.credentials.password}</p>}</div>)}</div>}
+        {rows.length > 0 && <><div className="mt-5 divide-y divide-slate-100 rounded-lg border border-slate-200 sm:hidden">{rows.slice(0, 10).map((row, index) => <details key={index} className="px-4 py-3"><summary className="cursor-pointer text-sm font-medium text-slate-800"><span className="mr-2 text-slate-500">{index + 1}.</span>{row.name || row.title || row.email || row[columns[kind][0]] || 'Visa uppgifter'}</summary><dl className="mt-3 space-y-2">{columns[kind].filter(column => row[column]).map(column => <div key={column} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] gap-3 text-sm"><dt className="break-words text-slate-500">{column.replace(/_/g, ' ')}</dt><dd className="break-words text-slate-800">{row[column]}</dd></div>)}</dl></details>)}</div><div className="mt-5 hidden overflow-x-auto rounded-lg border border-slate-200 sm:block"><table className="min-w-full text-left text-sm"><thead className="bg-slate-50"><tr>{columns[kind].map(column => <th key={column} className="px-3 py-2 font-semibold">{column}</th>)}</tr></thead><tbody>{rows.slice(0, 10).map((row, index) => <tr key={index} className="border-t border-slate-100">{columns[kind].map(column => <td key={column} className="max-w-[220px] truncate px-3 py-2">{row[column] || '—'}</td>)}</tr>)}</tbody></table></div>{rows.length > 10 && <p className="mt-2 text-xs text-slate-500">Visar de första 10 av {rows.length} rader.</p>}<Button className="mt-4" onClick={()=>setConfirm(true)} loading={busy} disabled={Boolean(rowErrors.length)}>Granska och importera {rows.length} {labels[kind].title.toLowerCase()}</Button></>}
+        {busy && <p role="status" className="mt-4 text-sm text-slate-600">Bearbetar rad {progress} av {rows.length}. Stäng inte sidan.</p>}{error && <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+        {results.length > 0 && <div className="mt-5 space-y-2"><h3 className="font-semibold">Importresultat</h3><p className="text-sm text-slate-600">{results.filter(r=>r.status==='created').length} skapade · {results.filter(r=>r.status==='skipped').length} överhoppade · {results.filter(r=>r.status==='error').length} fel</p>{results.map(result => <div key={`${result.row}-${result.message}`} className={`rounded-lg border p-3 text-sm ${result.status === 'error' ? 'border-red-200 bg-red-50' : result.status === 'skipped' ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}><p className="font-semibold">Rad {result.row}: {result.status === 'created' ? 'Skapad' : result.status === 'skipped' ? 'Hoppades över' : 'Fel'}</p><p>{result.message}</p>{result.credentials && <p className="mt-1 font-mono text-xs">Inloggning: {result.credentials.email} · tillfälligt lösenord: {result.credentials.password}</p>}</div>)}</div>}
       </Card>
       <Card className="h-fit p-5"><h2 className="font-semibold text-slate-900">Så gör du</h2><ol className="mt-3 space-y-3 text-sm text-slate-600"><li><strong>1.</strong> Ladda ner Excel-mallen eller CSV-mallen.</li><li><strong>2.</strong> Fyll i en rad per post och ändra inte kolumnrubrikerna.</li><li><strong>3.</strong> Importera boende i ordningen fastigheter, lägenheter, hyresgäster.</li><li><strong>4.</strong> För lager: importera lagerplatser före artiklar. Ange kod eller namn i <code>initial_location</code> om startsaldo ska läggas in.</li><li><strong>5.</strong> För uthyrning: importera produkter, priser och därefter fysiska objekt.</li><li><strong>6.</strong> Kontrollera förhandsvisningen och importresultatet.</li></ol><div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><AlertTriangle className="mr-1 inline h-4 w-4" /> Hyresgäster får nya konton. Spara de tillfälliga lösenorden säkert och dela dem separat.</div><div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900"><CheckCircle2 className="mr-1 inline h-4 w-4" /> Befintliga poster hoppas över via organisationsbundna namn, koder, artikelnummer, sluggar och interna objekts-ID:n.</div></Card>
     </div>
+    <Modal open={confirm} onClose={()=>setConfirm(false)} title="Bekräfta import" footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={()=>setConfirm(false)}>Tillbaka</Button><Button onClick={()=>void importRows()} loading={busy}>Starta import</Button></div>}><p>{rows.length} rader med {labels[kind].title.toLowerCase()} från {fileName} kommer att bearbetas i din organisation.</p><p className="mt-3 text-sm text-slate-500">Varje rad redovisas separat. Lyckade rader behålls även om senare rader misslyckas. Granska resultatet innan du försöker igen.</p></Modal>
   </div>;
 }
