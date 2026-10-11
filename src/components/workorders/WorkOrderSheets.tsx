@@ -13,7 +13,7 @@ export interface QuickAction { key: string; label: string; icon: React.ReactNode
 
 export function WorkOrderActionSheet({ open, onClose, title, actions }: { open: boolean; onClose: () => void; title: string; actions: QuickAction[] }) {
   return (
-    <Modal open={open} onClose={onClose} title={title} size="sm">
+    <Modal open={open} onClose={onClose} title={title} size="sm" disableTextSelection>
       <div className="-mx-1 space-y-1">
         {actions.map((a) => (
           <button

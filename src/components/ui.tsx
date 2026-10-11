@@ -162,12 +162,13 @@ interface ModalProps {
   footer?: React.ReactNode;
   toolbar?: React.ReactNode;
   mobileFullscreen?: boolean;
+  disableTextSelection?: boolean;
 }
 
-export function Modal({ open, onClose, title, children, footer, toolbar, mobileFullscreen = false, size = 'md' }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, toolbar, mobileFullscreen = false, disableTextSelection = false, size = 'md' }: ModalProps) {
   useScrollLock(open);
   if (!open) return null;
-  return <DialogSurface title={title} onClose={onClose} size={size} mobileFullscreen={mobileFullscreen} footer={footer} toolbar={toolbar}>{children}</DialogSurface>;
+  return <DialogSurface title={title} onClose={onClose} size={size} mobileFullscreen={mobileFullscreen} disableTextSelection={disableTextSelection} footer={footer} toolbar={toolbar}>{children}</DialogSurface>;
 }
 
 /** Samma som Modal men med smalare standardbredd -- används för snabbåtgärder (datum, ansvarig, status). */

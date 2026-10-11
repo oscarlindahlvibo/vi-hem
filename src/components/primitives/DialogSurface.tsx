@@ -52,6 +52,7 @@ export function DialogSurface({
   onClose,
   size,
   mobileFullscreen = false,
+  disableTextSelection = false,
 }: {
   title: string;
   children: ReactNode;
@@ -59,6 +60,7 @@ export function DialogSurface({
   toolbar?: ReactNode;
   onClose: () => void;
   mobileFullscreen?: boolean;
+  disableTextSelection?: boolean;
   size: "sm" | "md" | "lg" | "xl" | "xxl" | "fullscreen";
 }) {
   const id = useId(),
@@ -66,6 +68,19 @@ export function DialogSurface({
     layer = useRef<HTMLDivElement>(null),
     close = useRef(onClose);
   close.current = onClose;
+  useLayoutEffect(() => {
+    const element = panel.current;
+    if (!disableTextSelection || !element) return;
+    const clear = () => window.getSelection()?.removeAllRanges();
+    const block = (event: Event) => { event.preventDefault(); clear(); };
+    clear();
+    element.addEventListener("selectstart", block, true);
+    element.addEventListener("contextmenu", block);
+    return () => {
+      element.removeEventListener("selectstart", block, true);
+      element.removeEventListener("contextmenu", block);
+    };
+  }, [disableTextSelection]);
   useLayoutEffect(() => {
     const element = panel.current,
       container = layer.current;
@@ -154,7 +169,7 @@ export function DialogSurface({
         role="dialog"
         aria-modal="true"
         aria-labelledby={id}
-        className={`vihem-dialog vihem-dialog-${size} ${mobileFullscreen ? 'vihem-dialog-mobile-fullscreen' : ''}`}
+        className={`vihem-dialog vihem-dialog-${size} ${mobileFullscreen ? 'vihem-dialog-mobile-fullscreen' : ''} ${disableTextSelection ? 'vihem-no-text-selection' : ''}`}
       >
         <div className="vihem-dialog-handle" aria-hidden="true" />
         <header className="vihem-dialog-header">

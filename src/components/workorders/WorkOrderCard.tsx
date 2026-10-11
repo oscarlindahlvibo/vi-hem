@@ -171,7 +171,7 @@ export function WorkOrderCard(props: WorkOrderCardProps) {
           WebkitUserSelect: 'none',
           userSelect: 'none',
         }}
-        className={`relative flex cursor-pointer select-none items-stretch gap-3 rounded-card border bg-white px-3.5 py-3 shadow-card outline-none transition-colors focus-visible:ring-2 focus-visible:ring-vihem-blue ${
+        className={`vihem-no-text-selection relative flex cursor-pointer select-none items-stretch gap-3 rounded-card border bg-white px-3.5 py-3 shadow-card outline-none transition-colors focus-visible:ring-2 focus-visible:ring-vihem-blue ${
           selected ? 'border-vihem-blue bg-blue-50/60' : 'border-slate-200/70'
         }`}
       >

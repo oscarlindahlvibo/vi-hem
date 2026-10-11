@@ -208,3 +208,12 @@ html[data-overlay-open] .vihem-floating-nav { transform: translateY(130%); opaci
 @media (max-width: 767px) {
  .chat-workspace-active { margin-top: 0 !important; position: fixed; inset-inline: 0; top: var(--chat-top, 0px); height: var(--chat-height, 100dvh); z-index: 40; border: 0; border-radius: 0; }
 }
+
+/* Interaction surfaces must not start iOS text selection during long press.
+   Applied only to work-order cards and their action menu, never forms/details. */
+.vihem-no-text-selection,
+.vihem-no-text-selection * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
