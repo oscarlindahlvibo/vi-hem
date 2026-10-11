@@ -346,45 +346,50 @@ function ChatWorkspace({
         <section
           className={`${chat.selected ? "flex" : "hidden md:flex"} min-h-0 min-w-0 flex-1 flex-col`}
         >
+          {chat.selected && (
+            <header className="flex shrink-0 items-center gap-3 border-b bg-white p-3 pt-[max(env(safe-area-inset-top),0.75rem)] md:pt-3">
+              <button
+                aria-label="Tillbaka till konversationer"
+                type="button"
+                title="Tillbaka till konversationer"
+                className="vihem-icon-button min-h-11 min-w-11 shrink-0 text-vihem-ink"
+                onClick={() => chat.setSelected(null)}
+              >
+                <ArrowLeft />
+              </button>
+              {current && <ChatAvatar
+                name={chatTitle(current, user.id, !staff)}
+                path={current.group_image_path}
+                userId={current.chat_type === "direct" ? current.participants.find(p=>p.user_id!==user.id)?.user_id : undefined}
+              />}
+              <div className="min-w-0 flex-1">
+                <h2 className="truncate font-semibold text-vihem-ink">
+                  {current ? chatTitle(current, user.id, !staff) : "Öppnar konversation…"}
+                </h2>
+                <p className="truncate text-xs text-slate-500">
+                  {current && (!chat.online
+                    ? "Offline"
+                    : chat.connection !== "connected"
+                      ? "Återansluter…"
+                      : activity.onlineUsers.length
+                        ? "Aktiv i chatten"
+                        : current.chat_type === "group"
+                          ? `${current.participants.length} deltagare`
+                          : "VI-HEM")}
+                </p>
+              </div>
+              {current && <button
+                type="button"
+                aria-label="Konversationsinställningar"
+                className="p-2 text-xl"
+                onClick={() => setThreadMenu(current)}
+              >
+                ⋯
+              </button>}
+            </header>
+          )}
           {current ? (
             <>
-              <header className="flex shrink-0 items-center gap-3 border-b bg-white p-3 pt-[max(env(safe-area-inset-top),0.75rem)] md:pt-3">
-                <button
-                  aria-label="Tillbaka till konversationer"
-                  className="rounded-full p-2 md:hidden"
-                  onClick={() => chat.setSelected(null)}
-                >
-                  <ArrowLeft />
-                </button>
-                <ChatAvatar
-                  name={chatTitle(current, user.id, !staff)}
-                  path={current.group_image_path}
-                  userId={current.chat_type === "direct" ? current.participants.find(p=>p.user_id!==user.id)?.user_id : undefined}
-                />
-                <div className="min-w-0 flex-1">
-                  <h2 className="truncate font-semibold text-vihem-ink">
-                    {chatTitle(current, user.id, !staff)}
-                  </h2>
-                  <p className="truncate text-xs text-slate-500">
-                    {!chat.online
-                      ? "Offline"
-                      : chat.connection !== "connected"
-                        ? "Återansluter…"
-                        : activity.onlineUsers.length
-                          ? "Aktiv i chatten"
-                          : current.chat_type === "group"
-                            ? `${current.participants.length} deltagare`
-                            : "VI-HEM"}
-                  </p>
-                </div>
-                <button
-                  aria-label="Konversationsinställningar"
-                  className="p-2 text-xl"
-                  onClick={() => setThreadMenu(current)}
-                >
-                  ⋯
-                </button>
-              </header>
               {chat.error && (
                 <p
                   role="alert"

@@ -377,3 +377,7 @@ Se pass13-beta-release.md för konkret installations- och återgångsordning. Ma
 ## 2026-10-11 – mobil beta efter webbinstallation
 
 3.0(9): Xcode Cloud/lokal mobilbuild använder tvingande betaspärrar, API-nyckel/HTTPS-validering och revisionsmetadata. Privacy-resurs och kameratexter, Android backup avstängd. TypeScript/chat/premium/mobile checks, iOS unsigned archive/simulatorstart och Android releasebundle PASS; lint 0/78. 13 äldre chattreferenser privat kopierade/checksummerade och åtkomstprovade; runtimefel i Storage-DDL rättat via 20261013100000 efter service-role rollbackprov. Original bevarade. Distribution-signering/fysiska enheter/Firebase/externaler kvar; se mobile-beta-release.md. Ingen native-publicering.
+
+## 2026-10-11 – lämna aktiv chatt
+
+Tillbakaknapp på alla skärmstorlekar, även utan hämtad konversation eller vid laddfel; minst 44 px tryckyta. Ingen ändring av meddelanden, medlemskap eller utkast. TypeScript/build/chat-invarianter/riktad lint PASS. Browser med isolerade hook-fixtures: laddad/laddar/fel × 390/768/1440, klick återställer listan och chat-focus=false PASS; representativa bilder granskade. Fysisk enhet och liveinstallation ej verifierade.
