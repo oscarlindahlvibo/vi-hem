@@ -15,6 +15,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea, SearchInput, Tabs, Avatar } from '../components/ui';
 import { formatDateTime } from '../lib/utils';
+import { SupplierProductSearch } from '../components/SupplierProductSearch';
 import type { PurchaseItem } from '../types';
 
 type PurchaseStatusFilter = 'open' | 'all' | 'purchased' | 'cancelled';
@@ -374,7 +375,7 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
               label="Butik"
               value={form.store_name}
               onChange={(event) => setForm({ ...form, store_name: event.target.value })}
-              placeholder="T.ex. Bauhaus, IKEA, Ahlsell"
+              placeholder="T.ex. Jula, Biltema, Ahlsell"
             />
             <Input
               label="Produkt"
@@ -383,6 +384,8 @@ export function PurchaseListPage({ onNavigate: _onNavigate }: { onNavigate: (pag
               placeholder="Vad behöver köpas?"
             />
           </div>
+
+          <SupplierProductSearch query={form.item_name} disabled={saving} />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
