@@ -4,6 +4,8 @@ Status efter pass12: **60/60 aktiva områden individuellt bearbetade, 0 ej påb�
 
 Passstatus skiljer mellan **Ej påbörjad**, **Implementerad** (beskriven omfattning), **QA-verifierad för webb**, **Releaseblockerad** och **Releaseklar**. Faktisk verifiering och kvarvarande arbete redovisas separat. Implementerad är ingen garanti för hela modulens DoD. Full release har fortsatt blockerare enligt pass9. För den uttryckligen begränsade betan gäller istället pass13-beta-release.md: externa filfunktioner spärrade, äldre privata filer i karantän och separat installationsgodkännande. Ingen rad har därmed automatiskt blivit Releaseklar.
 
+Mobilkontroll 2026-10-11: begränsad 3.0(9) byggd för iOS/Android; simulatorstart PASS. 13 äldre chattreferenser har nu privat åtkomst med deltagar-/anonym-/cross-org-prov. Distribution/native/externaler kvar enligt mobile-beta-release.md; full DoD-status oförändrad.
+
 | Vy/modul | Passstatus | Individuell ändring | Faktisk verifiering | Återstående |
 |---|---|---|---|---|
 | src/components/LoginPage.tsx | Implementerad | Fokuserad återställning, kopplade labels/autocomplete, mobilfält, dubbelsubmit-lås och nätverksfel | QA lösenordsinloggning och återställningsnavigation 390/1440; inga mejl/BankID | Riktig BankID och mejltransport/native ej verifierade |

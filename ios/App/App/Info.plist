@@ -34,9 +34,9 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VI-HEM behöver mikrofonen för att spela in röstmeddelanden i chatten.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>VI-HEM använder kameran för att skanna kvitton och leverantörsfakturor.</string>
+	<string>VI-HEM använder kameran för profilbilder, chattbilagor och skanning av kvitton och dokument.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>VI-HEM behöver åtkomst till bilder när du väljer ett underlag att skanna.</string>
+	<string>VI-HEM behöver åtkomst till de bilder du väljer för profil, chatt eller dokument.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>VI-HEM behöver åtkomst för att spara skannade underlag när du väljer det.</string>
 	<key>LSRequiresIPhoneOS</key>

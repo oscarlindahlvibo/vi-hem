@@ -57,10 +57,7 @@ export VITE_PUBLIC_APP_URL
 # Environment Variables in App Store Connect, not here.
 echo "=== Checking required VITE_* environment variables ==="
 stage="production environment validation"
-npm run release:check
-
-stage="Vite web build"
-npm run build
+npm run mobile:build
 stage="Capacitor iOS sync"
 npx cap sync ios
 

@@ -14,7 +14,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "release:check": "node scripts/check-release.mjs",
-    "mobile:sync": "npm run build && npx cap sync",
+    "mobile:sync": "npm run mobile:build && npx cap sync",
     "mobile:ios": "npx cap open ios",
     "mobile:android": "npx cap open android",
     "viborent:dev": "vite --config apps/viborent/vite.config.ts",
@@ -28,7 +28,9 @@
     "test:chat:integration": "node scripts/chat-integration-check.mjs",
     "test:premium": "node scripts/premium/checks.mjs",
     "test:premium:profile": "node scripts/premium/profile-integration.mjs",
-    "test:premium:workorders": "node scripts/premium/workorder-integration.mjs"
+    "test:premium:workorders": "node scripts/premium/workorder-integration.mjs",
+    "mobile:build": "node scripts/build-mobile-release.mjs",
+    "test:mobile-release": "node scripts/check-mobile-release-config.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
