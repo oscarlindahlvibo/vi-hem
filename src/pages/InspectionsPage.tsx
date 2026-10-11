@@ -1,3 +1,4 @@
+import { betaExternalRestricted, betaArchiveNotice } from '../lib/betaCapabilities';
 import { hasRoomAssessment } from '../lib/inspections/roomAssessment';
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
@@ -310,6 +311,7 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
     savedDraft.current = data; setSelectedInspection(data); return data;
   };
   const uploadPhotos = async (files: File[], roomIndex?: number) => {
+    if (betaExternalRestricted) { setInspectionError(betaArchiveNotice); return; }
     if (!files.length || uploadLock.current) return;
     uploadLock.current = true; setUploadingPhoto(true); setInspectionError('');
     try {
@@ -369,6 +371,7 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
   };
 
   const handleSaveInspection = async (status: 'draft' | 'completed') => {
+    if (betaExternalRestricted && status === 'completed') { setInspectionError(betaArchiveNotice); return; }
     if (saveLock.current || uploadLock.current) return;
     if (status === 'completed' && pendingPhotos.length) { setInspectionError('Försök igen med väntande bilder innan protokollet färdigställs.'); return; }
     saveLock.current = true; setSavingInspection(true); setInspectionError('');
@@ -584,6 +587,8 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
         )}
       </div>
 
+      {betaExternalRestricted && <p role="status" className="mx-auto mb-4 max-w-7xl rounded-xl bg-blue-50 p-4 text-sm text-blue-900">{betaArchiveNotice}</p>}
+
       {/* ═══ INSPECTION MODAL ═══════════════════════════════════════════════ */}
       <Modal mobileFullscreen open={showInspectionModal} onClose={requestInspectionClose} title={selectedInspection ? 'Redigera besiktning' : 'Ny besiktning'} size="xl" toolbar={<nav aria-label="Besiktningssteg"><Tabs tabs={[{key:'object',label:'Objekt'},{key:'rooms',label:'Rum'},{key:'summary',label:'Sammanfattning'}]} active={inspectionStep} onChange={step=>{if(!savingInspection&&!uploadingPhoto)setInspectionStep(step);}}/></nav>} footer={<>
           {inspectionError&&<p role="alert" className="mb-3 text-sm text-red-700">{inspectionError}</p>}
@@ -591,12 +596,13 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
           <div className="flex justify-end gap-2">
             <Button variant="secondary" disabled={savingInspection||uploadingPhoto} onClick={requestInspectionClose} size="sm" className="hidden sm:inline-flex">Avbryt</Button>
             <Button variant="secondary" onClick={() => handleSaveInspection('draft')} loading={savingInspection} disabled={!inspectionForm.apartment_id||uploadingPhoto} size="sm" className="flex-1 whitespace-nowrap sm:flex-none">Spara utkast</Button>
-            <Button variant="primary" onClick={() => inspectionStep==='summary' ? handleSaveInspection('completed') : setInspectionStep('summary')} loading={savingInspection} disabled={!inspectionForm.apartment_id||uploadingPhoto} size="sm" className="gap-1 flex-1 sm:flex-none">
+            <Button variant="primary" onClick={() => inspectionStep==='summary' ? handleSaveInspection('completed') : setInspectionStep('summary')} loading={savingInspection} disabled={!inspectionForm.apartment_id||uploadingPhoto||(betaExternalRestricted&&inspectionStep==='summary')} size="sm" className="gap-1 flex-1 sm:flex-none">
               <CheckCircle className="w-4 h-4" />{inspectionStep==='summary' ? 'Slutför' : 'Granska'}
             </Button>
           </div>
         </>}>
         <fieldset disabled={savingInspection||uploadingPhoto} className="mx-auto min-w-0 max-w-3xl space-y-5">
+          {betaExternalRestricted && <p role="status" className="text-sm text-vihem-muted">{betaArchiveNotice}</p>}
           {inspectionStep==='object'&&<>
           <h3 className="text-base font-semibold text-vihem-ink">Objekt och tid</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -626,7 +632,7 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
           </>}
           {inspectionStep==='rooms'&&<>
           {pendingPhotos.length > 0 && <section aria-label="Bildarkivering" className="space-y-2 rounded-xl border border-vihem-line p-4"><h3 className="text-sm font-semibold">Bilder som väntar på arkivering</h3><p className="text-sm text-vihem-muted">Bilderna behålls lokalt i denna webbläsare för samma konto tills arkiveringen lyckas. 100 % överföring betyder att arkivering fortfarande kontrolleras.</p>{pendingPhotos.map(item => <div key={item.id} className="flex items-center justify-between gap-3 text-sm"><span className="truncate">{item.file.name} · {item.error ? 'Uppladdningen misslyckades' : item.progress < 100 ? `Laddar upp ${item.progress} %` : 'Verifierar Google Drive…'}</span>{item.error && <Button size="sm" variant="secondary" disabled={uploadingPhoto} onClick={() => void retryPhoto(item)}>Försök igen</Button>}</div>)}</section>}
-          <InspectionRooms rooms={inspectionForm.rooms} change={(index,patch)=>setInspectionForm(previous=>({...previous,rooms:previous.rooms.map((room,i)=>i===index?{...room,...patch}:room)}))} add={addRoom} remove={removeRoom} camera={setInspectionCameraRoomIndex} upload={(files,index)=>void uploadPhotos(files,index)} removePhoto={removePhoto} busy={uploadingPhoto||savingInspection||pendingPhotos.length>0}/>
+          <InspectionRooms rooms={inspectionForm.rooms} change={(index,patch)=>setInspectionForm(previous=>({...previous,rooms:previous.rooms.map((room,i)=>i===index?{...room,...patch}:room)}))} add={addRoom} remove={removeRoom} camera={setInspectionCameraRoomIndex} upload={(files,index)=>void uploadPhotos(files,index)} removePhoto={removePhoto} filesDisabled={betaExternalRestricted} busy={uploadingPhoto||savingInspection||pendingPhotos.length>0}/>
           </>}
           {inspectionStep==='summary'&&<>
             <section aria-label="Besiktningsobjekt" className="border-b border-vihem-line pb-4">
@@ -645,22 +651,22 @@ export function InspectionsPage({ onNavigate: _onNavigate }: InspectionsPageProp
                   <button type="button" aria-label={`Ta bort allmän bild ${pi+1}`} onClick={() => removePhoto(url)} className="vihem-icon-button absolute -top-2 -right-2 rounded-full bg-white text-vihem-danger shadow-sm"><X className="h-4 w-4" /></button>
                 </div>
               ))}
-              <label className="vihem-touch-target vihem-focus relative flex cursor-pointer items-center gap-2 rounded-xl border border-vihem-line px-3 py-2 text-sm font-medium text-vihem-ink hover:bg-vihem-canvas focus-within:ring-2 focus-within:ring-vihem-blue">
+              <label className={`vihem-touch-target vihem-focus relative flex cursor-pointer items-center gap-2 rounded-xl border border-vihem-line px-3 py-2 text-sm font-medium text-vihem-ink hover:bg-vihem-canvas focus-within:ring-2 focus-within:ring-vihem-blue ${betaExternalRestricted ? 'pointer-events-none opacity-50' : ''}`}>
                 <Image className="h-4 w-4" /> Välj bilder
-                <input ref={photoInputRef} type="file" accept="image/*" multiple aria-label="Välj allmänna bilder" className="sr-only" onChange={(e) => handlePhotoFile(e)} />
+                <input ref={photoInputRef} disabled={betaExternalRestricted} type="file" accept="image/*" multiple aria-label="Välj allmänna bilder" className="sr-only" onChange={(e) => handlePhotoFile(e)} />
               </label>
             </div>
-            <p className="text-sm text-vihem-muted mt-2">Välj flera bilder samtidigt, högst 10 MB per bild. Spara utkastet för att behålla bilderna i besiktningen.</p>
+            <p className="text-sm text-vihem-muted mt-2">{betaExternalRestricted ? 'Nya bilder kan läggas till när det privata Drive-arkivet har öppnats.' : 'Välj flera bilder samtidigt, högst 10 MB per bild. Spara utkastet för att behålla bilderna i besiktningen.'}</p>
           </div>
 
           <Textarea label="Allmänna noteringar" value={inspectionForm.notes} onChange={(e) => setInspectionForm({ ...inspectionForm, notes: e.target.value })} placeholder="Övergripande noteringar om lägenheten..." rows={3} />
           <Textarea label="Åtgärder krävs" value={inspectionForm.action_required} onChange={(e) => setInspectionForm({ ...inspectionForm, action_required: e.target.value })} placeholder="Beskriv åtgärder som behöver genomföras..." rows={2} />
 
-          <section className="rounded-xl bg-vihem-canvas p-4" aria-label="Sammanfattning"><h3 className="text-base font-semibold text-vihem-ink">Sammanfattning</h3><p className="mt-2 text-sm text-vihem-muted">{inspectionForm.rooms.filter(r=>r.reviewed).length} av {inspectionForm.rooms.length} rum markerade som genomgångna · {inspectionForm.rooms.filter(r=>hasRoomAssessment(r)&&r.condition==='poor').length} med dåligt skick · {inspectionForm.photo_urls.length+inspectionForm.rooms.reduce((n,r)=>n+r.photos.length,0)} bilder</p><p className="mt-2 text-sm text-vihem-muted">Spara ett utkast för att fortsätta senare. Slutför skapar en ny PDF-version. Besiktningen färdigställs först när protokollet har verifierats i Google Drive.</p></section>
+          <section className="rounded-xl bg-vihem-canvas p-4" aria-label="Sammanfattning"><h3 className="text-base font-semibold text-vihem-ink">Sammanfattning</h3><p className="mt-2 text-sm text-vihem-muted">{inspectionForm.rooms.filter(r=>r.reviewed).length} av {inspectionForm.rooms.length} rum markerade som genomgångna · {inspectionForm.rooms.filter(r=>hasRoomAssessment(r)&&r.condition==='poor').length} med dåligt skick · {inspectionForm.photo_urls.length+inspectionForm.rooms.reduce((n,r)=>n+r.photos.length,0)} bilder</p><p className="mt-2 text-sm text-vihem-muted">{betaExternalRestricted ? betaArchiveNotice : 'Spara ett utkast för att fortsätta senare. Slutför skapar en ny PDF-version. Besiktningen färdigställs först när protokollet har verifierats i Google Drive.'}</p></section>
 
           </>}
         </fieldset>
-        {inspectionStep==='summary' && selectedInspection?.id && <div className="mx-auto mt-5 max-w-3xl"><InspectionArchive key={`${selectedInspection.id}:${archiveRevision}`} inspection={selectedInspection.id} canRetry={true}/></div>}
+        {inspectionStep==='summary' && selectedInspection?.id && <div className="mx-auto mt-5 max-w-3xl"><InspectionArchive key={`${selectedInspection.id}:${archiveRevision}`} inspection={selectedInspection.id} canRetry={!betaExternalRestricted}/></div>}
       </Modal>
 
       <Modal open={confirmDiscard} onClose={()=>setConfirmDiscard(false)} title="Lämna utan att spara?" size="sm"><p className="text-sm text-vihem-muted">Du har ändrat besiktningen. Spara ett utkast för att kunna fortsätta senare.</p><div className="mt-5 flex flex-wrap justify-end gap-2"><Button variant="secondary" onClick={()=>setConfirmDiscard(false)}>Fortsätt redigera</Button><Button variant="danger" onClick={closeInspection}>Lämna utan att spara</Button></div></Modal>

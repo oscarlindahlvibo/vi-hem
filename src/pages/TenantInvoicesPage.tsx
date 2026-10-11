@@ -1,3 +1,4 @@
+import { betaExternalRestricted, betaInvoiceNotice } from '../lib/betaCapabilities';
 // Tenant portal invoice view. Accounted (self-hosted) is the source of
 // truth for the real invoice, PDF, and payment status -- this page reads
 // VI-HEM's synced local cache (vihem_accounted_invoice_links) for a fast
@@ -64,6 +65,7 @@ export function TenantInvoicesPage() {
   }, [load]);
 
   const handleOpenPdf = async (invoiceId: string, invoiceNumber: string) => {
+    if (betaExternalRestricted) { setError(betaInvoiceNotice); setFailedPdf(null); return; }
     if(openingId)return;
     setOpeningId(invoiceId);
     setError('');setFailedPdf(null);

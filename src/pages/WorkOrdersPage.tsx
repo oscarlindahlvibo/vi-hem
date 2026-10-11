@@ -1,3 +1,4 @@
+import { betaExternalRestricted, betaLegacyFileNotice } from '../lib/betaCapabilities';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { WorkOrderChatFiles } from '../components/chat/WorkOrderChatFiles';
 import { ContextChatLauncher } from '../components/chat/ContextChatLauncher';
@@ -606,6 +607,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
   const createSubmission = useRef(false);
   async function createWorkOrder() {
     if (!user || !createForm.title.trim() || createSubmission.current) return;
+    if (betaExternalRestricted && createForm.files.length) { setCreateError(betaLegacyFileNotice); return; }
     createSubmission.current = true;
 
     try {
@@ -658,6 +660,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
 
   async function uploadWorkOrderFiles(workOrderId: string, files: File[], userId: string): Promise<AttachmentItem[]> {
     if (files.length === 0) return [];
+    if (betaExternalRestricted) throw new Error(betaLegacyFileNotice);
 
     const uploaded: AttachmentItem[] = [];
     for (const file of files) {
@@ -700,6 +703,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
 
   async function deleteWorkOrderAttachment(attachment: AttachmentItem) {
     if (!selectedWorkOrder || !isStaff) return;
+    if (betaExternalRestricted) { toast.show(betaLegacyFileNotice); return; }
     if (!window.confirm(`Ta bort bilagan "${attachment.name}"?`)) return;
 
     try {
@@ -2237,7 +2241,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
               </div>
             )}
 
-            {selectedWorkOrder.attachments?.length > 0 && (
+            {selectedWorkOrder.attachments?.length > 0 && betaExternalRestricted && <p role="status" className="text-sm text-vihem-muted">{betaLegacyFileNotice}</p>}
+            {selectedWorkOrder.attachments?.length > 0 && !betaExternalRestricted && (
               <div>
                 <p className="mb-2 text-xs font-medium uppercase text-slate-500">Bilagor</p>
                 <div className="space-y-2">

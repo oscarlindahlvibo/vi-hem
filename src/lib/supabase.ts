@@ -1,6 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+// Isolated staging can proxy every API through its own origin (including TLS/VPN).
+// Production/native builds retain their configured Supabase URL.
+const supabaseUrl = import.meta.env.VITE_SUPABASE_USE_SAME_ORIGIN === 'true'
+  ? window.location.origin
+  : import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 // createClient() below throws synchronously if either value is missing, and

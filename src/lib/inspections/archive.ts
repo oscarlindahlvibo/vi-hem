@@ -1,3 +1,4 @@
+import { betaExternalRestricted, betaArchiveNotice } from '../betaCapabilities';
 import { supabase, supabaseUrl, supabaseAnonKey } from '../supabase';
 import { prepareChatImage } from '../chatMedia';
 export const driveReference = (id: string) => `vihem-drive:${id}`;
@@ -49,6 +50,7 @@ export async function prepareInspectionPhoto(original: File) {
   } finally { bitmap.close(); }
 }
 export async function archiveInspectionFile(id: string, inspection: string, kind: 'photo' | 'protocol', room: string, file: File, progress?: (percent: number) => void) {
+  if (betaExternalRestricted) throw Error(betaArchiveNotice);
   const bytes = await file.arrayBuffer();
   const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map(n => n.toString(16).padStart(2, '0')).join('');
   const { error } = await supabase.rpc('vihem_begin_inspection_file', { p_id: id, p_inspection: inspection, p_kind: kind, p_room: room, p_filename: file.name, p_mime: file.type, p_size: file.size, p_sha256: hash });
@@ -57,4 +59,4 @@ export async function archiveInspectionFile(id: string, inspection: string, kind
   return driveReference(id);
 }
 
-export async function retryInspectionArchive(id: string) { await requestArchive(id, 'archive'); }
+export async function retryInspectionArchive(id: string) { if (betaExternalRestricted) throw Error(betaArchiveNotice); await requestArchive(id, 'archive'); }

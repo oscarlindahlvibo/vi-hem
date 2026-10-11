@@ -2,7 +2,7 @@
 
 Status efter pass12: **60/60 aktiva områden individuellt bearbetade, 0 ej påbörjade**. Originalinventeringen behåller 62 rader; Finance och Finance V2 är pausade. Pass12 omfattar de tre sista områdenas huvudsakliga design-/flödesförbättringar; underflöden och full DoD redovisas fortsatt separat. **1 avgränsat funktionsområde QA-verifierat för webb** (aviseringsinkorgen); **0 hela moduler med full ursprunglig DoD**, **0 releaseklara**.
 
-Passstatus skiljer mellan **Ej påbörjad**, **Implementerad** (beskriven omfattning), **QA-verifierad för webb**, **Releaseblockerad** och **Releaseklar**. Faktisk verifiering och kvarvarande arbete redovisas separat. Implementerad är ingen garanti för hela modulens DoD. Globala releaseblockerare enligt pass9 gäller fortfarande, även när en rad endast anger Implementerad.
+Passstatus skiljer mellan **Ej påbörjad**, **Implementerad** (beskriven omfattning), **QA-verifierad för webb**, **Releaseblockerad** och **Releaseklar**. Faktisk verifiering och kvarvarande arbete redovisas separat. Implementerad är ingen garanti för hela modulens DoD. Full release har fortsatt blockerare enligt pass9. För den uttryckligen begränsade betan gäller istället pass13-beta-release.md: externa filfunktioner spärrade, äldre privata filer i karantän och separat installationsgodkännande. Ingen rad har därmed automatiskt blivit Releaseklar.
 
 | Vy/modul | Passstatus | Individuell ändring | Faktisk verifiering | Återstående |
 |---|---|---|---|---|

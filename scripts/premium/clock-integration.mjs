@@ -24,7 +24,7 @@ try {
  const last=current;const out=await perform('clockout',130,{},'Avslutande QA-kommentar');assert.equal((await staff.rpc('vihem_clock_transition',out.a)).error,null);
  const rows=await staff.from('vihem_time_entries').select('id,entry_type,comment,total_minutes,start_time,end_time,status').in('id',operations);assert.equal(rows.error,null);assert.equal(rows.data.length,6);assert.ok(rows.data.every(row=>row.end_time&&row.status==='approved'));assert.equal(rows.data.reduce((n,row)=>n+row.total_minutes,0),130);assert.equal(rows.data.filter(row=>row.entry_type==='work').reduce((n,row)=>n+row.total_minutes,0),90);
  assert.equal(rows.data.find(row=>row.id===last).comment,'Avslutande QA-kommentar');assert.equal(rows.data.find(row=>row.id===workBeforePause).comment,'','comment not copied to unrelated earlier job');
- assert.equal((await staff.from('vihem_clock_operations').select('event_at,received_at').eq('id',start.p_id).single()).data.event_at,new Date(base).toISOString().replace('.000Z','+00:00').replace('Z','+00:00'));
+ assert.equal(Date.parse((await staff.from('vihem_clock_operations').select('event_at,received_at').eq('id',start.p_id).single()).data.event_at),base);
  const status=await staff.rpc('vihem_clock_operation_status',{p_id:out.a.p_id,p_org:c.org});assert.equal(status.error,null);assert.equal(status.data.operation,out.a.p_id);
  assert.ok((await outsider.rpc('vihem_clock_operation_status',{p_id:out.a.p_id,p_org:c.org})).error);
  const summary=await staff.from('vihem_daily_work_summaries').select('comment').eq('user_id',c.users.christofer.id).eq('work_date',day).single();assert.equal(summary.error,null);assert.equal(summary.data.comment.split('Avslutande QA-kommentar').length-1,1,'retry does not repeat day comment');

@@ -27,3 +27,7 @@ dist-ssr
 android/keystore.properties
 android/*.jks
 android/*.keystore
+
+# Isolated staging/release build artifacts (may contain environment-specific public config).
+dist-staging
+dist-beta

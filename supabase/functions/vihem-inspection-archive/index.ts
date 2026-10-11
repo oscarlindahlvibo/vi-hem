@@ -19,6 +19,7 @@ Deno.serve(async req=>{
   if(!profile.active)return json({error:'Access denied'},403);
   const params=new URL(req.url).searchParams,action=params.get('action')||'archive',id=params.get('job');
   if(!['upload','archive','read'].includes(action))return json({error:'Unknown action'},400);
+  if(action!=='read'&&Deno.env.get('VIHEM_BETA_RESTRICT_EXTERNAL')==='true')return json({error:'Nya arkivfiler är tillfälligt avstängda i beta. Utkast och äldre filer bevaras.',code:'BETA_DISABLED'},503);
   if(!id||!/^[0-9a-f-]{36}$/i.test(id))return json({error:'Invalid job'},400);
   step='job';
   const job=await checked(caller.from('vihem_inspection_file_jobs').select('*').eq('id',id).single());

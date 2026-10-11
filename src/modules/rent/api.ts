@@ -1,3 +1,4 @@
+import { betaExternalRestricted, betaInvoiceNotice } from '../../lib/betaCapabilities';
 import { invoke } from '../finance-v2/api';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../../lib/supabase';
 import type { FinanceCompany, Invoice, InvoiceLine } from '../../types';
@@ -12,6 +13,7 @@ export async function loadRentCompanies(organisationId: string): Promise<Finance
   return data || [];
 }
 export async function loadInvoiceCustomers(companyId: string, ids: string[]) {
+  if (betaExternalRestricted) return [];
   const result: { id: string; accounted_customer_id: string }[] = [];
   for (let offset = 0; offset < ids.length; offset += 20) {
     const response = await invoke<{ data: typeof result }>('vihem-rent-overview', { action: 'invoice_customers', company_id: companyId, invoice_link_ids: ids.slice(offset, offset + 20) });
@@ -34,6 +36,7 @@ export async function cancelRentChange(companyId: string, change: RentChange) {
 }
 export async function getRentInvoicePdf(companyId: string, invoiceId: string, accounted: boolean): Promise<Blob> {
   if (accounted) {
+    if (betaExternalRestricted) throw new Error(betaInvoiceNotice);
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('Logga in igen för att öppna fakturan.');
     const response = await fetch(`${supabaseUrl}/functions/v1/vihem-rent-overview`, { method: 'POST', headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'invoice_pdf', company_id: companyId, invoice_link_id: invoiceId }) });

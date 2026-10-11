@@ -1,3 +1,4 @@
+import { betaExternalRestricted, betaLegacyFileNotice } from '../lib/betaCapabilities';
 // Fleet Manager: register över fordon/maskiner/släp, med skador,
 // service, besiktningar, mätarhistorik, däck, dokument, kostnader,
 // checklistor och telematik-förberedelse. Återanvänder befintliga
@@ -64,6 +65,7 @@ function describeError(err: unknown): string { if (err && typeof err === 'object
 async function uploadFleetFile(
   file: File, bucket: string, orgId: string, folder: string, userId: string, sourceType: string, sourceId: string
 ): Promise<AttachmentItem> {
+  if (betaExternalRestricted) throw new Error(betaLegacyFileNotice);
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
   const path = `${orgId}/${folder}/${crypto.randomUUID()}-${safeName}`;
   const upload = await supabase.storage.from(bucket).upload(path, file, { upsert: false, contentType: file.type });

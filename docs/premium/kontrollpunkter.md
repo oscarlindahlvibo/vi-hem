@@ -364,3 +364,12 @@ PASS: TypeScript/build/mobilebundle, premium- och bildbatch-invarianter; lint 0 
 Browser API-mock: Ekängen sök/FAQ/tabbutkast/sparfel/retry, skärminställning sparfel/retry samt initialfel spärrar defaults, skärmvisning bevarar data vid laddfel. Representativa före/efter 390/768/1440, riktig QA-presentation med 32 arbetsordrar. Bilder under outputs/pass12; ingen verklig webbpublicering/Beds24/Stripe/åtkomstlänk-mutation. Full display-vy/roll/långdriftsmatris ej körd. Temporär harness avlägsnad, inga nya öppna teststämplingar.
 
 **1 avgränsad webbinkorg QA-verifierad, 0 full-DoD-moduler, 0 releaseklara.** 60/60 avser individuell implementation, inte allmän slutverifiering. Main/produktion oförändrade. Nästa etapp: frys bred designomfattning; välj sammanhängande releasekandidater för samlad riskbaserad webbregression, externa Drive/Accounted-prov, legacy-fil-/appmigrering, fysisk mobil och separat säkerhetsgodkännande enligt releaseplanen.
+
+
+## Pass 13 – begränsad beta och verkligt återställningsprov
+
+Bas 8f3a45b; 60/60 aktiva implementerade, inga nya full-DoD-markeringar. Isolerad riktig QA-webb/Edge på loopback; fakturering/utskick/signering avstängda där. Beta-build spärrar nya besiktningsfiler/slutprotokoll och Accounted-PDF; textutkast/revisioner bevaras. Separat filkarantän kandidat stänger fem gamla publika person-/verksamhetsytor utan radering, medan nya privata chattfiler och webbplatsbilder berörs inte. Detta kräver uttrycklig acceptans av tillfälligt låsta gamla bilagor.
+
+Backup checksummor/gzip och verklig återställning (67 fysiska filer, 16 dokument, 70 Auth, 0 besiktningar) i nätverkslös engångskopia PASS efter dokumenterad Supabase bootstrap/GraphQL-anpassning, 0 SQL-fel. 36/36 migrationer + karantän PASS; befintliga poster och andra publika appars datahash oförändrade. Riktig Storage HTTP/JWT/signed-denial/service recovery PASS. QA access/klocka/lager/fastigheter/revisioner samt browser utkast save/reload/återöppning PASS; fysik/native/Drive/Accounted ej verifierade. Klocktestets datumjämförelse tolererar PostgRESTs trimning av millisekundnollor utan att ändra tidsregler.
+
+Se pass13-beta-release.md för konkret installations- och återgångsordning. Main 2b935b7 och befintlig installation orörda; gemensam Edge-omstart kan ge kort avbrott för andra appar och ingår därför i godkännandebeslutet. Ingen installation före svar.
