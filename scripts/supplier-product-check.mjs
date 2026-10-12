@@ -16,7 +16,7 @@ try {
  const products=await parser.fetchProducts(url,async()=>new Response(html,{headers:{'content-type':'text/html'}}));assert.equal(products.length,2);assert.equal(products[0].sku,'18-319');assert.equal(products[0].name,'Skruv ÅÄÖ');
  for(const response of [new Response('',{status:302,headers:{Location:'http://127.0.0.1'}}),new Response('',{status:403}),new Response('not html'),new Response('x'.repeat(2000001),{headers:{'content-type':'text/html'}})])await assert.rejects(parser.fetchProducts(url,async()=>response));
  let client=await fs.readFile(path.join(root,'src/lib/supplierProducts.ts'),'utf8');client=client.replace("import { registerPlugin } from '@capacitor/core';",'const registerPlugin = <T>() => ({} as T);');
- const {validateSupplierProduct,productExtractionScript}=await module(client,'client');
+ const {validateSupplierProduct,productExtractionScript,customStoreUrl,validateCustomSupplierProduct}=await module(client,'client');
  const document={querySelector(selector){return selector==='main'?{innerText:'Artnr. 18-319'}:{textContent:'Skruv ÅÄÖ'};},querySelectorAll(){return [{textContent:JSON.stringify({'@graph':[{'@type':'Product',name:'Wrong related item',sku:'wrong'},{'@type':'Product',name:'Skruv ÅÄÖ',sku:'18-319'}]})}];}};
  const result=vm.runInNewContext(productExtractionScript,{document,location:{href:url}});assert.equal(validateSupplierProduct(result).sku,'18-319');assert.equal(validateSupplierProduct(result).supplier,'Biltema');assert.throws(()=>validateSupplierProduct({name:'Bad',url:'javascript:alert(1)'}));
  const retailers = [
@@ -30,7 +30,7 @@ try {
   assert.equal(validateSupplierProduct(result[0]).supplier,supplier);
   assert.throws(()=>parser.productUrl(link.replace(new URL(link).hostname,new URL(link).hostname+'.evil.test')));
  }
- const nativeByggmax=vm.runInNewContext(productExtractionScript,{document:{querySelector(selector){return selector==='main'?{innerText:'ART.NR: 45521'}:selector.startsWith('meta')?null:{textContent:'Lantbruksströ'};},querySelectorAll(){return [];}},location:{href:retailers[0][0]}});
+ const nativeByggmax=vm.runInNewContext(productExtractionScript,{document:{querySelector(selector){return selector==='main'?{innerText:'ART.NR: 45521'}:selector.startsWith('meta')?null:{textContent:'Lantbruksströ',closest:()=>null};},querySelectorAll(){return [];}},location:{href:retailers[0][0]}});
  assert.equal(validateSupplierProduct(nativeByggmax).sku,'45521');
  for(const suffix of ['/', '']) {
   const link='https://www.jula.se/catalog/bygg/maskeringstejp-021489'+suffix;
@@ -45,5 +45,16 @@ try {
  assert.equal(searchRequest.searchParams.get('q'),'skruv & bits');assert.equal(hits.length,1);assert.equal(hits[0].name,'Skruv ÅÄÖ');assert.equal(hits[0].sku,'123');
  await assert.rejects(parser.searchProducts('skruv','https://127.0.0.1',async()=>{throw Error('must not fetch');}));
  assert.deepEqual(await parser.searchProducts('unknown','Byggmax',async()=>new Response('<h1>No results</h1>',{headers:{'content-type':'text/html'}})),[]);
+ assert.equal(customStoreUrl('www.autodoc.se').href,'https://www.autodoc.se/');
+ for(const raw of ['http://www.autodoc.se','https://127.0.0.1','https://[::1]','https://user:password@www.autodoc.se','https://office.local','https://site.test','https://localhost','https://2130706433','https://www.autodoc.se:444'])assert.throws(()=>customStoreUrl(raw));
+ const custom={name:'JURID Bromsbelägg',sku:'573186D',url:'https://www.autodoc.se/jurid/9951466',productConfirmed:true};
+ assert.equal(validateCustomSupplierProduct(custom,'https://autodoc.se').supplier,'Autodoc');
+ assert.throws(()=>validateCustomSupplierProduct({...custom,productConfirmed:false},'https://www.autodoc.se'));
+ assert.throws(()=>validateCustomSupplierProduct({...custom,url:'https://www.autodoc.se.evil.com/jurid/9951466'},'https://www.autodoc.se'));
+ // Backend remains deliberately limited to its original five suppliers.
+ assert.throws(()=>parser.productUrl(custom.url));
+ const customDoc={querySelector(selector){return selector==='main'?{innerText:'Artikelnummer: 573186D EAN: 4044197846801'}:selector.startsWith('meta')?null:{textContent:'JURID Bromsbelägg',closest:()=>null};},querySelectorAll(){return [{textContent:JSON.stringify({'@type':'Product',name:'JURID Bromsbelägg',sku:'573186D'})}];}};
+ const extracted=vm.runInNewContext(productExtractionScript,{document:customDoc,location:{href:custom.url,origin:'https://www.autodoc.se',pathname:'/jurid/9951466'},URL});
+ assert.equal(extracted.productConfirmed,true);assert.equal(extracted.sku,'573186D');
  console.log('PASS supplier URL restrictions, variants, Unicode, redirects, blocked/oversized responses, product extraction, five suppliers and review data validation');
 }finally{await fs.rm(temp,{recursive:true,force:true});}

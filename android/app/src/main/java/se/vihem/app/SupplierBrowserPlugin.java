@@ -22,7 +22,8 @@ public class SupplierBrowserPlugin extends Plugin {
     @PluginMethod public void open(PluginCall call) {
         String raw = call.getString("url", ""), script = call.getString("script", "");
         Uri initial = Uri.parse(raw);
-        if (!allowed(initial, initial.getHost()) || !java.util.Arrays.asList("www.jula.se", "www.biltema.se", "www.byggmax.se", "www.bauhaus.se", "www.jemfix.se").contains(initial.getHost()) || script.length() > 8000 || script.isEmpty()) { call.reject("Ogiltig butikssökning"); return; }
+        boolean customStore = Boolean.TRUE.equals(call.getBoolean("customStore", false));
+        if (!allowed(initial, initial.getHost()) || (!customStore && !java.util.Arrays.asList("www.jula.se", "www.biltema.se", "www.byggmax.se", "www.bauhaus.se", "www.jemfix.se").contains(initial.getHost())) || script.length() > 8000 || script.isEmpty()) { call.reject("Ogiltig butikssökning"); return; }
         getActivity().runOnUiThread(() -> {
             if (dialog != null) { call.reject("Butiksvyn är redan öppen"); return; }
             Dialog current = new Dialog(getActivity()); dialog = current;
@@ -64,9 +65,9 @@ public class SupplierBrowserPlugin extends Plugin {
                     try {
                         String json = new org.json.JSONTokener(encoded).nextValue().toString();
                         JSONObject p = new JSONObject(json); Uri selected = Uri.parse(p.optString("url"));
-                        boolean productPage = productPage(selected, p.optString("sku"));
+                        boolean productPage = customStore ? p.optBoolean("productConfirmed") : productPage(selected, p.optString("sku"));
                         if (!allowed(selected, initial.getHost()) || !productPage || p.optString("name").isEmpty() || !samePage(selected, Uri.parse(web.getUrl()))) throw new Exception();
-                        JSObject product = new JSObject(); product.put("name", p.getString("name")); product.put("sku", p.optString("sku")); product.put("url", selected.toString()); result[0].put("product", product); current.dismiss();
+                        JSObject product = new JSObject(); product.put("name", p.getString("name")); product.put("sku", p.optString("sku")); product.put("url", selected.toString()); product.put("productConfirmed", p.optBoolean("productConfirmed")); result[0].put("product", product); current.dismiss();
                     } catch (Exception error) { Toast.makeText(getActivity(), "Öppna en produktsida och välj produkten igen.", Toast.LENGTH_LONG).show(); }
                 });
             });
@@ -88,7 +89,8 @@ public class SupplierBrowserPlugin extends Plugin {
         }
     }
     private boolean allowed(Uri url, String host) {
-        return "https".equals(url.getScheme()) && host != null && host.equals(url.getHost()) && url.getUserInfo() == null && url.getPort() == -1;
+        String actual = url.getHost();
+        return "https".equals(url.getScheme()) && host != null && actual != null && actual.matches("([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,}") && !actual.matches(".*\\.(local|localhost|internal|test|invalid|example)") && host.replaceFirst("^www\\.", "").equals(actual.replaceFirst("^www\\.", "")) && url.getUserInfo() == null && url.getPort() == -1;
     }
     @Override protected void handleOnDestroy() { if (dialog != null) dialog.dismiss(); }
 }

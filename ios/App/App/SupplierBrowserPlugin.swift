@@ -2,6 +2,11 @@ import UIKit
 import WebKit
 import Capacitor
 
+private func publicStoreURL(_ url: URL) -> Bool {
+    guard url.scheme == "https", url.user == nil, url.password == nil, url.port == nil, let host = url.host?.lowercased() else { return false }
+    return host.range(of: "^([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,}$", options: .regularExpression) != nil && host.range(of: "\\.(local|localhost|internal|test|invalid|example)$", options: .regularExpression) == nil
+}
+
 class VIHEMBridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() { bridge?.registerPluginInstance(SupplierBrowserPlugin()) }
 }
@@ -14,8 +19,9 @@ public class SupplierBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
     private var active = false
 
     @objc func open(_ call: CAPPluginCall) {
+        let customStore = call.getBool("customStore") ?? false
         guard let raw = call.getString("url"), let url = URL(string: raw),
-              url.scheme == "https", ["www.jula.se", "www.biltema.se", "www.byggmax.se", "www.bauhaus.se", "www.jemfix.se"].contains(url.host ?? ""),
+              publicStoreURL(url), (customStore || ["www.jula.se", "www.biltema.se", "www.byggmax.se", "www.bauhaus.se", "www.jemfix.se"].contains(url.host ?? "")),
               url.user == nil, url.password == nil, url.port == nil,
               let script = call.getString("script"), script.count < 8000 else {
             call.reject("Ogiltig butikssökning"); return
@@ -23,7 +29,7 @@ public class SupplierBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.async {
             guard !self.active, let presenter = self.bridge?.viewController else { call.reject("Butiksvyn är redan öppen"); return }
             self.active = true
-            let page = SupplierPage(url: url, script: script) { product in
+            let page = SupplierPage(url: url, script: script, customStore: customStore) { product in
                 self.active = false
                 if let product = product { call.resolve(["product": product]) } else { call.resolve([:]) }
             }
@@ -36,6 +42,7 @@ public class SupplierBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
 
 private class SupplierPage: UIViewController, WKNavigationDelegate {
     private let initialURL: URL
+    private let customStore: Bool
     private let script: String
     private let finish: ([String: Any]?) -> Void
     private var finished = false
@@ -43,14 +50,14 @@ private class SupplierPage: UIViewController, WKNavigationDelegate {
     private var web: WKWebView!
     private var choose: UIBarButtonItem!
 
-    init(url: URL, script: String, finish: @escaping ([String: Any]?) -> Void) {
-        initialURL = url; self.script = script; self.finish = finish
+    init(url: URL, script: String, customStore: Bool, finish: @escaping ([String: Any]?) -> Void) {
+        initialURL = url; self.script = script; self.customStore = customStore; self.finish = finish
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = ["www.jula.se":"Jula", "www.biltema.se":"Biltema", "www.byggmax.se":"Byggmax", "www.bauhaus.se":"BAUHAUS", "www.jemfix.se":"jem & fix"][initialURL.host ?? ""]
+        title = ["www.jula.se":"Jula", "www.biltema.se":"Biltema", "www.byggmax.se":"Byggmax", "www.bauhaus.se":"BAUHAUS", "www.jemfix.se":"jem & fix"][initialURL.host ?? ""] ?? initialURL.host
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         // Separate WKWebView: no Capacitor bridge, app cookies or injected credentials.
@@ -83,10 +90,10 @@ private class SupplierPage: UIViewController, WKNavigationDelegate {
             guard error == nil, let data = result as? [String: Any], let name = data["name"] as? String, !name.isEmpty,
                   let resultURL = data["url"] as? String, let parsed = URL(string: resultURL), self.allowed(parsed),
                   self.samePage(parsed),
-                  self.productPage(parsed, sku: data["sku"] as? String ?? "") else {
+                  (self.customStore ? data["productConfirmed"] as? Bool == true : self.productPage(parsed, sku: data["sku"] as? String ?? "")) else {
                 self.message(error != nil ? "Produktuppgifterna kunde inte läsas. Ladda om produktsidan och försök igen." : "Produktnamnet eller produktadressen kunde inte verifieras. Vänta tills sidan laddat klart och välj produkten igen."); return
             }
-            self.complete(["name": String(name.prefix(300)), "sku": String((data["sku"] as? String ?? "").prefix(80)), "url": parsed.absoluteString])
+            self.complete(["name": String(name.prefix(300)), "sku": String((data["sku"] as? String ?? "").prefix(80)), "url": parsed.absoluteString, "productConfirmed": data["productConfirmed"] as? Bool ?? false])
         }
     }
     // WebKit and location.href can differ in fragments/URL encoding after
@@ -100,7 +107,13 @@ private class SupplierPage: UIViewController, WKNavigationDelegate {
         guard let pattern = patterns[url.host ?? ""] else { return false }
         return url.path.range(of: pattern, options: .regularExpression) != nil && (url.host != "www.bauhaus.se" || !sku.isEmpty)
     }
-    private func allowed(_ url: URL) -> Bool { url.scheme == "https" && url.host == initialURL.host && url.user == nil && url.password == nil && url.port == nil }
+    private func allowed(_ url: URL) -> Bool {
+        guard publicStoreURL(url) else { return false }
+        if !customStore { return url.host == initialURL.host }
+        let host = url.host?.replacingOccurrences(of: "^www\\.", with: "", options: .regularExpression)
+        let initial = initialURL.host?.replacingOccurrences(of: "^www\\.", with: "", options: .regularExpression)
+        return host == initial
+    }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
         // Subframes/resources may contain retailer infrastructure. Main navigation stays at retailer.

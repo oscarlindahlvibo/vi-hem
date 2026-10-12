@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { ExternalLink, Search } from 'lucide-react';
-import { supplierBrowser, productExtractionScript, validateSupplierProduct, type SupplierProduct } from '../lib/supplierProducts';
+import { supplierBrowser, productExtractionScript, validateSupplierProduct, type SupplierProduct, customStoreUrl, validateCustomSupplierProduct } from '../lib/supplierProducts';
 import { supabase } from '../lib/supabase';
 import { Button, Input } from './ui';
 
@@ -21,8 +21,22 @@ export function SupplierProductSearch({ query, disabled = false, onImport }: { q
   const [products, setProducts] = useState<SupplierProduct[]>([]);
   const [opening, setOpening] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [customStore, setCustomStore] = useState('');
   const pending = useRef(false);
   const search = query.trim();
+
+  const openCustomStore = async () => {
+          if(disabled || opening || pending.current)return;setError('');
+          try {
+            const url=customStoreUrl(customStore);
+            if(!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('SupplierBrowser')) throw new Error('Produktval från egna butiker kräver den nya mobilappen (bygge 16 eller senare).');
+            pending.current=true;setOpening(true);setProducts([]);setSearched(false);
+            const result=await supplierBrowser.open({url:url.href,script:productExtractionScript,customStore:true});
+            if(result.product)setProducts([validateCustomSupplierProduct(result.product,url.href)]);
+          } catch(failure) { setError(failure instanceof Error && failure.message !== 'Ogiltig butikssökning' ? failure.message : 'Kunde inte öppna butiken. Uppdatera appen till bygge 16 eller senare och försök igen.'); }
+          finally {pending.current=false;setOpening(false);}
+        
+  };
 
   return (
     <section aria-label="Sök hos butik" className="rounded-2xl bg-vihem-canvas p-4">
@@ -89,6 +103,11 @@ export function SupplierProductSearch({ query, disabled = false, onImport }: { q
       <p className="mt-3 text-xs leading-relaxed text-vihem-muted">
         {Capacitor.isPluginAvailable('SupplierBrowser') ? 'Öppna en produkt och tryck på Välj produkt. Granska uppgifterna här innan du lägger till dem.' : 'Byggmax: välj en artikel direkt i träfflistan. Övriga butiker har produktval i den nya mobilappen; här på webben öppnas deras webbplatser.'}
       </p>
+      <div className="mt-4 space-y-2 border-t border-[color:var(--vihem-line)] pt-3">
+        <Input label="Annan butik / hemsida" placeholder="www.autodoc.se" type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" maxLength={2000} value={customStore} disabled={disabled || opening} onChange={e=>setCustomStore(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();void openCustomStore();}}} />
+        <Button type="button" variant="secondary" disabled={disabled || opening || !customStore.trim()} onClick={openCustomStore}>Öppna butik i appen</Button>
+        <p className="text-xs leading-relaxed text-vihem-muted">Öppna artikeln, tryck Välj produkt och granska uppgifterna här. Stöd beror på butikens produktmetadata.</p>
+      </div>
       <details className="mt-3"><summary className="vihem-focus cursor-pointer text-sm text-vihem-muted">Har du redan en produktlänk?</summary><div className="mt-3 space-y-2">
         <Input label="Importera från produktlänk" value={productUrl} onChange={e=>setProductUrl(e.target.value)} placeholder="https://www.biltema.se/..." disabled={disabled || opening} type="url" />
         <Button type="button" variant="secondary" disabled={disabled || !productUrl.trim()} loading={opening} onClick={async () => {
