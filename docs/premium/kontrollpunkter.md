@@ -434,3 +434,5 @@ Klient: SUBSCRIBED bekräftar status utan obligatorisk extra system/ok; aktiv tr
 2026-10-12: användarens original-PNG för Ekängens Vandrarhem införd i Vibogruppen-portalen och installationsseed. Eget proportionerligt logoutrymme, mobil/desktop 390/1440 visuellt kontrollerade, sajtbuild PASS. Befintlig vandrarhemssajt och produktion orörda.
 
 2026-10-12: VI-HEM:s befintliga SVG-appmärke återanvänt på portalens verksamhetskort med VI-HEM-namn. Default och installationsseed uppdaterade; sajtbuild och visuella 390/1440-kontroller PASS. Ingen bildomritning eller produktionsändring.
+
+2026-10-12: publicering godkänd. Portalens privata schema/RPC/Edge installerade efter läsbar full DB-backup `/mnt/md0/supabase-backups/shared/vibogruppen-20261012T144413Z`. Publikt innehåll/logotyper, anonym adminnekning och rätt admininkorg samt ogiltigt kontaktanrop mot verklig Edge PASS, inga testärenden skapade. Webb/HTTPS behöver engångsrootsetup; installerad sudo-helper omfattar ännu inte nya domänen. Förbereder admin i mobilbygge 19 och scoperootinstaller utan Git/npm/DB-körning.
