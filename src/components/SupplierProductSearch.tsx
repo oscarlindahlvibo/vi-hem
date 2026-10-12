@@ -35,7 +35,7 @@ export function SupplierProductSearch({ query, disabled = false, onImport }: { q
             if(result.product)setProducts([validateCustomSupplierProduct(result.product,url.href)]);
           } catch(failure) { setError(failure instanceof Error && failure.message !== 'Ogiltig butikssökning' ? failure.message : 'Kunde inte öppna butiken. Uppdatera appen till bygge 16 eller senare och försök igen.'); }
           finally {pending.current=false;setOpening(false);}
-        
+
   };
 
   return (
