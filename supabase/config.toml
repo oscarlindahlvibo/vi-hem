@@ -495,3 +495,19 @@ verify_jwt = false
 # Gräv & Allservice (gavirserum.se): publikt offertformulär (ingen JWT; origin-lista, honeypot, hastighetsbegränsning och strikt validering i koden).
 [functions.vihem-grav-quote]
 verify_jwt = false
+
+# ViboRent 2.0: publika/maskinanrop autentiseras i funktionerna (Origin→domän, Stripe-signatur, delad worker-hemlighet).
+[functions.vihem-public-rental]
+verify_jwt = false
+
+[functions.vihem-rental-stripe]
+verify_jwt = false
+
+[functions.vihem-rental-access-worker]
+verify_jwt = false
+
+[functions.vihem-rental-admin]
+verify_jwt = false
+
+[functions.vihem-rental-customer-portal]
+verify_jwt = false

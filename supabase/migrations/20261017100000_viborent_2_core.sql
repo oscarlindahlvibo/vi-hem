@@ -387,6 +387,9 @@ begin
     end if;
     if v_org is null then v_org := v_prod.organisation_id;
     elsif v_org <> v_prod.organisation_id then raise exception '[E_ORG] Varukorgen innehåller produkter från olika uthyrare.'; end if;
+    if nullif(target_options ->> 'organisation_id', '') is not null and (target_options ->> 'organisation_id')::uuid <> v_org then
+      raise exception '[E_PRODUCT] Produkten hittades inte.';
+    end if;
     v_err := public.vihem_rental_check_period(v_product, v_start, v_end, v_enforce);
     if v_err is not null then raise exception '%', v_err; end if;
     v_min_start := least(coalesce(v_min_start, v_start), v_start);
@@ -713,6 +716,9 @@ begin
 
   select * into s from public.vihem_rental_settings where organisation_id = b.organisation_id;
   v_cutoff := b.start_at - make_interval(mins => coalesce(s.free_cancellation_minutes, 60));
+  -- Lås kodraderna först: kodjobbet claimar med FOR UPDATE SKIP LOCKED, så antingen hinner jobbet före (vi ser 'issuing') eller
+  -- så ser jobbet att bokningen är avbokad. Aldrig båda.
+  perform 1 from public.vihem_rental_access_codes where booking_id = b.id for update;
   select count(*) into v_issued from public.vihem_rental_access_codes where booking_id = b.id and status in ('issuing', 'issued', 'sent');
 
   if p_actor = 'customer' then
