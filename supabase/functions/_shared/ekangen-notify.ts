@@ -21,8 +21,12 @@ export async function emailGuest(admin: any, ctx: NotifyContext, booking: any, k
         `Se eller avboka din bokning: ${link}`, "", `Varmt välkommen!`, ctx.companyName,
       ]
     : [
-        `Hej ${booking.guest_name},`, "", `Din bokning ${booking.reference} är avbokad och beloppet ${money(Number(booking.total), booking.currency)} återbetalas till det kort/den betalmetod du använde.`,
-        `Det kan ta några bankdagar innan pengarna syns.`, "", ctx.companyName,
+        `Hej ${booking.guest_name},`, "",
+        `Din bokning ${booking.reference} är avbokad.`,
+        Number(booking.retained_fee) > 0
+          ? `Vi återbetalar ${money(Number(booking.refunded_amount ?? booking.total), booking.currency)} av ${money(Number(booking.total), booking.currency)}. Resterande ${money(Number(booking.retained_fee), booking.currency)} är den betalningsavgift vi själva debiteras av betalleverantören, enligt bokningsvillkoren.`
+          : `Hela beloppet ${money(Number(booking.total), booking.currency)} återbetalas.`,
+        `Pengarna går till det kort/den betalmetod du använde och kan ta några bankdagar att synas.`, "", ctx.companyName,
       ];
   try {
     await sendGmailMessage(admin, ctx.organisation_id, {

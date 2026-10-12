@@ -29,3 +29,31 @@ export async function verifySignature(rawBody: string, header: string | null): P
   const expected = [...new Uint8Array(digest)].map((v) => v.toString(16).padStart(2, "0")).join("");
   return signatures.some((s) => s.length === expected.length && s === expected);
 }
+
+export async function stripeGet(path: string) {
+  const key = stripeKey();
+  if (!key) throw new Error("STRIPE_NOT_CONFIGURED");
+  const response = await fetch(`https://api.stripe.com/v1/${path}`, { headers: { Authorization: `Bearer ${key}` } });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data?.error?.message || "Stripe-anropet misslyckades.");
+  return data;
+}
+
+export interface RefundPlan { amountMinor: number; refundMinor: number; feeMinor: number; currency: string }
+
+/**
+ * Hur mycket som återbetalas vid gratis avbokning. Med retainFee behåller vi Stripes verkliga avgift för betalningen
+ * (hämtas från balance transaction); annars återbetalas allt. Av försiktighet behålls aldrig mer än 10 % av beloppet,
+ * och saknas avgiften (eller ligger den i annan valuta) återbetalas hela beloppet.
+ */
+export async function planRefund(paymentIntentId: string, retainFee: boolean): Promise<RefundPlan> {
+  const pi = await stripeGet(`payment_intents/${encodeURIComponent(paymentIntentId)}?expand[]=latest_charge.balance_transaction`);
+  const amountMinor = Number(pi.amount_received || pi.amount || 0);
+  const currency = String(pi.currency || "sek").toLowerCase();
+  const bt = pi.latest_charge && typeof pi.latest_charge === "object" ? pi.latest_charge.balance_transaction : null;
+  let feeMinor = 0;
+  if (retainFee && bt && typeof bt === "object" && String(bt.currency).toLowerCase() === currency) {
+    feeMinor = Math.min(Math.max(Number(bt.fee) || 0, 0), Math.floor(amountMinor * 0.1));
+  }
+  return { amountMinor, refundMinor: Math.max(amountMinor - feeMinor, 0), feeMinor, currency };
+}

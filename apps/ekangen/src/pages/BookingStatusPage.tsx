@@ -61,7 +61,14 @@ export function BookingStatusPage({ reference, query }: { reference: string; que
         {booking.canCancel && !confirmCancel && <button className="btn btn-ghost mt-6" onClick={() => setConfirmCancel(true)}>Avboka (gratis till {booking.freeCancelUntil})</button>}
         {confirmCancel && (
           <div className="mt-6 rounded-xl bg-amber-50 p-4 text-left">
-            <p className="text-sm font-semibold text-amber-900">Vill du avboka? Hela beloppet återbetalas till det kort du betalade med.</p>
+            <p className="text-sm font-semibold text-amber-900">
+              Vill du avboka?{' '}
+              {booking.refundPreview
+                ? booking.refundPreview.fee > 0
+                  ? `Du får tillbaka ${kr(booking.refundPreview.refund)} av ${kr(booking.total)}. Betalningsavgiften på ${kr(booking.refundPreview.fee)} behålls enligt bokningsvillkoren.`
+                  : `Hela beloppet ${kr(booking.total)} återbetalas till det kort du betalade med.`
+                : 'Beloppet återbetalas till det kort du betalade med.'}
+            </p>
             <div className="mt-3 flex gap-2"><button className="btn btn-primary min-h-10 px-4 text-sm" onClick={cancel} disabled={busy}>{busy ? 'Avbokar...' : 'Ja, avboka'}</button><button className="btn btn-ghost min-h-10 px-4 text-sm" onClick={() => setConfirmCancel(false)}>Behåll bokningen</button></div>
           </div>
         )}
