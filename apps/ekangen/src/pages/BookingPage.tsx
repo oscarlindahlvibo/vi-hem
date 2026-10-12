@@ -63,9 +63,14 @@ export function BookingPage({ query }: { query: URLSearchParams }) {
                     <p className="mt-2 text-sm text-fjord-600">{kr(q.avgPerNight)} per natt i snitt</p>
                   </div>
                   <div className="text-right">
-                    {q.directDiscount > 0 && <p className="text-sm text-fjord-500 line-through">{kr(q.baseTotal)}</p>}
+                    {q.subtotal > q.total && <p className="text-sm text-fjord-500 line-through" title="Ordinarie pris">{kr(q.subtotal)}</p>}
                     <p className="text-2xl font-bold text-fjord-900">{kr(q.total)}</p>
-                    {q.directDiscount > 0 && <p className="text-xs font-semibold text-green-700">Du sparar {kr(q.directDiscount)} direkt</p>}
+                    {q.subtotal > q.total && (
+                      <>
+                        <p className="text-xs font-semibold text-green-700">Du sparar {kr(q.subtotal - q.total)} ({Math.round(((q.subtotal - q.total) / q.subtotal) * 100)} %)</p>
+                        <p className="text-[11px] text-fjord-500">{[q.losAmount > 0 ? `längdrabatt ${q.losPercent} %` : '', q.directDiscount > 0 ? `direktrabatt ${q.directDiscountPercent} %` : ''].filter(Boolean).join(' + ')}</p>
+                      </>
+                    )}
                     <button className="btn btn-primary mt-3" onClick={() => setChosen(q)}>Välj</button>
                   </div>
                 </div>
@@ -123,10 +128,11 @@ function Checkout({ availability, quote, onBack }: { availability: Availability;
         <h2 className="text-xl font-semibold text-fjord-900">{quote.title}</h2>
         <p className="text-sm text-fjord-700">{fmtDate(availability.start)}<br />till {fmtDate(availability.end)}<br />{availability.nights} natt{availability.nights > 1 ? 'er' : ''} · {availability.guests} gäst{availability.guests > 1 ? 'er' : ''}</p>
         <dl className="space-y-1.5 border-t border-fjord-100 pt-3 text-sm">
-          <div className="flex justify-between"><dt>Pris före rabatt</dt><dd>{kr(quote.subtotal)}</dd></div>
+          <div className="flex justify-between"><dt>Ordinarie pris ({availability.nights} natt{availability.nights > 1 ? 'er' : ''})</dt><dd>{kr(quote.subtotal)}</dd></div>
           {quote.losAmount > 0 && <div className="flex justify-between text-green-700"><dt>Längdrabatt {quote.losPercent} %</dt><dd>−{kr(quote.losAmount)}</dd></div>}
           {quote.directDiscount > 0 && <div className="flex justify-between text-green-700"><dt>Direktrabatt {quote.directDiscountPercent} %</dt><dd>−{kr(quote.directDiscount)}</dd></div>}
           <div className="flex justify-between border-t border-fjord-100 pt-2 text-lg font-bold text-fjord-900"><dt>Att betala</dt><dd>{kr(quote.total)}</dd></div>
+          {quote.subtotal > quote.total && <p className="text-right text-xs font-semibold text-green-700">Du sparar totalt {kr(quote.subtotal - quote.total)} ({Math.round(((quote.subtotal - quote.total) / quote.subtotal) * 100)} %)</p>}
         </dl>
         <p className="text-xs text-fjord-600">Incheckning från {availability.checkInTime}, utcheckning senast {availability.checkOutTime}.{availability.freeCancelDays > 0 && ` Gratis avbokning till ${availability.freeCancelDays} dagar före ankomst.`}</p>
         <button type="submit" className="btn btn-amber w-full" disabled={busy || !accept}>{busy ? 'Skickar till betalning...' : <><Lock className="h-4 w-4" />Gå till betalning</>}</button>
