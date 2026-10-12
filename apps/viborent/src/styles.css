@@ -134,3 +134,10 @@ footer { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 28px; padding: 
   .cart-lines li { grid-template-columns: 72px 1fr; } .cart-lines img { width: 72px; height: 60px; } .line-price { grid-column: 2; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+
+/* Kundportal */
+.portal .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.portal .stack { display: grid; gap: 14px; margin: 14px 0; }
+.narrow-card { max-width: 480px; margin: 24px auto; }
+.portal-booking .actions-row { margin-top: 10px; justify-content: flex-start; }
+.reply { margin: 8px 0 0; padding: 10px 14px; border-left: 4px solid var(--teal); background: var(--teal-soft); border-radius: 0 10px 10px 0; }

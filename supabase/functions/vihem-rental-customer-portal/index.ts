@@ -1,4 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.50.0";
+import { mapDbError } from "../_shared/rental-common.ts";
+import { issueRefund } from "../_shared/rental-stripe.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -53,7 +55,7 @@ async function customerData(supabase: any, customer: any) {
   const [bookingsResult, requestsResult, messagesResult] = await Promise.all([
     supabase
       .from("vihem_rental_bookings")
-      .select("id,public_reference,status,payment_status,payment_provider,start_at,end_at,subtotal,vat_amount,deposit,total,currency,customer_notes,items:vihem_rental_booking_items(quantity,start_at,end_at,product:vihem_rental_products(name,slug,location,pickup_instructions,return_instructions))")
+      .select("id,public_reference,public_lookup_token,status,payment_status,payment_provider,contract_status,start_at,end_at,subtotal,vat_amount,deposit,total,currency,customer_notes,hold_expires_at,short_notice,cancelled_at,refund_status,refund_amount,items:vihem_rental_booking_items(quantity,start_at,end_at,product:vihem_rental_products(name,slug,location,pickup_instructions,return_instructions))")
       .eq("organisation_id", customer.organisation_id)
       .eq("customer_id", customer.id)
       .order("start_at", { ascending: false }),
@@ -73,7 +75,21 @@ async function customerData(supabase: any, customer: any) {
   if (bookingsResult.error) throw bookingsResult.error;
   if (requestsResult.error) throw requestsResult.error;
   if (messagesResult.error) throw messagesResult.error;
-  return { bookings: bookingsResult.data || [], requests: requestsResult.data || [], messages: messagesResult.data || [] };
+  const { data: settings } = await supabase.from("vihem_rental_settings").select("free_cancellation_minutes,access_enabled").eq("organisation_id", customer.organisation_id).maybeSingle();
+  const ids = (bookingsResult.data || []).map((b: any) => b.id);
+  const { data: codes } = ids.length ? await supabase.from("vihem_rental_access_codes").select("booking_id,status,scheduled_for,sms_status").in("booking_id", ids) : { data: [] };
+  const bookings = (bookingsResult.data || []).map((b: any) => {
+    const mine = (codes || []).filter((c: any) => c.booking_id === b.id);
+    const cutoff = new Date(b.start_at).getTime() - (settings?.free_cancellation_minutes ?? 60) * 60000;
+    const issued = mine.some((c: any) => ["issuing", "issued", "sent"].includes(c.status));
+    return {
+      ...b,
+      can_cancel: ["pending", "confirmed"].includes(b.status) && Date.now() < cutoff && !b.short_notice && !issued,
+      cancel_until: new Date(cutoff).toISOString(),
+      access: settings?.access_enabled && mine.length ? { scheduled_for: mine.map((c: any) => c.scheduled_for).sort()[0] || null, sent: mine.every((c: any) => ["sent", "delivered"].includes(c.sms_status)), failed: mine.some((c: any) => c.status === "failed" || c.sms_status === "failed") } : null,
+    };
+  });
+  return { bookings, requests: requestsResult.data || [], messages: messagesResult.data || [] };
 }
 
 async function requireStaff(request: Request, supabase: any) {
@@ -215,9 +231,21 @@ Deno.serve(async (request) => {
       return json({ request: requestRow });
     }
 
+    if (action === "cancel_booking") {
+      const bookingId = text(body.booking_id, 80);
+      const { data: owned } = await supabase.from("vihem_rental_bookings").select("id").eq("id", bookingId).eq("customer_id", customer.id).eq("organisation_id", customer.organisation_id).maybeSingle();
+      if (!owned) return json({ error: "Bokningen hittades inte." }, 404);
+      const { data: result, error } = await supabase.rpc("vihem_rental_cancel_booking", { p_booking: owned.id, p_actor: "customer", p_reason: text(body.reason, 500) || null, p_customer: customer.id });
+      if (error) { const m = mapDbError(error); return json({ error: m.message, code: m.code }, m.status); }
+      let refund = "none";
+      if (Number(result.refund_amount) > 0) refund = await issueRefund(supabase, owned.id, result);
+      return json({ ok: true, refund_amount: Number(result.refund_amount) || 0, refund_status: refund });
+    }
+
     return json({ error: "Okänd portalåtgärd." }, 404);
   } catch (error) {
     console.error("vihem-rental-customer-portal error:", error);
-    return json({ error: error instanceof Error ? error.message : "Ett oväntat fel uppstod." }, 500);
+    const mapped = mapDbError(error);
+    return json({ error: mapped.message, code: mapped.code }, mapped.status);
   }
 });

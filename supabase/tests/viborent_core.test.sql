@@ -171,5 +171,39 @@ begin
   end;
   perform pg_temp.expect('kund kan inte styra avtalstext', (select contract_terms_snapshot from public.vihem_rental_bookings where id = v_b) not like '%Avtalskomplettering%');
 
+  -- ===== FLYTTA BOKNING + AVBOKNINGSTRIGGER =====
+  r := public.vihem_rental_create_booking_v2(jsonb_build_array(jsonb_build_object('product_id', v_prod2, 'start_at', v_start + interval '30 days', 'end_at', v_start + interval '31 days', 'quantity', 1)),
+        '{"email":"h@example.com"}', 'viborent.se', 'pending', '', '{"public":true,"hold":true}');
+  v_b := (r ->> 'id')::uuid;
+  perform public.vihem_rental_mark_paid(v_b, 'cs_mv', 'pi_mv');
+  perform public.vihem_rental_change_booking_period(v_b, v_start + interval '32 days', v_start + interval '33 days');
+  perform pg_temp.expect('flytt uppdaterar bokning och rader', (select start_at from public.vihem_rental_bookings where id = v_b) = v_start + interval '32 days'
+    and (select count(*) from public.vihem_rental_booking_items where booking_id = v_b and start_at = v_start + interval '32 days') = 1);
+  perform pg_temp.expect('kodschema följer med flytten', (select valid_from from public.vihem_rental_access_codes where booking_id = v_b) = v_start + interval '32 days');
+  r2 := public.vihem_rental_create_booking_v2(jsonb_build_array(jsonb_build_object('product_id', v_prod2, 'start_at', v_start + interval '34 days', 'end_at', v_start + interval '35 days', 'quantity', 1)),
+        '{"email":"i@example.com"}', 'viborent.se', 'pending', '', '{"public":true,"hold":true}');
+  perform pg_temp.expect_error('flytt till upptagen tid nekas', format('select public.vihem_rental_change_booking_period(%L, %L, %L)', v_b, v_start + interval '34 days', v_start + interval '35 days 1 hour'), 'E_UNAVAILABLE');
+  update public.vihem_rental_bookings set status = 'cancelled' where id = v_b;
+  perform pg_temp.expect('direkt statusändring till avbokad stoppar schemalagd kod', (select status from public.vihem_rental_access_codes where booking_id = v_b) = 'cancelled');
+
+  -- ===== AVTALSADMIN (simulerad inloggad admin) =====
+  perform set_config('request.jwt.claims', json_build_object('sub', 'c03d0d59-4641-4baa-a45b-adadbc5d162b', 'role', 'authenticated')::text, true);
+  perform set_config('request.jwt.claim.sub', 'c03d0d59-4641-4baa-a45b-adadbc5d162b', true);
+  delete from public.vihem_rental_contract_versions where organisation_id = v_org and version = 9001;
+  declare v_draft uuid; v_v integer;
+  begin
+    v_draft := public.vihem_rental_new_contract_draft();
+    perform pg_temp.expect('utkast skapas som kopia av aktivt avtal', (select body from public.vihem_rental_contract_versions where id = v_draft) = (select body from public.vihem_rental_contract_versions where organisation_id = v_org and status = 'active'));
+    perform pg_temp.expect_error('bara ett utkast åt gången', 'select public.vihem_rental_new_contract_draft()', 'E_STATE');
+    update public.vihem_rental_contract_versions set body = 'kort' where id = v_draft;
+    perform pg_temp.expect_error('för kort avtal kan inte publiceras', format('select public.vihem_rental_publish_contract(%L)', v_draft), 'E_STATE');
+    update public.vihem_rental_contract_versions set body = 'Nytt hyresavtal version 2 – hyrestagaren ansvarar för utrustningen.' where id = v_draft;
+    perform public.vihem_rental_publish_contract(v_draft);
+    perform pg_temp.expect('publicering byter aktiv version', (select count(*) from public.vihem_rental_contract_versions where organisation_id = v_org and status = 'active') = 1 and (select status from public.vihem_rental_contract_versions where id = v_draft) = 'active');
+    r := public.vihem_rental_create_booking_v2(jsonb_build_array(jsonb_build_object('product_id', v_prod2, 'start_at', v_start + interval '40 days', 'end_at', v_start + interval '41 days', 'quantity', 1)),
+          '{"email":"j@example.com"}', 'viborent.se', 'pending', '', '{"public":true,"hold":true}');
+    perform pg_temp.expect('ny bokning får den nya avtalsversionen och texten', (select contract_terms_snapshot from public.vihem_rental_bookings where id = (r ->> 'id')::uuid) like 'Nytt hyresavtal version 2%' and (select contract_terms_version from public.vihem_rental_bookings where id = (r ->> 'id')::uuid) = 'v' || (select version from public.vihem_rental_contract_versions where id = v_draft));
+  end;
+
   raise notice 'ALLA TESTER GODKÄNDA';
 end $$;
