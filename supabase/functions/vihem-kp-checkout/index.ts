@@ -3,7 +3,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { allow, clientIp, corsFor, ensureParticipant, fingerprint, isUuid, kpContext, mapKpError, money, queueMail, text, userFromRequest, notifyStaff } from "../_shared/kp-common.ts";
-import { stripeConfigured, stripePost } from "../_shared/kp-stripe.ts";
+import { stripeConfigured, stripeGet, stripePost } from "../_shared/kp-stripe.ts";
 import { createInvoiceForOrder } from "../_shared/kp-accounted.ts";
 
 Deno.serve(async (request: Request) => {
@@ -98,6 +98,7 @@ Deno.serve(async (request: Request) => {
 
     // Kortbetalning: Stripe Checkout. Åtkomst ges först av webhooken.
     if (order.stripe_checkout_session_id) {
+      try { const existing = await stripeGet(`checkout/sessions/${encodeURIComponent(order.stripe_checkout_session_id)}`); if (existing.status === "open" && existing.url) return reply(200, { order_id: orderId, order_number: order.order_number, status: order.status, checkout_url: existing.url, resumed: true }); } catch (e) { console.error("kp resume session:", e instanceof Error ? e.message : e); }
       return reply(200, { order_id: orderId, order_number: order.order_number, status: order.status, resumed: true });
     }
     try {

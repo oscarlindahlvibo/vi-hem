@@ -34,6 +34,10 @@ SITES = {
         'inbox': '/home/vibo/.local/share/site-deploy/grav.tar',
         'backups': '/var/backups/site-publish/grav',
     },
+    'kompetensportalen': {
+        'mode': 'flat', 'host': 'kompetensportalen.se', 'web': '/var/www/kompetensportalen/html',
+        'inbox': '/home/vibo/.local/share/site-deploy/kompetensportalen.tar', 'backups': '/var/backups/site-publish/kompetensportalen',
+    },
     'viborent': {
         'mode': 'flat', 'host': 'viborent.se', 'web': '/var/www/viborent.se/html',
         'inbox': '/home/vibo/.local/share/site-deploy/viborent.tar', 'backups': '/var/backups/site-publish/viborent',
