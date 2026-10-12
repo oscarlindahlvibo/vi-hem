@@ -511,3 +511,22 @@ verify_jwt = false
 
 [functions.vihem-rental-customer-portal]
 verify_jwt = false
+
+# Kompetensportalen 2.0: publika/maskinanrop autentiseras i funktionerna (Origin→domän, JWT, Stripe-signatur, worker-hemlighet).
+[functions.vihem-kp-public]
+verify_jwt = false
+
+[functions.vihem-kp-checkout]
+verify_jwt = false
+
+[functions.vihem-kp-stripe]
+verify_jwt = false
+
+[functions.vihem-kp-learn]
+verify_jwt = false
+
+[functions.vihem-kp-admin]
+verify_jwt = false
+
+[functions.vihem-kp-worker]
+verify_jwt = false
