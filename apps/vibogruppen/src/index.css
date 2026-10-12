@@ -363,3 +363,5 @@
 .portal-brand-hostel{height:106px}.portal-brand-hostel img{max-width:190px;max-height:100px;width:auto;height:auto;object-fit:contain}
 
 .portal-brand-app{gap:14px}.portal-brand-app img{width:56px;height:56px}.portal-brand-app span{font-size:24px;font-weight:700;letter-spacing:-.03em;color:#15223b}
+
+.charging-status{margin-top:18px;padding-top:16px;border-top:1px solid #d8ddd4;font-size:13px;color:#72746c;display:grid;gap:8px}.charging-status strong{font-size:15px;color:#293c25;font-weight:600}.charging-status ul{display:grid;gap:8px}.charging-status li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px}.charging-state{font-weight:600}.charging-available{color:#286a30}.charging-busy{color:#875a18}.charging-unavailable{color:#9d3535}

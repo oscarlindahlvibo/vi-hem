@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import {makeReader,publicPoint} from '../../supabase/functions/vihem-vibogruppen-charging/monta.ts';
+const point={id:12,visibility:'public',state:'available',maxKw:150,note:'PRIVATE',serialNumber:'SECRET'};
+assert.deepEqual(publicPoint(point,'12',0),{label:'Laddpunkt 1',status:'available',maxKw:150});
+for(const state of ['busy','busy-charging','busy-reserved'])assert.equal(publicPoint({...point,state},'12',0).status,'busy');
+assert.equal(publicPoint({...point,state:'new-unknown-state'},'12',0).status,'unknown');
+assert.equal(publicPoint({...point,state:'disconnected'},'12',0).status,'unavailable');
+assert.throws(()=>publicPoint({...point,visibility:'private'},'12',0));assert.throws(()=>publicPoint(point,'13',0));
+let now=Date.parse('2026-10-12T12:00:00Z'),calls=[];let failed=false;
+const fetcher=async(url,opts)=>{
+ calls.push([url,opts]);
+ if(failed)return new Response('{}',{status:503});
+ return new Response(JSON.stringify(url.endsWith('/auth/token')?{accessToken:'private-token',refreshToken:'private-refresh',accessTokenExpirationDate:new Date(now+3600000).toISOString()}:point),{status:200});
+};
+const read=makeReader({clientId:'private-id',clientSecret:'private-secret',ids:['12']},fetcher,()=>now);
+const results=await Promise.all([read(),read(),read()]);assert.equal(calls.length,2);assert.equal(results[0].points[0].status,'available');assert.ok(!JSON.stringify(results).includes('private-'));
+await read();assert.equal(calls.length,2);now+=61000;await read();assert.equal(calls.length,3);
+failed=true;now+=61000;assert.deepEqual(await read(),{status:'unavailable',checkedAt:null,points:[]});const count=calls.length;await read();assert.equal(calls.length,count);
+failed=false;now+=31000;assert.equal((await read()).status,'ok');
+let touched=false;const invalid=makeReader({clientId:'id',clientSecret:'secret',ids:['12','12']},async()=>{touched=true;throw Error('unexpected');});assert.equal((await invalid()).status,'unavailable');assert.equal(touched,false);
+console.log('PASS Monta public-only/ID/status projection, secret stripping, single-flight/cache, error cooldown/recovery and configuration validation');
