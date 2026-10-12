@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://vi-hem.se/sitemap.xml

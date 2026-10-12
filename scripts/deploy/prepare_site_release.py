@@ -6,7 +6,7 @@ usage: prepare_site_release.py <ekangen|grav|vibofast|vibogruppen> [repo] [inbox
 import hashlib, io, json, os, pathlib, subprocess, sys, tarfile
 
 site = sys.argv[1] if len(sys.argv) > 1 else ''
-if site not in ('ekangen', 'grav', 'vibofast', 'vibogruppen'): raise SystemExit('usage: prepare_site_release.py <ekangen|grav|vibofast|vibogruppen> [repo] [inbox_dir]')
+if site not in ('ekangen', 'grav', 'vibofast', 'vibogruppen', 'vihem-site'): raise SystemExit('usage: prepare_site_release.py <ekangen|grav|vibofast|vibogruppen> [repo] [inbox_dir]')
 repo = pathlib.Path(sys.argv[2] if len(sys.argv) > 2 else '/home/vibo/vi-hem')
 inbox = pathlib.Path(sys.argv[3] if len(sys.argv) > 3 else '/home/vibo/.local/share/site-deploy')
 source = repo / 'apps' / site / 'dist'

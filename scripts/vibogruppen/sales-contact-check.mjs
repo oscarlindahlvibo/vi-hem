@@ -1,0 +1,9 @@
+import assert from 'node:assert/strict';
+import {handler,prepare} from '../../supabase/functions/vihem-sales-contact/contact.ts';
+const payload={name:'Åsa QA',email:'qa@example.invalid',company:'Testbolag',phone:'',message:'Demo med åäö',preferredTime:'Nästa vecka',kind:'demo',plan:'starter',website:''};
+const p=prepare(payload);assert.equal(p.subject,'vi-hem');assert.ok(p.message.includes('Demoförfrågan'));assert.ok(p.message.includes('Nästa vecka'));assert.ok(prepare({...payload,kind:'account'}).message.includes('demokonto'));assert.ok(!prepare({...payload,kind:'account'}).message.includes('Nästa vecka'));assert.throws(()=>prepare({...payload,plan:'admin'}));assert.throws(()=>prepare({...payload,email:'bad'}));
+let calls=0,mode='ok';const h=handler(async(id,p,f)=>{calls++;assert.equal(p.subject,'vi-hem');assert.match(f,/^[a-f0-9]{64}$/);return mode;},'private-test-key');
+const request=(origin='https://vi-hem.se',extra={})=>new Request('https://test',{method:'POST',headers:{Origin:origin},body:JSON.stringify({operation_id:'12345678-1234-4234-8234-123456789012',payload:{...payload,...extra}})});
+assert.equal((await h(request())).status,201);mode='failed';assert.equal((await h(request())).status,503);mode='limited';assert.equal((await h(request())).status,429);let before=calls;assert.equal((await h(request('https://evil.invalid'))).status,403);assert.equal((await h(request('https://vi-hem.se',{plan:'bad'}))).status,400);assert.equal((await h(request('https://vi-hem.se',{website:'bot'}))).status,201);assert.equal(calls,before);
+assert.equal((await h(new Request('https://test',{method:'POST',headers:{Origin:'https://vi-hem.se'},body:'x'.repeat(21000)}))).status,413);
+console.log('PASS sales handler: allowed origins, fixed inbox destination, demo/account projection, field validation, size bound, honeypot and truthful failures');

@@ -9,9 +9,13 @@ against the live site and rolls back if anything is wrong.
   ekangen / grav   flat web root; files replaced atomically (assets first, index.html last); previous version backed up.
   vibofast  release directories + atomic switch of the 'current' symlink; previous releases stay for instant rollback.
 """
-import datetime, fcntl, hashlib, http.client, io, json, os, pathlib, shutil, socket, ssl, stat, sys, tarfile
+import datetime, fcntl, hashlib, http.client, io, json, os, pathlib, shutil, socket, ssl, stat, sys, tarfile, time
 
 SITES = {
+    'vihem-site': {
+        'mode':'flat','host':'vi-hem.se','web':'/var/www/vi-hem.se/html',
+        'inbox':'/home/vibo/.local/share/site-deploy/vihem-site.tar','backups':'/var/backups/site-publish/vihem-site',
+    },
     'vibogruppen': {
         'mode':'flat','host':'vibogruppen.se',
         'web':'/var/www/vibogruppen.se/html',
@@ -93,9 +97,16 @@ def fetch_local(host, name, stamp):
 
 
 def verify_live(host, files, stamp):
-    for name, data in files.items():
-        status, body = fetch_local(host, name, stamp)
-        if status != 200 or sha(body) != sha(data): raise ValueError('HTTP mismatch ' + name)
+    # Existing nginx open_file_cache retains replaced files for up to 30 s.
+    deadline=time.monotonic()+45
+    for name,data in files.items():
+        while True:
+            try:
+                status,body=fetch_local(host,name,stamp)
+                if status==200 and sha(body)==sha(data):break
+            except (OSError,ssl.SSLError):pass
+            if time.monotonic()>=deadline:raise ValueError('HTTP mismatch '+name)
+            time.sleep(1)
 
 
 def owner_ids():

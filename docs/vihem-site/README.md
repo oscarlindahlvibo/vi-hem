@@ -1,0 +1,18 @@
+# VI-HEM säljsida
+
+Separat app `apps/vihem-site`, avsedd för vi-hem.se. Appinloggning länkas till app.vi-hem.se; app/native/routning/ekonomiska regler ändras inte. Starter/Professional/Enterprise och standardgränser från AdminOrganisationsPage (25/10/25, 100/50/200, 500/250/999). Priser saknas i underlaget: visas som ”Kontakta oss för pris”, moduler specificeras i offert. Inga påhittade kundomdömen, priser eller automatiska provperioder.
+
+Fyra oförändrade appskärmbilder med syntetiska QA-data: pass5 fastighet/min-bostad, pass4 rum, pass3 tid. Visuellt granskade före kopiering; inga verkliga kunduppgifter. Sidan har galleri/större originalbild, tillgängliga flikar, mobilmeny, nivåval, FAQ och kontakt/demo/demokonto. Demo och demokonto är uttryckligen förfrågningar: ingen automatisk kalenderbokning, kontoprovisionering eller utskick.
+
+Ny Edge `vihem-sales-contact` tar bara vi-hem.se/www-origin och skickar validerade, servervalda VI-HEM-förfrågningar till befintlig privata Vibogruppen-inkorg. Samma organisationsisolering/rate-limit/idempotens återanvänds; ingen ny DB-migration. VI-HEM-business måste vara synlig i portalens innehåll för befintliga RPC:s subjectvalidering. Behörig admin hittar förfrågningar under Administration → Vibogruppens portal → Kontaktärenden (rubrikprefix VI-HEM.se). Inga publika tabellgrants eller organisationsval i frontend.
+
+PASS: TypeScript/sajtbuild/riktad lint; handler validering/Origin/storlek/honeypot/felfallback; browser 390/768/1440 med transportmock (bilder/flikar/nivå/demo/demokonto/sparfel och samma retry-ID). Riktig isolerad QA Auth/Edge/DB: alla tre förfrågningstyper, parallella återförsök/en rad, korrekt inboxinnehåll och anonym åtkomst nekad. Visuell mobil/desktop granskning. Ingen produktion/publicering eller riktiga mejl/konton skapade.
+
+## Aktivering separat från appen
+
+1. Bekräfta priser/kommersiella nivåvillkor och granska sidan. Integrera godkänd branch, installera `vihem-sales-contact` före sajten och verifiera subjectkonfiguration och anonym/annan organisations inkorgsnekning.
+2. Backup av befintlig vi-hem.se webroot/nginx/sw. Domänen visar idag en äldre webbapp. App.vi-hem.se och native ändras inte. Nya `sw.js` avregistrerar bara gamla vi-hem.se-worker, utan att ladda om öppna fönster. Gamla assets/privacy-policy bevaras av flat-publisher. Gamla installerade PWA-klienter bör kontrolleras efter godkänd aktivering.
+3. Uppdatera den rootägda fixed-target-helpern med `sudo bash scripts/deploy/install-site-publish.sh` (engångslösenord). Ny exakt sudo-target `site-publish vihem-site`; default/all-targets oförändrade. Befintligt TLS-certifikat återanvänds efter SAN-kontroll. Granska dedikerad `apps/vihem-site/deploy/nginx.conf` för just denna domän, med statisk fallback, cachefri worker/index och en enda korrekt www-redirect; backup/nginx -t före reload. Det ersätter äldre PHP-fallback och dubbla www-vhost, utan att röra app.vi-hem.se.
+4. `~/deploy_sites.sh vihem-site` bygger/paketerar/publicerar bara säljsidan med backup, SHA-256, HTTPS och rollback. Kontrollera gamla worker-klienter och gör ett godkänt syntetiskt kontaktprov i rätt inkorg. Publisher tillåter 45 s cacheövergång efter nginx filbyte, kräver fortsatt exakt hash.
+
+Ej aktiverad. Förhandsvisning: `npm --prefix apps/vihem-site run dev -- --host 127.0.0.1 --port 5198`. Fysisk mobil/extern domän/ny verklig inkorgskontakt efter publicering återstår.
