@@ -143,3 +143,53 @@ const STATUS_TONES: Record<StatusTone, string> = {
 export function StatusBadge({ tone = 'neutral', children, className = '' }: { tone?: StatusTone; children: React.ReactNode; className?: string }) {
   return <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_TONES[tone]} ${className}`}>{children}</span>;
 }
+
+interface CardProps {
+  children: React.ReactNode;
+  className?: string;
+  onClick?: () => void;
+}
+
+export function Card({ children, className = '', onClick }: CardProps) {
+  return (
+    <div
+      className={`vihem-surface rounded-card ${onClick ? 'cursor-pointer transition-colors hover:border-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500' : ''} ${className}`}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onClick(); } } : undefined}
+    >
+      {children}
+    </div>
+  );
+}
+
+interface EmptyStateProps {
+  icon?: React.ReactNode | React.ComponentType<{ className?: string }>;
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}
+
+export function EmptyState({ icon, title, description, action }: EmptyStateProps) {
+  const isIconElement = React.isValidElement(icon);
+  const isIconComponent = typeof icon === 'function'
+    || (typeof icon === 'object' && icon !== null && '$$typeof' in icon && !isIconElement);
+  const iconNode = isIconElement
+    ? icon
+    : isIconComponent
+      ? React.createElement(icon as React.ElementType, { className: 'w-12 h-12' })
+      : icon as React.ReactNode;
+  return (
+    <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
+      {icon && (
+        <div className="mb-4 rounded-xl bg-blue-50 p-3 text-blue-500 ring-1 ring-blue-100">
+          {iconNode}
+        </div>
+      )}
+      <h3 className="text-base font-bold text-slate-800">{title}</h3>
+      {description && <p className="mt-1 text-sm text-slate-400 max-w-sm">{description}</p>}
+      {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}

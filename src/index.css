@@ -1,4 +1,5 @@
 @import './styles-tokens.css';
+@import './styles-presentation.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -150,23 +151,6 @@
   }
 }
 
-@layer components {
-  .vihem-surface {
-    background: #ffffff;
-    border: 1px solid var(--vihem-line);
-    box-shadow: var(--vihem-shadow-card);
-  }
-
-  .vihem-field {
-    background: var(--vihem-surface);
-    border-color: #d3dce8;
-    box-shadow: none;
-  }
-
-  .vihem-focus {
-    @apply focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500;
-  }
-}
 
 @layer utilities {
   .line-clamp-2 {
