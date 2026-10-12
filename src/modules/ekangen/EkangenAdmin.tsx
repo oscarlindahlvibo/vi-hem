@@ -82,6 +82,7 @@ interface Settings {
   check_out_time: string;
   notification_email: string;
   sender_email: string;
+  retain_stripe_fee_on_cancel?: boolean;
   revision: number;
 }
 interface Snapshot {
@@ -106,6 +107,8 @@ interface BookingRow {
   free_cancel_until: string | null;
   paid_at: string | null;
   created_at: string;
+  refunded_amount?: number | null;
+  retained_fee?: number | null;
 }
 
 const BUCKET = "vihem-ekangen-images";
@@ -371,6 +374,12 @@ function Bookings({ rows }: { rows: BookingRow[] }) {
                   )}
                   {b.free_cancel_until && b.status === "paid" && (
                     <p>Gratis avbokning till {date(b.free_cancel_until)}</p>
+                  )}
+                  {b.status === "refunded" && b.refunded_amount != null && (
+                    <p>
+                      Återbetalt {Number(b.refunded_amount).toLocaleString("sv-SE")} {b.currency}
+                      {Number(b.retained_fee) > 0 ? `, behållen avgift ${Number(b.retained_fee).toLocaleString("sv-SE")} ${b.currency}` : ""}
+                    </p>
                   )}
                 </div>
               </details>
@@ -1268,6 +1277,18 @@ function SettingsTab({
               onChange={num("free_cancel_days")}
               hint="0 = ingen gratis avbokning."
             />
+            <label className="flex items-start gap-2 text-sm font-semibold text-slate-800 sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={s.retain_stripe_fee_on_cancel !== false}
+                onChange={(e) => setS({ ...s, retain_stripe_fee_on_cancel: e.target.checked })}
+                className="mt-0.5 h-4 w-4 accent-blue-600"
+              />
+              <span>
+                Behåll betalningsavgiften vid gratis avbokning
+                <span className="block text-xs font-normal text-slate-500">Gästen får tillbaka beloppet minus Stripes verkliga avgift (högst 10 %). Texten visas i villkoren och vid bokning. Datumen blir lediga igen i båda fallen.</span>
+              </span>
+            </label>
             <Input
               label="Minsta antal nätter"
               type="number"

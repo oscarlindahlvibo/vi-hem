@@ -11,6 +11,7 @@ export function TermsPage() {
         <ul className="mt-6 list-disc space-y-1.5 pl-5 text-fjord-800">
           <li>Betalning sker i förskott vid bokning.</li>
           <li>{s.freeCancelDays > 0 ? `Gratis avbokning till och med ${s.freeCancelDays} dagar före ankomstdatum, direkt via din bokningslänk.` : 'Bokningar kan inte avbokas gratis.'}</li>
+          {s.freeCancelDays > 0 && s.retainStripeFee && <li>Vid gratis avbokning återbetalas beloppet minus den betalningsavgift som vår betalleverantör tar ut för betalningen (normalt cirka 2–3 % av beloppet). Det exakta beloppet visas innan du bekräftar avbokningen.</li>}
           <li>Incheckning från {s.checkInTime}, utcheckning senast {s.checkOutTime}.</li>
         </ul>
       )}

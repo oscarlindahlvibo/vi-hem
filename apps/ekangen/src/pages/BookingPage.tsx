@@ -134,7 +134,7 @@ function Checkout({ availability, quote, onBack }: { availability: Availability;
           <div className="flex justify-between border-t border-fjord-100 pt-2 text-lg font-bold text-fjord-900"><dt>Att betala</dt><dd>{kr(quote.total)}</dd></div>
           {quote.subtotal > quote.total && <p className="text-right text-xs font-semibold text-green-700">Du sparar totalt {kr(quote.subtotal - quote.total)} ({Math.round(((quote.subtotal - quote.total) / quote.subtotal) * 100)} %)</p>}
         </dl>
-        <p className="text-xs text-fjord-600">Incheckning från {availability.checkInTime}, utcheckning senast {availability.checkOutTime}.{availability.freeCancelDays > 0 && ` Gratis avbokning till ${availability.freeCancelDays} dagar före ankomst.`}</p>
+        <p className="text-xs text-fjord-600">Incheckning från {availability.checkInTime}, utcheckning senast {availability.checkOutTime}.{availability.freeCancelDays > 0 && ` Gratis avbokning till ${availability.freeCancelDays} dagar före ankomst.`}{availability.freeCancelDays > 0 && site?.settings.retainStripeFee && ' Vid avbokning återbetalas beloppet minus betalningsavgiften (normalt ca 2–3 %).'}</p>
         <button type="submit" className="btn btn-amber w-full" disabled={busy || !accept}>{busy ? 'Skickar till betalning...' : <><Lock className="h-4 w-4" />Gå till betalning</>}</button>
         <p className="text-center text-xs text-fjord-500">Betalning sker säkert hos Stripe.{site ? '' : ''}</p>
       </aside>

@@ -59,7 +59,11 @@ Deno.serve(async (req: Request) => {
     if (event.type === "charge.refunded") {
       const intent = String(object.payment_intent || "");
       const { data: booking } = intent ? await admin.rpc("vihem_ekangen_by_payment_intent", { p_intent: intent }) : { data: null };
-      if (booking && booking.status === "paid" && object.refunded === true) {
+      // Hel återbetalning, eller en återbetalning på minst 90 % (t.ex. beloppet minus betalningsavgiften) räknas som avbokning:
+      // då släpps datumen. Mindre delåterbetalningar (kulans) rör inte bokningen.
+      const amount = Number(object.amount || 0), refundedMinor = Number(object.amount_refunded || 0);
+      if (booking && booking.status === "paid" && (object.refunded === true || (amount > 0 && refundedMinor >= amount * 0.9))) {
+        if (booking.refunded_amount == null) await admin.rpc("vihem_ekangen_record_refund", { p_booking_id: booking.id, p_refunded: refundedMinor / 100, p_fee: Math.max(amount - refundedMinor, 0) / 100 });
         try { if (booking.short_stay_booking_id) await cancelShortStayBookingInBeds24(admin, booking.short_stay_booking_id); } catch (error) { console.error(error); }
         await admin.rpc("vihem_ekangen_set_status", { p_booking_id: booking.id, p_status: "refunded" });
         if (notifyCtx) await notifyAdmins(admin, notifyCtx, "Direktbokning återbetald", `Bokning ${booking.reference} (${booking.guest_name}) är återbetald i Stripe och datumen är lediga igen.`);

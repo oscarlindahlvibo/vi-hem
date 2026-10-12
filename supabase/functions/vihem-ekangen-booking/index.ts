@@ -8,7 +8,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { calculateStayPrice, nightsBetween } from "../_shared/short-stay-pricing.ts";
-import { stripeFetch } from "../_shared/ekangen-stripe.ts";
+import { planRefund, stripeFetch } from "../_shared/ekangen-stripe.ts";
 import { cancelShortStayBookingInBeds24 } from "../_shared/ekangen-beds24.ts";
 import { emailGuest, notifyAdmins } from "../_shared/ekangen-notify.ts";
 
@@ -170,23 +170,36 @@ async function bookingAction(admin: any, ctx: any, body: any, cancel: boolean) {
     currency: booking.currency, freeCancelUntil: booking.free_cancel_until, canCancel,
     checkInTime: ctx.settings.check_in_time, checkOutTime: ctx.settings.check_out_time,
   };
-  if (!cancel) return json({ data: view });
+  let refundPreview: { refund: number; fee: number } | null = null;
+  if (canCancel && booking.stripe_payment_intent && ctx.settings.retain_stripe_fee_on_cancel) {
+    try {
+      const plan = await planRefund(booking.stripe_payment_intent, true);
+      refundPreview = { refund: plan.refundMinor / 100, fee: plan.feeMinor / 100 };
+    } catch (error) { console.error("ekangen refund preview:", error instanceof Error ? error.message : error); }
+  }
+  if (!cancel) return json({ data: { ...view, refundPreview } });
 
   if (!canCancel) return fail("CANCEL_NOT_ALLOWED", "Gratis avbokning är inte längre möjlig. Kontakta oss så hjälper vi dig.", 409);
   if (!booking.stripe_payment_intent) return fail("CANCEL_NOT_ALLOWED", "Bokningen kan inte avbokas automatiskt. Kontakta oss.", 409);
   const notifyCtx = { organisation_id: ctx.organisation_id, settings: ctx.settings, siteUrl: "", companyName: await companyName(admin) };
+  let plan;
   try {
-    await stripeFetch("refunds", { payment_intent: booking.stripe_payment_intent }, `ekangen-refund-${booking.id}`);
+    plan = await planRefund(booking.stripe_payment_intent, Boolean(ctx.settings.retain_stripe_fee_on_cancel));
+    const params: Record<string, string> = { payment_intent: booking.stripe_payment_intent, "metadata[ekangen_cancel]": "1", "metadata[ekangen_reference]": ref };
+    if (plan.refundMinor < plan.amountMinor) params.amount = String(plan.refundMinor);
+    await stripeFetch("refunds", params, `ekangen-refund-${booking.id}`);
   } catch (error) {
     console.error("ekangen refund:", error instanceof Error ? error.message : error);
     return fail("REFUND_FAILED", "Återbetalningen kunde inte genomföras. Kontakta oss.", 502);
   }
   try { if (booking.short_stay_booking_id) await cancelShortStayBookingInBeds24(admin, booking.short_stay_booking_id); }
   catch (error) { console.error("ekangen beds24 cancel:", error instanceof Error ? error.message : error); await notifyAdmins(admin, notifyCtx, "Kontrollera Beds24: avbokning", `Bokning ${ref} avbokades av gästen men kunde inte avbokas i Beds24. Avboka manuellt.`); }
+  const refunded = plan.refundMinor / 100, kept = plan.feeMinor / 100;
+  await admin.rpc("vihem_ekangen_record_refund", { p_booking_id: booking.id, p_refunded: refunded, p_fee: kept });
   await admin.rpc("vihem_ekangen_set_status", { p_booking_id: booking.id, p_status: "refunded" });
-  await emailGuest(admin, notifyCtx, booking, "refunded");
-  await notifyAdmins(admin, notifyCtx, "Direktbokning avbokad", `${booking.guest_name} avbokade ${booking.unit_title || booking.unit_name} ${booking.start_date}–${booking.end_date} (${ref}). Beloppet återbetalas.`);
-  return json({ data: { ...view, status: "refunded", canCancel: false } });
+  await emailGuest(admin, notifyCtx, { ...booking, refunded_amount: refunded, retained_fee: kept }, "refunded");
+  await notifyAdmins(admin, notifyCtx, "Direktbokning avbokad", `${booking.guest_name} avbokade ${booking.unit_title || booking.unit_name} ${booking.start_date}–${booking.end_date} (${ref}). Återbetalt ${refunded} ${booking.currency}${kept > 0 ? `, behållen betalningsavgift ${kept} ${booking.currency}` : ""}. Datumen är lediga igen.`);
+  return json({ data: { ...view, status: "refunded", canCancel: false, refundPreview: { refund: refunded, fee: kept } } });
 }
 
 async function companyName(admin: any) {

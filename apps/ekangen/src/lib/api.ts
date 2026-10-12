@@ -8,7 +8,7 @@ export interface UnitListing {
   id: string; maxGuests: number; title: string; slug: string; kind: 'room' | 'apartment'; shortDescription: string; description: string;
   features: string[]; images: { url: string; alt: string }[]; beds: string;
 }
-export interface SiteSettings { bookingEnabled: boolean; discountPercent: number; freeCancelDays: number; minNights: number; maxNights: number; checkInTime: string; checkOutTime: string }
+export interface SiteSettings { bookingEnabled: boolean; discountPercent: number; freeCancelDays: number; minNights: number; maxNights: number; checkInTime: string; checkOutTime: string; retainStripeFee?: boolean }
 export interface PublicSite {
   content: { company: Company; text: Record<string, string>; faq: Faq[]; images?: Record<string, string> };
   settings: SiteSettings;
@@ -22,6 +22,7 @@ export interface Availability { nights: number; start: string; end: string; gues
 export interface BookingView {
   reference: string; status: 'pending' | 'paid' | 'expired' | 'cancelled' | 'refunded' | 'conflict'; unit: string; start: string; end: string;
   guests: number; name: string; total: number; currency: string; freeCancelUntil: string | null; canCancel: boolean; checkInTime: string; checkOutTime: string;
+  refundPreview?: { refund: number; fee: number } | null;
 }
 
 export const configured = Boolean(url && key);
