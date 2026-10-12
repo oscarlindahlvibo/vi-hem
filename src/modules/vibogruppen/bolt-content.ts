@@ -154,6 +154,7 @@ export const companies: Company[] = [
     url: 'https://hostel.vibogruppen.se',
     internal: true,
     icon: 'BedDouble',
+    logo: '/assets/logos/ekangens-vandrarhem/logo.png',
     image:
       'https://images.pexels.com/photos/36234126/pexels-photo-36234126.jpeg?auto=compress&cs=tinysrgb&w=1600',
     imageAlt: 'Varmt upplyst gatukafé i en stad på kvällen',

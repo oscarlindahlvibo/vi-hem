@@ -359,3 +359,5 @@
 @media(max-width:600px){.portal-hero h1{font-size:38px;line-height:1.1;margin-bottom:26px}.portal-index{display:none}.portal-hero{padding-top:38px;padding-bottom:38px}}
 
 .portal-brand-wide img{max-width:230px;max-height:74px;width:auto;height:auto;object-fit:contain}
+
+.portal-brand-hostel{height:106px}.portal-brand-hostel img{max-width:190px;max-height:100px;width:auto;height:auto;object-fit:contain}
