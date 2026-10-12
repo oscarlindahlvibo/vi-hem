@@ -121,7 +121,21 @@ Deno.serve(async (request: Request) => {
       }
       const { data: setting } = await admin.from("vihem_rental_products").select("buffer_minutes").eq("id", product.id).maybeSingle();
       const { data: defaults } = await admin.from("vihem_rental_settings").select("default_return_buffer_minutes").eq("organisation_id", organisationId).maybeSingle();
-      return reply(200, { product, capacity: assetIds.length, buffer_minutes: setting?.buffer_minutes ?? defaults?.default_return_buffer_minutes ?? 0, assets: assetIds.map((id: string, index: number) => ({ n: index + 1, busy: busy[id] })), blocked: wide });
+      // Bakåtkompatibelt format för äldre klienter: perioder då ALLA objekt är upptagna som "bokningar", produktövergripande spärrar som "blocks".
+      const cut = new Set<number>([Date.parse(from), Date.parse(to)]);
+      for (const list of [...Object.values(busy), wide]) for (const [a, b] of list) { cut.add(Date.parse(a)); cut.add(Date.parse(b)); }
+      const points = [...cut].filter((t) => t >= Date.parse(from) && t <= Date.parse(to)).sort((x, y) => x - y);
+      const fullyBusy: Array<{ start_at: string; end_at: string; status: string }> = [];
+      for (let i = 0; i < points.length - 1; i++) {
+        const mid = (points[i] + points[i + 1]) / 2;
+        const busyCount = Object.values(busy).filter((l) => l.some(([a, b]) => mid >= Date.parse(a) && mid < Date.parse(b))).length;
+        if (assetIds.length === 0 || busyCount >= assetIds.length) {
+          const last = fullyBusy[fullyBusy.length - 1];
+          if (last && Date.parse(last.end_at) === points[i]) last.end_at = new Date(points[i + 1]).toISOString();
+          else fullyBusy.push({ start_at: new Date(points[i]).toISOString(), end_at: new Date(points[i + 1]).toISOString(), status: "confirmed" });
+        }
+      }
+      return reply(200, { bookings: fullyBusy, blocks: wide.map(([a, b]) => ({ start_at: a, end_at: b, block_type: "admin_block", reason: "" })), product, capacity: assetIds.length, buffer_minutes: setting?.buffer_minutes ?? defaults?.default_return_buffer_minutes ?? 0, assets: assetIds.map((id: string, index: number) => ({ n: index + 1, busy: busy[id] })), blocked: wide });
     }
 
     // ---------------------------------------------------------------- Pris
@@ -165,7 +179,8 @@ Deno.serve(async (request: Request) => {
       const firstName = text(customer.first_name, 120), lastName = text(customer.last_name, 120), company = text(customer.company_name, 200);
       const phone = text(customer.phone, 40).replace(/[^\d+]/g, "");
       if (!EMAIL.test(email) || (!firstName && !company) || phone.length < 7) return reply(400, { error: "Fyll i namn, e-post och telefonnummer (för låskod och bokningsinformation).", code: "E_CUSTOMER" });
-      if (body.accepted_terms !== true) return reply(400, { error: "Du måste godkänna hyresvillkoren.", code: "E_TERMS" });
+      // Godkännande sker bindande vid signeringen (krävs före betalning). Nya sajten skickar det redan här; uttryckligt nej nekas alltid.
+      if (body.accepted_terms === false) return reply(400, { error: "Du måste godkänna hyresvillkoren.", code: "E_TERMS" });
       const items: any[] = [];
       for (const line of (Array.isArray(body.items) ? body.items.slice(0, 20) : [])) {
         const checked: any = await checkLine(line, text(body.start_at, 40), text(body.end_at, 40));

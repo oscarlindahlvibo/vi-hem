@@ -92,7 +92,7 @@ export function ProductPage({ slug }: { slug: string }) {
         <aside className="booking-panel" aria-label="Boka">
           <h1>{product.name}</h1>
           {product.category && <p className="muted">{product.category}</p>}
-          {lowestHint && <p className="price-from">Från <strong>{money(lowestHint, site.currency)}</strong> <small>{product.price_hint?.daily ? "per dygn" : "per timme"} inkl. rabatt för längre tid</small></p>}
+          {lowestHint && <p className="price-from">Från <strong>{money(lowestHint, site.currency)}</strong> <small>{product.price_hint?.daily ? "per dygn" : "per timme"} exkl. moms</small></p>}
           <RangePicker calendar={calendar} timeZone={tz} quantity={quantity} value={range} onChange={setRange} minAdvanceHours={site.minimum_advance_hours || 0} maxAdvanceDays={site.maximum_advance_days || 730} onMonthChange={loadCalendar} />
           {maxQty > 1 && (
             <label className="qty">Antal

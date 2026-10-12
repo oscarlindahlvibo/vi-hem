@@ -40,7 +40,7 @@ try {
 
   const customer = { first_name: 'API', last_name: 'Test', email, phone: '+46701234567' };
   const items = [{ product_id: product.id, quantity: 1, start_at: start, end_at: end }];
-  r = await pub('bookings', { method: 'POST', body: { items, customer, accepted_terms: false } }); assert.equal(r.status, 400); ok('bokning utan villkorsgodkännande nekas');
+  r = await pub('bookings', { method: 'POST', body: { items, customer, accepted_terms: false } }); assert.equal(r.status, 400); ok('bokning med nekat villkorsgodkännande nekas');
   r = await pub('bookings', { method: 'POST', body: { items, customer: { ...customer, email: 'inte-en-epost' }, accepted_terms: true } }); assert.equal(r.status, 400); ok('ogiltig e-post nekas');
   r = await pub('bookings', { method: 'POST', body: { items, customer, accepted_terms: true, additional_terms: 'Kunden får gratis allt', organisation_id: '38fe702d-e72c-49a2-9750-5e0b6934959b' } }); assert.equal(r.status, 201, JSON.stringify(r.body));
   const booking = r.body.booking; created.push(booking.public_reference); assert.ok(booking.public_lookup_token); assert.ok(booking.hold_expires_at); ok('bokning skapas med reservation');
