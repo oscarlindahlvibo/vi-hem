@@ -149,11 +149,11 @@ Deno.serve(async (req: Request) => {
         const { data: admins } = await admin.from("vihem_profiles").select("id").eq("organisation_id", src.organisation_id).in("role", ["admin", "superadmin"]).eq("active", true);
         const label = [veh?.name, veh?.registration_number ? `(${veh.registration_number})` : ""].filter(Boolean).join(" ");
         for (const a of admins ?? []) {
-          await admin.rpc("create_notification", {
+          { const { error: notifyError } = await admin.rpc("create_notification", {
             recipient_id: a.id, org_uuid: src.organisation_id, notification_title: "Besiktning utförd",
             notification_message: `${label}: besiktigad ${newLast}${newNext ? `, nästa senast ${newNext}` : ""}.`,
-            notification_type: "fleet", notification_link: `fleet/${src.vehicle_id}`,
-          });
+            notification_type: "fleet", notification_link: `fleet/${src.vehicle_id}`, setting_key: null,
+          }); if (notifyError) console.error("create_notification:", notifyError.message); }
         }
       }
 

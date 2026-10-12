@@ -106,10 +106,10 @@ Deno.serve(async (req: Request) => {
     try {
       const { data: admins } = await admin.from("vihem_profiles").select("id").eq("organisation_id", ctx.organisation_id).in("role", ["admin", "superadmin"]).eq("active", true);
       for (const a of admins ?? []) {
-        await admin.rpc("create_notification", {
+        { const { error: notifyError } = await admin.rpc("create_notification", {
           recipient_id: a.id, org_uuid: ctx.organisation_id, notification_title: "Ny offertförfrågan",
-          notification_message: `${name} – ${service || "förfrågan"} i ${location} (${ref}).`, notification_type: "info", notification_link: "grav-website",
-        });
+          notification_message: `${name} – ${service || "förfrågan"} i ${location} (${ref}).`, notification_type: "info", notification_link: "grav-website", setting_key: null,
+        }); if (notifyError) console.error("create_notification:", notifyError.message); }
       }
     } catch (error) { console.error("vihem-grav-quote notify:", error instanceof Error ? error.message : error); }
 
