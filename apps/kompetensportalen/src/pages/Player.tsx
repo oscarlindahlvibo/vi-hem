@@ -108,9 +108,18 @@ function ExamPanel({ exam, enrollmentId, onFinished }: { exam: Exam; enrollmentI
   const q = attempt.questions[i]; const answered = attempt.questions.filter((x: any) => (sel[x.question_id] ?? []).length > 0).length;
   return <div><div className="row"><p className="eyebrow" style={{ margin: 0 }}>Fråga {i + 1} av {attempt.questions.length}</p>{left !== null && <span className="timer" role="timer" aria-label="Återstående tid">{Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</span>}</div>
     <div className="progress"><i style={{ width: `${((i + 1) / attempt.questions.length) * 100}%` }} /></div>
-    <h2 style={{ fontSize: "1.4rem" }}>{q.prompt}</h2>{q.multiple && <p className="fine">Välj alla rätta alternativ.</p>}
+    <h2 style={{ fontSize: "1.4rem" }}>{q.prompt}</h2>{q.image_asset_id && <ExamImage key={q.image_asset_id} attemptId={attempt.attempt_id} assetId={q.image_asset_id} />}{q.multiple && <p className="fine">Välj alla rätta alternativ.</p>}
     <div role={q.multiple ? "group" : "radiogroup"} aria-label={q.prompt}>{q.options.map((o: any) => <label key={o.id} className={`opt ${(sel[q.question_id] ?? []).includes(o.id) ? "sel" : ""}`}><input type={q.multiple ? "checkbox" : "radio"} name={q.question_id} checked={(sel[q.question_id] ?? []).includes(o.id)} onChange={() => choose(q, o.id)} />{o.label}</label>)}</div>
     {error && <p className="notice error" role="alert">{error}</p>}
     <div className="row" style={{ marginTop: 18 }}><button className="btn ghost" disabled={i === 0} onClick={() => setI(i - 1)}>← Föregående</button>{i < attempt.questions.length - 1 ? <button className="btn primary" onClick={() => setI(i + 1)}>Nästa →</button> : <button className="btn teal" disabled={busy} onClick={submit}>Lämna in ({answered}/{attempt.questions.length} besvarade)</button>}</div>
     <p className="fine">Dina svar sparas löpande. Obesvarade frågor räknas som fel.</p></div>;
+}
+
+function ExamImage({ attemptId, assetId }: { attemptId: string; assetId: string }) {
+  const [url, setUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { let live = true; learn<{ url: string }>("exam_image", { attempt_id: attemptId, asset_id: assetId }).then((r) => live && setUrl(r.url)).catch(() => live && setFailed(true)); return () => { live = false; }; }, [attemptId, assetId]);
+  if (failed) return <p className="notice warn" role="status">Bilden till frågan kunde inte hämtas. Ladda om sidan.</p>;
+  if (!url) return <div className="skeleton" style={{ height: 180, borderRadius: 12 }} aria-hidden="true" />;
+  return <figure style={{ margin: "8px 0 16px" }}><img src={url} alt="Bild till frågan" style={{ borderRadius: 12, maxHeight: 360, maxWidth: "100%" }} /></figure>;
 }

@@ -109,3 +109,7 @@ footer.site-footer { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap:
 }
 @media (max-width: 560px) { footer.site-footer { grid-template-columns: 1fr; } .hero { padding-top: 56px; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+
+.skeleton{background:linear-gradient(90deg,#e6eef1,#f3f7f8,#e6eef1);background-size:200% 100%;animation:kp-sk 1.4s infinite}
+@keyframes kp-sk{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.skeleton{animation:none}}
