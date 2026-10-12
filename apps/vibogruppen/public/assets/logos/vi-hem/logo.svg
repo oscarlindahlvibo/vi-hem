@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">VI-HEM</title>
+  <defs>
+    <linearGradient id="bg" x1="96" y1="64" x2="416" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="158" y1="84" x2="350" y2="380" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".36"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <path d="M98 376c64-146 135-224 252-292 15-9 33 2 33 20v274c0 18-14 32-32 32H128c-22 0-38-21-30-44z" fill="url(#shine)"/>
+  <path d="M156 238 256 158l100 80v150a18 18 0 0 1-18 18H174a18 18 0 0 1-18-18V238z" fill="none" stroke="#fff" stroke-width="24" stroke-linejoin="round"/>
+  <path d="M132 254 256 154l124 100" fill="none" stroke="#fff" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M215 406V286h82v120" fill="none" stroke="#fff" stroke-width="24" stroke-linejoin="round"/>
+  <path d="M184 188v-44h54" fill="none" stroke="#bfdbfe" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M333 164v-36" fill="none" stroke="#bfdbfe" stroke-width="22" stroke-linecap="round"/>
+</svg>

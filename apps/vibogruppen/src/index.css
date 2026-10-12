@@ -361,3 +361,5 @@
 .portal-brand-wide img{max-width:230px;max-height:74px;width:auto;height:auto;object-fit:contain}
 
 .portal-brand-hostel{height:106px}.portal-brand-hostel img{max-width:190px;max-height:100px;width:auto;height:auto;object-fit:contain}
+
+.portal-brand-app{gap:14px}.portal-brand-app img{width:56px;height:56px}.portal-brand-app span{font-size:24px;font-weight:700;letter-spacing:-.03em;color:#15223b}

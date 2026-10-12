@@ -179,14 +179,15 @@ export const companies: Company[] = [
   },
   {
     id: 'vi-hem',
-    name: 'Vi-Hem',
-    shortName: 'Vi-Hem',
+    name: 'VI-HEM',
+    shortName: 'VI-HEM',
     tagline: 'Fastighetssystem för hyresgäster och personal',
     description:
       'Ett fastighetssystem som förenlar hyresgäster och personal. Hantera ärenden, information och kommunikation på ett ställe.',
     category: 'tech',
     url: 'https://vi-hem.se',
     icon: 'Home',
+    logo: '/assets/logos/vi-hem/logo.svg',
     image:
       'https://images.pexels.com/photos/4488301/pexels-photo-4488301.jpeg?auto=compress&cs=tinysrgb&w=1600',
     imageAlt: 'Modern lägenhet med rent och ljust interiör',

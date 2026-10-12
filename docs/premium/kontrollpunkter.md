@@ -432,3 +432,5 @@ Klient: SUBSCRIBED bekräftar status utan obligatorisk extra system/ok; aktiv tr
 2026-10-12: användarens original-PNG för Gräv & Allservice tillagd på Vibogruppen-portalens verksamhetskort och installationsseed. Originalfilen bevarad, proportioner kontrollerade visuellt på 390/1440; sajtbuild PASS. Gavirserum-sajt och produktion orörda.
 
 2026-10-12: användarens original-PNG för Ekängens Vandrarhem införd i Vibogruppen-portalen och installationsseed. Eget proportionerligt logoutrymme, mobil/desktop 390/1440 visuellt kontrollerade, sajtbuild PASS. Befintlig vandrarhemssajt och produktion orörda.
+
+2026-10-12: VI-HEM:s befintliga SVG-appmärke återanvänt på portalens verksamhetskort med VI-HEM-namn. Default och installationsseed uppdaterade; sajtbuild och visuella 390/1440-kontroller PASS. Ingen bildomritning eller produktionsändring.
