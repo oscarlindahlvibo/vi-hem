@@ -31,3 +31,7 @@ PASS isolerad QA med faktisk Edge och PostgreSQL men **falsk mailtransport**: an
 PASS faktisk ShortStayPage med mockad DB/Edge: konfigurationsfel/återkontroll, mottagargranskning, explicit bekräftelse, ett utskick och fortsatt befintlig PDF-delning. Mobil 390 och desktop 1440 visuellt granskade (`outputs/shortstay-receipt-email-*.png`, lokala leveransartefakter).
 
 Produktionsinspektion var skrivskyddad: Vibogruppen AB har lagrad Workspace-koppling, men avsändarkontot är inte aktivt registrerat i VI-HEM. Riktig Gmail-delegation/token, verklig leverans och fysisk app är **ej verifierade**. Ingen produktionsmigration, kontoaktivering, frontenddeployment eller verkligt utskick genomfört.
+
+## Aktivering efter användargodkännande 2026-10-12
+
+Backend och avsändarkonto installerade. Färsk full PostgreSQL custom-backup och läsbar pg_restore-lista verifierade: `/mnt/md0/supabase-backups/shared/receipt-email-20261012T082213Z`. Tidigare helper, kontorad och migrationsledger bevarade. Additiv tabell och kontoaktivering i samma transaktion; adminläsning/backendskrivning efterkontrollerade. Riktig delegerad Gmail-send-token för kontaktkontot PASS utan mejlutskick. Förbättringarna för egna inköpswebbplatser finns på main sedan bygge 16; ny frontend samlar även kvittomejl i bygge 17. Verklig leverans och fysisk app återstår.
