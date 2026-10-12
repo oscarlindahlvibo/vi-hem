@@ -266,6 +266,8 @@ export type NotificationSettings = {
   staff_absence_submitted: boolean;
   chat_message: boolean;
   fleet_damage_reported: boolean;
+  short_stay_new_booking: boolean;
+  short_stay_new_message: boolean;
   jour_swap_available: boolean;
   shift_start_reminder: boolean;
   lunch_start_reminder: boolean;
@@ -286,6 +288,8 @@ export const defaultNotificationSettings: NotificationSettings = {
   staff_absence_submitted: true,
   chat_message: true,
   fleet_damage_reported: true,
+  short_stay_new_booking: true,
+  short_stay_new_message: true,
   jour_swap_available: true,
   shift_start_reminder: true,
   lunch_start_reminder: true,
@@ -308,6 +312,8 @@ export const NOTIFICATION_SETTING_LABELS: { key: BooleanNotificationSettingKey; 
   { key: 'staff_absence_submitted', label: 'Frånvaro från personal', description: 'Notifiera admin när personal sjukanmäler sig eller ansöker om ledighet.' },
   { key: 'chat_message', label: 'Chattmeddelanden', description: 'Notifiera deltagare när nya chattmeddelanden skickas.' },
   { key: 'fleet_damage_reported', label: 'Fordonsskada', description: 'Notifiera admin vid brådskande fordonsskador.' },
+  { key: 'short_stay_new_booking', label: 'Ny korttidsbokning', description: 'Notifiera personal och admin när en ny bokning kommer in från Booking.com, Airbnb, Expedia och andra kanaler.' },
+  { key: 'short_stay_new_message', label: 'Nytt gästmeddelande (korttid)', description: 'Notifiera personal och admin när en gäst skickar ett nytt meddelande.' },
   { key: 'jour_swap_available', label: 'Jourpass ute för byte', description: 'Notifiera behörig personal när ett jourpass läggs ut för byte.' },
   { key: 'shift_start_reminder', label: 'Pass börjar', description: 'Påminn vid schemalagd starttid.' },
   { key: 'lunch_start_reminder', label: 'Lunch börjar', description: 'Påminn vid schemalagd lunchstart.' },

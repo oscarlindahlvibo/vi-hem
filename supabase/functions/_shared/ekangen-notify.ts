@@ -45,7 +45,7 @@ export async function notifyAdmins(admin: any, ctx: NotifyContext, title: string
   for (const a of admins ?? []) {
     { const { error: notifyError } = await admin.rpc("create_notification", {
       recipient_id: a.id, org_uuid: ctx.organisation_id, notification_title: title, notification_message: message,
-      notification_type: "info", notification_link: "shortstay", setting_key: null,
+      notification_type: "info", notification_link: "short-stay", setting_key: null,
     }); if (notifyError) console.error("create_notification:", notifyError.message); }
   }
   const to = String(ctx.settings.notification_email || "").trim();
