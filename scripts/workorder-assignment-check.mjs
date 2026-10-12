@@ -1,0 +1,11 @@
+import fs from 'node:fs/promises';import assert from 'node:assert/strict';import ts from 'typescript';import vm from 'node:vm';
+const root=new URL('../',import.meta.url);const helper=await fs.readFile(new URL('src/lib/workOrderAssignment.ts',root),'utf8');const module=ts.transpileModule(helper,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;const context={exports:{}};vm.runInNewContext(module,context);const derive=context.exports.assignedWorkOrderStatus;
+assert.equal(derive('new',['staff']),'assigned');assert.equal(derive('new',[]),'new');assert.equal(derive('new',['staff'],true),'new');
+for(const status of ['assigned','started','paused','waiting_material','waiting_tenant','waiting_contractor','ready_for_check','completed','cancelled'])assert.equal(derive(status,['staff']),status);
+const source=await fs.readFile(new URL('src/pages/WorkOrdersPage.tsx',root),'utf8');const handler=source.slice(source.indexOf('  async function changeAssigneesFor('),source.indexOf('  async function addCommentTo('));
+for(const [shown,actual,expected] of [['new','new','assigned'],['new','started','started'],['paused','paused','paused']]) {
+ let row={id:'qa',status:actual,assigned_to_ids:[]},list=[{...row,status:shown}],writes=0,errorToast=false;
+ const c={assignedWorkOrderStatus:derive,workOrders:list,setSheetBusy(){},setQuickSheet(){},toast:{show(_,options){errorToast=options?.tone==='error';}},setWorkOrders(fn){list=fn(list);},supabase:{from(){let patch,filters=[];return {update(p){patch=p;return this;},eq(k,v){filters.push([k,v]);return this;},select(){return this;},async single(){if(filters.some(([k,v])=>row[k]!==v))return {error:{message:'conflict'}};writes++;row={...row,...patch};return {error:null,data:{id:row.id}};}};}}};
+ vm.createContext(c);vm.runInContext(ts.transpileModule(handler,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+';globalThis.change=changeAssigneesFor;',c);await c.change('qa',['staff']);assert.equal(row.status,expected);assert.equal(writes,shown==='new'&&actual==='started'?0:1);if(!writes){assert.equal(errorToast,true);assert.equal(list[0].assigned_to_ids.length,0);}else{assert.equal(row.assigned_to,'staff');assert.equal(list[0].status,expected);}
+}
+console.log('PASS default assignment, explicit New override, all other statuses, atomic patch and stale status conflict');

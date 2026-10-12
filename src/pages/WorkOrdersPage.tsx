@@ -3,6 +3,7 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { WorkOrderChatFiles } from '../components/chat/WorkOrderChatFiles';
 import { ContextChatLauncher } from '../components/chat/ContextChatLauncher';
 import React, { useState, useEffect, useRef } from 'react';
+import { assignedWorkOrderStatus } from '../lib/workOrderAssignment';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -104,6 +105,7 @@ type CreateWorkOrderForm = {
   category: string;
   priority: WOPriority;
   status: WOStatus;
+  statusExplicit: boolean;
   property_id: string;
   apartment_id: string;
   tenant_id: string;
@@ -119,6 +121,7 @@ const defaultCreateForm: CreateWorkOrderForm = {
   category: WO_CATEGORIES[0],
   priority: 'normal',
   status: 'new',
+  statusExplicit: false,
   property_id: '',
   apartment_id: '',
   tenant_id: '',
@@ -293,6 +296,8 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
   const [showDetailModal, setShowDetailModal] = useState(false);
   const openedInitialOrder = useRef<string | undefined>(undefined);
   const detailSaveLock = useRef(false);
+  const detailStatusExplicit = useRef(false);
+  useEffect(() => { detailStatusExplicit.current = false; }, [selectedWorkOrder?.id, showDetailModal]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [properties, setProperties] = useState<Property[]>([]);
   const [apartments, setApartments] = useState<Apartment[]>([]);
@@ -628,7 +633,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
           description: createForm.description,
           category: createForm.category,
           priority: createForm.priority,
-          status: createForm.status,
+          status: assignedWorkOrderStatus(createForm.status, assignedIds, createForm.statusExplicit),
           property_id: createForm.property_id || null,
           apartment_id: createForm.apartment_id || null,
           tenant_id: createForm.tenant_id || null,
@@ -879,13 +884,15 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
     try {
       setUpdatingAssignment(true);
       const assignedIds = newAssignedToIds;
-      const { error } = await supabase
-        .from('vihem_work_orders')
-        .update({ assigned_to: assignedIds[0] || null, assigned_to_ids: assignedIds })
-        .eq('id', selectedWorkOrder.id);
-
-      if (error) throw error;
-      setSelectedWorkOrder(current => current ? { ...current, assigned_to: assignedIds[0] || null, assigned_to_ids: assignedIds } : current);
+      const status = assignedWorkOrderStatus(selectedWorkOrder.status,assignedIds,detailStatusExplicit.current);
+      const promote = status !== selectedWorkOrder.status;
+      const patch = {assigned_to:assignedIds[0] || null,assigned_to_ids:assignedIds,...(promote ? {status} : {})};
+      let request = supabase.from('vihem_work_orders').update(patch).eq('id',selectedWorkOrder.id);
+      if (promote) request = request.eq('status','new');
+      const { error } = await request.select('id').single();
+      if (error) throw new Error('Kunde inte ändra ansvarig. Arbetsordern kan ha ändrats av någon annan; öppna den igen och försök på nytt.');
+      setSelectedWorkOrder(current => current ? { ...current, ...patch } : current);
+      if (promote) setNewDetailStatus(status);
       await fetchWorkOrders();
     } catch (err) {
       console.error('Error updating assignment:', err);
@@ -1088,10 +1095,17 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
 
   async function changeAssigneesFor(id: string, ids: string[]) {
     setSheetBusy(true);
-    const { error } = await supabase.from('vihem_work_orders').update({ assigned_to: ids[0] || null, assigned_to_ids: ids }).eq('id', id);
+    const order=workOrders.find(item=>item.id===id);
+    if (!order) { setSheetBusy(false); return; }
+    const status=assignedWorkOrderStatus(order.status,ids);
+    const promote=status!==order.status;
+    const patch={assigned_to:ids[0] || null,assigned_to_ids:ids,...(promote?{status}:{})};
+    let request=supabase.from('vihem_work_orders').update(patch).eq('id',id);
+    if (promote) request=request.eq('status','new');
+    const { error } = await request.select('id').single();
     setSheetBusy(false);
     if (error) { toast.show(error.message || 'Kunde inte ändra ansvarig.', { tone: 'error' }); return; }
-    setWorkOrders((orders) => orders.map((o) => (o.id === id ? { ...o, assigned_to: ids[0] || null, assigned_to_ids: ids } : o)));
+    setWorkOrders((orders) => orders.map((o) => (o.id === id ? { ...o, ...patch } : o)));
     setQuickSheet(null);
     toast.show('Ansvarig uppdaterad');
   }
@@ -1220,12 +1234,11 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
     return ids.map(assigneeName).join(', ');
   };
   const toggleCreateAssignee = (staffId: string) => {
-    setCreateForm((current) => ({
-      ...current,
-      assigned_to_ids: current.assigned_to_ids.includes(staffId)
-        ? current.assigned_to_ids.filter((id) => id !== staffId)
-        : [...current.assigned_to_ids, staffId],
-    }));
+    setCreateForm((current) => {
+      const ids = current.assigned_to_ids.includes(staffId) ? current.assigned_to_ids.filter(id=>id!==staffId) : [...current.assigned_to_ids,staffId];
+      const status = !current.statusExplicit && !ids.length && current.status === 'assigned' ? 'new' : assignedWorkOrderStatus(current.status,ids,current.statusExplicit);
+      return {...current,assigned_to_ids:ids,status};
+    });
   };
   const toggleDetailAssignee = (staffId: string) => {
     setNewAssignedToIds((current) => current.includes(staffId)
@@ -1798,7 +1811,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
               label="Status"
               options={WO_STATUSES.map((s) => ({ value: s, label: WO_STATUS_LABELS[s] }))}
               value={createForm.status}
-              onChange={(e) => setCreateForm({ ...createForm, status: e.target.value as WOStatus })}
+              onChange={(e) => setCreateForm({ ...createForm, status: e.target.value as WOStatus, statusExplicit: true })}
             />
 
             </div></section>
@@ -2091,7 +2104,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
                       aria-label="Arbetsorderns status"
                       options={WO_STATUSES.map((s) => ({ value: s, label: WO_STATUS_LABELS[s] }))}
                       value={newDetailStatus}
-                      onChange={(e) => setNewDetailStatus(e.target.value as WOStatus)}
+                      onChange={(e) => { detailStatusExplicit.current = true; setNewDetailStatus(e.target.value as WOStatus); }}
                       className="text-sm"
                     />
                   </div>

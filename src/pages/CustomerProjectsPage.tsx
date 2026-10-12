@@ -25,6 +25,7 @@ import {
   ArrowLeft,
   ChevronRight,
 } from 'lucide-react';
+import { assignedWorkOrderStatus } from '../lib/workOrderAssignment';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -1064,7 +1065,7 @@ export function CustomerProjectsPage({ onNavigate: _onNavigate, initialProjectId
         description: workOrderForm.description,
         category: workOrderForm.category,
         priority: workOrderForm.priority,
-        status: 'new',
+        status: assignedWorkOrderStatus('new',workOrderForm.assigned_to ? [workOrderForm.assigned_to] : []),
         assigned_to: workOrderForm.assigned_to || null,
         due_date: workOrderForm.due_date || null,
         created_by: user.id,

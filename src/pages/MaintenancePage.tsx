@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { assignedWorkOrderStatus } from '../lib/workOrderAssignment';
 import { supabase } from '../lib/supabase';
 import { queueOfflineMutation } from '../lib/offlineQueue';
 import { useAuth } from '../contexts/AuthContext';
@@ -513,7 +514,7 @@ export function MaintenancePage({ onNavigate: _onNavigate }: { onNavigate: (page
         description: woForm.description,
         category: woForm.category,
         priority: woForm.priority,
-        status: 'new',
+        status: assignedWorkOrderStatus('new',assignedIds),
         property_id: selectedRequest.property_id || null,
         apartment_id: selectedRequest.apartment_id || null,
         tenant_id: selectedRequest.tenant_id || null,
