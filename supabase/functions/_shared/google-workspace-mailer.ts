@@ -241,3 +241,8 @@ export function googleMailerFriendlyMessage(code: string) {
   };
   return messages[code] || "E-postutskicket via Google misslyckades.";
 }
+
+/** Non-sending connectivity check using the same scope as receipt delivery. */
+export async function verifyGmailSender(db: any, organisationId: string, sender: string): Promise<void> {
+  await googleToken(db, organisationId, sender, GMAIL_SEND_SCOPE);
+}

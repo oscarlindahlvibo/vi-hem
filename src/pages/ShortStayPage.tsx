@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   BedDouble, CalendarDays, RefreshCw, Plus, Edit2, ExternalLink,
   Sparkles, ClipboardCheck, AlertTriangle, DoorOpen,
@@ -564,9 +564,16 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const [receiptMessage, setReceiptMessage] = useState('');
   const [creatingReceiptId, setCreatingReceiptId] = useState<string | null>(null);
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
-  const [receiptPreview, setReceiptPreview] = useState<{html: string; pdf: ReceiptPdfInput; filename: string} | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<{html: string; pdf: ReceiptPdfInput; filename: string; bookingId: string} | null>(null);
   const [receiptExporting, setReceiptExporting] = useState(false);
   const [receiptExportError, setReceiptExportError] = useState('');
+  const [receiptEmailOpen,setReceiptEmailOpen]=useState(false);
+  const [receiptEmailBusy,setReceiptEmailBusy]=useState(false);
+  const [receiptEmailError,setReceiptEmailError]=useState('');
+  const [receiptEmailInfo,setReceiptEmailInfo]=useState<{sender:string;hash:string;snapshot:{recipient:string;issuer:string;total:number;currency:string};previous_status:string|null}|null>(null);
+  const [receiptEmailSent,setReceiptEmailSent]=useState(false);
+  const receiptMailLock=useRef(false);
+  const receiptMailOperation=useRef<string|null>(null);
   const [receiptForm, setReceiptForm] = useState<ReceiptForm>(defaultReceiptForm);
   const [visibleKeyBoxId, setVisibleKeyBoxId] = useState<string | null>(null);
 
@@ -1397,7 +1404,8 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
         </body>
       </html>`;
     setReceiptExportError('');
-    setReceiptPreview({html,filename:`Kvitto-${booking.id}.pdf`,pdf:{
+    receiptMailOperation.current=null;setReceiptEmailSent(false);
+    setReceiptPreview({html,bookingId:booking.id,filename:`Kvitto-${booking.id}.pdf`,pdf:{
       title:booking.receipt_title || 'Kvitto',issuer,bookingId:booking.beds24_booking_id || booking.external_uid || booking.id,
       details:[company?.organisation_number ? `Org.nr ${company.organisation_number}` : '', `Datum: ${new Date().toLocaleDateString('sv-SE')}`, `Kund: ${booking.guest_name || booking.title || 'Gäst'}`, booking.guest_email || '', booking.guest_phone || '', unit?.name || 'Enhet',formatDateRange(booking.start_date,booking.end_date),`${booking.guest_count || 1} gäster · ${booking.channel_name || 'VI-HEM'}`].filter(Boolean),
       rows:[...configuredLines.map(line=>({label:line.description,amount:formatMoney(Number(line.amount || 0),currency)})),...[
@@ -1419,6 +1427,27 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     } catch(failure) {
       if (!(failure instanceof Error && failure.name==='AbortError')) setReceiptExportError(failure instanceof Error?failure.message:'Kunde inte skapa PDF. Försök igen.');
     } finally {setReceiptExporting(false);}
+  }
+
+  async function receiptEmailRequest(body: Record<string,unknown>) {
+    const {data,error:requestError}=await supabase.functions.invoke('vihem-short-stay-receipt-email',{body});
+    if(requestError){let message='Kunde inte nå kvittots mejlfunktion. Kontrollera kopplingen och försök igen.';let state=body.action==='send'?'uncertain':undefined;try{const details=await requestError.context.json();message=details.error||message;state=details.status||state;}catch{/* network error */}throw Object.assign(new Error(message),{receiptState:state});}
+    if(data?.error)throw new Error(data.error);
+    return data;
+  }
+  async function openReceiptEmail() {
+    if(!receiptPreview||receiptMailLock.current)return;
+    receiptMailLock.current=true;setReceiptEmailOpen(true);setReceiptEmailBusy(true);setReceiptEmailError('');setReceiptEmailInfo(null);
+    try {const data=await receiptEmailRequest({action:'prepare',booking_id:receiptPreview.bookingId});setReceiptEmailInfo(data);setReceiptEmailSent(data.previous_status==='sent');if(!receiptMailOperation.current)receiptMailOperation.current=crypto.randomUUID();}
+    catch(failure){setReceiptEmailError(failure instanceof Error?failure.message:'Kunde inte förbereda utskicket.');}
+    finally{receiptMailLock.current=false;setReceiptEmailBusy(false);}
+  }
+  async function sendReceiptEmail() {
+    if(!receiptPreview||!receiptEmailInfo||receiptMailLock.current||receiptEmailSent)return;
+    receiptMailLock.current=true;setReceiptEmailBusy(true);setReceiptEmailError('');
+    try {const data=await receiptEmailRequest({action:'send',booking_id:receiptPreview.bookingId,expected_hash:receiptEmailInfo.hash,operation_id:receiptMailOperation.current});if(data.status!=='sent')throw new Error('Utskicket kunde inte bekräftas. Kontrollera Skickat i Gmail innan du försöker igen.');setReceiptEmailSent(true);}
+    catch(failure){setReceiptEmailError(failure instanceof Error?failure.message:'Kunde inte skicka kvittot.');if((failure as {receiptState?:string})?.receiptState==='uncertain')setReceiptEmailInfo(current=>current?{...current,previous_status:'uncertain'}:current);}
+    finally{receiptMailLock.current=false;setReceiptEmailBusy(false);}
   }
 
   async function createFinanceReceipt(booking: ShortStayBooking) {
@@ -2443,9 +2472,30 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
           {receiptExportError && <p role="alert" className="text-sm text-vihem-danger">{receiptExportError}</p>}
           <div className="flex flex-wrap gap-2">
             <Button type="button" loading={receiptExporting} onClick={()=>exportReceipt(false)}>Spara PDF</Button>
-            <Button type="button" variant="secondary" disabled={receiptExporting} onClick={()=>exportReceipt(true)}>Mejla / dela PDF</Button>
+            {isAdmin && <Button type="button" variant="secondary" disabled={receiptExporting} onClick={openReceiptEmail}>Skicka kvitto via e-post</Button>}
+            <Button type="button" variant="secondary" disabled={receiptExporting} onClick={()=>exportReceipt(true)}>Dela PDF</Button>
           </div>
         </div>}
+      </Modal>
+
+      <Modal open={receiptEmailOpen} onClose={()=>{if(!receiptEmailBusy)setReceiptEmailOpen(false);}} title="Skicka kvitto till kunden" size="md">
+        <div className="space-y-4">
+          <p className="text-sm text-vihem-muted">Kvittot skickas som PDF från kontakt@ekangensvandrarhem.se genom Google Workspace.</p>
+          {receiptEmailBusy && !receiptEmailInfo && <p role="status">Kontrollerar avsändare och kvitto…</p>}
+          {receiptEmailInfo && <dl className="space-y-2 text-sm">
+            <div><dt className="text-vihem-muted">Från</dt><dd className="font-medium">{receiptEmailInfo.sender}</dd></div>
+            <div><dt className="text-vihem-muted">Till</dt><dd className="font-medium break-all">{receiptEmailInfo.snapshot.recipient}</dd></div>
+            <div><dt className="text-vihem-muted">Utfärdare och belopp</dt><dd>{receiptEmailInfo.snapshot.issuer} · {formatMoney(receiptEmailInfo.snapshot.total,receiptEmailInfo.snapshot.currency)}</dd></div>
+          </dl>}
+          {receiptEmailSent && <p role="status" className="text-sm text-emerald-700">Kvittot är skickat eller har redan skickats. Google har accepterat mejlet.</p>}
+          {receiptEmailInfo && ['processing','uncertain'].includes(receiptEmailInfo.previous_status || '') && <p role="alert" className="text-sm text-vihem-danger">Ett utskick pågår eller resultatet är okänt. Kontrollera Skickat i Gmail innan nytt utskick.</p>}
+          {receiptEmailError && <p role="alert" className="text-sm text-vihem-danger">{receiptEmailError}</p>}
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" disabled={receiptEmailBusy} onClick={()=>setReceiptEmailOpen(false)}>Stäng</Button>
+            {(!receiptEmailInfo || receiptEmailError) && !receiptEmailBusy && <Button type="button" variant="secondary" onClick={openReceiptEmail}>Kontrollera igen</Button>}
+            {receiptEmailInfo && !receiptEmailSent && <Button type="button" loading={receiptEmailBusy} disabled={['processing','uncertain'].includes(receiptEmailInfo.previous_status || '')} onClick={sendReceiptEmail}>Bekräfta och skicka PDF</Button>}
+          </div>
+        </div>
       </Modal>
 
       <Modal open={receiptModalOpen} onClose={() => setReceiptModalOpen(false)} title="Anpassa korttidskvitto" size="lg">
