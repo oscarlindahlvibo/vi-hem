@@ -1,0 +1,72 @@
+#!/usr/bin/python3 -I
+"""Root-owned, no-argument publisher. Never executes repository code."""
+import os,sys,pathlib,stat,json,tarfile,hashlib,io,datetime,shutil,fcntl,urllib.request
+WEB=pathlib.Path('/var/www/app.vi-hem.se/html')
+INBOX=pathlib.Path('/home/vibo/.local/share/vihem-deploy/release.tar')
+BACKUPS=pathlib.Path('/mnt/md0/supabase-backups/shared/vihem-frontend')
+def checked_tree(path):
+ for p in [path,*path.parents]:
+  if p.is_symlink():raise ValueError('Symlink forbidden: '+str(p))
+def read_package(path):
+ fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+ with os.fdopen(fd,'rb') as f:
+  info=os.fstat(f.fileno())
+  if not stat.S_ISREG(info.st_mode) or info.st_size>128*1024*1024:raise ValueError('Invalid package size/type')
+  raw=f.read(128*1024*1024+1)
+ files={};total=0
+ with tarfile.open(fileobj=io.BytesIO(raw),mode='r:') as archive:
+  for member in archive:
+   name=member.name
+   if not member.isfile() or member.size>32*1024*1024 or name in files:raise ValueError('Invalid archive member')
+   p=pathlib.PurePosixPath(name)
+   if str(p)!=name or p.is_absolute() or any(not part or part.startswith('.') for part in p.parts):raise ValueError('Invalid path')
+   if not all(c.isascii() and (c.isalnum() or c in '/._-') for c in name):raise ValueError('Invalid filename')
+   if p.suffix.lower() not in {'.html','.js','.css','.json','.webmanifest','.svg','.png','.jpg','.jpeg','.webp','.ico','.woff','.woff2','.ttf','.txt'}:raise ValueError('Forbidden file type')
+   total+=member.size
+   if total>128*1024*1024 or len(files)>10000:raise ValueError('Package too large')
+   files[name]=archive.extractfile(member).read()
+ meta=json.loads(files.pop('deploy-manifest.json'))
+ if meta['files']!={name:hashlib.sha256(data).hexdigest() for name,data in files.items()}:raise ValueError('Manifest mismatch')
+ v=json.loads(files['beta-version.json'])
+ if not v.get('restricted') or v.get('workingTreePending') or v['revision']!=meta['revision']:raise ValueError('Invalid beta provenance')
+ if len(v['revision'])!=40 or any(c not in '0123456789abcdef' for c in v['revision']):raise ValueError('Invalid revision')
+ if 'index.html' not in files:raise ValueError('Missing index')
+ return files,v
+
+def main():
+ if os.geteuid()!=0 or len(sys.argv)!=1:raise ValueError('Run only the installed command via sudo without arguments')
+ os.umask(0o022)
+ checked_tree(WEB);checked_tree(BACKUPS);checked_tree(INBOX.parent)
+ if not WEB.is_dir():raise ValueError('VI-HEM webroot missing')
+ lock=open('/var/lock/vihem-beta-frontend.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+ files,version=read_package(INBOX)
+ old=json.loads((WEB/'beta-version.json').read_text())
+ if not old.get('restricted'):raise ValueError('Existing beta restrictions missing')
+ for name in files:checked_tree(WEB/name)
+ if any(p.is_symlink() for p in WEB.rglob('*')):raise ValueError('Symlink in existing webroot')
+ BACKUPS.mkdir(mode=0o700,parents=True,exist_ok=True)
+ stamp=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+os.urandom(4).hex()
+ backup=BACKUPS/('release-'+stamp);backup.mkdir(mode=0o700);shutil.copytree(WEB,backup/'previous')
+ uid=__import__('pwd').getpwnam('www-data').pw_uid;gid=__import__('grp').getgrnam('www-data').gr_gid
+ def install(name,data):
+  dest=WEB/name;checked_tree(dest);dest.parent.mkdir(parents=True,exist_ok=True)
+  tmp=dest.with_name(dest.name+'.deploy-'+stamp)
+  fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o644)
+  with os.fdopen(fd,'wb') as f:f.write(data);f.flush();os.fsync(f.fileno())
+  os.chown(tmp,uid,gid);os.replace(tmp,dest)
+ try:
+  for name,data in files.items():
+   if name not in ['index.html','beta-version.json']:install(name,data)
+  for name in ['beta-version.json','index.html']:install(name,files[name])
+  for name,data in files.items():
+   req=urllib.request.Request('https://app.vi-hem.se/'+name+'?release='+stamp,headers={'Cache-Control':'no-cache'})
+   with urllib.request.urlopen(req,timeout=20) as r:
+    if r.status!=200 or hashlib.sha256(r.read()).digest()!=hashlib.sha256(data).digest():raise ValueError('HTTP mismatch '+name)
+ except Exception:
+  for p in (backup/'previous').rglob('*'):
+   rel=p.relative_to(backup/'previous')
+   if p.is_file() and rel.parts[0]!='assets':install(str(rel),p.read_bytes())
+  raise
+ report={'status':'VI-HEM published and HTTP hashes verified','revision':version['revision'],'backup':str(backup),'old_assets_retained':True}
+ (backup/'release-report.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))
+if __name__=='__main__':main()
