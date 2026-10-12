@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build --config vite.config.ts",
     "lint": "eslint .",
-    "test:rental": "node scripts/rental-pricing-check.mjs",
+    "test:rental": "node scripts/viborent-unit-check.mjs",
     "test:inventory": "node scripts/inventory-invariants-check.mjs",
     "test:skatteverket": "node scripts/skatteverket-check.mjs",
     "test:installments": "node scripts/installment-plan-check.mjs",
