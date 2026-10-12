@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /kassa
+Disallow: /varukorg
+Disallow: /bokning/
+Disallow: /kundportal
+Sitemap: https://viborent.se/sitemap.xml

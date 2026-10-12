@@ -34,6 +34,10 @@ SITES = {
         'inbox': '/home/vibo/.local/share/site-deploy/grav.tar',
         'backups': '/var/backups/site-publish/grav',
     },
+    'viborent': {
+        'mode': 'flat', 'host': 'viborent.se', 'web': '/var/www/viborent.se/html',
+        'inbox': '/home/vibo/.local/share/site-deploy/viborent.tar', 'backups': '/var/backups/site-publish/viborent',
+    },
     'vibofast': {
         'mode': 'releases', 'host': 'vibofast.se',
         'current': '/var/www/vibofast.se/current', 'releases': '/var/www/vibofast.se/releases',

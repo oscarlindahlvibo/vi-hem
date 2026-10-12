@@ -82,6 +82,11 @@ Deno.serve(async (request: Request) => {
       return reply(200, { site: { site_name: "ViboRent", organisation_name: organisation?.name || "ViboRent", organisation_slug: organisation?.slug || "", currency: "SEK", timezone: "Europe/Stockholm", free_cancellation_minutes: 60, access_dispatch_minutes: 60, booking_hold_minutes: 30, ...(settings || {}), contract_version: contract || null } });
     }
 
+    if (request.method === "GET" && action === "contract") {
+      const { data } = await admin.from("vihem_rental_contract_versions").select("version,title,body").eq("organisation_id", organisationId).eq("status", "active").maybeSingle();
+      return reply(200, { contract: data || { version: 1, title: "Uthyrningsavtal", body: "ViboRent uthyrningsavtal v1" } });
+    }
+
     if (action === "availability" || action === "availability-calendar") {
       const product = await productBySlug(param("slug"));
       if (!product) return reply(404, { error: "Produkten hittades inte.", code: "E_PRODUCT" });
