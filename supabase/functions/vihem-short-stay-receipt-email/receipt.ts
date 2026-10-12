@@ -16,3 +16,15 @@ export function definiteMailFailure(error: unknown) {
   const text=String(error);
   return /GOOGLE_(CREDENTIALS|PRIVATE_KEY|TOKEN_FAILED)/.test(text) || /GOOGLE_GMAIL_SEND_FAILED:4\d\d:/.test(text);
 }
+
+export const defaultMailTemplate={subject:'Kvitto – Ekängens Vandrarhem',message:'Hej {namn},\n\nHär är ditt kvitto för {boende}, {ankomst}–{avresa}. Kvittot finns som PDF-bilaga.\n\nTack för din vistelse!\n\nVänliga hälsningar\nEkängens Vandrarhem'};
+export function validateMailContent(subject:unknown,message:unknown) {
+ if(typeof subject!=='string'||!subject.trim()||subject.length>200||/[\r\n\u0000]/.test(subject))throw Error('Ange ett ämne på högst 200 tecken utan radbrytning.');
+ if(typeof message!=='string'||!message.trim()||message.length>6000||message.includes('\u0000'))throw Error('Ange ett meddelande på högst 6 000 tecken.');
+ return {subject:subject.trim(),message};
+}
+export function renderMailTemplate(template:{subject:string;message:string},snapshot:any){
+ const values:Record<string,string>={namn:snapshot.guest,boende:snapshot.unit,ankomst:snapshot.start,avresa:snapshot.end};
+ const render=(text:string)=>text.replace(/\{(namn|boende|ankomst|avresa)\}/g,(_,key)=>String(values[key]||''));
+ return validateMailContent(render(template.subject),render(template.message));
+}

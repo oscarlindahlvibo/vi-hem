@@ -7,7 +7,7 @@ const load = async (name) => {
  const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
  return import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
 };
-const { receiptSnapshot, snapshotHash, validEmail, definiteMailFailure } = await load('receipt');
+const { receiptSnapshot, snapshotHash, validEmail, definiteMailFailure, validateMailContent, renderMailTemplate, defaultMailTemplate } = await load('receipt');
 const { receiptPdf } = await load('pdf');
 const booking = { id: 'qa', guest_email: 'qa@example.invalid', guest_name: 'Åsa Öberg', total_price: 1120, paid_amount: 1120, balance_due: 0, start_date: '2026-10-12', end_date: '2026-10-14' };
 const snapshot = receiptSnapshot(booking, { name: 'Östra rummet' }, { name: 'Vibogruppen AB' });
@@ -25,3 +25,5 @@ assert.equal((await PDFDocument.load(bytes)).getPageCount(), 1);
 const long = await receiptPdf({...snapshot, lines: Array.from({length:30}, () => ({description:'ÅÄÖ lång beskrivning '.repeat(25),amount:10}))});
 assert.ok((await PDFDocument.load(long)).getPageCount() > 2);
 console.log('PASS receipt validation, authoritative amounts, version hashing, ambiguous transport failures and paginated Swedish PDF');
+
+const mail=renderMailTemplate(defaultMailTemplate,snapshot);assert.ok(mail.message.includes('Åsa Öberg'));assert.ok(mail.message.includes('Östra rummet'));assert.equal(validateMailContent('Eget ämne','Eget meddelande').message,'Eget meddelande');assert.throws(()=>validateMailContent('Subject\r\nBcc:bad','body'));assert.throws(()=>validateMailContent('Subject','x'.repeat(6001)));console.log('PASS templates, Swedish merge values, edited messages and header/length validation');

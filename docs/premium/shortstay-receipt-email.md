@@ -35,3 +35,11 @@ Produktionsinspektion var skrivskyddad: Vibogruppen AB har lagrad Workspace-kopp
 ## Aktivering efter användargodkännande 2026-10-12
 
 Backend och avsändarkonto installerade. Färsk full PostgreSQL custom-backup och läsbar pg_restore-lista verifierade: `/mnt/md0/supabase-backups/shared/receipt-email-20261012T082213Z`. Tidigare helper, kontorad och migrationsledger bevarade. Additiv tabell och kontoaktivering i samma transaktion; adminläsning/backendskrivning efterkontrollerade. Riktig delegerad Gmail-send-token för kontaktkontot PASS utan mejlutskick. Förbättringarna för egna inköpswebbplatser finns på main sedan bygge 16; ny frontend samlar även kvittomejl i bygge 17. Verklig leverans och fysisk app återstår.
+
+## Standardmeddelande och redigerbar granskning
+
+Under Korttidsuthyrning → Kvitton → Mejlinställningar kan admin spara standardämne/text per organisation. Platshållare `{namn}`, `{boende}`, `{ankomst}`, `{avresa}` fylls av backend. Skicka-dialogen visar mottagare och avsändare, låter admin redigera text/ämne för just det utskicket, växla till mejlförhandsvy och visa kvittobilagan. Text skickas som ren text, inte HTML. Ämnesrad nekar radbrytningsinjektion; text max 6 000 tecken. Sparfel behåller texter; revisionsvillkor nekar samtidiga överskrivningar. Mejlets ämne/text registreras i den befintliga privata sändningshistoriken. Ändrad meddelandetext kringgår inte kvittoversionens dubbelutskicksskydd. Äldre frontend utan textfält använder standardmallen.
+
+Ny additiv migration `20261012190000_short_stay_receipt_email_templates.sql` behöver föregående kvittomejlledger. Installation: backup → migration → uppdaterad receipt Edge/receipt.ts → frontend; inga Workspace-rättigheter/kontoändringar behövs. Ingen kunddata/bokning ändras. Detta tillägg är **inte installerat i befintlig beta ännu**.
+
+QA PASS: faktisk isolerad Edge/DB mallskapande och revisioner (parallella/stale anrop), personal/hyresgäst/org-isolering, platshållare, redigerad text/ämne, headerinjektion och fortsatt dubblettspärr. Tidigare återförsök/timeout/ledgerfel PASS. Browser faktisk sida med mocktransport 390/768/1440: standardmall, sparfel/bevarad text/återförsök, redigering/förhandsvy/explicit utskick; mobil/desktop visuellt granskade. TypeScript/riktad lint, kvitto/PDF/malltest PASS. Inga riktiga mejl skickade; leverans och fysisk app återstår.

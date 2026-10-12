@@ -570,8 +570,15 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const [receiptEmailOpen,setReceiptEmailOpen]=useState(false);
   const [receiptEmailBusy,setReceiptEmailBusy]=useState(false);
   const [receiptEmailError,setReceiptEmailError]=useState('');
-  const [receiptEmailInfo,setReceiptEmailInfo]=useState<{sender:string;hash:string;snapshot:{recipient:string;issuer:string;total:number;currency:string};previous_status:string|null}|null>(null);
+  const [receiptEmailInfo,setReceiptEmailInfo]=useState<{sender:string;hash:string;snapshot:{recipient:string;issuer:string;total:number;currency:string};previous_status:string|null;mail?:{subject:string;message:string}}|null>(null);
   const [receiptEmailSent,setReceiptEmailSent]=useState(false);
+  const [receiptMailDraft,setReceiptMailDraft]=useState({subject:'',message:''});
+  const [receiptMailPreview,setReceiptMailPreview]=useState(false);
+  const [mailSettingsOpen,setMailSettingsOpen]=useState(false);
+  const [mailSettingsBusy,setMailSettingsBusy]=useState(false);
+  const [mailSettingsError,setMailSettingsError]=useState('');
+  const [mailSettingsForm,setMailSettingsForm]=useState<{subject:string;message:string;revision:number}|null>(null);
+  const mailSettingsLock=useRef(false);
   const receiptMailLock=useRef(false);
   const receiptMailOperation=useRef<string|null>(null);
   const [receiptForm, setReceiptForm] = useState<ReceiptForm>(defaultReceiptForm);
@@ -1404,7 +1411,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
         </body>
       </html>`;
     setReceiptExportError('');
-    receiptMailOperation.current=null;setReceiptEmailSent(false);
+    receiptMailOperation.current=null;setReceiptEmailSent(false);setReceiptMailDraft({subject:'',message:''});setReceiptMailPreview(false);
     setReceiptPreview({html,bookingId:booking.id,filename:`Kvitto-${booking.id}.pdf`,pdf:{
       title:booking.receipt_title || 'Kvitto',issuer,bookingId:booking.beds24_booking_id || booking.external_uid || booking.id,
       details:[company?.organisation_number ? `Org.nr ${company.organisation_number}` : '', `Datum: ${new Date().toLocaleDateString('sv-SE')}`, `Kund: ${booking.guest_name || booking.title || 'Gäst'}`, booking.guest_email || '', booking.guest_phone || '', unit?.name || 'Enhet',formatDateRange(booking.start_date,booking.end_date),`${booking.guest_count || 1} gäster · ${booking.channel_name || 'VI-HEM'}`].filter(Boolean),
@@ -1438,16 +1445,31 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   async function openReceiptEmail() {
     if(!receiptPreview||receiptMailLock.current)return;
     receiptMailLock.current=true;setReceiptEmailOpen(true);setReceiptEmailBusy(true);setReceiptEmailError('');setReceiptEmailInfo(null);
-    try {const data=await receiptEmailRequest({action:'prepare',booking_id:receiptPreview.bookingId});setReceiptEmailInfo(data);setReceiptEmailSent(data.previous_status==='sent');if(!receiptMailOperation.current)receiptMailOperation.current=crypto.randomUUID();}
+    try {const data=await receiptEmailRequest({action:'prepare',booking_id:receiptPreview.bookingId});setReceiptEmailInfo(data);setReceiptMailDraft(current=>current.subject||current.message?current:(data.mail||{subject:'',message:''}));setReceiptEmailSent(data.previous_status==='sent');if(!receiptMailOperation.current)receiptMailOperation.current=crypto.randomUUID();}
     catch(failure){setReceiptEmailError(failure instanceof Error?failure.message:'Kunde inte förbereda utskicket.');}
     finally{receiptMailLock.current=false;setReceiptEmailBusy(false);}
   }
   async function sendReceiptEmail() {
     if(!receiptPreview||!receiptEmailInfo||receiptMailLock.current||receiptEmailSent)return;
     receiptMailLock.current=true;setReceiptEmailBusy(true);setReceiptEmailError('');
-    try {const data=await receiptEmailRequest({action:'send',booking_id:receiptPreview.bookingId,expected_hash:receiptEmailInfo.hash,operation_id:receiptMailOperation.current});if(data.status!=='sent')throw new Error('Utskicket kunde inte bekräftas. Kontrollera Skickat i Gmail innan du försöker igen.');setReceiptEmailSent(true);}
+    try {const data=await receiptEmailRequest({action:'send',booking_id:receiptPreview.bookingId,expected_hash:receiptEmailInfo.hash,operation_id:receiptMailOperation.current,subject:receiptMailDraft.subject,message:receiptMailDraft.message});if(data.status!=='sent')throw new Error('Utskicket kunde inte bekräftas. Kontrollera Skickat i Gmail innan du försöker igen.');setReceiptEmailSent(true);}
     catch(failure){setReceiptEmailError(failure instanceof Error?failure.message:'Kunde inte skicka kvittot.');if((failure as {receiptState?:string})?.receiptState==='uncertain')setReceiptEmailInfo(current=>current?{...current,previous_status:'uncertain'}:current);}
     finally{receiptMailLock.current=false;setReceiptEmailBusy(false);}
+  }
+
+  async function openMailSettings() {
+    if(mailSettingsLock.current)return;
+    mailSettingsLock.current=true;setMailSettingsOpen(true);setMailSettingsBusy(true);setMailSettingsError('');setMailSettingsForm(null);
+    try {const data=await receiptEmailRequest({action:'settings_get'});setMailSettingsForm(data.template);}
+    catch(failure){setMailSettingsError(failure instanceof Error?failure.message:'Kunde inte läsa inställningarna.');}
+    finally{mailSettingsLock.current=false;setMailSettingsBusy(false);}
+  }
+  async function saveMailSettings() {
+    if(!mailSettingsForm||mailSettingsLock.current)return;
+    mailSettingsLock.current=true;setMailSettingsBusy(true);setMailSettingsError('');
+    try {await receiptEmailRequest({action:'settings_save',subject:mailSettingsForm.subject,message:mailSettingsForm.message,expected_revision:mailSettingsForm.revision});setMailSettingsOpen(false);setReceiptMessage('Standardmeddelandet är sparat. Det används när nästa kvitto öppnas.');}
+    catch(failure){setMailSettingsError(failure instanceof Error?failure.message:'Kunde inte spara standardmeddelandet.');}
+    finally{mailSettingsLock.current=false;setMailSettingsBusy(false);}
   }
 
   async function createFinanceReceipt(booking: ShortStayBooking) {
@@ -2018,7 +2040,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
                 <h2 className="text-lg font-semibold text-slate-900">Kvitton</h2>
                 <p className="text-sm text-slate-500">Skapa utskriftsvänliga kvitton eller riktiga ekonomiunderlag från korttidsbokningar.</p>
               </div>
-              <ReceiptText className="h-8 w-8 text-blue-600" />
+              <div className="flex items-center gap-3">{isAdmin && <Button variant="secondary" onClick={openMailSettings}>Mejlinställningar</Button>}<ReceiptText className="h-8 w-8 text-blue-600" /></div>
             </div>
             {receiptMessage && (
               <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
@@ -2478,7 +2500,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
         </div>}
       </Modal>
 
-      <Modal open={receiptEmailOpen} onClose={()=>{if(!receiptEmailBusy)setReceiptEmailOpen(false);}} title="Skicka kvitto till kunden" size="md">
+      <Modal open={receiptEmailOpen} onClose={()=>{if(!receiptEmailBusy)setReceiptEmailOpen(false);}} title="Skicka kvitto till kunden" size="lg">
         <div className="space-y-4">
           <p className="text-sm text-vihem-muted">Kvittot skickas som PDF från kontakt@ekangensvandrarhem.se genom Google Workspace.</p>
           {receiptEmailBusy && !receiptEmailInfo && <p role="status">Kontrollerar avsändare och kvitto…</p>}
@@ -2487,14 +2509,32 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
             <div><dt className="text-vihem-muted">Till</dt><dd className="font-medium break-all">{receiptEmailInfo.snapshot.recipient}</dd></div>
             <div><dt className="text-vihem-muted">Utfärdare och belopp</dt><dd>{receiptEmailInfo.snapshot.issuer} · {formatMoney(receiptEmailInfo.snapshot.total,receiptEmailInfo.snapshot.currency)}</dd></div>
           </dl>}
+          {receiptEmailInfo && <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3"><p className="text-sm text-vihem-muted">PDF-kvittot bifogas. Ändringar här gäller bara detta mejl.</p><Button type="button" variant="secondary" onClick={()=>setReceiptMailPreview(value=>!value)}>{receiptMailPreview?'Redigera':'Förhandsvisa mejl'}</Button></div>
+            {receiptMailPreview ? <section aria-label="Förhandsvisning av mejl" className="rounded-xl bg-vihem-surface p-4 ring-1 ring-inset ring-[color:var(--vihem-line)]"><h3 className="font-semibold break-words">{receiptMailDraft.subject}</h3><p className="mt-4 whitespace-pre-wrap break-words text-sm leading-relaxed">{receiptMailDraft.message}</p><p className="mt-5 text-sm text-vihem-muted">Bilaga: {receiptPreview?.filename}</p></section> : <>
+              <Input label="Ämne" maxLength={200} disabled={receiptEmailBusy||receiptEmailSent||['processing','uncertain'].includes(receiptEmailInfo.previous_status||'')} value={receiptMailDraft.subject} onChange={e=>setReceiptMailDraft({...receiptMailDraft,subject:e.target.value})} />
+              <Textarea label="Meddelande till kunden" rows={9} maxLength={6000} disabled={receiptEmailBusy||receiptEmailSent||['processing','uncertain'].includes(receiptEmailInfo.previous_status||'')} value={receiptMailDraft.message} onChange={e=>setReceiptMailDraft({...receiptMailDraft,message:e.target.value})} />
+            </>}
+            <details className="text-sm"><summary className="cursor-pointer font-medium py-2">Visa bifogat kvitto</summary><iframe title="Bifogat kvitto" sandbox="" srcDoc={receiptPreview?.html} className="mt-2 h-80 w-full rounded-lg border border-[color:var(--vihem-line)] bg-white" /></details>
+          </div>}
           {receiptEmailSent && <p role="status" className="text-sm text-emerald-700">Kvittot är skickat eller har redan skickats. Google har accepterat mejlet.</p>}
           {receiptEmailInfo && ['processing','uncertain'].includes(receiptEmailInfo.previous_status || '') && <p role="alert" className="text-sm text-vihem-danger">Ett utskick pågår eller resultatet är okänt. Kontrollera Skickat i Gmail innan nytt utskick.</p>}
           {receiptEmailError && <p role="alert" className="text-sm text-vihem-danger">{receiptEmailError}</p>}
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="secondary" disabled={receiptEmailBusy} onClick={()=>setReceiptEmailOpen(false)}>Stäng</Button>
             {(!receiptEmailInfo || receiptEmailError) && !receiptEmailBusy && <Button type="button" variant="secondary" onClick={openReceiptEmail}>Kontrollera igen</Button>}
-            {receiptEmailInfo && !receiptEmailSent && <Button type="button" loading={receiptEmailBusy} disabled={['processing','uncertain'].includes(receiptEmailInfo.previous_status || '')} onClick={sendReceiptEmail}>Bekräfta och skicka PDF</Button>}
+            {receiptEmailInfo && !receiptEmailSent && <Button type="button" loading={receiptEmailBusy} disabled={!receiptMailDraft.subject.trim()||!receiptMailDraft.message.trim()||['processing','uncertain'].includes(receiptEmailInfo.previous_status || '')} onClick={sendReceiptEmail}>Bekräfta och skicka PDF</Button>}
           </div>
+        </div>
+      </Modal>
+
+      <Modal open={mailSettingsOpen} onClose={()=>{if(!mailSettingsBusy)setMailSettingsOpen(false);}} title="Standardmeddelande för kvitton" size="lg">
+        <div className="space-y-4">
+          <p className="text-sm text-vihem-muted">Skickas från kontakt@ekangensvandrarhem.se. Du kan ändra texten för varje kund innan utskick.</p>
+          {mailSettingsBusy&&!mailSettingsForm&&<p role="status">Läser inställningar…</p>}
+          {mailSettingsForm&&<><Input label="Standardämne" maxLength={200} disabled={mailSettingsBusy} value={mailSettingsForm.subject} onChange={e=>setMailSettingsForm({...mailSettingsForm,subject:e.target.value})} /><Textarea label="Standardmeddelande" rows={10} maxLength={6000} disabled={mailSettingsBusy} value={mailSettingsForm.message} onChange={e=>setMailSettingsForm({...mailSettingsForm,message:e.target.value})} /><p className="text-sm text-vihem-muted">Använd {'{namn}'}, {'{boende}'}, {'{ankomst}'} och {'{avresa}'} för bokningens uppgifter. De fylls i när mejlet öppnas.</p></>}
+          {mailSettingsError&&<p role="alert" className="text-sm text-vihem-danger">{mailSettingsError}</p>}
+          <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={mailSettingsBusy} onClick={()=>setMailSettingsOpen(false)}>Avbryt</Button>{mailSettingsForm&&<Button loading={mailSettingsBusy} disabled={!mailSettingsForm.subject.trim()||!mailSettingsForm.message.trim()} onClick={saveMailSettings}>Spara standardmeddelande</Button>}{!mailSettingsForm&&!mailSettingsBusy&&<Button variant="secondary" onClick={openMailSettings}>Försök igen</Button>}</div>
         </div>
       </Modal>
 
