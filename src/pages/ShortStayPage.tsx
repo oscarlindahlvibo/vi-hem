@@ -8,7 +8,9 @@ import {
 import { supabase } from '../lib/supabase';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useAuth } from '../contexts/AuthContext';
-import { formatDateTime } from '../lib/utils';
+import { formatDateTime, saveOrShareFile } from '../lib/utils';
+import { defaultShortStayCompany, makeShortStayReceiptPdf, type ReceiptPdfInput } from '../lib/shortStayReceipt';
+import { Capacitor } from '@capacitor/core';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
 import { ShortStayPricingPanel } from '../components/ShortStayPricingPanel';
 import { ShortStayMessageTemplates } from '../components/ShortStayMessageTemplates';
@@ -562,6 +564,9 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   const [receiptMessage, setReceiptMessage] = useState('');
   const [creatingReceiptId, setCreatingReceiptId] = useState<string | null>(null);
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
+  const [receiptPreview, setReceiptPreview] = useState<{html: string; pdf: ReceiptPdfInput; filename: string} | null>(null);
+  const [receiptExporting, setReceiptExporting] = useState(false);
+  const [receiptExportError, setReceiptExportError] = useState('');
   const [receiptForm, setReceiptForm] = useState<ReceiptForm>(defaultReceiptForm);
   const [visibleKeyBoxId, setVisibleKeyBoxId] = useState<string | null>(null);
 
@@ -668,10 +673,13 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
   }, [organisationId, isAdmin]);
 
   useEffect(() => {
-    if (!organisationId || !isAdmin) return;
-    supabase.from('vihem_companies').select('*').eq('organisation_id', organisationId).eq('active', true).order('name')
-      .then(({ data }) => setFinanceCompanies((data || []) as FinanceCompany[]));
-  }, [organisationId, isAdmin]);
+    setFinanceCompanies([]);
+    if (!organisationId) return;
+    let cancelled = false;
+    supabase.from('vihem_companies').select('id,name,legal_name,organisation_number').eq('organisation_id', organisationId).eq('active', true).order('name')
+      .then(({ data }) => { if (!cancelled) setFinanceCompanies((data || []) as FinanceCompany[]); });
+    return () => { cancelled = true; };
+  }, [organisationId]);
 
   async function fetchData() {
     if (!organisationId) return;
@@ -1111,7 +1119,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
 
     const result = editingBooking
       ? await supabase.from('vihem_short_stay_bookings').update(payload).eq('id', editingBooking.id).select('id').single()
-      : await supabase.from('vihem_short_stay_bookings').insert(payload).select('id').single();
+      : await supabase.from('vihem_short_stay_bookings').insert({...payload, receipt_company_id: defaultShortStayCompany(financeCompanies)?.id || null}).select('id').single();
 
     if (result.error) {
       setSaving(false);
@@ -1257,7 +1265,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
       : [{ description: `Boende · ${units.find(unit => unit.id === booking.unit_id)?.name || 'Korttidsboende'}`, amount: Number(booking.total_price || 0) }];
     setReceiptForm({
       booking_id: booking.id,
-      company_id: booking.receipt_company_id || financeCompanies[0]?.id || '',
+      company_id: booking.receipt_company_id || defaultShortStayCompany(financeCompanies)?.id || '',
       title: booking.receipt_title || 'Kvitto',
       vat_rate: String(booking.receipt_vat_rate ?? units.find(unit => unit.id === booking.unit_id)?.receipt_vat_rate ?? 12),
       vat_exempt: Boolean(booking.receipt_vat_exempt ?? units.find(unit => unit.id === booking.unit_id)?.receipt_vat_exempt),
@@ -1325,24 +1333,23 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
     const vat = Math.round((total - subtotal) * 100) / 100;
     const paid = Number(booking.paid_amount || 0);
     const due = Number(booking.balance_due ?? Math.max(total - paid, 0));
-    const receiptWindow = window.open('', '_blank');
-    if (!receiptWindow) {
-      setError('Kunde inte öppna kvittot. Tillåt popup-fönster och försök igen.');
-      return;
-    }
-
-    receiptWindow.document.write(`<!doctype html>
+    const company = financeCompanies.find(company => company.id === booking.receipt_company_id) || (!booking.receipt_company_id ? defaultShortStayCompany(financeCompanies) : undefined);
+    const issuer = company?.legal_name || company?.name || 'VI-HEM korttidsuthyrning';
+    const html = `<!doctype html>
       <html lang="sv">
         <head>
           <meta charset="utf-8" />
           <title>Kvitto ${escapeHtml(booking.guest_name || booking.title)}</title>
           <style>
-            body { margin: 0; padding: 32px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #0f172a; background: #f8fafc; }
-            main { max-width: 720px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 32px; }
+            body { margin: 0; padding: 12px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #0f172a; background: #f8fafc; }
+            main { max-width: 720px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 20px; }
             header { display: flex; justify-content: space-between; gap: 24px; border-bottom: 1px solid #e2e8f0; padding-bottom: 22px; }
             h1 { margin: 0; font-size: 28px; }
             h2 { margin: 26px 0 10px; font-size: 16px; }
             p { margin: 4px 0; color: #475569; }
+            p, h1 { overflow-wrap: anywhere; }
+            td:first-child { overflow-wrap: anywhere; }
+            th:last-child, td:last-child { width: 45%; }
             table { width: 100%; border-collapse: collapse; margin-top: 14px; }
             th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 0; text-align: left; }
             th:last-child, td:last-child { text-align: right; }
@@ -1353,13 +1360,13 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
           </style>
         </head>
         <body>
-          <button class="print" onclick="window.print()">Skriv ut / spara som PDF</button>
+
           <main>
-            <header>
+            <header style="flex-wrap:wrap">
               <div>
                 <h1>${escapeHtml(booking.receipt_title || 'Kvitto')}</h1>
-                <p>${escapeHtml(financeCompanies.find(company => company.id === booking.receipt_company_id)?.legal_name || financeCompanies.find(company => company.id === booking.receipt_company_id)?.name || 'VI-HEM korttidsuthyrning')}</p>
-                ${financeCompanies.find(company => company.id === booking.receipt_company_id)?.organisation_number ? `<p>Org.nr ${escapeHtml(financeCompanies.find(company => company.id === booking.receipt_company_id)?.organisation_number || '')}</p>` : ''}
+                <p>${escapeHtml(issuer)}</p>
+                ${company?.organisation_number ? `<p>Org.nr ${escapeHtml(company?.organisation_number || '')}</p>` : ''}
               </div>
               <div>
                 <p><strong>Datum:</strong> ${escapeHtml(new Date().toLocaleDateString('sv-SE'))}</p>
@@ -1378,6 +1385,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
               <thead><tr><th>Rad</th><th>Belopp</th></tr></thead>
               <tbody>
                 ${configuredLines.map(line => `<tr><td>${escapeHtml(line.description)}</td><td>${escapeHtml(formatMoney(Number(line.amount || 0), currency))}</td></tr>`).join('')}
+                <tr><td>Totalt</td><td>${escapeHtml(formatMoney(total, currency))}</td></tr>
                 <tr><td>Exkl. moms</td><td>${escapeHtml(formatMoney(subtotal, currency))}</td></tr>
                 <tr><td>Moms (${vatRate}%)</td><td>${escapeHtml(formatMoney(vat, currency))}</td></tr>
                 <tr><td>Betalt</td><td>${escapeHtml(formatMoney(paid, currency))}</td></tr>
@@ -1387,9 +1395,30 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
             <p class="muted">Kvitto skapat från bokningsuppgifter i VI-HEM. Kontrollera moms- och bolagsuppgifter innan kvittot används externt.</p>
           </main>
         </body>
-      </html>`);
-    receiptWindow.document.close();
-    receiptWindow.focus();
+      </html>`;
+    setReceiptExportError('');
+    setReceiptPreview({html,filename:`Kvitto-${booking.id}.pdf`,pdf:{
+      title:booking.receipt_title || 'Kvitto',issuer,bookingId:booking.beds24_booking_id || booking.external_uid || booking.id,
+      details:[company?.organisation_number ? `Org.nr ${company.organisation_number}` : '', `Datum: ${new Date().toLocaleDateString('sv-SE')}`, `Kund: ${booking.guest_name || booking.title || 'Gäst'}`, booking.guest_email || '', booking.guest_phone || '', unit?.name || 'Enhet',formatDateRange(booking.start_date,booking.end_date),`${booking.guest_count || 1} gäster · ${booking.channel_name || 'VI-HEM'}`].filter(Boolean),
+      rows:[...configuredLines.map(line=>({label:line.description,amount:formatMoney(Number(line.amount || 0),currency)})),...[
+        ['Totalt',total],['Exkl. moms',subtotal],[`Moms (${vatRate}%)`,vat],['Betalt',paid],['Kvar att betala',due],
+      ].map(([label,amount])=>({label:String(label),amount:formatMoney(Number(amount),currency)}))],
+    }});
+  }
+
+  async function exportReceipt(share: boolean) {
+    if (!receiptPreview || receiptExporting) return;
+    setReceiptExporting(true);setReceiptExportError('');
+    try {
+      const blob=await makeShortStayReceiptPdf(receiptPreview.pdf);
+      if (share && !Capacitor.isNativePlatform()) {
+        const file=new File([blob],receiptPreview.filename,{type:'application/pdf'});
+        if (!navigator.canShare?.({files:[file]})) throw new Error('Din webbläsare kan inte dela PDF-filer. Spara PDF och bifoga den i ditt mejl.');
+        await navigator.share({files:[file],title:receiptPreview.pdf.title});
+      } else { await saveOrShareFile(blob,receiptPreview.filename); }
+    } catch(failure) {
+      if (!(failure instanceof Error && failure.name==='AbortError')) setReceiptExportError(failure instanceof Error?failure.message:'Kunde inte skapa PDF. Försök igen.');
+    } finally {setReceiptExporting(false);}
   }
 
   async function createFinanceReceipt(booking: ShortStayBooking) {
@@ -1404,7 +1433,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
 
     const { data, error: receiptError } = await supabase.rpc('vihem_create_invoice_from_short_stay_booking', {
       target_booking_id: booking.id,
-      target_company_id: booking.receipt_company_id || null,
+      target_company_id: booking.receipt_company_id || defaultShortStayCompany(financeCompanies)?.id || null,
       target_customer_id: null,
       approve_invoice: booking.payment_status === 'paid',
     });
@@ -2405,6 +2434,18 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
             <Button onClick={saveKeyBox} loading={saving}>{editingKeyBox ? 'Spara' : 'Skapa'}</Button>
           </div>
         </div>
+      </Modal>
+
+      <Modal open={Boolean(receiptPreview)} onClose={()=>{if(!receiptExporting)setReceiptPreview(null);}} title="Förhandsvisning av kvitto" size="lg">
+        {receiptPreview && <div className="space-y-3">
+          <iframe title="Kvitto" sandbox="" srcDoc={receiptPreview.html} className="h-[60dvh] min-h-80 w-full rounded-xl border border-[color:var(--vihem-line)] bg-white" />
+          <p className="text-sm text-vihem-muted">Kontrollera bolag och belopp. I appen väljer du Spara i Filer eller Mail i delningsmenyn. Inget mejl skickas automatiskt.</p>
+          {receiptExportError && <p role="alert" className="text-sm text-vihem-danger">{receiptExportError}</p>}
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" loading={receiptExporting} onClick={()=>exportReceipt(false)}>Spara PDF</Button>
+            <Button type="button" variant="secondary" disabled={receiptExporting} onClick={()=>exportReceipt(true)}>Mejla / dela PDF</Button>
+          </div>
+        </div>}
       </Modal>
 
       <Modal open={receiptModalOpen} onClose={() => setReceiptModalOpen(false)} title="Anpassa korttidskvitto" size="lg">
