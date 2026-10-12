@@ -4,8 +4,8 @@ import { Link } from "../lib/router";
 
 export function priceFrom(product: Product) {
   const d = product.price_hint?.daily, h = product.price_hint?.hourly;
-  if (d) return { label: "per dygn", value: d };
-  if (h) return { label: "per timme", value: h };
+  if (d) return { label: "per dygn exkl. moms", value: d };
+  if (h) return { label: "per timme exkl. moms", value: h };
   return null;
 }
 

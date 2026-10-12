@@ -60,7 +60,7 @@ main { min-height: 62vh; }
 .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 22px; }
 .product-card { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--card); text-decoration: none; color: var(--ink); transition: box-shadow .15s, transform .15s; }
 .product-card:hover { box-shadow: var(--shadow); transform: translateY(-3px); }
-.product-image { position: relative; aspect-ratio: 4 / 3; background: var(--teal-soft); } .product-image img { width: 100%; height: 100%; object-fit: cover; }
+.product-image { position: relative; aspect-ratio: 4 / 3; background: var(--teal-soft); } .product-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .chip { position: absolute; top: 12px; left: 12px; background: rgba(255,255,255,.95); border-radius: 999px; padding: 4px 12px; font-size: .78rem; font-weight: 700; }
 .chip.warn { left: auto; right: 12px; background: var(--warn-bg); color: var(--warn); }
 .product-body { padding: 18px; display: flex; flex-direction: column; gap: 6px; flex: 1; } .product-body p { color: var(--muted); font-size: .95rem; margin: 0; flex: 1; }
