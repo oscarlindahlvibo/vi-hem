@@ -1,7 +1,7 @@
 import pathlib,importlib.machinery,importlib.util,tempfile,tarfile,hashlib,json,io
 from unittest.mock import patch
 p=pathlib.Path(__file__).parent/'site-publish';loader=importlib.machinery.SourceFileLoader('site_publisher',str(p));spec=importlib.util.spec_from_loader(loader.name,loader);m=importlib.util.module_from_spec(spec);loader.exec_module(m)
-assert set(m.SITES)=={'ekangen','grav','vibofast','vibogruppen','vihem-site'}
+assert set(m.SITES)=={'ekangen','grav','vibofast','vibogruppen','viborent','vihem-site'}
 assert m.SITES['vihem-site']['web']=='/var/www/vi-hem.se/html'
 with tempfile.TemporaryDirectory() as d:
  p=pathlib.Path(d)/'site.tar';files={'index.html':b'<html>QA</html>','assets/site.js':b'// QA'}
