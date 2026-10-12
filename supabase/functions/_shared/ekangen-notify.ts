@@ -43,10 +43,10 @@ export async function emailGuest(admin: any, ctx: NotifyContext, booking: any, k
 export async function notifyAdmins(admin: any, ctx: NotifyContext, title: string, message: string) {
   const { data: admins } = await admin.from("vihem_profiles").select("id").eq("organisation_id", ctx.organisation_id).in("role", ["admin", "superadmin"]).eq("active", true);
   for (const a of admins ?? []) {
-    await admin.rpc("create_notification", {
+    { const { error: notifyError } = await admin.rpc("create_notification", {
       recipient_id: a.id, org_uuid: ctx.organisation_id, notification_title: title, notification_message: message,
-      notification_type: "info", notification_link: "shortstay",
-    });
+      notification_type: "info", notification_link: "shortstay", setting_key: null,
+    }); if (notifyError) console.error("create_notification:", notifyError.message); }
   }
   const to = String(ctx.settings.notification_email || "").trim();
   const from = String(ctx.settings.sender_email || "").trim();

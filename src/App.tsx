@@ -1,6 +1,7 @@
 import { PortalAdmin } from './modules/vibogruppen/PortalAdmin';
 import { WebsiteAdmin } from './modules/vibofast/WebsiteAdmin';
 import { EkangenAdmin } from './modules/ekangen/EkangenAdmin';
+import { GravAdmin } from './modules/grav/GravAdmin';
 import { InterestsAdmin } from './modules/vibofast/InterestsAdmin';
 import React, { useCallback, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -611,6 +612,10 @@ function AppInner() {
       case 'ekangen-website':
         if (!isAdmin) return renderDashboard();
         return <EkangenAdmin client={supabase} />;
+
+      case 'grav-website':
+        if (!isAdmin) return renderDashboard();
+        return <GravAdmin client={supabase} />;
 
       case 'admin-properties':
         if (!isAdmin) return renderDashboard();

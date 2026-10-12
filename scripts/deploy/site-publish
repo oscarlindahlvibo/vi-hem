@@ -1,12 +1,12 @@
 #!/usr/bin/python3 -I
-"""Root-owned publisher for the public websites ekangensvandrarhem.se and vibofast.se.
+"""Root-owned publisher for the public websites ekangensvandrarhem.se, gavirserum.se and vibofast.se.
 
 Installed as /usr/local/sbin/site-publish and run via sudo with exactly one argument from a fixed allow-list
 (see /etc/sudoers.d/site-publish). It NEVER executes repository code: it only reads a prepared release package
 (a tar written by prepare_site_release.py), validates it strictly, installs the files, verifies them over HTTPS
 against the live site and rolls back if anything is wrong.
 
-  ekangen   flat web root; files replaced atomically (assets first, index.html last); previous version backed up.
+  ekangen / grav   flat web root; files replaced atomically (assets first, index.html last); previous version backed up.
   vibofast  release directories + atomic switch of the 'current' symlink; previous releases stay for instant rollback.
 """
 import datetime, fcntl, hashlib, http.client, io, json, os, pathlib, shutil, socket, ssl, stat, sys, tarfile
@@ -23,6 +23,12 @@ SITES = {
         'web': '/var/www/ekangensvandrarhem.se/html',
         'inbox': '/home/vibo/.local/share/site-deploy/ekangen.tar',
         'backups': '/var/backups/site-publish/ekangen',
+    },
+    'grav': {
+        'mode': 'flat', 'host': 'gavirserum.se',
+        'web': '/var/www/gavirserum.se/html',
+        'inbox': '/home/vibo/.local/share/site-deploy/grav.tar',
+        'backups': '/var/backups/site-publish/grav',
     },
     'vibofast': {
         'mode': 'releases', 'host': 'vibofast.se',

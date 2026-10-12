@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Deploys the public sites without a password (uses the root-owned /usr/local/sbin/site-publish via scoped sudo).
-#   ./deploy_sites.sh                 -> ekangen + vibofast
+#   ./deploy_sites.sh                 -> ekangen + grav + vibofast
 #   ./deploy_sites.sh ekangen         -> only ekangensvandrarhem.se
+#   ./deploy_sites.sh grav            -> only gavirserum.se
 #   ./deploy_sites.sh vibofast        -> only vibofast.se
 #   ./deploy_sites.sh vihem           -> only VI-HEM (runs ./deploy_vihem.sh)
-#   ./deploy_sites.sh all             -> ekangen + vibofast + VI-HEM
+#   ./deploy_sites.sh all             -> ekangen + grav + vibofast + VI-HEM
 #   ./deploy_sites.sh vibogruppen    -> only vibogruppen.se
 # Run as the normal user (vibo), not with sudo.
 set -uo pipefail
@@ -13,9 +14,9 @@ ENV_FILE="${DEPLOY_ENV_FILE:-/home/vibo/barorder/.env}"
 [[ $EUID -ne 0 ]] || { echo "Run as vibo, without sudo."; exit 1; }
 
 targets=("$@")
-[[ ${#targets[@]} -eq 0 ]] && targets=(ekangen vibofast)
-[[ "${targets[0]}" == all ]] && targets=(ekangen vibofast vihem)
-for t in "${targets[@]}"; do [[ "$t" =~ ^(ekangen|vibofast|vibogruppen|vihem)$ ]] || { echo "Unknown target: $t"; exit 2; }; done
+[[ ${#targets[@]} -eq 0 ]] && targets=(ekangen grav vibofast)
+[[ "${targets[0]}" == all ]] && targets=(ekangen grav vibofast vihem)
+for t in "${targets[@]}"; do [[ "$t" =~ ^(ekangen|grav|vibofast|vibogruppen|vihem)$ ]] || { echo "Unknown target: $t"; exit 2; }; done
 
 log() { printf '\n[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 needs_repo=false; for t in "${targets[@]}"; do [[ "$t" != vihem ]] && needs_repo=true; done
