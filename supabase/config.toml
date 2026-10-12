@@ -491,3 +491,7 @@ verify_jwt = false
 
 [functions.vihem-profile-photo]
 verify_jwt = false
+
+# Gräv & Allservice (gavirserum.se): publikt offertformulär (ingen JWT; origin-lista, honeypot, hastighetsbegränsning och strikt validering i koden).
+[functions.vihem-grav-quote]
+verify_jwt = false
