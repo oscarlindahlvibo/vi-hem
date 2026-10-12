@@ -11,7 +11,7 @@ export function makeReader(config:{clientId:string;clientSecret:string;ids:strin
  let token='',refresh='',expires=0;let cache:Snapshot={status:'unavailable',checkedAt:null,points:[]};let next=0;let pending:Promise<Snapshot>|null=null;
  async function api(path:string,body?:unknown,authenticated=false):Promise<Record<string,unknown>> {
   const r=await fetcher(base+path,{method:body?'POST':'GET',headers:{'Accept':'application/json',...(body?{'Content-Type':'application/json'}:{}),...(authenticated?{'Authorization':`Bearer ${token}`}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(8000),redirect:'error'});
-  if(!r.ok){if(r.status===401)expires=0;throw Error('Monta request failed');}
+  if(!r.ok){console.warn('Monta response status',r.status);if(r.status===401)expires=0;throw Error('Monta request failed');}
   return await r.json();
  }
  async function authenticate(){
@@ -29,7 +29,7 @@ export function makeReader(config:{clientId:string;clientSecret:string;ids:strin
    await authenticate();
    const points=await Promise.all(config.ids.map(async(id,i)=>publicPoint(await api('/charge-points/'+id,undefined,true),id,i)));
    cache={status:'ok',checkedAt:new Date(now()).toISOString(),points};next=now()+60000;
-  }catch {cache={status:'unavailable',checkedAt:null,points:[]};next=now()+30000;}
+  }catch(e) {console.warn('Monta read failed',e instanceof Error?e.message:'Error');cache={status:'unavailable',checkedAt:null,points:[]};next=now()+30000;}
   return cache;
  }
  return ()=>{

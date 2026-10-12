@@ -34,3 +34,6 @@ dist-beta
 
 __pycache__/
 *.pyc
+
+# Generated Monta backend credentials; never commit.
+supabase/functions/vihem-vibogruppen-charging/credentials.json
