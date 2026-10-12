@@ -5,6 +5,7 @@
 #   ./deploy_sites.sh vibofast        -> only vibofast.se
 #   ./deploy_sites.sh vihem           -> only VI-HEM (runs ./deploy_vihem.sh)
 #   ./deploy_sites.sh all             -> ekangen + vibofast + VI-HEM
+#   ./deploy_sites.sh vibogruppen    -> only vibogruppen.se
 # Run as the normal user (vibo), not with sudo.
 set -uo pipefail
 REPO="${VI_HEM_REPO:-/home/vibo/vi-hem}"
@@ -14,7 +15,7 @@ ENV_FILE="${DEPLOY_ENV_FILE:-/home/vibo/barorder/.env}"
 targets=("$@")
 [[ ${#targets[@]} -eq 0 ]] && targets=(ekangen vibofast)
 [[ "${targets[0]}" == all ]] && targets=(ekangen vibofast vihem)
-for t in "${targets[@]}"; do [[ "$t" =~ ^(ekangen|vibofast|vihem)$ ]] || { echo "Unknown target: $t"; exit 2; }; done
+for t in "${targets[@]}"; do [[ "$t" =~ ^(ekangen|vibofast|vibogruppen|vihem)$ ]] || { echo "Unknown target: $t"; exit 2; }; done
 
 log() { printf '\n[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 needs_repo=false; for t in "${targets[@]}"; do [[ "$t" != vihem ]] && needs_repo=true; done

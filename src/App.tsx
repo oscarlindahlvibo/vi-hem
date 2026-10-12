@@ -1,3 +1,4 @@
+import { PortalAdmin } from './modules/vibogruppen/PortalAdmin';
 import { WebsiteAdmin } from './modules/vibofast/WebsiteAdmin';
 import { EkangenAdmin } from './modules/ekangen/EkangenAdmin';
 import { InterestsAdmin } from './modules/vibofast/InterestsAdmin';
@@ -600,6 +601,9 @@ function AppInner() {
       case 'notifications':
         return <NotificationsPage onNavigate={navigate} />;
 
+      case 'vibogruppen-website':
+        if (!isAdmin || user?.organisation_id !== '38fe702d-e72c-49a2-9750-5e0b6934959b') return renderDashboard();
+        return <PortalAdmin client={supabase} />;
       case 'vibofast-website':
         if (!isAdmin) return renderDashboard();
         return <WebsiteAdmin client={supabase} />;

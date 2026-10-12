@@ -14,7 +14,7 @@ install -o "$USER_NAME" -g "$USER_NAME" -m 0755 prepare_site_release.py "$HOME_D
 install -d -m 0700 /var/backups/site-publish
 
 tmp="$(mktemp)"
-printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/site-publish ekangen, /usr/local/sbin/site-publish vibofast\n' "$USER_NAME" > "$tmp"
+printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/site-publish ekangen, /usr/local/sbin/site-publish vibofast, /usr/local/sbin/site-publish vibogruppen\n' "$USER_NAME" > "$tmp"
 visudo -cf "$tmp"
 install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/site-publish
 rm -f "$tmp"

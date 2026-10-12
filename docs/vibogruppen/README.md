@@ -1,0 +1,26 @@
+# Vibogruppen – portal och VI-HEM-administration
+
+Branch `codex/vibogruppen-portal`. Byggd från användarens Bolt-zip, med originalets logotyper och gröna/grafitfärgade identitet. Typsnitt är lokalt levererade WOFF2 med OFL-licenser; ingen Google Fonts-förfrågan görs vid besök. Nya appen `apps/vibogruppen` är fristående; vandrarhemmet, Vibofast och Claudes gavirserum-arbete ändras inte. ChargeFinder-länken är användarbekräftad; inga simulerade laddvärden används. Ekängen leder till den befintliga `ekangensvandrarhem.se` och Bolt-demolänkar används inte. Exempeltelefonnummer visas inte; kan fyllas i från admin när bekräftat.
+
+VI-HEM → Administration → Vibogruppens portal: rubriker, ingress, om oss, kontaktuppgifter, verksamheters namn/beskrivningar/länkar/logotyper, synlighet, ordning och nya verksamheter. Ändringar publiceras med en explicit sparåtgärd och revisionsvillkor. Bildlänkar kan vara egna `/assets/...` eller HTTPS; filuppladdning är inte införd i detta pass. Ärendeinkorg med sökning på aktuell sida, 50 per sida, detaljvy och Nytt/Pågår/Klart. Svar öppnar användarens e-postapp; inga automatiska utskick.
+
+Kontaktformuläret går via `vihem-vibogruppen-contact` till isolerad privat sajtinkorg. Ingen anonym läsning av personuppgifter/direkt inskrivning: endast offentlig innehålls-RPC är publik. Inloggad, aktiv admin i den anslutna organisationen kan administrera. Supabase/service-rättigheter och servervald organisationskoppling bestämmer mottagaren; besökaren kan inte välja organisations-ID. Bounded request, honeypot, global/identitetsbaserad DB-rate-limit, idempotent operation-ID med payloadkontroll. UI visar bekräftelse först efter sparning, bevarar fält vid fel och återanvänder operation-ID vid återförsök. HMAC-fingerprint använder befintlig rate-secret, alternativt backendns privata service-nyckel med domänseparerat prefix. Inga nycklar eller e-postroutingkonfiguration från Bolt-zipens `.env` används.
+
+## Kontroller
+
+PASS: TypeScript i VI-HEM och sajt; sajtbuild; riktad lint. Browser faktiskt UI med kontrollerad transport vid 390/768/1440: mobilmeny/affärslänkar, ingen horisontell overflow, formulärfel/bevarat utkast/återförsök/bekräftelse; VI-HEM-admin publicera/sparfel/återförsök, ny verksamhet, ärendedetalj/status. Mobil/desktop skärmbilder granskade, CSS-konfigurationsmiss i dev rättad. Representativa artefakter finns i lokala `outputs/vibogruppen-*.png`.
+
+PASS riktig isolerad QA Auth/PostgREST/Edge/DB: publikt innehåll, privata leads, anonym/personal/hyresgäst/annan org nekas adminåtkomst, osäkra länkar/ogiltigt innehåll nekas, parallell innehållspublicering ger en vinnare, kontakt till inkorg/status/återläsning, samtidiga återförsök skapar en rad, rate limit och stale status nekas. Inga externa mejl, betalningar eller produktionsdata ändrade. `scripts/vibogruppen/integration-qa.py` körs på QA-server mot loopback18880 med syntetiska credentials via stdin.
+
+## Installation efter separat godkännande
+
+1. Granska senaste main och gör backup av DB/Edge/web. Migrera `20261012200000_vibogruppen_portal.sql` i transaktion och registrera checksumma. Seed binder uttryckligen till Vibogruppen AB (38fe702d...). För QA binds seed separat till syntetisk org; inga QA-konton/data finns i migrationen.
+2. Installera nya Edge-funktionen. Publik gateway måste släppa igenom anonnyckel till denna endpoint, men SQL-store är service-role-only. Kontrollera verklig Origin/CORS och RPC-grants innan frontend. Inga befintliga sajt- eller organisationsbehörigheter ändras.
+3. Publik A-uppslagning 2026-10-12 visar samma adress för `vibogruppen.se`, `www` och `app.vi-hem.se` (194.17.156.10). Kontrollera även aktuella IPv6-poster och DNS före aktivering; skapa endast den nya webrooten och TLS-certifikatet. Granska `nginx.conf.example`, testa nginx och aktivera endast ny vhost. Denna domän har ännu ingen egen serverkonfiguration i befintlig installation.
+4. Efter granskad frontend: integrera main, installera uppdaterad rootägd `site-publish` via befintligt engångsinstaller-script. Ny sudo-regel ger endast ytterligare exakt `site-publish vibogruppen`; övriga targets/regler behålls. Default/all i deploy-wrappern ändras inte automatiskt, så den nya sajten är opt-in.
+5. `~/deploy_sites.sh vibogruppen` bygger/paketerar/publicerar med backup och HTTPS/hashkontroll. VI-HEM-admin deployas därefter via sitt eget backend-granskade flöde. Gamla filer/versioner bevaras; ingen annan sajt deployas.
+6. Bekräfta kontakter/namn/verksamhetslänkar och personuppgiftstext före offentlig användning. Testa ett uttryckligen godkänt verkligt kontaktärende till rätt inkorg, rensa testet kontrollerat. Riktig domän/HTTPS/contact end-to-end är inte verifierade ännu.
+
+## Separat tekniskt fynd
+
+Det nya QA-provet visade att applikationskonflikter med SQLSTATE 40001 orsakar upprepade PostgREST-transaktionsförsök. Nya portal-RPC använder därför PT409, verifierat i QA. Samma äldre kodmönster finns i bl.a. Vibofast/Ekängen-migrationer; de har inte ändrats i denna portalimplementation. Granska aktuell installerad funktion och förbered separat additiv rättning innan eventuell åtgärd. Referens: https://supabase.com/docs/guides/troubleshooting/high-cpu-and-infinite-transaction-retries-when-using-custom-error-codes-in-rpc-functions-77326b

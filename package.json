@@ -30,7 +30,9 @@
     "test:premium:profile": "node scripts/premium/profile-integration.mjs",
     "test:premium:workorders": "node scripts/premium/workorder-integration.mjs",
     "mobile:build": "node scripts/build-mobile-release.mjs",
-    "test:mobile-release": "node scripts/check-mobile-release-config.mjs"
+    "test:mobile-release": "node scripts/check-mobile-release-config.mjs",
+    "vibogruppen:build": "npm --prefix apps/vibogruppen run build",
+    "vibogruppen:dev": "npm --prefix apps/vibogruppen run dev"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

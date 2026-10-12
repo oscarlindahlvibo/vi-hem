@@ -12,6 +12,12 @@ against the live site and rolls back if anything is wrong.
 import datetime, fcntl, hashlib, http.client, io, json, os, pathlib, shutil, socket, ssl, stat, sys, tarfile
 
 SITES = {
+    'vibogruppen': {
+        'mode':'flat','host':'vibogruppen.se',
+        'web':'/var/www/vibogruppen.se/html',
+        'inbox':'/home/vibo/.local/share/site-deploy/vibogruppen.tar',
+        'backups':'/var/backups/site-publish/vibogruppen',
+    },
     'ekangen': {
         'mode': 'flat', 'host': 'ekangensvandrarhem.se',
         'web': '/var/www/ekangensvandrarhem.se/html',

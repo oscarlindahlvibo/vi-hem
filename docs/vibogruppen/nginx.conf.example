@@ -1,0 +1,23 @@
+# Review DNS, obtain the domain certificate, then install/test this configuration.
+# Do not replace existing sites or reload nginx until the certificate exists.
+server {
+    listen 80;
+    server_name vibogruppen.se www.vibogruppen.se;
+    location /.well-known/acme-challenge/ { root /var/www/vibogruppen.se/html; }
+    location / { return 301 https://vibogruppen.se$request_uri; }
+}
+server {
+    listen 443 ssl;
+    server_name vibogruppen.se www.vibogruppen.se;
+    ssl_certificate /etc/letsencrypt/live/vibogruppen.se/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/vibogruppen.se/privkey.pem;
+    root /var/www/vibogruppen.se/html;
+    index index.html;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    location / { try_files $uri $uri/ /index.html; }
+    location = /index.html { add_header Cache-Control "no-store"; }
+    location /assets/ { add_header Cache-Control "public, max-age=31536000, immutable"; }
+    location ~ /\. { deny all; }
+}

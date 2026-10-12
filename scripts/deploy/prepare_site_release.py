@@ -1,12 +1,12 @@
 #!/usr/bin/python3
 """Packs apps/<site>/dist into a release tar for /usr/local/sbin/site-publish (runs as the normal user, no sudo).
 
-usage: prepare_site_release.py <ekangen|vibofast> [repo] [inbox_dir]
+usage: prepare_site_release.py <ekangen|vibofast|vibogruppen> [repo] [inbox_dir]
 """
 import hashlib, io, json, os, pathlib, subprocess, sys, tarfile
 
 site = sys.argv[1] if len(sys.argv) > 1 else ''
-if site not in ('ekangen', 'vibofast'): raise SystemExit('usage: prepare_site_release.py <ekangen|vibofast> [repo] [inbox_dir]')
+if site not in ('ekangen', 'vibofast', 'vibogruppen'): raise SystemExit('usage: prepare_site_release.py <ekangen|vibofast|vibogruppen> [repo] [inbox_dir]')
 repo = pathlib.Path(sys.argv[2] if len(sys.argv) > 2 else '/home/vibo/vi-hem')
 inbox = pathlib.Path(sys.argv[3] if len(sys.argv) > 3 else '/home/vibo/.local/share/site-deploy')
 source = repo / 'apps' / site / 'dist'
