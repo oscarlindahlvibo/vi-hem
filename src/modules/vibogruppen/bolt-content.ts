@@ -118,6 +118,7 @@ export const companies: Company[] = [
     url: 'https://gavirserum.se',
     legalEntity: 'Gräv & Allservice i Virserum AB',
     icon: 'Construction',
+    logo: '/assets/logos/grav-allservice/logo.png',
     image:
       'https://images.pexels.com/photos/15071423/pexels-photo-15071423.jpeg?auto=compress&cs=tinysrgb&w=1600',
     imageAlt: 'Gul grävmaskin i arbete i ett stenbrott under klarblå himmel',
