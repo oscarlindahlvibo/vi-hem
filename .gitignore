@@ -31,3 +31,6 @@ android/*.keystore
 # Isolated staging/release build artifacts (may contain environment-specific public config).
 dist-staging
 dist-beta
+
+__pycache__/
+*.pyc
