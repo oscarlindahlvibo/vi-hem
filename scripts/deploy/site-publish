@@ -1,0 +1,169 @@
+#!/usr/bin/python3 -I
+"""Root-owned publisher for the public websites ekangensvandrarhem.se and vibofast.se.
+
+Installed as /usr/local/sbin/site-publish and run via sudo with exactly one argument from a fixed allow-list
+(see /etc/sudoers.d/site-publish). It NEVER executes repository code: it only reads a prepared release package
+(a tar written by prepare_site_release.py), validates it strictly, installs the files, verifies them over HTTPS
+against the live site and rolls back if anything is wrong.
+
+  ekangen   flat web root; files replaced atomically (assets first, index.html last); previous version backed up.
+  vibofast  release directories + atomic switch of the 'current' symlink; previous releases stay for instant rollback.
+"""
+import datetime, fcntl, hashlib, http.client, io, json, os, pathlib, shutil, socket, ssl, stat, sys, tarfile
+
+SITES = {
+    'ekangen': {
+        'mode': 'flat', 'host': 'ekangensvandrarhem.se',
+        'web': '/var/www/ekangensvandrarhem.se/html',
+        'inbox': '/home/vibo/.local/share/site-deploy/ekangen.tar',
+        'backups': '/var/backups/site-publish/ekangen',
+    },
+    'vibofast': {
+        'mode': 'releases', 'host': 'vibofast.se',
+        'current': '/var/www/vibofast.se/current', 'releases': '/var/www/vibofast.se/releases',
+        'inbox': '/home/vibo/.local/share/site-deploy/vibofast.tar',
+    },
+}
+ALLOWED_SUFFIX = {'.html', '.js', '.css', '.json', '.webmanifest', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.avif', '.gif',
+                  '.ico', '.woff', '.woff2', '.ttf', '.txt', '.xml'}
+ALLOWED_NAMES = {'_redirects'}
+MAX_FILE, MAX_TOTAL, MAX_FILES = 32 * 1024 * 1024, 128 * 1024 * 1024, 10000
+KEEP_RELEASES = 6
+KEEP_BACKUPS = 10
+
+
+def sha(data): return hashlib.sha256(data).hexdigest()
+
+
+def forbid_symlinks(path):
+    for p in [path, *path.parents]:
+        if p.is_symlink(): raise ValueError('Symlink forbidden: ' + str(p))
+
+
+def read_package(path, site):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, 'rb') as f:
+        info = os.fstat(f.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_TOTAL: raise ValueError('Invalid package size/type')
+        raw = f.read(MAX_TOTAL + 1)
+    files, total = {}, 0
+    with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as archive:
+        for member in archive:
+            name = member.name
+            if not member.isfile() or member.size > MAX_FILE or name in files: raise ValueError('Invalid archive member')
+            p = pathlib.PurePosixPath(name)
+            if str(p) != name or p.is_absolute() or any(not part or part.startswith('.') for part in p.parts): raise ValueError('Invalid path')
+            if not all(c.isascii() and (c.isalnum() or c in '/._-') for c in name): raise ValueError('Invalid filename')
+            if p.name not in ALLOWED_NAMES and p.suffix.lower() not in ALLOWED_SUFFIX: raise ValueError('Forbidden file type: ' + name)
+            total += member.size
+            if total > MAX_TOTAL or len(files) > MAX_FILES: raise ValueError('Package too large')
+            files[name] = archive.extractfile(member).read()
+    meta = json.loads(files.pop('deploy-manifest.json'))
+    if meta.get('site') != site: raise ValueError('Package is for another site')
+    if meta['files'] != {n: sha(d) for n, d in files.items()}: raise ValueError('Manifest mismatch')
+    rev = meta.get('revision', '')
+    if len(rev) != 40 or any(c not in '0123456789abcdef' for c in rev): raise ValueError('Invalid revision')
+    if 'index.html' not in files: raise ValueError('Missing index.html')
+    return files, meta
+
+
+def fetch_local(host, name, stamp):
+    """GET https://<host>/<name> via 127.0.0.1 with correct SNI/Host and a verified certificate (bypasses NAT hairpin)."""
+    ctx = ssl.create_default_context()
+    class Conn(http.client.HTTPSConnection):
+        def connect(self):
+            sock = socket.create_connection(('127.0.0.1', 443), timeout=20)
+            self.sock = ctx.wrap_socket(sock, server_hostname=host)
+    c = Conn(host, timeout=20)
+    c.request('GET', '/' + name + '?release=' + stamp, headers={'Host': host, 'Cache-Control': 'no-cache'})
+    r = c.getresponse(); body = r.read(); c.close()
+    return r.status, body
+
+
+def verify_live(host, files, stamp):
+    for name, data in files.items():
+        status, body = fetch_local(host, name, stamp)
+        if status != 200 or sha(body) != sha(data): raise ValueError('HTTP mismatch ' + name)
+
+
+def owner_ids():
+    import grp, pwd
+    return pwd.getpwnam('www-data').pw_uid, grp.getgrnam('www-data').gr_gid
+
+
+def write_file(dest, data, stamp, ids):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + '.deploy-' + stamp)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, 'wb') as f: f.write(data); f.flush(); os.fsync(f.fileno())
+    if ids: os.chown(tmp, *ids)
+    os.replace(tmp, dest)
+
+
+def publish_flat(cfg, files, meta, stamp, ids, verify=True):
+    web = pathlib.Path(cfg['web'])
+    if not web.is_dir(): raise ValueError('Web root missing: ' + str(web))
+    forbid_symlinks(web)
+    for name in files: forbid_symlinks(web / name)
+    if any(p.is_symlink() for p in web.rglob('*')): raise ValueError('Symlink in existing web root')
+    backups = pathlib.Path(cfg['backups']); backups.mkdir(mode=0o700, parents=True, exist_ok=True)
+    backup = backups / ('release-' + stamp); shutil.copytree(web, backup / 'previous')
+    try:
+        for name, data in files.items():
+            if name != 'index.html': write_file(web / name, data, stamp, ids)
+        write_file(web / 'index.html', files['index.html'], stamp, ids)
+        if verify: verify_live(cfg['host'], files, stamp)
+    except Exception:
+        for p in (backup / 'previous').rglob('*'):
+            rel = p.relative_to(backup / 'previous')
+            if p.is_file() and rel.parts[0] != 'assets': write_file(web / rel, p.read_bytes(), stamp, ids)
+        raise
+    for old in sorted(backups.glob('release-*'))[:-KEEP_BACKUPS]: shutil.rmtree(old, ignore_errors=True)
+    return {'backup': str(backup), 'old_assets_retained': True}
+
+
+def publish_releases(cfg, files, meta, stamp, ids, verify=True):
+    current, releases = pathlib.Path(cfg['current']), pathlib.Path(cfg['releases'])
+    if not current.is_symlink() or not releases.is_dir(): raise ValueError('Expected release layout missing')
+    previous_target = os.readlink(current)
+    new = releases / ('web-' + stamp)
+    forbid_symlinks(releases)
+    new.mkdir(mode=0o755)
+    try:
+        for name, data in files.items(): write_file(new / name, data, stamp, ids)
+        if ids:
+            for p in [new, *new.rglob('*')]: os.chown(p, *ids)
+        tmp = current.with_name('current.new-' + stamp)
+        os.symlink(str(new), tmp); os.replace(tmp, current)
+        if verify: verify_live(cfg['host'], files, stamp)
+    except Exception:
+        tmp = current.with_name('current.rollback-' + stamp)
+        os.symlink(previous_target, tmp); os.replace(tmp, current)
+        shutil.rmtree(new, ignore_errors=True)
+        raise
+    keep = {os.path.realpath(current), os.path.realpath(previous_target)}
+    mine = sorted((p for p in releases.glob('web-*') if p.is_dir() and not p.is_symlink()), key=lambda p: p.stat().st_mtime)
+    for old in mine[:-KEEP_RELEASES]:
+        if os.path.realpath(old) not in keep: shutil.rmtree(old, ignore_errors=True)
+    return {'release': str(new), 'previous': previous_target}
+
+
+def publish(site, cfg, verify=True, ids=None):
+    files, meta = read_package(cfg['inbox'], site)
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + os.urandom(4).hex()
+    run = publish_flat if cfg['mode'] == 'flat' else publish_releases
+    details = run(cfg, files, meta, stamp, ids, verify)
+    return {'status': site + ' published' + (' and HTTP hashes verified' if verify else ''), 'revision': meta['revision'], **details}
+
+
+def main():
+    if os.geteuid() != 0 or len(sys.argv) != 2 or sys.argv[1] not in SITES:
+        raise SystemExit('Usage (as root via sudo): site-publish <' + '|'.join(SITES) + '>')
+    site = sys.argv[1]; cfg = SITES[site]
+    os.umask(0o022)
+    lock = open('/var/lock/site-publish-' + site + '.lock', 'w'); fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    print(json.dumps(publish(site, cfg, True, owner_ids()), indent=2))
+
+
+if __name__ == '__main__':
+    main()
