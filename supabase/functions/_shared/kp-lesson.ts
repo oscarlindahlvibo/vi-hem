@@ -3,11 +3,15 @@ import { isUuid } from "./kp-common.ts";
 
 export const SIGN_TTL = 2 * 3600;
 
+/** Funktionerna ser lagringen via den interna adressen (kong:8000). Webbläsare behöver den publika: byt ut ursprunget i signerade URL:er. */
+export const publicApiBase = () => (Deno.env.get("KP_PUBLIC_API_URL") || "https://supabase.asedatruckmeet.se").replace(/\/$/, "");
+export const publicize = (url: string | null | undefined) => (url ? url.replace(/^https?:\/\/[^/]+/, publicApiBase()) : null);
+
 export function makeSigner(admin: any) {
   return async (bucket: string, path: string | null | undefined, ttl = SIGN_TTL, download?: string) => {
     if (!path) return null;
     const { data } = await admin.storage.from(bucket).createSignedUrl(path, ttl, download ? { download } : undefined);
-    return data?.signedUrl ?? null;
+    return publicize(data?.signedUrl);
   };
 }
 

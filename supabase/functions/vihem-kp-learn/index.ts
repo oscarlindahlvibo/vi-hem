@@ -2,11 +2,10 @@
 // här kontrolleras ägarskap/företagsadministration och privata filer signeras med korta URL:er. Svar innehåller aldrig facit.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { allow, corsFor, encryptPii, ensureParticipant, EMAIL, isUuid, kpContext, mapKpError, normalisePersonalNumber, queueMail, text, userFromRequest, notifyStaff } from "../_shared/kp-common.ts";
+import { allow, corsFor, encryptPii, ensureParticipant, EMAIL, isTestEmail, isUuid, kpContext, mapKpError, normalisePersonalNumber, queueMail, text, userFromRequest, notifyStaff as notifyStaffReal } from "../_shared/kp-common.ts";
 import { ensureCertificatePdf } from "../_shared/kp-certificate-render.ts";
-import { buildLessonBlocks } from "../_shared/kp-lesson.ts";
+import { buildLessonBlocks, makeSigner, SIGN_TTL } from "../_shared/kp-lesson.ts";
 
-const SIGN_TTL = 2 * 3600;
 
 Deno.serve(async (request: Request) => {
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -19,16 +18,13 @@ Deno.serve(async (request: Request) => {
   try {
     const user = await userFromRequest(admin, request);
     if (!user) return reply(401, { error: "Logga in för att fortsätta.", code: "E_AUTH" });
-    if (!(await allow(admin, request, "kp-learn", 600, 60))) return reply(429, { error: "För många anrop.", code: "E_RATE" });
+    if (!(await allow(admin, request, `kp-learn-${user.id}`, 400, 60))) return reply(429, { error: "För många anrop.", code: "E_RATE" });
     const body = JSON.parse((await request.text()) || "{}");
     const action = text(body.action, 40);
     const participant = await ensureParticipant(admin, ctx, user);
+    const notifyStaff = (...args: Parameters<typeof notifyStaffReal>) => (isTestEmail(user.email) ? Promise.resolve() : notifyStaffReal(...args));
     const rpc = async (fn: string, args: Record<string, unknown>) => { const { data, error } = await admin.rpc(fn, args); if (error) throw error; return data; };
-    const sign = async (bucket: string, path: string | null | undefined, ttl = SIGN_TTL, download?: string) => {
-      if (!path) return null;
-      const { data } = await admin.storage.from(bucket).createSignedUrl(path, ttl, download ? { download } : undefined);
-      return data?.signedUrl ?? null;
-    };
+    const sign = makeSigner(admin);
     const requireCompanyAdmin = async (customerId: unknown) => {
       if (!isUuid(customerId)) throw new Error("[E_FORBIDDEN] Välj företag.");
       const { data: m } = await admin.from("vihem_kp_company_members").select("id,role").eq("customer_id", customerId).eq("user_id", user.id).eq("status", "active").eq("role", "admin").maybeSingle();
@@ -221,7 +217,9 @@ Deno.serve(async (request: Request) => {
       if (seat.status === "assigned") await rpc("vihem_kp_reclaim_seat", { p_seat: seat.id, p_actor: user.id });
       const { data: target } = await admin.from("vihem_kp_participants").select("user_id,first_name,last_name").eq("organisation_id", org).ilike("email", email).maybeSingle();
       await rpc("vihem_kp_assign_seat_internal", { p_seat: seat.id, p_user: target?.user_id ?? null, p_email: email, p_actor: user.id });
-      await admin.from("vihem_kp_company_members").upsert({ organisation_id: org, customer_id: c.id, user_id: target?.user_id ?? null, email, role: "employee", status: target ? "active" : "invited", invited_by: user.id, joined_at: target ? new Date().toISOString() : null }, { onConflict: "customer_id,email", ignoreDuplicates: true } as any).select();
+      const { data: existingMember } = await admin.from("vihem_kp_company_members").select("id,status").eq("customer_id", c.id).ilike("email", email).neq("status", "removed").maybeSingle();
+      if (existingMember) { if (existingMember.status === "invited" && target) await admin.from("vihem_kp_company_members").update({ user_id: target.user_id, status: "active", joined_at: new Date().toISOString() }).eq("id", existingMember.id); }
+      else { const { error: memberError } = await admin.from("vihem_kp_company_members").insert({ organisation_id: org, customer_id: c.id, user_id: target?.user_id ?? null, email, role: "employee", status: target ? "active" : "invited", invited_by: user.id, joined_at: target ? new Date().toISOString() : null }); if (memberError) console.error("company member insert:", memberError.message); }
       const inviter = `${participant?.first_name ?? ""} ${participant?.last_name ?? ""}`.trim() || c.name;
       await queueMail(admin, org, target ? "seat_assigned" : "participant_invite", email, target ? `${target.first_name} ${target.last_name}`.trim() : "", { name: target ? target.first_name : "", course: seat.course.title, inviter, portal_url: `${ctx.baseUrl}/mina-sidor` }, `seat-${seat.id}-${email}`, "seat", seat.id);
       return reply(200, { ok: true, invited: !target });

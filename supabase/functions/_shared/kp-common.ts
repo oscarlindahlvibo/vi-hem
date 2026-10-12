@@ -126,7 +126,11 @@ export async function notifyStaff(admin: any, orgId: string, title: string, mess
 }
 
 /** Köar mejl via databasmallarna (idempotent per nyckel). */
+/** Automatiska end-to-end-tester använder adresser @e2e.kp.test: inga riktiga mejl köas och personal notifieras inte. */
+export const isTestEmail = (email: string) => /@e2e\.kp\.test$/i.test(email || "");
+
 export async function queueMail(admin: any, orgId: string, key: string, to: string, name: string, vars: Record<string, string>, idem: string, relatedType?: string, relatedId?: string, attachment?: unknown) {
+  if (isTestEmail(to)) return;
   const { error } = await admin.rpc("vihem_kp_queue_email", { p_org: orgId, p_key: key, p_to: to, p_name: name, p_vars: vars, p_idem: idem, p_related_type: relatedType ?? null, p_related_id: relatedId ?? null, p_attachment: attachment ?? null });
   if (error) console.error("queue_email:", error.message);
 }

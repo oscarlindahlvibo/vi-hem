@@ -2,7 +2,7 @@
 // Order skapas av databasfunktionen (pris, moms, kapacitet, kreditgräns). Åtkomst ges ALDRIG här för kortköp – bara av verifierad Stripe-webhook.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { allow, clientIp, corsFor, ensureParticipant, fingerprint, isUuid, kpContext, mapKpError, money, queueMail, text, userFromRequest, notifyStaff } from "../_shared/kp-common.ts";
+import { allow, clientIp, corsFor, ensureParticipant, fingerprint, isTestEmail, isUuid, kpContext, mapKpError, money, queueMail, text, userFromRequest, notifyStaff as notifyStaffReal } from "../_shared/kp-common.ts";
 import { stripeConfigured, stripeGet, stripePost } from "../_shared/kp-stripe.ts";
 import { createInvoiceForOrder } from "../_shared/kp-accounted.ts";
 
@@ -17,10 +17,11 @@ Deno.serve(async (request: Request) => {
   try {
     const user = await userFromRequest(admin, request);
     if (!user) return reply(401, { error: "Logga in för att fortsätta.", code: "E_AUTH" });
-    if (!(await allow(admin, request, "kp-checkout", 30, 600))) return reply(429, { error: "För många försök. Försök igen om en stund.", code: "E_RATE" });
+    if (!(await allow(admin, request, `kp-checkout-${user.id}`, 30, 600))) return reply(429, { error: "För många försök. Försök igen om en stund.", code: "E_RATE" });
     const body = JSON.parse((await request.text()) || "{}");
     const action = text(body.action, 40);
     await ensureParticipant(admin, ctx, user);
+    const notifyStaff = (...args: Parameters<typeof notifyStaffReal>) => (isTestEmail(user.email) ? Promise.resolve() : notifyStaffReal(...args));
 
     if (action === "order_status") {
       const { data: o } = await admin.from("vihem_kp_orders").select("id,order_number,status,payment_method,total,access_enabled,invoice_status").eq("id", body.order_id).eq("buyer_user_id", user.id).maybeSingle();
