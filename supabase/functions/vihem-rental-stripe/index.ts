@@ -124,7 +124,6 @@ Deno.serve(async (request: Request) => {
     const body = JSON.parse((await request.text()) || "{}");
     const bookingId = text(body.booking_id, 80), token = text(body.public_lookup_token, 80);
     if (!UUID.test(bookingId) || !UUID.test(token)) return reply(400, { error: "Bokningen kunde inte identifieras." });
-    if (!stripeConfigured()) return reply(503, { error: "Kortbetalning är inte aktiverad ännu. Kontakta uthyraren för att slutföra bokningen." });
 
     const allowedHosts = await hostsForOrganisation(admin, organisationId);
     const validReturn = (value: string) => { try { const u = new URL(value); return u.protocol === "https:" && allowedHosts.has(normaliseHost(u.hostname)) ? u.toString() : null; } catch { return null; } };
@@ -139,6 +138,7 @@ Deno.serve(async (request: Request) => {
     if (booking.payment_status === "paid") return reply(409, { error: "Bokningen är redan betald." });
     if (booking.status !== "pending") return reply(409, { error: "Bokningen kan inte betalas." });
     if (booking.contract_status !== "signed") return reply(409, { error: "Avtalet måste signeras innan betalning." });
+    if (!stripeConfigured()) return reply(503, { error: "Kortbetalning är inte aktiverad ännu. Kontakta uthyraren för att slutföra bokningen." });
     const amount = Math.round(Number(booking.total) * 100);
     if (!(amount > 0)) return reply(400, { error: "Bokningen saknar belopp att betala." });
 

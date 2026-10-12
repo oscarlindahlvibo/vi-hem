@@ -10,10 +10,10 @@ import { pathToFileURL } from 'node:url';
 const dir = mkdtempSync(path.join(tmpdir(), 'viborent-unit-'));
 const entry = path.join(dir, 'entry.ts');
 const root = path.resolve('supabase/functions/_shared');
-writeFileSync(entry, `export * from ${JSON.stringify(path.join(root, 'igloohome.ts'))}; export * from ${JSON.stringify(path.join(root, 'rental-common.ts'))};`);
+writeFileSync(entry, `export * from ${JSON.stringify(path.join(root, 'igloohome.ts'))}; export * from ${JSON.stringify(path.join(root, 'rental-common.ts'))}; export * as stripe from ${JSON.stringify(path.join(root, 'rental-stripe.ts'))};`);
 const out = path.join(dir, 'bundle.mjs');
 await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error' });
-globalThis.Deno = { env: { get: (k) => ({ VIHEM_RENTAL_SECRET_KEY: 'unit-test-secret' })[k] } };
+globalThis.Deno = { env: { get: (k) => ({ VIHEM_RENTAL_SECRET_KEY: 'unit-test-secret', STRIPE_RENTAL_WEBHOOK_SECRET: 'whsec_test', STRIPE_RENTAL_SECRET_KEY: 'sk_test_x' })[k] } };
 const m = await import(pathToFileURL(out).href);
 
 // --- Tidsformat (egen implementation av offset: kontrollerar både sommar- och vintertid) ---
@@ -82,5 +82,30 @@ const hidden = m.mapDbError({ message: 'duplicate key value violates unique cons
 assert.equal(hidden.status, 500); assert.ok(!/duplicate|constraint/.test(hidden.message));
 assert.equal(m.mapDbError({ message: '[E_INVENTED] något' }).status, 500);
 assert.equal(m.maskPins('Din kod är 482913 ok'), 'Din kod är •••• ok');
+
+// --- Stripe-signatur ---
+import { createHmac } from 'node:crypto';
+const payload = JSON.stringify({ id: 'evt_1', type: 'checkout.session.completed' });
+const ts = Math.floor(Date.now() / 1000);
+const sig = (secret, t = ts, body = payload) => `t=${t},v1=${createHmac('sha256', secret).update(`${t}.${body}`).digest('hex')}`;
+assert.equal(await m.stripe.verifySignature(payload, sig('whsec_test')), true);
+assert.equal(await m.stripe.verifySignature(payload, sig('annan_hemlighet')), false);
+assert.equal(await m.stripe.verifySignature(payload + ' ', sig('whsec_test')), false, 'ändrad body nekas');
+assert.equal(await m.stripe.verifySignature(payload, sig('whsec_test', ts - 3600)), false, 'gammal tidsstämpel nekas');
+assert.equal(await m.stripe.verifySignature(payload, null), false);
+assert.equal(m.stripe.stripeConfigured(), true);
+
+// --- Återbetalning: belopp begränsas till det som faktiskt betalats, fel markeras som failed ---
+const updates = [];
+const fakeAdmin = { from: () => ({ update: (u) => { updates.push(u); return { eq: async () => ({}) }; } }) };
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => url.includes('payment_intents') ? { ok: true, json: async () => ({ amount_received: 47500 }) } : { ok: true, json: async () => ({ id: 're_1', _body: String(init.body) }) };
+assert.equal(await m.stripe.issueRefund(fakeAdmin, 'b1', { refund_amount: 9999, payment_intent: 'pi_1' }), 'succeeded');
+assert.deepEqual(updates.at(-1), { refund_status: 'succeeded', refund_amount: 475, payment_status: 'refunded' });
+assert.equal(await m.stripe.issueRefund(fakeAdmin, 'b1', { refund_amount: 100, payment_intent: 'pi_1' }), 'succeeded');
+assert.equal(updates.at(-1).payment_status, 'partially_refunded');
+assert.equal(await m.stripe.issueRefund(fakeAdmin, 'b1', { refund_amount: 100, payment_intent: null }), 'failed');
+assert.equal(updates.at(-1).refund_status, 'failed');
+globalThis.fetch = realFetch;
 
 console.log('ViboRent unit checks passed.');
