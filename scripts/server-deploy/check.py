@@ -18,3 +18,18 @@ with tempfile.TemporaryDirectory() as tmp:
  except OSError:pass
  else:raise AssertionError('Symlink accepted')
 print('PASS valid snapshot; traversal, absolute paths, hidden files, executable suffixes, invalid names and symlink package rejected')
+
+from unittest.mock import patch
+class Response:
+ status=200
+ def __init__(self,body):self.body=body
+ def __enter__(self):return self
+ def __exit__(self,*args):pass
+ def read(self):return self.body
+with patch.object(m.urllib.request,'urlopen',side_effect=[Response(b'old'),Response(b'new')]),patch.object(m.time,'sleep'):
+ m.verify_live({'index.html':b'new'},'qa')
+with patch.object(m.urllib.request,'urlopen',return_value=Response(b'old')),patch.object(m.time,'monotonic',side_effect=[0,46]):
+ try:m.verify_live({'index.html':b'new'},'qa')
+ except ValueError:pass
+ else:raise AssertionError('Persistent mismatch accepted')
+print('PASS stale nginx cache retried; persistent hash mismatch rejected')

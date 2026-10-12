@@ -24,3 +24,7 @@ PASS riktig isolerad QA Auth/PostgREST/Edge/DB: publikt innehåll, privata leads
 ## Separat tekniskt fynd
 
 Det nya QA-provet visade att applikationskonflikter med SQLSTATE 40001 orsakar upprepade PostgREST-transaktionsförsök. Nya portal-RPC använder därför PT409, verifierat i QA. Samma äldre kodmönster finns i bl.a. Vibofast/Ekängen-migrationer; de har inte ändrats i denna portalimplementation. Granska aktuell installerad funktion och förbered separat additiv rättning innan eventuell åtgärd. Referens: https://supabase.com/docs/guides/troubleshooting/high-cpu-and-infinite-transaction-retries-when-using-custom-error-codes-in-rpc-functions-77326b
+
+## Aktuell aktivering 2026-10-12
+
+Backend installerad efter verifierad full DB-backup och live-grant/Edge-smoke. Portal/VI-HEM-paket från 44fc4a1 (bygge 19) förberedda på servern. Frontend ej publicerad: nginx filcache orsakade omedelbart index-hashfel och korrekt återställning. Helperkandidaten väntar boundedly (45 s) på rätt hash; kvarstående fel leder fortfarande till rollback. Ny domän har filcache avstängd. Engångsrootkommando: `sudo python3 /var/tmp/vihem-vibogruppen-release/activate-site.py`. Det installerar granskade helpers, publicerar admin och skapar endast nya domänens vhost/certifikat innan portalpublicering. Inga Git/npm/DB-kommandon som root. Godkännandet finns; sudo-lösenord krävs på servern. Kontrollera rapporten och publikt HTTPS efter körning. A main/www 194.17.156.10, inga AAAA vid kontroll.

@@ -13,6 +13,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/vibogruppen.se/privkey.pem;
     root /var/www/vibogruppen.se/html;
     index index.html;
+    open_file_cache off;
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy strict-origin-when-cross-origin always;
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;

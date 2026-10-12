@@ -1,6 +1,6 @@
 #!/usr/bin/python3 -I
 """Root-owned, no-argument publisher. Never executes repository code."""
-import os,sys,pathlib,stat,json,tarfile,hashlib,io,datetime,shutil,fcntl,urllib.request
+import os,sys,pathlib,stat,json,tarfile,hashlib,io,datetime,shutil,fcntl,urllib.request,time
 WEB=pathlib.Path('/var/www/app.vi-hem.se/html')
 INBOX=pathlib.Path('/home/vibo/.local/share/vihem-deploy/release.tar')
 BACKUPS=pathlib.Path('/mnt/md0/supabase-backups/shared/vihem-frontend')
@@ -33,6 +33,20 @@ def read_package(path):
  if 'index.html' not in files:raise ValueError('Missing index')
  return files,v
 
+def verify_live(files, stamp):
+ # nginx open_file_cache can retain an old inode for 30 seconds after os.replace.
+ # Retry boundedly without weakening the status or exact-byte integrity check.
+ deadline=time.monotonic()+45
+ for name,data in files.items():
+  while True:
+   try:
+    req=urllib.request.Request('https://app.vi-hem.se/'+name+'?release='+stamp,headers={'Cache-Control':'no-cache'})
+    with urllib.request.urlopen(req,timeout=20) as r:
+     if r.status==200 and hashlib.sha256(r.read()).digest()==hashlib.sha256(data).digest():break
+   except (OSError,urllib.error.URLError):pass
+   if time.monotonic()>=deadline:raise ValueError('HTTP mismatch '+name)
+   time.sleep(1)
+
 def main():
  if os.geteuid()!=0 or len(sys.argv)!=1:raise ValueError('Run only the installed command via sudo without arguments')
  os.umask(0o022)
@@ -58,10 +72,7 @@ def main():
   for name,data in files.items():
    if name not in ['index.html','beta-version.json']:install(name,data)
   for name in ['beta-version.json','index.html']:install(name,files[name])
-  for name,data in files.items():
-   req=urllib.request.Request('https://app.vi-hem.se/'+name+'?release='+stamp,headers={'Cache-Control':'no-cache'})
-   with urllib.request.urlopen(req,timeout=20) as r:
-    if r.status!=200 or hashlib.sha256(r.read()).digest()!=hashlib.sha256(data).digest():raise ValueError('HTTP mismatch '+name)
+  verify_live(files,stamp)
  except Exception:
   for p in (backup/'previous').rglob('*'):
    rel=p.relative_to(backup/'previous')
