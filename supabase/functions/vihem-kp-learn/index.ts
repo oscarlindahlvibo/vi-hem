@@ -154,6 +154,15 @@ Deno.serve(async (request: Request) => {
       return reply(200, result);
     }
 
+    if (action === "exam_image") {
+      // Bild till en provfråga: bara om bilden ingår i en fråga i ditt pågående försök
+      const { data: att } = await admin.from("vihem_kp_exam_attempts").select("snapshot,status,enrollment_id").eq("id", body.attempt_id).maybeSingle();
+      const { data: en } = att ? await admin.from("vihem_kp_enrollments").select("user_id").eq("id", att.enrollment_id).maybeSingle() : { data: null };
+      if (!att || att.status !== "in_progress" || en?.user_id !== user.id || !(att.snapshot as any[]).some((q) => q.image_asset_id === body.asset_id)) return reply(404, { error: "Bilden hittades inte.", code: "E_NOT_FOUND" });
+      const { data: a } = await admin.from("vihem_kp_media_assets").select("bucket,storage_path").eq("id", body.asset_id).eq("organisation_id", org).maybeSingle();
+      return reply(200, { url: await sign(a!.bucket, a!.storage_path, 3600) });
+    }
+
     // ------------------------------------------------------------------ Certifikat
     if (action === "certificate_pdf") {
       const { data: c } = await admin.from("vihem_kp_certificates").select("id,user_id,enrollment_id,status").eq("id", body.certificate_id).maybeSingle();

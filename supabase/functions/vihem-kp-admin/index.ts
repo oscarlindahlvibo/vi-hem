@@ -157,6 +157,22 @@ Deno.serve(async (request: Request) => {
       return json({ ok: true, completed_enrollments: n });
     }
 
+    // ---------------------------------------------------------------- Provresultat
+    if (action === "exam_override") {
+      needAdmin();
+      const { data: a } = await admin.from("vihem_kp_exam_attempts").select("id").eq("id", body.attempt_id).eq("organisation_id", org).maybeSingle(); if (!a) return json({ error: "Försöket finns inte." }, 404);
+      await rpc("vihem_kp_exam_override", { p_attempt: a.id, p_passed: body.passed === true, p_reason: text(body.reason, 300), p_actor: profile.id });
+      return json({ ok: true });
+    }
+    if (action === "attempt_review") {
+      const { data: a } = await admin.from("vihem_kp_exam_attempts").select("id,attempt_no,status,percent,passed,started_at,submitted_at,snapshot").eq("id", body.attempt_id).eq("organisation_id", org).maybeSingle(); if (!a) return json({ error: "Försöket finns inte." }, 404);
+      const { data: answers } = await admin.from("vihem_kp_attempt_answers").select("question_id,option_ids,correct,points").eq("attempt_id", a.id);
+      const { data: events } = await admin.from("vihem_kp_attempt_events").select("event_type,detail,created_at").eq("attempt_id", a.id).order("created_at");
+      await audit("attempt_reviewed", "exam_attempt", a.id);
+      return json({ attempt: { ...a, snapshot: undefined }, questions: (a.snapshot as any[]).map((q) => ({ question_id: q.question_id, prompt: q.prompt, points: q.points, options: q.options.map((o: any) => ({ id: o.id, label: o.label, is_correct: o.is_correct })), answer: (answers ?? []).find((x: any) => x.question_id === q.question_id) ?? null })), events });
+    }
+    if (action === "image_url") { const { data: a } = await admin.from("vihem_kp_media_assets").select("bucket,storage_path").eq("id", body.asset_id).eq("organisation_id", org).maybeSingle(); return a ? json({ url: await sign(a.bucket, a.storage_path, 900) }) : json({ error: "Finns inte." }, 404); }
+
     // ---------------------------------------------------------------- Certifikat
     if (action === "certificate_issue") { needAdmin(); const id = await rpc("vihem_kp_issue_certificate", { p_enrollment: body.enrollment_id, p_actor: profile.id }); await ensureCertificatePdf(admin, ctx, id); return json({ certificate_id: id }); }
     if (action === "certificate_pdf") {
