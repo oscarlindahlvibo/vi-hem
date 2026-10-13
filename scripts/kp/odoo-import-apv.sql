@@ -1,5 +1,5 @@
 -- Importerar APV 1.1–1.3 ur Odoo-exporten (texter, diagnostiska prov, slutprov) som UTKAST. Ersätter ett tidigare utkast (APV-113).
--- Ej importerat: de 11 dokumentavsnitten (saknar filer i Odoo), videon (endast Google Drive-länk) samt pris/produkt. Genererad av odoo-build-import.py.
+-- Ej importerat: de 11 dokumentavsnitten (saknar filer i Odoo) samt pris/produkt. Videon (scen 1.mp4) laddades upp separat och kopplades till lektionen – kör om detta skript raderar den kopplingen. Genererad av odoo-build-import.py.
 begin;
 do $$
 declare v_org uuid := '38fe702d-e72c-49a2-9750-5e0b6934959b'; v_course uuid; v_ver uuid; v_mod uuid; v_les uuid; v_q uuid; v_exam uuid;
