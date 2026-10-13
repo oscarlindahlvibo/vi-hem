@@ -22,6 +22,10 @@ export function Checkout() {
   const [contract, setContract] = useState<{ version: number; title: string; body: string } | null>(null);
   const [contractError, setContractError] = useState("");
   const [contractRetry, setContractRetry] = useState(0);
+  const [signingMethod, setSigningMethod] = useState<"handwritten" | "bankid">(site.bankid_signing_available ? "bankid" : "handwritten");
+  const [bankid, setBankid] = useState<{order_ref: string; auto_start_url: string; qr_image: string | null; bookingId: string; token: string; reference: string} | null>(null);
+  const [bankidSigned, setBankidSigned] = useState(false);
+  const [qrTick, setQrTick] = useState(0);
   const submitLock = useRef(false);
   const [showContract, setShowContract] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -40,6 +44,32 @@ export function Checkout() {
     return () => { alive = false; };
   }, [contractRetry, site.contract_version?.id, site.contract_version?.version]);
 
+  useEffect(() => {
+    if (!bankid) return;
+    let active = true, collecting = false;
+    const poll = async () => {
+      if (collecting) return;
+      collecting = true;
+      try {
+        const result = await rentalApi.bankidCollect(bankid.bookingId, bankid.token, bankid.order_ref);
+        if (!active) return;
+        setQrTick(t => t + 1);
+        if (result.status === "failed") { setError(result.error || "BankID-signeringen avbröts. Försök igen."); setBankid(null); }
+        if (result.status === "complete" && result.signed) {
+          setBankidSigned(true); setBankid(null); setSubmitting(true);
+          const base = `${window.location.origin}/bokning/${bankid.reference}?token=${bankid.token}`;
+          try {
+            const {checkout_url} = await rentalApi.startPayment(bankid.bookingId,bankid.token,`${base}&betalning=klar`,`${base}&betalning=avbruten`);
+            window.location.href = checkout_url;
+          } catch (e) { setError((e as Error).message); setSubmitting(false); }
+        }
+      } catch (e) { if (active) { setError((e as Error).message); setBankid(null); } }
+      finally { collecting = false; }
+    };
+    const timer = setInterval(() => void poll(),2500);
+    return () => { active = false; clearInterval(timer); };
+  }, [bankid]);
+
   if (!cart.items.length && !paymentOff) return <section className="section"><h1>Kassa</h1><div className="empty">Varukorgen är tom. <Link to="/hyra" className="text-link">Se utrustning →</Link></div></section>;
   if (paymentOff) return (
     <section className="section narrow"><h1>Bokningen är skapad</h1>
@@ -54,7 +84,7 @@ export function Checkout() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (submitLock.current) return;
+    if (submitLock.current || bankid) return;
     setError("");
     if (!allAvailable || !contract) return setError("Vänta tills pris, tillgänglighet och hyresavtal är kontrollerade.");
     if (!EMAIL.test(form.email)) return setError("Ange en giltig e-postadress.");
@@ -62,7 +92,7 @@ export function Checkout() {
     if (form.phone.replace(/[^\d]/g, "").length < 7) return setError("Ange ett giltigt telefonnummer – låskoden och bokningsinfo skickas dit.");
     if (!terms) return setError("Du måste godkänna hyresvillkoren.");
     if (needsAck && !ack) return setError("Bekräfta att avbokning inte längre gäller vid kort varsel.");
-    if (!signature) return setError("Signera avtalet i rutan ovan.");
+    if (signingMethod === "handwritten" && !signature) return setError("Signera avtalet i rutan ovan.");
     submitLock.current = true; setSubmitting(true);
     try {
       const payload = {
@@ -92,6 +122,11 @@ export function Checkout() {
       reserved ||= (await rentalApi.booking(pending.reference, pending.token)).booking;
       if (reserved.contract_terms_snapshot !== contract.body) throw new Error("Reservationens avtal skiljer sig från det visade avtalet. Öppna reservationen eller kontakta uthyraren innan du fortsätter.");
       if (reserved.status !== "pending" || reserved.payment_status === "paid") throw new Error("Reservationens status har ändrats. Öppna reservationen för att se aktuell status.");
+      if (reserved.contract_status !== "signed" && signingMethod === "bankid") {
+        const order = await rentalApi.bankidStart(pending.id,pending.token);
+        setBankid({...order,bookingId:pending.id,token:pending.token,reference:pending.reference}); setQrTick(0);
+        return;
+      }
       if (reserved.contract_status !== "signed") await rentalApi.signContract({ booking_id: pending.id, public_lookup_token: pending.token, signer_name: signer, signature, accepted_terms: true });
       const base = `${window.location.origin}/bokning/${pending.reference}?token=${pending.token}`;
       try {
@@ -116,7 +151,7 @@ export function Checkout() {
       <h1>Kassa</h1>
       <form onSubmit={submit} className="checkout-layout" noValidate>
         <div className="checkout-main">
-          <fieldset disabled={submitting}><legend>Dina uppgifter</legend>
+          <fieldset disabled={submitting || !!bankid}><legend>Dina uppgifter</legend>
             <div className="grid2"><label>Förnamn<input autoComplete="given-name" value={form.first_name} onChange={set("first_name")} /></label><label>Efternamn<input autoComplete="family-name" value={form.last_name} onChange={set("last_name")} /></label></div>
             <div className="grid2"><label>E-post<input type="email" autoComplete="email" required value={form.email} onChange={set("email")} /></label><label>Mobilnummer (för låskod)<input type="tel" autoComplete="tel" required value={form.phone} onChange={set("phone")} placeholder="070 123 45 67" /></label></div>
             <details className="optional-details"><summary>Företag, adress eller meddelande (valfritt)</summary><div className="optional-fields">
@@ -126,12 +161,18 @@ export function Checkout() {
             <label>Meddelande till uthyraren (valfritt)<textarea rows={3} maxLength={2000} value={form.notes} onChange={set("notes")} /></label>
             </div></details>
           </fieldset>
-          <fieldset disabled={submitting}><legend>Avtal</legend>
+          <fieldset disabled={submitting || !!bankid}><legend>Avtal</legend>
             <p>Hyresavtalet upprättas av {LESSOR_NAME} och kan inte ändras av hyrestagaren. <button type="button" className="text-link" onClick={() => setShowContract(!showContract)}>{showContract ? "Dölj avtalet" : "Läs avtalet"}</button></p>
             {showContract && <pre className="contract-text" tabIndex={0}>{contract ? `${contract.title}\n\n${contract.body}` : "Hämtar…"}</pre>}
             {contractError && <div className="notice error" role="alert">{contractError} <button type="button" className="text-link" onClick={() => setContractRetry(n => n + 1)}>Försök igen</button></div>}
             {!contract && !contractError && <p role="status">Kontrollerar hyresavtalet…</p>}
-            {contract && <><p className="label-like">Signera här</p><SignaturePad value={signature} onChange={setSignature} /></>}
+            {contract && <>
+              {site.bankid_signing_available && <div className="signing-method" role="group" aria-label="Signeringsmetod">
+                <label className="check"><input type="radio" name="signing-method" checked={signingMethod === "bankid"} onChange={() => setSigningMethod("bankid")} /> Mobilt BankID</label>
+                <label className="check"><input type="radio" name="signing-method" checked={signingMethod === "handwritten"} onChange={() => setSigningMethod("handwritten")} /> Rita signatur</label>
+              </div>}
+              {signingMethod === "handwritten" ? <><p className="label-like">Signera här</p><SignaturePad value={signature} onChange={setSignature} /></> : <p className="fineprint">Du godkänner bokningen och avtalet i BankID. Därefter går du vidare till betalning.</p>}
+            </>}
             <label className="check"><input type="checkbox" disabled={!contract} checked={terms} onChange={(e) => setTerms(e.target.checked)} /> Jag har läst och godkänner hyresavtalet{site.terms_url && <> och <a href={site.terms_url} target="_blank" rel="noopener noreferrer">hyresvillkoren</a></>}.</label>
             {needsAck && <label className="check warn"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /> Jag förstår att bokningen startar inom {site.access_dispatch_minutes} minuter, att låskoden skickas direkt efter betalning och att <strong>avbokning enligt ordinarie regler inte gäller</strong>.</label>}
           </fieldset>
@@ -146,8 +187,14 @@ export function Checkout() {
           {quote && Number(quote.deposit) > 0 && <p className="fineprint">Deposition {money(quote.deposit, quote.currency)} tillkommer vid hämtning.</p>}
           <p className="fineprint">{needsAck ? "Ordinarie avbokning gäller inte för denna bokning." : `Kostnadsfri avbokning fram till ${site.free_cancellation_minutes} min före start.`}</p>
           {error && <p className="notice error" role="alert">{error}</p>}
+          {bankid && <div className="bankid-panel" role="status">
+            <h3>Signera med BankID</h3><p>Öppna BankID på din telefon och kontrollera avtal och belopp.</p>
+            {bankid.auto_start_url.startsWith("https://app.bankid.com/") && <a className="btn primary" href={bankid.auto_start_url}>Öppna BankID</a>}
+            {bankid.qr_image && /^https:\/\/|^data:image\/(png|jpeg|webp);base64,/.test(bankid.qr_image) && <img className="bankid-qr" src={bankid.qr_image.startsWith("https:") ? `${bankid.qr_image}${bankid.qr_image.includes("?") ? "&" : "?"}t=${qrTick}` : bankid.qr_image} alt="Skanna QR-koden med BankID" />}
+            <p className="fineprint">Väntar på din signering…</p><button type="button" className="text-link" onClick={() => setBankid(null)}>Avbryt väntan</button>
+          </div>}
           {cart.pending && <p className="notice"><Link to={`/bokning/${cart.pending.reference}?token=${cart.pending.token}`}>Öppna befintlig reservation {cart.pending.reference}</Link></p>}
-          <button className="btn primary large" type="submit" disabled={submitting || !allAvailable || !contract}>{submitting ? "Vänta…" : "Signera och betala"}</button>
+          <button className="btn primary large" type="submit" disabled={submitting || !!bankid || !allAvailable || !contract}>{submitting ? "Vänta…" : bankid ? "Väntar på BankID…" : bankidSigned ? "Fortsätt till betalning" : signingMethod === "bankid" ? "Signera med BankID och betala" : "Signera och betala"}</button>
           <p className="fineprint">Du skickas till Stripe för säker kortbetalning. Reservationen gäller i {site.booking_hold_minutes} minuter.</p>
         </aside>
       </form>

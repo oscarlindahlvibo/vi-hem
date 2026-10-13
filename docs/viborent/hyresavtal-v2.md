@@ -1,6 +1,6 @@
 # Hyresavtal – ViboRent
 
-Förslag för granskning före aktivering. Uthyraren korrigerad till WPE Sweden AB enligt instruktion 2026-10-13. Detta dokument aktiverar inte någon avtalsversion i databasen.
+Aktiverat 2026-10-13 enligt uttryckligt godkännande. Version 2, ID ca0f5c7d-17bb-493c-8b21-85b6d77174eb. Uthyrare: WPE Sweden AB. Gäller nya bokningar; äldre avtalsögonblicksbilder ändras inte.
 
 ## 1. Parter och omfattning
 

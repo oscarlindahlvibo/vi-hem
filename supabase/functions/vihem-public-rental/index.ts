@@ -7,6 +7,8 @@
 //  * Skrivande anrop hastighetsbegränsas per IP-fingeravtryck. Avtalstext kommer alltid från organisationens publicerade avtalsversion.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { bankidSettings } from "../_shared/kp-bankid.ts";
+import { rentalBankid } from "../_shared/rental-bankid.ts";
 import { allow, clientIp, corsHeaders, EMAIL, fingerprint, hostFromOrigin, mapDbError, normaliseHost, organisationForHost, text, UUID } from "../_shared/rental-common.ts";
 import { issueRefund } from "../_shared/rental-stripe.ts";
 
@@ -79,7 +81,7 @@ Deno.serve(async (request: Request) => {
         admin.from("vihem_rental_settings").select("currency,customer_support_email,customer_support_phone,terms_url,privacy_url,timezone,minimum_advance_hours,maximum_advance_days,free_cancellation_minutes,access_dispatch_minutes,booking_hold_minutes,access_enabled").eq("organisation_id", organisationId).maybeSingle(),
       ]);
       const { data: contract } = await admin.from("vihem_rental_contract_versions").select("id,version,title").eq("organisation_id", organisationId).eq("status", "active").maybeSingle();
-      return reply(200, { site: { site_name: "ViboRent", organisation_name: organisation?.name || "ViboRent", organisation_slug: organisation?.slug || "", currency: "SEK", timezone: "Europe/Stockholm", free_cancellation_minutes: 60, access_dispatch_minutes: 60, booking_hold_minutes: 30, ...(settings || {}), contract_version: contract || null } });
+      return reply(200, { site: { site_name: "ViboRent", organisation_name: organisation?.name || "ViboRent", organisation_slug: organisation?.slug || "", currency: "SEK", timezone: "Europe/Stockholm", free_cancellation_minutes: 60, access_dispatch_minutes: 60, booking_hold_minutes: 30, ...(settings || {}), contract_version: contract || null, bankid_signing_available: !!(await bankidSettings(admin, organisationId, "sign")) } });
     }
 
     if (request.method === "GET" && action === "contract") {
@@ -207,6 +209,12 @@ Deno.serve(async (request: Request) => {
       const { data } = await q.maybeSingle();
       return data;
     };
+
+    if (request.method === "POST" && ["bankid-start","bankid-collect"].includes(action)) {
+      const booking = await loadBooking(text(body.booking_id,80),"",text(body.public_lookup_token,100));
+      const result = await rentalBankid(admin,request,organisationId,action,body,booking);
+      return reply(result.status,result.body);
+    }
 
     if (request.method === "POST" && action === "sign-contract") {
       if (!(await allow(admin, request, "sign", 20, 600))) return reply(429, { error: "För många försök.", code: "E_RATE" });

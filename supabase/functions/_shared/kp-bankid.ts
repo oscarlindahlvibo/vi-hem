@@ -23,14 +23,14 @@ function endpoint(s: any, which: "sign" | "collect") {
 const unwrap = (d: any) => d?.apiCallResponse?.Response || d?.apiCallResponse?.response || d?.ApiCallResponse?.Response || d?.ApiCallResponse?.response || d?.Response || d?.response || d;
 const pick = (o: any, keys: string[]) => { for (const k of keys) if (o?.[k] !== undefined && o?.[k] !== null) return o[k]; return undefined; };
 
-export async function bankidSettings(admin: any, org: string, need: "login" | "link") {
+export async function bankidSettings(admin: any, org: string, need: "login" | "link" | "sign") {
   const { data } = await admin.from("vihem_bankid_settings").select("*").eq("organisation_id", org).maybeSingle();
-  if (!data?.enabled || (need === "login" && !data.login_enabled) || !data.encrypted_api_user || !data.encrypted_password || !data.encrypted_company_api_guid) return null;
+  if (!data?.enabled || (need === "login" && !data.login_enabled) || (need === "sign" && !data.signing_enabled) || !data.encrypted_api_user || !data.encrypted_password || !data.encrypted_company_api_guid) return null;
   return data;
 }
 
-export async function bankidStart(s: any, visibleText: string, endUserIp: string) {
-  const response = await fetch(endpoint(s, "sign"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...(await credentials(s)), endUserIp, userVisibleData: visibleText, userNonVisibleData: "", getQr: true }) });
+export async function bankidStart(s: any, visibleText: string, endUserIp: string, nonVisibleData = "") {
+  const response = await fetch(endpoint(s, "sign"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...(await credentials(s)), endUserIp, userVisibleData: visibleText, userNonVisibleData: nonVisibleData, getQr: true }) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`[E_BANKID] BankID kunde inte startas (${response.status}).`);
   const r = unwrap(data);
@@ -40,7 +40,7 @@ export async function bankidStart(s: any, visibleText: string, endUserIp: string
   return { orderRef, autoStartUrl: token ? `https://app.bankid.com/?autostarttoken=${encodeURIComponent(token)}` : "", qrImage: String(pick(r, ["QrImage", "qrImage", "qr_image"]) ?? "") || null };
 }
 
-export async function bankidCollect(s: any, orderRef: string): Promise<{ status: "pending" | "complete" | "failed"; hintCode?: string; personalNumber?: string; name?: string }> {
+export async function bankidCollect(s: any, orderRef: string): Promise<{ status: "pending" | "complete" | "failed"; hintCode?: string; personalNumber?: string; name?: string; signature?: string; ocspResponse?: string }> {
   const response = await fetch(endpoint(s, "collect"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...(await credentials(s)), orderRef }) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`[E_BANKID] BankID-svar kunde inte hämtas (${response.status}).`);
@@ -52,7 +52,7 @@ export async function bankidCollect(s: any, orderRef: string): Promise<{ status:
   const c = pick(r, ["CompletionData", "completionData", "completion_data"]);
   const pno = String(c?.User?.PersonalNumber ?? c?.user?.personalNumber ?? "").replace(/\D/g, "");
   const name = String(c?.User?.Name ?? c?.user?.name ?? "");
-  return pno.length === 12 ? { status: "complete", personalNumber: pno, name } : { status: "failed", hintCode: "no_personal_number" };
+  return pno.length === 12 ? { status: "complete", personalNumber: pno, name, signature: c?.Signature ?? c?.signature ?? "", ocspResponse: c?.OcspResponse ?? c?.ocspResponse ?? "" } : { status: "failed", hintCode: "no_personal_number" };
 }
 
 /** Nyckelad hash för uppslag/unikhet. Samma nyckelmaterial som personnummerkrypteringen. */

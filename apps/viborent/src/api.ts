@@ -9,7 +9,7 @@ export type SiteConfig = {
   site_name: string; organisation_name: string; currency: string; customer_support_email: string; customer_support_phone: string;
   vat_rate?: number; terms_url: string; privacy_url: string; timezone: string; minimum_advance_hours?: number; maximum_advance_days?: number;
   free_cancellation_minutes: number; access_dispatch_minutes: number; booking_hold_minutes: number; access_enabled?: boolean;
-  contract_version?: { id: string; version: number; title: string } | null;
+  bankid_signing_available?: boolean; contract_version?: { id: string; version: number; title: string } | null;
 };
 
 export type CalendarData = {
@@ -73,6 +73,8 @@ export const rentalApi = {
   quote: (slug: string, startAt: string, endAt: string, quantity = 1) => request<{ quote: RentalQuote }>("quote", post({ slug, start_at: startAt, end_at: endAt, quantity })),
   quoteCart: (items: Array<{ product_id: string; quantity: number; start_at: string; end_at: string }>) => request<{ quote: CartQuote }>("quote-cart", post({ items })),
   createBooking: (payload: unknown) => request<{ booking: { id: string; public_reference: string; public_lookup_token: string; short_notice: boolean; hold_expires_at: string | null; quote: Record<string, number | string> } }>("bookings", post(payload)),
+  bankidStart: (bookingId: string, token: string) => request<{order_ref: string; auto_start_url: string; qr_image: string | null}>("bankid-start", post({booking_id: bookingId, public_lookup_token: token, accepted_terms: true})),
+  bankidCollect: (bookingId: string, token: string, orderRef: string) => request<{status: "pending" | "complete" | "failed"; signed?: boolean; error?: string}>("bankid-collect", post({booking_id: bookingId, public_lookup_token: token, order_ref: orderRef, accepted_terms: true})),
   signContract: (payload: { booking_id: string; public_lookup_token: string; signer_name: string; signature: string; accepted_terms: boolean }) => request<{ booking: { id: string; contract_status: string } }>("sign-contract", post(payload)),
   booking: (reference: string, token: string) => request<{ booking: BookingView }>("booking", {}, { reference, token }),
   cancelBooking: (bookingId: string, token: string, reason?: string) => request<{ ok: boolean; refund_amount: number; refund_status: string }>("cancel-booking", post({ booking_id: bookingId, public_lookup_token: token, reason })),
