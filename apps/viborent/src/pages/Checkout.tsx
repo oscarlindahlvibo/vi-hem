@@ -1,3 +1,4 @@
+import { LESSOR_NAME } from "../lib/siteIdentity";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ApiError, BookingView, rentalApi } from "../api";
 import { SignaturePad } from "../components/SignaturePad";
@@ -126,7 +127,7 @@ export function Checkout() {
             </div></details>
           </fieldset>
           <fieldset disabled={submitting}><legend>Avtal</legend>
-            <p>Hyresavtalet upprättas av {site.organisation_name} och kan inte ändras av hyrestagaren. <button type="button" className="text-link" onClick={() => setShowContract(!showContract)}>{showContract ? "Dölj avtalet" : "Läs avtalet"}</button></p>
+            <p>Hyresavtalet upprättas av {LESSOR_NAME} och kan inte ändras av hyrestagaren. <button type="button" className="text-link" onClick={() => setShowContract(!showContract)}>{showContract ? "Dölj avtalet" : "Läs avtalet"}</button></p>
             {showContract && <pre className="contract-text" tabIndex={0}>{contract ? `${contract.title}\n\n${contract.body}` : "Hämtar…"}</pre>}
             {contractError && <div className="notice error" role="alert">{contractError} <button type="button" className="text-link" onClick={() => setContractRetry(n => n + 1)}>Försök igen</button></div>}
             {!contract && !contractError && <p role="status">Kontrollerar hyresavtalet…</p>}

@@ -1,3 +1,4 @@
+import { LESSOR_NAME } from "../lib/siteIdentity";
 import React, { useState } from "react";
 import type { SiteConfig } from "../api";
 import { useCart } from "../lib/cart";
@@ -29,7 +30,7 @@ export function Shell({ children, site }: { children: React.ReactNode; site: Sit
           <p>Släpvagnar, maskiner, verkstad & event – boka online, hämta när det passar.</p>
         </div>
         <div>
-          <strong>{site?.organisation_name || "ViboRent"}</strong>
+          <strong>{LESSOR_NAME}</strong>
           {site?.customer_support_phone && <p><a href={`tel:${site.customer_support_phone.replace(/\s/g, "")}`}>{site.customer_support_phone}</a></p>}
           {site?.customer_support_email && <p><a href={`mailto:${site.customer_support_email}`}>{site.customer_support_email}</a></p>}
         </div>

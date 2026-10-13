@@ -1,3 +1,4 @@
+import { LESSOR_NAME } from "../lib/siteIdentity";
 import { ProductCard } from "../components/ProductCard";
 import { useSite } from "../lib/context";
 import { Link } from "../lib/router";
@@ -9,13 +10,13 @@ export function Home() {
   useSeo({
     title: "ViboRent – hyr släpvagnar, maskiner, verkstad & event",
     description: "Hyr släpvagnar, maskiner, verktyg och eventutrustning online hos ViboRent. Se lediga tider och pris direkt, boka och betala på nätet.",
-    jsonLd: { "@context": "https://schema.org", "@type": "LocalBusiness", name: site.organisation_name || "ViboRent", url: window.location.origin, telephone: site.customer_support_phone || undefined, email: site.customer_support_email || undefined },
+    jsonLd: { "@context": "https://schema.org", "@type": "LocalBusiness", name: LESSOR_NAME, url: window.location.origin, telephone: site.customer_support_phone || undefined, email: site.customer_support_email || undefined },
   });
   return (
     <>
       <section className="hero">
         <div className="hero-inner">
-          <p className="eyebrow">{site.organisation_name || "ViboRent"}</p>
+          <p className="eyebrow">{LESSOR_NAME}</p>
           <h1>Hyr rätt utrustning. <em>Boka på två minuter.</em></h1>
           <p className="lead">Släpvagnar, maskiner, verkstad och event. Välj tid, se priset direkt och hämta när det passar – utan kö och bokningsbesvär.</p>
           <div className="hero-actions">
