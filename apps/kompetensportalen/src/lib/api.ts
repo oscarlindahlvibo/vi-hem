@@ -46,6 +46,7 @@ export const pub = {
   verify: (code: string) => call<any>("vihem-kp-public", undefined, { action: "verify", code }),
   quote: (items: CartItemInput[], code?: string, customerId?: string) => call<{ quote: Quote }>("vihem-kp-public", { action: "quote", items, code, customer_id: customerId }, {}, true),
   bankidStart: () => call<BankIdStart>("vihem-kp-public", { action: "bankid_start" }),
+  bankidSignup: (p: { order_ref: string; email: string; accepted_privacy: boolean; consent_identity: boolean }) => call<{ ok: boolean; message: string }>("vihem-kp-public", { action: "bankid_signup", ...p }),
   bankidCollect: (orderRef: string) => call<BankIdResult>("vihem-kp-public", { action: "bankid_collect", order_ref: orderRef }),
   contact: (payload: unknown) => call<{ ok: boolean }>("vihem-kp-public", { action: "contact", ...(payload as object) }),
   register: (payload: unknown) => call<{ ok: boolean; message: string }>("vihem-kp-public", { action: "register", ...(payload as object) }),
@@ -57,5 +58,5 @@ export const pub = {
 export const learn = <T = any>(action: string, body: Record<string, unknown> = {}) => call<T>("vihem-kp-learn", { action, ...body }, {}, true);
 export const checkout = <T = any>(action: string, body: Record<string, unknown> = {}) => call<T>("vihem-kp-checkout", { action, ...body }, {}, true);
 
-export type BankIdStart = { orderRef: string; autoStartUrl: string; qrImage: string | null };
-export type BankIdResult = { status: "pending" | "complete" | "failed"; hintCode?: string | null; login_ready?: boolean; token_hash?: string; verified?: boolean; error?: string };
+export type BankIdStart = { orderRef: string; autoStartToken: string; autoStartUrl: string; qrImage: string | null };
+export type BankIdResult = { status: "pending" | "complete" | "failed"; hintCode?: string | null; login_ready?: boolean; token_hash?: string; verified?: boolean; error?: string; signup_available?: boolean; given_name?: string; surname?: string };

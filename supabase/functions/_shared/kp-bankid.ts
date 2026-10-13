@@ -37,10 +37,10 @@ export async function bankidStart(s: any, visibleText: string, endUserIp: string
   const orderRef = String(pick(r, ["OrderRef", "orderRef", "order_ref"]) ?? "");
   const token = String(pick(r, ["AutoStartToken", "autoStartToken", "auto_start_token", "autostarttoken"]) ?? "");
   if (!orderRef) throw new Error("[E_BANKID] BankID returnerade inget order-id.");
-  return { orderRef, autoStartUrl: token ? `https://app.bankid.com/?autostarttoken=${encodeURIComponent(token)}` : "", qrImage: String(pick(r, ["QrImage", "qrImage", "qr_image"]) ?? "") || null };
+  return { orderRef, autoStartToken: token, autoStartUrl: token ? `https://app.bankid.com/?autostarttoken=${encodeURIComponent(token)}` : "", qrImage: String(pick(r, ["QrImage", "qrImage", "qr_image"]) ?? "") || null };
 }
 
-export async function bankidCollect(s: any, orderRef: string): Promise<{ status: "pending" | "complete" | "failed"; hintCode?: string; personalNumber?: string; name?: string; signature?: string; ocspResponse?: string }> {
+export async function bankidCollect(s: any, orderRef: string): Promise<{ status: "pending" | "complete" | "failed"; hintCode?: string; personalNumber?: string; name?: string; givenName?: string; surname?: string; signature?: string; ocspResponse?: string }> {
   const response = await fetch(endpoint(s, "collect"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...(await credentials(s)), orderRef }) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`[E_BANKID] BankID-svar kunde inte hämtas (${response.status}).`);
@@ -52,7 +52,8 @@ export async function bankidCollect(s: any, orderRef: string): Promise<{ status:
   const c = pick(r, ["CompletionData", "completionData", "completion_data"]);
   const pno = String(c?.User?.PersonalNumber ?? c?.user?.personalNumber ?? "").replace(/\D/g, "");
   const name = String(c?.User?.Name ?? c?.user?.name ?? "");
-  return pno.length === 12 ? { status: "complete", personalNumber: pno, name, signature: c?.Signature ?? c?.signature ?? "", ocspResponse: c?.OcspResponse ?? c?.ocspResponse ?? "" } : { status: "failed", hintCode: "no_personal_number" };
+  const givenName = String(c?.User?.GivenName ?? c?.user?.givenName ?? ""), surname = String(c?.User?.Surname ?? c?.user?.surname ?? "");
+  return pno.length === 12 ? { status: "complete", personalNumber: pno, name, givenName, surname, signature: c?.Signature ?? c?.signature ?? "", ocspResponse: c?.OcspResponse ?? c?.ocspResponse ?? "" } : { status: "failed", hintCode: "no_personal_number" };
 }
 
 /** Nyckelad hash för uppslag/unikhet. Samma nyckelmaterial som personnummerkrypteringen. */

@@ -3,7 +3,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { bankidCollect, bankidSettings, bankidStart, pnoHmac } from "../_shared/kp-bankid.ts";
-import { allow, corsFor, EMAIL, fingerprint, clientIp, isUuid, kpContext, mapKpError, text, userFromRequest } from "../_shared/kp-common.ts";
+import { allow, corsFor, decryptPii, encryptPii, EMAIL, fingerprint, clientIp, isUuid, kpContext, mapKpError, text, userFromRequest } from "../_shared/kp-common.ts";
 
 Deno.serve(async (request: Request) => {
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -137,7 +137,13 @@ Deno.serve(async (request: Request) => {
       if (r.status !== "complete") return reply(200, { status: "failed", hintCode: r.hintCode ?? null });
       const { data: ident } = await admin.from("vihem_kp_participant_identity").select("user_id").eq("organisation_id", org).eq("pno_hmac", await pnoHmac(r.personalNumber!)).eq("verified_method", "bankid").maybeSingle();
       const { data: found } = ident ? await admin.auth.admin.getUserById(ident.user_id) : { data: null };
-      if (!found?.user?.email) return reply(200, { status: "complete", login_ready: false, error: "Inget konto är kopplat till detta BankID. Logga in med e-post och lösenord och välj ”Verifiera med BankID” under Mina sidor." });
+      if (!found?.user?.email) {
+        // Ingen koppling: spara den BankID-verifierade identiteten kort på ordern så att personen kan skapa konto med bara en e-postadress
+        const pno = r.personalNumber!;
+        await admin.from("vihem_kp_bankid_orders").update({ consumed_at: null, pno_hmac: await pnoHmac(pno), pno_enc: await encryptPii(pno, `kp-bankid-order:${ref}`), person_given: (r.givenName || "").slice(0, 120), person_surname: (r.surname || "").slice(0, 120), completed_at: new Date().toISOString() }).eq("order_ref", ref);
+        return reply(200, { status: "complete", login_ready: false, signup_available: true, given_name: r.givenName || "", surname: r.surname || "", error: "Det finns inget konto kopplat till detta BankID ännu." });
+      }
+      if (!found.user.email_confirmed_at) return reply(200, { status: "complete", login_ready: false, error: "Bekräfta din e-postadress först – vi har skickat en länk när kontot skapades. Du kan också begära en ny länk på inloggningssidan." });
       const link = await admin.auth.admin.generateLink({ type: "magiclink", email: found.user.email });
       if (link.error || !link.data?.properties?.hashed_token) { console.error("kp bankid generateLink", link.error?.message); return reply(500, { error: "BankID godkändes men sessionen kunde inte skapas.", code: "E_INTERNAL" }); }
       await admin.rpc("vihem_kp_audit", { p_org: org, p_actor: ident!.user_id, p_kind: "user", p_action: "bankid_login", p_type: "participant", p_id: ident!.user_id, p_detail: {} });
@@ -154,6 +160,33 @@ Deno.serve(async (request: Request) => {
     };
     const passwordOk = (p: string) => p.length >= 10 && p.length <= 200 && /[a-zA-Zåäö]/.test(p) && /\d/.test(p);
     const generic = { ok: true, message: "Om adressen kan användas har vi skickat ett mejl med fortsatta instruktioner." };
+
+    if (request.method === "POST" && action === "bankid_signup") {
+      if (!(await allow(admin, request, "kp-bankid-signup", 10, 3600))) return reply(429, { error: "För många försök. Försök igen senare.", code: "E_RATE" });
+      const ref = text(body.order_ref, 100), email = text(body.email, 200).toLowerCase();
+      if (!EMAIL.test(email)) return reply(400, { error: "Ange en giltig e-postadress.", code: "E_INVALID" });
+      if (body.accepted_privacy !== true || body.consent_identity !== true) return reply(400, { error: "Du måste ta del av integritetspolicyn och samtycka till att personnumret sparas.", code: "E_TERMS" });
+      const { data: order } = await admin.from("vihem_kp_bankid_orders").select("*").eq("order_ref", ref).eq("organisation_id", org).eq("flow", "auth").maybeSingle();
+      if (!order || !order.pno_hmac || !order.pno_enc || !order.completed_at || order.consumed_at || new Date(order.completed_at).getTime() < Date.now() - 15 * 60_000) return reply(410, { error: "BankID-bekräftelsen har gått ut. Starta om och identifiera dig igen.", code: "E_EXPIRED" });
+      const { data: already } = await admin.from("vihem_kp_participant_identity").select("user_id").eq("organisation_id", org).eq("pno_hmac", order.pno_hmac).maybeSingle();
+      if (already) return reply(409, { error: "Detta BankID är redan kopplat till ett konto. Logga in med BankID.", code: "E_CONFLICT" });
+      const { data: existing } = await admin.rpc("vihem_kp_find_user", { p_email: email });
+      if (existing?.length) return reply(409, { error: "Det finns redan ett konto med den e-postadressen. Logga in med e-post och lösenord och välj ”Verifiera med BankID” under Mina sidor.", code: "E_CONFLICT" });
+      const first = order.person_given || "", last = order.person_surname || "";
+      const password = [...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("") + "aA1";
+      const { data: created, error: cErr } = await admin.auth.admin.createUser({ email, password, email_confirm: false, user_metadata: { first_name: first, last_name: last } });
+      if (cErr || !created?.user) { console.error("kp bankid signup:", cErr?.message); return reply(500, { error: "Kontot kunde inte skapas. Försök igen.", code: "E_INTERNAL" }); }
+      const uid = created.user.id;
+      await admin.from("vihem_kp_participants").insert({ user_id: uid, organisation_id: org, email, first_name: first, last_name: last });
+      const pn = await decryptPii(order.pno_enc, `kp-bankid-order:${ref}`);
+      const { error: lErr } = await admin.rpc("vihem_kp_bankid_link", { p_user: uid, p_org: org, p_pno_enc: await encryptPii(pn, `kp-identity:${uid}`), p_last4: pn.slice(-4), p_hmac: order.pno_hmac, p_name: `${first} ${last}`.trim() });
+      if (lErr) { await admin.auth.admin.deleteUser(uid); throw lErr; }
+      await admin.from("vihem_kp_bankid_orders").update({ consumed_at: new Date().toISOString(), pno_enc: null, pno_hmac: null }).eq("order_ref", ref);
+      const t = await newToken(uid, "verify", 48);
+      await admin.rpc("vihem_kp_queue_email", { p_org: org, p_key: "verify_email", p_to: email, p_name: first, p_vars: { name: first, link: `${ctx.baseUrl}/bekrafta?token=${t}` }, p_idem: `verify-${uid}-${t.slice(0, 8)}`, p_related_type: "user", p_related_id: uid, p_attachment: null });
+      await admin.rpc("vihem_kp_audit", { p_org: org, p_actor: uid, p_kind: "user", p_action: "bankid_signup", p_type: "participant", p_id: uid, p_detail: {} });
+      return reply(201, { ok: true, message: "Kontot är skapat och din identitet är verifierad med BankID. Bekräfta din e-postadress via länken vi har skickat – därefter kan du logga in med BankID." });
+    }
 
     if (request.method === "POST" && action === "register") {
       if (!(await allow(admin, request, "kp-register", 6, 3600))) return reply(429, { error: "För många registreringsförsök. Försök igen senare.", code: "E_RATE" });
