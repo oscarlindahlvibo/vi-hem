@@ -12,7 +12,7 @@ Checkout tar samma sorterade produktlås som kundbokning, kontrollerar exemplar 
 
 ## Verifierat
 
-- Isolerad `vihem-chat-qa-db`: 34 rollback-/roll-/organisations-/modul-/historikprov PASS.
+- Isolerad `vihem-chat-qa-db`: 35 rollback-/roll-/organisations-/modul-/historikprov PASS.
 - Två samtidiga sessioner: ett uttag vid återförsök; kund kontra personal i båda riktningar; oförändrat materialsaldo när maskinen upptagen; service-role-prisåtkomst PASS. UUID-avgränsade syntetiska resurser borttagna.
 - Riktiga React-komponenter med lokal mocktransport: blandad sparning, sparfel + rättning, förlorat svar + idempotent retry, bevarat utkast, nästa period, uthämtning/retur, adminavbokning/filter och kodväg PASS. Mobil 390, iPad 768, desktop 1440 visuellt granskade. Ingen verklig bokning ändrad.
 - Riktig ZXing bildavkodning av syntetisk QR-etikett PASS; manuellt EAN-värde/äldre lager-QR/ambiguitet provade. Kamera/fysiska iOS/Android-enheter EJ KÖRT. Foto avkodas lokalt utan uppladdning.
@@ -22,7 +22,7 @@ Checkout tar samma sorterade produktlås som kundbokning, kontrollerar exemplar 
 
 1. Ta verifierad backup av databas och aktuella uthyrningspolicyer/RPC-definitioner. Kontrollera återställningskommando och backupfil före ändring.
 2. Kontrollera befintliga beroenden: `20260812150000_inventory_management_mvp`, aktuell lager-RPC inklusive apartment-argument, `20261017100000_viborent_2_core` och uthyrningens bas-/drift-/avtalsschema. Kompetensportalens parallella migrationer är separata.
-3. Installera endast `20261021110000_staff_resources.sql` först. Inga nya Edge Functions behövs. Återläs katalog, begränsningar, adminflöde och service-role i den verkliga installationen utan riktiga uttag/bokningar.
+3. Installera endast `20261021110000_staff_resources.sql` först. Inga nya Edge Functions behövs. Frontend döljer arbetsytan om den begränsade capabilities-RPC:n saknas på äldre backend. Återläs katalog, begränsningar, adminflöde och service-role i den verkliga installationen utan riktiga uttag/bokningar.
 4. Publicera beroende frontend och uppdaterad native-app därefter. Äldre staff-klienters fulla uthyrningsvy blir avsiktligt spärrad av RLS; lagerfunktioner och befintliga kundbokningar behåller sina kontrakt. Admin/publik service-role måste smoke-testas före frontend.
 5. Vid frontendproblem: återgå till tidigare frontend men behåll säkerhetsbegränsningen. Återställ inte den sårbara RPC-kontrollen/breda läspolicyerna. Vid backendproblem: stäng den nya arbetsytan, bevara reservationer/spärrar/transaktioner/idempotensposter och rätta framåt; ingen tabellradering eller återställning av hela databasen efter nya uttag.
 

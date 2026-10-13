@@ -56,6 +56,15 @@ declare a public.vihem_profiles; begin
 end $$;
 revoke all on function public.vihem_resource_actor() from public,anon,authenticated;
 
+-- Äldre backend visar inte arbetsytan förrän denna begränsade API-version finns.
+create or replace function public.vihem_resource_enabled() returns boolean
+language plpgsql stable security definer set search_path=public as $$
+declare a public.vihem_profiles:=public.vihem_resource_actor(); begin
+ return public.vihem_rental_enabled(a.organisation_id) or exists(select 1 from public.vihem_organisation_modules where organisation_id=a.organisation_id and module_key='inventory_management' and enabled);
+end $$;
+revoke all on function public.vihem_resource_enabled() from public,anon;
+grant execute on function public.vihem_resource_enabled() to authenticated;
+
 create or replace function public.vihem_resource_catalog() returns jsonb
 language plpgsql stable security definer set search_path=public as $$
 declare a public.vihem_profiles:=public.vihem_resource_actor(); m boolean; r boolean; begin

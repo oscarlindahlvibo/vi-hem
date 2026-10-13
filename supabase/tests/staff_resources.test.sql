@@ -29,6 +29,7 @@ select pg_temp.expect('staff cannot read admin bookings',(select count(*)=0 from
 select pg_temp.reject('staff cannot read administrative reservations','select public.vihem_resource_admin_reservations()');
 select pg_temp.reject('staff cannot call price RPC',format('select public.vihem_rental_quote(%L,now()+interval ''1 day'',now()+interval ''2 days'',1)',product)) from fixture;
 select pg_temp.reject('staff cannot read raw free-assets RPC',format('select * from public.vihem_rental_free_assets(%L,now()+interval ''1 day'',now()+interval ''2 days'')',product)) from fixture;
+select pg_temp.expect('limited resource API enabled',public.vihem_resource_enabled());
 select pg_temp.expect('catalog has material and equipment',jsonb_array_length(public.vihem_resource_catalog()->'materials')=1 and jsonb_array_length(public.vihem_resource_catalog()->'equipment')=1);
 select pg_temp.expect('catalog does not expose purchase/rental prices',public.vihem_resource_catalog()::text not like '%purchase_price%' and public.vihem_resource_catalog()::text not like '%deposit%' and public.vihem_resource_catalog()::text not like '%customer%');
 do $$

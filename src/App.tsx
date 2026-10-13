@@ -257,7 +257,12 @@ function AppInner() {
     }
 
     // The limited service-use workspace does not grant access to rental administration.
-    setResourcesEnabled(Boolean(nextModules.inventory_management || nextModules.rental_management));
+    let resourceAvailable=false;
+    if ((user.role==='staff'||user.role==='admin') && (nextModules.inventory_management||nextModules.rental_management)) {
+      const resourceApi=await supabase.rpc('vihem_resource_enabled');
+      resourceAvailable=!resourceApi.error && resourceApi.data===true;
+    }
+    setResourcesEnabled(resourceAvailable);
 
     // Org-level enabling only decides whether a module is available to the
     // organisation at all -- for role 'staff' it also requires an explicit
