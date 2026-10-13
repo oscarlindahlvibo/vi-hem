@@ -32,7 +32,7 @@ import {
 } from '../lib/screenSettings';
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
-const SCREEN_APP_VERSION = '2026-10-13-tv-layout-12';
+const SCREEN_APP_VERSION = '2026-10-13-tv-calendar-13';
 const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
 const SCREEN_SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const SCREEN_SESSION_REFRESH_MARGIN_SECONDS = 15 * 60;
@@ -543,8 +543,8 @@ export function ScreenDisplayPage() {
         .select('*')
         .eq('organisation_id', user.organisation_id)
         .eq('visibility', 'organisation')
-        .lt('starts_at', `${calendarEnd}T23:59:59`)
-        .gt('ends_at', `${todayStart}T00:00:00`)
+        .lt('starts_at', new Date(`${calendarEnd}T23:59:59`).toISOString())
+        .gt('ends_at', new Date(`${todayStart}T00:00:00`).toISOString())
         .order('starts_at', { ascending: true })
         .limit(30),
       supabase
@@ -877,7 +877,7 @@ export function ScreenDisplayPage() {
           workOrders={workOrders}
           clockedInEntries={clockedInEntries}
           absenceRequests={absenceRequests}
-          meetings={meetings}
+          calendarEvents={calendarEvents}
           bookings={bookings}
           organisationName={organisationName}
           staffMembers={staffMembers}
@@ -1469,7 +1469,7 @@ function PresentationScreen({
   workOrders,
   clockedInEntries,
   absenceRequests,
-  meetings,
+  calendarEvents,
   bookings,
   organisationName,
   staffMembers,
@@ -1482,7 +1482,7 @@ function PresentationScreen({
   workOrders: WorkOrder[];
   clockedInEntries: TimeEntry[];
   absenceRequests: AbsenceOverlap[];
-  meetings: Meeting[];
+  calendarEvents: CalendarEvent[];
   bookings: ShortStayBooking[];
   organisationName: string;
   staffMembers: Pick<Profile, 'id' | 'name'>[];
@@ -1558,7 +1558,9 @@ function PresentationScreen({
       return (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9);
     })
     .slice(0, 40);
-  const activeMeetings = meetings.slice(0, 4);
+  const activeCalendarEvents = calendarEvents.filter(event => new Date(event.ends_at).getTime() > nowTick);
+  const scrollingCalendar = !narrow && activeCalendarEvents.length > 1;
+  const visibleCalendarEvents = scrollingCalendar ? [...activeCalendarEvents, ...activeCalendarEvents] : activeCalendarEvents;
   const customTickerItems = [
     ...(settings.customTickerItems || []),
     ...(settings.customTickerItems?.length ? [] : settings.customTickerText ? [settings.customTickerText] : []),
@@ -1731,25 +1733,25 @@ function PresentationScreen({
             )}
 
             {settings.showMeetings && (
-              <section className="min-h-0 overflow-hidden rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
+              <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="flex items-center gap-2 font-black" style={{ fontSize: 20 }}>
                     <CalendarDays className="h-5 w-5 text-blue-200" />
                     Kalender
                   </h3>
-                  <span className="rounded-full bg-white/10 px-3 py-1 font-black" style={{ fontSize: 14 }}>{meetings.length}</span>
+                  <span className="rounded-full bg-white/10 px-3 py-1 font-black" style={{ fontSize: 14 }}>{activeCalendarEvents.length}</span>
                 </div>
-                <div className="space-y-2 overflow-hidden">
-                  {activeMeetings.length === 0 ? (
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  {activeCalendarEvents.length === 0 ? (
                     <p className="rounded-xl bg-white/5 px-3 py-3 font-bold text-slate-300" style={{ fontSize: 14 }}>Inga kommande kalenderhändelser.</p>
-                  ) : activeMeetings.slice(0, 2).map(meeting => (
-                    <div key={meeting.id} className="rounded-xl bg-white/10 px-3 py-2">
-                      <p className="truncate font-black" style={{ fontSize: 15 }}>{meeting.title}</p>
+                  ) : <div className="space-y-2" style={scrollingCalendar ? { animation: `vihemNewsScroll ${Math.max(32, activeCalendarEvents.length * 10)}s linear infinite` } : undefined}>{visibleCalendarEvents.map((event, index) => (
+                    <div key={`${event.id}-${index}`} className="rounded-xl bg-white/10 px-3 py-2">
+                      <p className="truncate font-black" style={{ fontSize: 15 }}>{event.title}</p>
                       <p className="truncate font-semibold text-slate-300" style={{ fontSize: 12 }}>
-                        {meeting.starts_at ? formatDateTime(meeting.starts_at) : 'Ingen tid'}{meeting.location ? ` · ${meeting.location}` : ''}
+                        {event.all_day ? `${formatDate(event.starts_at)} · Heldag` : formatDateTime(event.starts_at)}{event.location ? ` · ${event.location}` : ''}
                       </p>
                     </div>
-                  ))}
+                  ))}</div>}
                 </div>
               </section>
             )}
