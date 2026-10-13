@@ -11,7 +11,7 @@ type Exam = { id: string; kind: string; title: string; question_count: number; p
 
 export function PlayerPage({ enrollmentId }: { enrollmentId: string }) {
   const { session, ready } = useAuth(); const { search } = useLocation();
-  const [data, setData] = useState<any>(null); const [error, setError] = useState(""); const [lessonId, setLessonId] = useState<string>(search.get("lektion") || ""); const [showExam, setShowExam] = useState<string>("");
+  const [data, setData] = useState<any>(null); const [error, setError] = useState(""); const [lessonId, setLessonId] = useState<string>(search.get("lektion") || ""); const [showExam, setShowExam] = useState<string>(""); const [menuOpen, setMenuOpen] = useState(false);
   useSeo({ title: "Utbildning | Kompetensportalen", noindex: true });
   const load = useCallback(() => learn("course_player", { enrollment_id: enrollmentId }).then((d) => { setData(d); return d; }).catch((e) => { setError((e as ApiError).message); return null; }), [enrollmentId]);
   useEffect(() => { if (ready && !session) navigate(`/logga-in?next=${encodeURIComponent(`/utbildning/${enrollmentId}`)}`); else if (session) void load(); }, [ready, session?.user.id, enrollmentId]);
@@ -20,11 +20,20 @@ export function PlayerPage({ enrollmentId }: { enrollmentId: string }) {
   if (!data) return <section className="section narrow"><p className="muted" role="status">Laddar utbildningen…</p></section>;
   const e = data.enrollment; const all: Lesson[] = data.modules.flatMap((m: any) => m.lessons); const idx = all.findIndex((l) => l.id === lessonId); const next = idx >= 0 ? all.slice(idx + 1).find((l) => !l.locked) : undefined;
   const finalExam: Exam | undefined = data.exams.find((x: Exam) => x.kind === "final"); const exam = data.exams.find((x: Exam) => x.id === showExam);
-  const open = (id: string) => { setShowExam(""); setLessonId(id); window.scrollTo(0, 0); };
+  const open = (id: string) => { setShowExam(""); setLessonId(id); setMenuOpen(false); window.scrollTo(0, 0); };
+  const currentTitle = showExam ? (exam?.title ?? "Examination") : (all.find((l) => l.id === lessonId)?.title ?? "Välj lektion");
   const download = async (id: string) => { const r = await learn("certificate_pdf", { certificate_id: id }); window.open(r.url, "_blank", "noopener"); };
   return (
     <div className="player">
-      <nav className="player-nav" aria-label="Kursinnehåll">
+      <div className="player-top">
+        <button type="button" className="player-menu-btn" aria-expanded={menuOpen} aria-controls="player-nav" onClick={() => setMenuOpen((v) => !v)}>
+          <span className="pm-icon" aria-hidden="true">{menuOpen ? "✕" : "☰"}</span>
+          <span className="pm-text"><strong>{menuOpen ? "Stäng kursmenyn" : "Kursmeny och framsteg"}</strong><span className="fine">{currentTitle}</span></span>
+          <span className="pm-pct">{e.progress_percent} %</span>
+        </button>
+        <div className="progress" aria-hidden="true"><i style={{ width: `${e.progress_percent}%` }} /></div>
+      </div>
+      <nav id="player-nav" className={`player-nav${menuOpen ? " open" : ""}`} aria-label="Kursinnehåll">
         <Link to="/mina-sidor" className="text-link">← Mina sidor</Link><h3 style={{ marginTop: 12 }}>{data.course.title}</h3>
         <div className="progress" aria-label={`${e.progress_percent} % genomfört`}><i style={{ width: `${e.progress_percent}%` }} /></div><p className="fine">{e.progress_percent} % genomfört{e.valid_until ? ` · tillgänglig till ${dateOnly(e.valid_until)}` : ""}</p>
         {data.modules.map((m: any) => <div key={m.id}><p className="mod">{m.title}</p>{m.lessons.map((l: Lesson) => <button key={l.id} className="lesson-link" disabled={l.locked || !e.access_enabled} aria-current={l.id === lessonId && !showExam} onClick={() => open(l.id)}><span className={`dot ${l.status === "completed" ? "done" : l.status === "started" ? "started" : ""}`}>{l.status === "completed" ? "✓" : ""}</span><span>{l.title}<br /><span className="fine">{l.kind === "video" ? "Video" : l.kind === "quiz" ? "Kunskapstest" : "Läsning"} · {duration(l.minutes)}{l.locked ? " · låst" : ""}</span></span></button>)}</div>)}
