@@ -12,7 +12,7 @@ mkdirSync('node_modules/.cache', { recursive: true });
 const dir = mkdtempSync(path.join(path.resolve('node_modules/.cache'), 'kp-unit-'));
 const root = path.resolve('supabase/functions/_shared');
 const entry = path.join(dir, 'entry.ts');
-writeFileSync(entry, ['kp-common', 'kp-certificate-pdf', 'kp-lesson', 'kp-id06-logo', 'kp-brand-logo'].map((f) => `export * from ${JSON.stringify(path.join(root, f + '.ts'))};`).join('\n') + `export * as stripe from ${JSON.stringify(path.join(root, 'kp-stripe.ts'))};`);
+writeFileSync(entry, ['kp-common', 'kp-certificate-pdf', 'kp-lesson', 'kp-id06-logo', 'kp-brand-logo', 'kp-receipt-pdf'].map((f) => `export * from ${JSON.stringify(path.join(root, f + '.ts'))};`).join('\n') + `export * as stripe from ${JSON.stringify(path.join(root, 'kp-stripe.ts'))};`);
 const out = path.join(dir, 'bundle.mjs');
 await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error', external: ['npm:*', 'jsr:*'], plugins: [{ name: 'npm-specifiers', setup(b) { b.onResolve({ filter: /^npm:/ }, (a) => ({ path: a.path.replace(/^npm:/, '').replace(/@[\d.^~]+$/, ''), external: true })); b.onResolve({ filter: /^jsr:/ }, () => ({ path: 'node:module', external: true })); } }] });
 const env = { VIHEM_KP_SECRET_KEY: 'unit-test-secret', STRIPE_KP_WEBHOOK_SECRET: 'whsec_unit', KP_PUBLIC_API_URL: 'https://api.example.test/' };
@@ -58,5 +58,11 @@ const pdf = await m.renderCertificatePdf({ title: 'Utbildningsintyg', bodyText: 
 const file = path.join(dir, 'cert.pdf'); writeFileSync(file, pdf); if (process.env.KP_KEEP_PDF) writeFileSync(process.env.KP_KEEP_PDF, pdf);
 assert.equal(Buffer.from(pdf.slice(0, 5)).toString(), '%PDF-'); ok('PDF har giltig header');
 try { const info = execFileSync('pdfinfo', [file], { encoding: 'utf8' }); assert.match(info, /Pages:\s+1/); assert.match(info, /Page size:\s+842 x 595 pts \(A4\)/); ok('pdfinfo: en sida A4 liggande'); } catch (e) { if (e.code === 'ENOENT') console.log('skip - pdfinfo saknas'); else throw e; }
+
+// Kvitto-PDF (A4 stående)
+const rpdf = m.renderReceiptPdf({ kind: 'receipt', receiptNumber: 'KV-2026-000001', issuedAt: '13 oktober 2026', orderNumber: 'KP-26-000042', currency: 'SEK', seller: { name: 'WPE Sweden AB', org_number: '559000-0000', vat_number: 'SE559000000001', address: 'Ekängsvägen 2, 577 71 Virserum', email: 'kontakt@kompetensportalen.se', phone: '010-214 61 51' }, buyerName: 'Åsa Öman', buyerEmail: 'asa@example.se', billingAddress: 'Storgatan 1, 111 22 Stockholm', lines: [{ description: 'APV 1.1–1.3 Arbete på väg (grundkompetens)', quantity: 1, unit_price: 990, net_total: 990, vat_rate: 25, vat_amount: 247.5, line_total: 1237.5 }], netTotal: 990, vatTotal: 247.5, total: 1237.5, paymentMethod: 'stripe', paymentReference: 'pi_3Abc', logoJpeg: m.KP_LOGO_JPEG });
+const rfile = path.join(dir, 'receipt.pdf'); writeFileSync(rfile, rpdf); if (process.env.KP_KEEP_RECEIPT) writeFileSync(process.env.KP_KEEP_RECEIPT, rpdf);
+assert.equal(Buffer.from(rpdf.slice(0, 5)).toString(), '%PDF-'); ok('kvitto-PDF har giltig header');
+try { const info = execFileSync('pdfinfo', [rfile], { encoding: 'utf8' }); assert.match(info, /Pages:\s+1/); assert.match(info, /595 x 842 pts \(A4\)/); ok('pdfinfo: kvitto är en sida A4 stående'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
 console.log(`\nALLA ${n} ENHETSKONTROLLER GODKÄNDA`);
 rmSync(dir, { recursive: true, force: true });

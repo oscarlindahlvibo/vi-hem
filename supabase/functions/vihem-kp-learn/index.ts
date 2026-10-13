@@ -6,6 +6,7 @@ import { bankidCollect, bankidSettings, bankidStart, pnoHmac } from "../_shared/
 import { allow, corsFor, encryptPii, ensureParticipant, EMAIL, isTestEmail, isUuid, clientIp, kpContext, mapKpError, normalisePersonalNumber, queueMail, text, userFromRequest, notifyStaff as notifyStaffReal } from "../_shared/kp-common.ts";
 import { ensureCertificatePdf } from "../_shared/kp-certificate-render.ts";
 import { buildLessonBlocks, makeSigner, SIGN_TTL } from "../_shared/kp-lesson.ts";
+import { ensureReceiptPdf } from "../_shared/kp-receipt.ts";
 
 
 Deno.serve(async (request: Request) => {
@@ -43,11 +44,12 @@ Deno.serve(async (request: Request) => {
         admin.from("vihem_kp_session_bookings").select("id,status,session:vihem_kp_sessions(id,title,starts_at,ends_at,location_kind,location,meeting_url,free_cancellation_hours,course_id),seat_id").eq("user_id", user.id).in("status", ["booked", "attended", "passed", "failed", "no_show"]).order("created_at", { ascending: false }),
         admin.from("vihem_kp_orders").select("id,order_number,status,total,payment_method,created_at,invoice_status").eq("buyer_user_id", user.id).order("created_at", { ascending: false }).limit(20),
       ]);
+      const { data: myReceipts } = (orders ?? []).length ? await admin.from("vihem_kp_receipts").select("id,order_id,kind,receipt_number,issued_at,total").in("order_id", (orders ?? []).map((o: any) => o.id)).order("issued_at") : { data: [] };
       const identity = await admin.from("vihem_kp_participant_identity").select("last4,verified_at").eq("user_id", user.id).maybeSingle();
       return reply(200, {
         participant: { email: user.email, first_name: participant?.first_name ?? "", last_name: participant?.last_name ?? "", phone: participant?.phone ?? "", identity_verified: !!participant?.identity_verified_at, identity_submitted: !!identity.data, identity_last4: identity.data?.last4 ?? null },
         enrollments: enrollments ?? [], certificates: (certs ?? []).map(({ pdf_path, ...c }: any) => ({ ...c, has_pdf: !!pdf_path, effective_status: c.status === "issued" && c.valid_until && c.valid_until < new Date().toISOString().slice(0, 10) ? "expired" : c.status })),
-        companies: (memberships ?? []).map((m: any) => ({ role: m.role, ...m.customer })), bookings: bookings ?? [], orders: orders ?? [],
+        companies: (memberships ?? []).map((m: any) => ({ role: m.role, ...m.customer })), bookings: bookings ?? [], orders: orders ?? [], receipts: myReceipts ?? [],
       });
     }
 
@@ -171,7 +173,10 @@ Deno.serve(async (request: Request) => {
     if (action === "exam_answer") return reply(200, await rpc("vihem_kp_exam_answer", { p_attempt: body.attempt_id, p_user: user.id, p_question: body.question_id, p_options: (Array.isArray(body.option_ids) ? body.option_ids : []).filter(isUuid) }));
     if (action === "exam_submit") {
       const result = await rpc("vihem_kp_exam_submit", { p_attempt: body.attempt_id, p_user: user.id });
-      if (result.passed) {
+      // Mejlet "godkänt slutprov" gäller bara det avslutande, certifierande provet – aldrig kunskapstest/diagnostiska prov under kursen
+      const { data: attKind } = result.passed ? await admin.from("vihem_kp_exam_attempts").select("exam:vihem_kp_exams(kind)").eq("id", body.attempt_id).single() : { data: null };
+      const examRow: any = attKind && (Array.isArray((attKind as any).exam) ? (attKind as any).exam[0] : (attKind as any).exam);
+      if (result.passed && examRow?.kind === "final") {
         const { data: att } = await admin.from("vihem_kp_exam_attempts").select("enrollment_id").eq("id", body.attempt_id).single();
         const { data: en } = await admin.from("vihem_kp_enrollments").select("course:vihem_kp_courses(title)").eq("id", att.enrollment_id).single();
         const name = [participant?.first_name, participant?.last_name].filter(Boolean).join(" ") || user.email;
@@ -217,6 +222,16 @@ Deno.serve(async (request: Request) => {
       return reply(201, { customer_id: c.id });
     }
 
+    if (action === "receipt_pdf") {
+      const { data: rc } = await admin.from("vihem_kp_receipts").select("id,order_id,pdf_path,receipt_number,organisation_id").eq("id", body.receipt_id).eq("organisation_id", org).maybeSingle();
+      const { data: ord } = rc ? await admin.from("vihem_kp_orders").select("buyer_user_id,customer_id").eq("id", rc.order_id).maybeSingle() : { data: null };
+      let allowed = !!ord && ord.buyer_user_id === user.id;
+      if (!allowed && ord?.customer_id) { const { data: m } = await admin.from("vihem_kp_company_members").select("id").eq("customer_id", ord.customer_id).eq("user_id", user.id).eq("status", "active").eq("role", "admin").maybeSingle(); allowed = !!m; }
+      if (!rc || !allowed) return reply(404, { error: "Kvittot hittades inte.", code: "E_NOT_FOUND" });
+      const path = rc.pdf_path ?? await ensureReceiptPdf(admin, rc.id);
+      return reply(200, { url: await sign("vihem-kp-private", path, 600) });
+    }
+
     if (action === "company_overview") {
       const c = await requireCompanyAdmin(body.customer_id);
       const [{ data: seats }, { data: members }, { data: orders }] = await Promise.all([
@@ -224,6 +239,7 @@ Deno.serve(async (request: Request) => {
         admin.from("vihem_kp_company_members").select("id,email,role,status,user_id,joined_at").eq("customer_id", c.id).neq("status", "removed").order("email"),
         admin.from("vihem_kp_orders").select("id,order_number,status,total,payment_method,invoice_status,amount_paid,created_at").eq("customer_id", c.id).order("created_at", { ascending: false }).limit(100),
       ]);
+      const { data: companyReceipts } = (orders ?? []).length ? await admin.from("vihem_kp_receipts").select("id,order_id,kind,receipt_number,issued_at,total").in("order_id", (orders ?? []).map((o: any) => o.id)).order("issued_at") : { data: [] };
       const userIds = [...new Set((seats ?? []).map((s: any) => s.assigned_to_user_id).filter(Boolean))];
       const { data: people } = userIds.length ? await admin.from("vihem_kp_participants").select("user_id,first_name,last_name,email").in("user_id", userIds) : { data: [] };
       const pm = new Map((people ?? []).map((p: any) => [p.user_id, p]));
@@ -234,7 +250,7 @@ Deno.serve(async (request: Request) => {
         return { seat_id: s.id, course: s.course?.title, course_id: s.course?.id, seat_status: s.status, access_enabled: s.access_enabled, order_number: (Array.isArray(s.order) ? s.order[0] : s.order)?.order_number, assignee_email: s.assigned_email, assignee_name: p ? `${p.first_name} ${p.last_name}`.trim() : null,
           progress_percent: en?.progress_percent ?? null, enrollment_status: en?.status ?? null, completed_at: en?.completed_at ?? null, certificate: cert ? { id: cert.id, number: cert.certificate_number, status: cert.status === "issued" && cert.valid_until && cert.valid_until < new Date().toISOString().slice(0, 10) ? "expired" : cert.status, valid_until: cert.valid_until } : null }; });
       const summary = { total: rows.length, unused: rows.filter((r: any) => r.seat_status === "available" && r.access_enabled).length, locked: rows.filter((r: any) => !r.access_enabled && !["revoked", "expired"].includes(r.seat_status)).length, assigned: rows.filter((r: any) => r.seat_status === "assigned").length, active: rows.filter((r: any) => r.seat_status === "active").length, completed: rows.filter((r: any) => r.seat_status === "completed").length };
-      return reply(200, { company: { id: c.id, name: c.name, org_number: c.org_number, invoice_purchase_allowed: c.invoice_purchase_allowed, status: c.status, invoice_email: c.invoice_email }, summary, seats: rows, members: members ?? [], orders: orders ?? [] });
+      return reply(200, { company: { id: c.id, name: c.name, org_number: c.org_number, invoice_purchase_allowed: c.invoice_purchase_allowed, status: c.status, invoice_email: c.invoice_email }, summary, seats: rows, members: members ?? [], orders: orders ?? [], receipts: companyReceipts ?? [] });
     }
 
     if (action === "company_assign") {

@@ -6,6 +6,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { queueMail } from "../_shared/kp-common.ts";
 import { ensureCertificatePdf } from "../_shared/kp-certificate-render.ts";
 import { deliverOutboxRow } from "../_shared/kp-mail.ts";
+import { retryPendingReceipts } from "../_shared/kp-receipt.ts";
 
 const sv = (iso: string, tz = "Europe/Stockholm") => new Date(iso).toLocaleString("sv-SE", { dateStyle: "medium", timeStyle: "short", timeZone: tz });
 
@@ -16,6 +17,7 @@ Deno.serve(async (request: Request) => {
   const summary: Record<string, number> = { pdf: 0, reminders: 0, sent: 0, failed: 0, id06: 0 };
   try {
     const { data: allSettings } = await admin.from("vihem_kp_settings").select("*");
+    summary.receipts = await retryPendingReceipts(admin); // kvitton utan PDF eller utskick (t.ex. efter tillfälligt fel)
     for (const settings of allSettings ?? []) {
       const org = settings.organisation_id as string;
       const base = String(settings.public_base_url).replace(/\/$/, "");

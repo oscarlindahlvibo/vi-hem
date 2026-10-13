@@ -1,5 +1,6 @@
 // Hanterar en (redan signaturverifierad) Stripe-händelse mot Kompetensportalens databas. Separerad från HTTP-lagret så att den kan testas direkt.
 import { isUuid, money, notifyStaff, queueMail, text } from "./kp-common.ts";
+import { processReceipt } from "./kp-receipt.ts";
 
 export interface HandlerResult { status: number; body: Record<string, unknown> }
 const out = (status: number, body: Record<string, unknown>): HandlerResult => ({ status, body });
@@ -43,7 +44,9 @@ export async function handleStripeEvent(admin: any, event: any, opts: { quiet?: 
       }
       if (!res?.duplicate) {
         const vars = { name, order_number: order.order_number, total: money(order.total), portal_url: `${String(settings.public_base_url).replace(/\/$/, "")}/mina-sidor`, lines: "" };
-        await queueMail(admin, org, "payment_received", order.contact_email, name, vars, `order-${orderId}-paid`, "order", orderId);
+        const { data: pay } = await admin.from("vihem_kp_payments").select("id").eq("order_id", orderId).eq("provider", "stripe").eq("provider_ref", String(obj.payment_intent || obj.id)).maybeSingle();
+        if (pay?.id) await processReceipt(admin, orderId, { paymentId: pay.id }); // kvitto (PDF) skickas som betalningsbekräftelse
+        else if (!pay?.id) await queueMail(admin, org, "payment_received", order.contact_email, name, { ...vars, receipt_number: "" }, `order-${orderId}-paid`, "order", orderId);
         await queueMail(admin, org, "order_confirmation", order.contact_email, name, { ...vars, lines: "Se din order under Mina sidor." }, `order-${orderId}-confirm`, "order", orderId);
         await notify(org, "Ny betald order", `Order ${order.order_number} (${money(order.total)} kr) är betald och aktiverad.`);
       }
@@ -62,7 +65,10 @@ export async function handleStripeEvent(admin: any, event: any, opts: { quiet?: 
       const refunded = Number(obj.amount_refunded || 0) / 100;
       const delta = refunded - Number(order.amount_refunded);
       if (delta > 0) {
-        await admin.rpc("vihem_kp_record_refund", { p_order: orderId, p_amount: delta, p_ref: `${obj.id}:${obj.amount_refunded}`, p_reason: "Återbetalning via Stripe", p_kind: "refund", p_actor: null, p_revoke: false });
+        const refRef = `${obj.id}:${obj.amount_refunded}`;
+        await admin.rpc("vihem_kp_record_refund", { p_order: orderId, p_amount: delta, p_ref: refRef, p_reason: "Återbetalning via Stripe", p_kind: "refund", p_actor: null, p_revoke: false });
+        const { data: rf } = await admin.from("vihem_kp_refunds").select("id").eq("order_id", orderId).eq("provider_ref", refRef).maybeSingle();
+        if (rf?.id) await processReceipt(admin, orderId, { refundId: rf.id });
         await notify(org, "Återbetalning registrerad", `Order ${order.order_number}: ${money(delta)} kr återbetald.`);
       }
       return out(200, { received: true, outcome: "refund_recorded" });
@@ -79,4 +85,5 @@ export async function handleStripeEvent(admin: any, event: any, opts: { quiet?: 
     return out(500, { error: "retry" });
   }
 }
+
 
