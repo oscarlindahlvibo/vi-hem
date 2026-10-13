@@ -2,6 +2,7 @@
 // Katalog, kurssidor, informationssidor, certifikatverifiering, pris/rabattberäkning och kontaktformulär.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { bankidCollect, bankidSettings, bankidStart, pnoHmac } from "../_shared/kp-bankid.ts";
 import { allow, corsFor, EMAIL, fingerprint, clientIp, isUuid, kpContext, mapKpError, text, userFromRequest } from "../_shared/kp-common.ts";
 
 Deno.serve(async (request: Request) => {
@@ -73,7 +74,9 @@ Deno.serve(async (request: Request) => {
 
     if (request.method === "GET" && action === "site") {
       const s = ctx.settings;
-      return reply(200, { site: { seller_name: s.seller_name, seller_org_number: s.seller_org_number, seller_vat_number: s.seller_vat_number, seller_address: s.seller_address, support_email: s.support_email || s.seller_email, phone: s.seller_phone, invoice_enabled: s.invoice_enabled, stripe_enabled: s.stripe_enabled, withdrawal_notice: s.withdrawal_notice } }, "public, max-age=120");
+      const bankid = !!Deno.env.get("VIHEM_KP_SECRET_KEY") && !!(await bankidSettings(admin, org, "link"));
+      const bankidLogin = bankid && !!(await bankidSettings(admin, org, "login"));
+      return reply(200, { site: { bankid_link: bankid, bankid_login: bankidLogin, seller_name: s.seller_name, seller_org_number: s.seller_org_number, seller_vat_number: s.seller_vat_number, seller_address: s.seller_address, support_email: s.support_email || s.seller_email, phone: s.seller_phone, invoice_enabled: s.invoice_enabled, stripe_enabled: s.stripe_enabled, withdrawal_notice: s.withdrawal_notice } }, "public, max-age=120");
     }
 
     if (request.method === "GET" && action === "verify") {
@@ -108,6 +111,37 @@ Deno.serve(async (request: Request) => {
       const key = `contact-${await fingerprint(`${email}:${message}`)}`.slice(0, 60);
       await admin.from("vihem_kp_email_outbox").upsert({ organisation_id: org, template_key: "contact_message", to_email: to, to_name: "Support", subject: `Meddelande via kompetensportalen.se från ${name}`, body: `Från: ${name} <${email}>\n\n${message}`, idempotency_key: key, related_type: "contact" }, { onConflict: "organisation_id,idempotency_key", ignoreDuplicates: true });
       return reply(201, { ok: true });
+    }
+
+    // ------------------------------------------------------------ BankID-inloggning (endast konton som själva kopplat BankID via "Verifiera med BankID")
+    if (request.method === "POST" && action === "bankid_start") {
+      if (!(await allow(admin, request, "kp-bankid-start", 20, 600))) return reply(429, { error: "För många försök. Vänta en stund.", code: "E_RATE" });
+      const s = Deno.env.get("VIHEM_KP_SECRET_KEY") ? await bankidSettings(admin, org, "login") : null;
+      if (!s) return reply(503, { error: "BankID-inloggning är inte aktiverad.", code: "E_CONFIG" });
+      const started = await bankidStart(s, "Logga in på Kompetensportalen", clientIp(request));
+      await admin.from("vihem_kp_bankid_orders").insert({ order_ref: started.orderRef, organisation_id: org, flow: "auth" });
+      return reply(200, started);
+    }
+    if (request.method === "POST" && action === "bankid_collect") {
+      if (!(await allow(admin, request, "kp-bankid-collect", 240, 600))) return reply(429, { error: "För många förfrågningar.", code: "E_RATE" });
+      const ref = text(body.order_ref, 100);
+      const { data: order } = await admin.from("vihem_kp_bankid_orders").select("*").eq("order_ref", ref).eq("organisation_id", org).eq("flow", "auth").maybeSingle();
+      if (!order || order.consumed_at || new Date(order.expires_at) < new Date()) return reply(410, { error: "BankID-sessionen har gått ut. Starta om.", code: "E_EXPIRED" });
+      const s = await bankidSettings(admin, org, "login");
+      if (!s) return reply(503, { error: "BankID-inloggning är inte aktiverad.", code: "E_CONFIG" });
+      const r = await bankidCollect(s, ref);
+      if (r.status === "pending") return reply(200, { status: "pending", hintCode: r.hintCode ?? null });
+      // Ordern förbrukas direkt (atomiskt) så att ett lyckat svar bara kan ge en session en gång
+      const { data: claimed } = await admin.from("vihem_kp_bankid_orders").update({ status: r.status, consumed_at: new Date().toISOString() }).eq("order_ref", ref).is("consumed_at", null).select("order_ref");
+      if (!claimed?.length) return reply(410, { error: "BankID-sessionen har redan använts.", code: "E_EXPIRED" });
+      if (r.status !== "complete") return reply(200, { status: "failed", hintCode: r.hintCode ?? null });
+      const { data: ident } = await admin.from("vihem_kp_participant_identity").select("user_id").eq("organisation_id", org).eq("pno_hmac", await pnoHmac(r.personalNumber!)).eq("verified_method", "bankid").maybeSingle();
+      const { data: found } = ident ? await admin.auth.admin.getUserById(ident.user_id) : { data: null };
+      if (!found?.user?.email) return reply(200, { status: "complete", login_ready: false, error: "Inget konto är kopplat till detta BankID. Logga in med e-post och lösenord och välj ”Verifiera med BankID” under Mina sidor." });
+      const link = await admin.auth.admin.generateLink({ type: "magiclink", email: found.user.email });
+      if (link.error || !link.data?.properties?.hashed_token) { console.error("kp bankid generateLink", link.error?.message); return reply(500, { error: "BankID godkändes men sessionen kunde inte skapas.", code: "E_INTERNAL" }); }
+      await admin.rpc("vihem_kp_audit", { p_org: org, p_actor: ident!.user_id, p_kind: "user", p_action: "bankid_login", p_type: "participant", p_id: ident!.user_id, p_detail: {} });
+      return reply(200, { status: "complete", login_ready: true, token_hash: link.data.properties.hashed_token });
     }
 
     // ------------------------------------------------------------ Konto: registrering, e-postbekräftelse, lösenordsåterställning (egna, märkta mejl)

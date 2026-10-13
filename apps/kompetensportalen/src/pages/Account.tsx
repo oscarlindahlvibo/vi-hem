@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, learn } from "../lib/api";
+import { useSite } from "../lib/context";
+import { BankIdButton } from "../components/BankId";
 import { useAuth } from "../lib/auth";
 import { CERT_LABEL, dateOnly, dateTime, money, statusLabel } from "../lib/format";
 import { Link, navigate } from "../lib/router";
@@ -44,12 +46,14 @@ function Bookings({ bookings, onChange }: { bookings: any[]; onChange: () => voi
 }
 
 function Profile({ participant, onSaved }: { participant: any; onSaved: () => void }) {
+  const { site } = useSite();
   const [f, setF] = useState({ first_name: participant.first_name, last_name: participant.last_name, phone: participant.phone }); const [msg, setMsg] = useState(""); const [pn, setPn] = useState(""); const [consent, setConsent] = useState(false); const [pmsg, setPmsg] = useState("");
   return <div className="two-col"><form className="card" style={{ margin: 0 }} onSubmit={async (e) => { e.preventDefault(); try { const r = await learn("profile_update", f); setMsg(r.note || "Sparat."); onSaved(); } catch (err) { setMsg((err as ApiError).message); } }}>
     <h2>Dina uppgifter</h2><div className="grid2"><label>Förnamn<input required value={f.first_name} onChange={(e) => setF({ ...f, first_name: e.target.value })} autoComplete="given-name" /></label><label>Efternamn<input required value={f.last_name} onChange={(e) => setF({ ...f, last_name: e.target.value })} autoComplete="family-name" /></label></div>
     <label style={{ marginTop: 12 }}>Telefon<input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} autoComplete="tel" /></label><label style={{ marginTop: 12 }}>E-post<input value={participant.email} disabled /></label>
     <p className="fine">Namnet används på dina intyg. Redan utfärdade intyg ändras inte automatiskt – kontakta oss vid felstavning.</p>{msg && <p className="notice" role="status">{msg}</p>}<button className="btn primary">Spara</button></form>
     <div className="card" style={{ margin: 0 }}><h2>Identitet</h2><p>{participant.identity_verified ? <span className="status ok">Verifierad</span> : participant.identity_submitted ? <span className="status warn">Personnummer sparat (slutar på {participant.identity_last4}) – väntar på verifiering</span> : <span className="status muted">Inte angiven</span>}</p>
+      {!participant.identity_verified && site.bankid_link && <div style={{ marginBottom: 14 }}><label className="check"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> Jag samtycker till att mitt personnummer behandlas för identitetskontroll och eventuell ID06-registrering.</label><BankIdButton label="Verifiera med BankID" className="btn primary" start={() => learn("bankid_link_start", { consent })} collect={(ref) => learn("bankid_link_collect", { order_ref: ref })} onDone={(r) => { setPmsg(r.verified ? "Din identitet är verifierad med BankID. Du kan nu även logga in med BankID." : r.error || ""); onSaved(); }} /></div>}
       <p className="fine">Vissa utbildningar kräver verifierad identitet innan intyg utfärdas, och ID06-registrering kräver ditt personnummer. Det lagras krypterat och används bara för detta ändamål.</p>
       {!participant.identity_verified && <form onSubmit={async (e) => { e.preventDefault(); try { const r = await learn("identity_submit", { personal_number: pn, consent }); setPmsg(r.note); setPn(""); onSaved(); } catch (err) { setPmsg((err as ApiError).message); } }} style={{ display: "grid", gap: 12 }}><label>Personnummer<input value={pn} onChange={(e) => setPn(e.target.value)} placeholder="ÅÅÅÅMMDD-NNNN" autoComplete="off" inputMode="numeric" /></label><label className="check"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> Jag samtycker till att mitt personnummer behandlas för identitetskontroll och eventuell ID06-registrering.</label>{pmsg && <p className="notice" role="status">{pmsg}</p>}<button className="btn ghost" disabled={!consent || pn.length < 10}>Spara personnummer</button></form>}</div></div>;
 }

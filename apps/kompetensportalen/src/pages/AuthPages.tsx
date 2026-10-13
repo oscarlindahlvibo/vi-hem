@@ -2,12 +2,15 @@ import { FormEvent, useEffect, useState } from "react";
 import { ApiError, pub, supabase } from "../lib/api";
 import { Link, navigate, useLocation } from "../lib/router";
 import { useSeo } from "../lib/seo";
+import { useSite } from "../lib/context";
+import { BankIdButton } from "../components/BankId";
 
 const safeNext = (n: string | null) => (n && n.startsWith("/") && !n.startsWith("//") ? n : "/mina-sidor");
 
 export function Login() {
   const { search } = useLocation(); const next = safeNext(search.get("next"));
   const [email, setEmail] = useState(""), [password, setPassword] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false), [unconfirmed, setUnconfirmed] = useState(false), [note, setNote] = useState("");
+  const { site } = useSite();
   useSeo({ title: "Logga in | Kompetensportalen", noindex: true });
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setError(""); setUnconfirmed(false);
@@ -20,7 +23,8 @@ export function Login() {
       {error && <p className="notice error" role="alert">{error}</p>}{note && <p className="notice ok" role="status">{note}</p>}
       <button className="btn primary" disabled={busy}>{busy ? "Loggar in…" : "Logga in"}</button></form>
     {unconfirmed && <p><button className="text-link" onClick={async () => { const r = await pub.resendVerification(email).catch(() => null); setNote(r?.message ?? "Försök igen om en stund."); }}>Skicka ny bekräftelselänk</button></p>}
-    <p><Link to="/glomt-losenord" className="text-link">Glömt lösenordet?</Link></p><hr /><p>Ny hos oss? <Link to={`/skapa-konto?next=${encodeURIComponent(next)}`} className="text-link">Skapa konto</Link></p></div></section>;
+    <p><Link to="/glomt-losenord" className="text-link">Glömt lösenordet?</Link></p>
+    {site.bankid_login && <><hr /><BankIdButton label="Logga in med BankID" start={pub.bankidStart} collect={pub.bankidCollect} onDone={async (r) => { if (r.login_ready && r.token_hash) { const { error } = await supabase.auth.verifyOtp({ token_hash: r.token_hash, type: "magiclink" }); if (error) setError("BankID godkändes men inloggningen misslyckades. Försök igen."); else navigate(next); } else setError(r.error || "Inget konto är kopplat till detta BankID."); }} /></>}<hr /><p>Ny hos oss? <Link to={`/skapa-konto?next=${encodeURIComponent(next)}`} className="text-link">Skapa konto</Link></p></div></section>;
 }
 
 export function Register() {

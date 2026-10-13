@@ -299,5 +299,25 @@ begin
   end;
   reset role;
 
+  -- BankID-länkning: verifierar identitet, samma personnummer kan inte kopplas till två konton, återlänkning av samma konto är tillåten
+  declare v_b1 uuid; v_b2 uuid; v_o uuid := '38fe702d-e72c-49a2-9750-5e0b6934959b';
+  begin
+    v_b1 := pg_temp.mkuser('Bankid1'); v_b2 := pg_temp.mkuser('Bankid2');
+    perform public.vihem_kp_bankid_link(v_b1, v_o, 'enc1', '9876', 'hmac-a', 'Test Testsson');
+    perform pg_temp.expect('BankID-länkning markerar identiteten som verifierad', (select identity_method = 'bankid' and identity_verified_at is not null from public.vihem_kp_participants where user_id = v_b1) and (select verified_method = 'bankid' and pno_hmac = 'hmac-a' from public.vihem_kp_participant_identity where user_id = v_b1));
+    begin
+      perform public.vihem_kp_bankid_link(v_b2, v_o, 'enc2', '9876', 'hmac-a', 'Test Testsson');
+      raise exception 'TEST FAILED: samma personnummer kopplades till två konton';
+    exception when others then perform pg_temp.expect('samma BankID kan inte kopplas till två konton', sqlerrm like '%E_CONFLICT%');
+    end;
+    perform public.vihem_kp_bankid_link(v_b1, v_o, 'enc3', '9876', 'hmac-a', 'Test Testsson');
+    perform pg_temp.expect('återlänkning av samma konto är tillåten', (select personal_number_enc from public.vihem_kp_participant_identity where user_id = v_b1) = 'enc3');
+    begin
+      perform 1 from public.vihem_kp_bankid_orders limit 1; set local role authenticated; perform 1 from public.vihem_kp_bankid_orders limit 1;
+      raise exception 'TEST FAILED: BankID-order läsbar för klient';
+    exception when insufficient_privilege then reset role; raise notice 'ok - BankID-ordrar är inte läsbara för klienten';
+    end;
+  end;
+
   raise notice 'ALLA KP-TESTER GODKÄNDA';
 end $$;

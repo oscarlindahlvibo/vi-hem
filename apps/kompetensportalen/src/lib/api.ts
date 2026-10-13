@@ -32,7 +32,7 @@ export type Course = {
   sessions?: SessionInfo[];
 };
 export type SessionInfo = { id: string; course_id: string; title: string; starts_at: string; ends_at: string; timezone: string; location_kind: "physical" | "online"; location: string; capacity: number; seats_left: number; product_id: string | null; free_cancellation_hours: number };
-export type Site = { seller_name: string; seller_org_number: string; seller_vat_number: string; seller_address: string; support_email: string; phone: string; invoice_enabled: boolean; stripe_enabled: boolean; withdrawal_notice: string };
+export type Site = { seller_name: string; seller_org_number: string; seller_vat_number: string; seller_address: string; support_email: string; phone: string; invoice_enabled: boolean; stripe_enabled: boolean; withdrawal_notice: string; bankid_link?: boolean; bankid_login?: boolean };
 export type QuoteLine = { product_id: string; name: string; quantity: number; list_price: number; unit_price: number; price_label: string; vat_rate: number; discount: number; net_total: number; vat_amount: number; line_total: number; session_id: string | null };
 export type Quote = { lines: QuoteLine[]; subtotal: number; discount_total: number; vat_total: number; total: number; code_applied: boolean };
 export type CartItemInput = { product_id: string; quantity: number; session_id?: string | null };
@@ -45,6 +45,8 @@ export const pub = {
   faq: () => call<{ faq: Array<{ category: string; question: string; answer: string }> }>("vihem-kp-public", undefined, { action: "faq" }),
   verify: (code: string) => call<any>("vihem-kp-public", undefined, { action: "verify", code }),
   quote: (items: CartItemInput[], code?: string, customerId?: string) => call<{ quote: Quote }>("vihem-kp-public", { action: "quote", items, code, customer_id: customerId }, {}, true),
+  bankidStart: () => call<BankIdStart>("vihem-kp-public", { action: "bankid_start" }),
+  bankidCollect: (orderRef: string) => call<BankIdResult>("vihem-kp-public", { action: "bankid_collect", order_ref: orderRef }),
   contact: (payload: unknown) => call<{ ok: boolean }>("vihem-kp-public", { action: "contact", ...(payload as object) }),
   register: (payload: unknown) => call<{ ok: boolean; message: string }>("vihem-kp-public", { action: "register", ...(payload as object) }),
   verifyEmail: (token: string) => call<{ ok: boolean }>("vihem-kp-public", { action: "verify_email", token }),
@@ -54,3 +56,6 @@ export const pub = {
 };
 export const learn = <T = any>(action: string, body: Record<string, unknown> = {}) => call<T>("vihem-kp-learn", { action, ...body }, {}, true);
 export const checkout = <T = any>(action: string, body: Record<string, unknown> = {}) => call<T>("vihem-kp-checkout", { action, ...body }, {}, true);
+
+export type BankIdStart = { orderRef: string; autoStartUrl: string; qrImage: string | null };
+export type BankIdResult = { status: "pending" | "complete" | "failed"; hintCode?: string | null; login_ready?: boolean; token_hash?: string; verified?: boolean; error?: string };

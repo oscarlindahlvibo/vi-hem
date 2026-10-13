@@ -2,7 +2,8 @@
 // här kontrolleras ägarskap/företagsadministration och privata filer signeras med korta URL:er. Svar innehåller aldrig facit.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { allow, corsFor, encryptPii, ensureParticipant, EMAIL, isTestEmail, isUuid, kpContext, mapKpError, normalisePersonalNumber, queueMail, text, userFromRequest, notifyStaff as notifyStaffReal } from "../_shared/kp-common.ts";
+import { bankidCollect, bankidSettings, bankidStart, pnoHmac } from "../_shared/kp-bankid.ts";
+import { allow, corsFor, encryptPii, ensureParticipant, EMAIL, isTestEmail, isUuid, clientIp, kpContext, mapKpError, normalisePersonalNumber, queueMail, text, userFromRequest, notifyStaff as notifyStaffReal } from "../_shared/kp-common.ts";
 import { ensureCertificatePdf } from "../_shared/kp-certificate-render.ts";
 import { buildLessonBlocks, makeSigner, SIGN_TTL } from "../_shared/kp-lesson.ts";
 
@@ -67,6 +68,35 @@ Deno.serve(async (request: Request) => {
       await admin.from("vihem_kp_participant_identity").upsert({ user_id: user.id, organisation_id: org, personal_number_enc: enc, last4: pn.slice(-4), legal_basis: "samtycke (identitetskontroll/ID06)" }, { onConflict: "user_id" });
       await admin.rpc("vihem_kp_audit", { p_org: org, p_actor: user.id, p_kind: "user", p_action: "identity_submitted", p_type: "participant", p_id: user.id, p_detail: {} });
       return reply(200, { ok: true, verified: false, note: "Personnumret är sparat krypterat men inte verifierat. Verifiering görs av personal eller via BankID när det är tillgängligt." });
+    }
+
+    // ------------------------------------------------------------------ BankID: verifiera identitet och koppla BankID till kontot
+    if (action === "bankid_link_start") {
+      if (body.consent !== true) return reply(400, { error: "Du måste lämna samtycke till behandlingen av personnummer.", code: "E_TERMS" });
+      if (!Deno.env.get("VIHEM_KP_SECRET_KEY")) return reply(503, { error: "BankID-verifiering är inte klar ännu (krypteringsnyckel saknas på servern).", code: "E_CONFIG" });
+      if (!(await allow(admin, request, `kp-bankid-link:${user.id}`, 10, 600))) return reply(429, { error: "För många försök. Vänta en stund.", code: "E_RATE" });
+      const s = await bankidSettings(admin, org, "link");
+      if (!s) return reply(503, { error: "BankID är inte aktiverat.", code: "E_CONFIG" });
+      const started = await bankidStart(s, "Verifiera din identitet hos Kompetensportalen", clientIp(request));
+      await admin.from("vihem_kp_bankid_orders").insert({ order_ref: started.orderRef, organisation_id: org, flow: "link", user_id: user.id });
+      return reply(200, started);
+    }
+    if (action === "bankid_link_collect") {
+      const ref = text(body.order_ref, 100);
+      const { data: order } = await admin.from("vihem_kp_bankid_orders").select("*").eq("order_ref", ref).eq("organisation_id", org).eq("flow", "link").eq("user_id", user.id).maybeSingle();
+      if (!order || order.consumed_at || new Date(order.expires_at) < new Date()) return reply(410, { error: "BankID-sessionen har gått ut. Starta om.", code: "E_EXPIRED" });
+      const s = await bankidSettings(admin, org, "link");
+      if (!s) return reply(503, { error: "BankID är inte aktiverat.", code: "E_CONFIG" });
+      const r = await bankidCollect(s, ref);
+      if (r.status === "pending") return reply(200, { status: "pending", hintCode: r.hintCode ?? null });
+      const { data: claimed } = await admin.from("vihem_kp_bankid_orders").update({ status: r.status, consumed_at: new Date().toISOString() }).eq("order_ref", ref).is("consumed_at", null).select("order_ref");
+      if (!claimed?.length) return reply(410, { error: "BankID-sessionen har redan använts.", code: "E_EXPIRED" });
+      if (r.status !== "complete") return reply(200, { status: "failed", hintCode: r.hintCode ?? null });
+      const pn = r.personalNumber!;
+      const { data: n, error } = await admin.rpc("vihem_kp_bankid_link", { p_user: user.id, p_org: org, p_pno_enc: await encryptPii(pn, `kp-identity:${user.id}`), p_last4: pn.slice(-4), p_hmac: await pnoHmac(pn), p_name: r.name ?? "" });
+      if (error) throw error;
+      await admin.rpc("vihem_kp_audit", { p_org: org, p_actor: user.id, p_kind: "user", p_action: "bankid_linked", p_type: "participant", p_id: user.id, p_detail: { released_enrollments: n } });
+      return reply(200, { status: "complete", verified: true, name: r.name ?? "" });
     }
 
     // ------------------------------------------------------------------ Kursspelare

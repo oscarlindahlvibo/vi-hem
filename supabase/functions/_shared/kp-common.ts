@@ -69,7 +69,7 @@ export async function ensureParticipant(admin: any, ctx: KpContext, user: { id: 
 // Felkoder i databasen: "[E_KOD] text". Bara kända koder släpps igenom till klienten.
 const STATUS: Record<string, number> = {
   E_EMPTY: 400, E_TOO_MANY: 400, E_ITEM: 400, E_CODE: 400, E_PRODUCT: 404, E_CONFIG: 503, E_CUSTOMER: 403, E_INVOICE: 403, E_FULL: 409, E_SESSION: 409, E_NOT_FOUND: 404, E_STATE: 409, E_FORBIDDEN: 403,
-  E_ACCESS: 403, E_LOCKED: 403, E_RULE: 400, E_TOO_FAST: 429, E_PREREQ: 409, E_IDENTITY: 403, E_ATTEMPTS: 403, E_COOLDOWN: 429, E_CLOSED: 409, E_INVALID: 400, E_CANCEL_CLOSED: 409, E_VERSION_LOCKED: 409,
+  E_ACCESS: 403, E_LOCKED: 403, E_RULE: 400, E_TOO_FAST: 429, E_PREREQ: 409, E_IDENTITY: 403, E_ATTEMPTS: 403, E_COOLDOWN: 429, E_CLOSED: 409, E_INVALID: 400, E_CANCEL_CLOSED: 409, E_VERSION_LOCKED: 409, E_CONFLICT: 409, E_EXPIRED: 410, E_BANKID: 502,
 };
 export function mapKpError(error: unknown): { status: number; code: string; message: string } {
   const raw = String((error as any)?.message ?? error ?? "");
