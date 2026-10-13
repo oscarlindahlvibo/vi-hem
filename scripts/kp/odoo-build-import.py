@@ -36,7 +36,7 @@ for s in slides:
     if s['category_id'] in cats and s['slide_category'] in ('article', 'video', 'quiz'): mods.setdefault(s['category_id'], []).append(s)
 order = sorted(mods, key=lambda c: int(cats[c]['sequence'] or 0))
 L = ["-- Importerar APV 1.1–1.3 ur Odoo-exporten (texter, diagnostiska prov, slutprov) som UTKAST. Ersätter ett tidigare utkast (APV-113).",
-     "-- Ej importerat: de 11 dokumentavsnitten (saknar filer i Odoo), videon (endast Google Drive-länk) samt pris/produkt. Genererad av odoo-build-import.py.",
+     "-- Ej importerat: de 11 dokumentavsnitten (saknar filer i Odoo) samt pris/produkt. Videon (scen 1.mp4) laddades upp separat och kopplades till lektionen – kör om detta skript raderar den kopplingen. Genererad av odoo-build-import.py.",
      "begin;", "do $$", "declare v_org uuid := '38fe702d-e72c-49a2-9750-5e0b6934959b'; v_course uuid; v_ver uuid; v_mod uuid; v_les uuid; v_q uuid; v_exam uuid;", "begin",
      "  if exists (select 1 from public.vihem_kp_courses c where c.organisation_id = v_org and c.code = 'APV-113' and c.status <> 'draft') then raise exception 'APV-113 är inte ett utkast – avbryter'; end if;",
      "  delete from public.vihem_kp_exam_questions where exam_id in (select e.id from public.vihem_kp_exams e join public.vihem_kp_course_versions v on v.id = e.version_id join public.vihem_kp_courses c on c.id = v.course_id where c.code = 'APV-113' and c.organisation_id = v_org);",
