@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock, Link2, MapPin, Plus, RefreshCw, Trash2, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { CalendarReminderSettings } from '../components/CalendarReminderSettings';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea, Tabs, Avatar } from '../components/ui';
 import type { CalendarEvent, CalendarEventCategory, CalendarEventVisibility, CalendarSource, Profile } from '../types';
 
@@ -397,7 +398,7 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
       <PageHeader
         title="Kalender"
         subtitle="Gemensamma händelser för organisationen och personliga händelser för personal."
-        action={<Button onClick={() => openCreate()}><Plus className="h-4 w-4" /> Ny händelse</Button>}
+        action={<div className="flex flex-wrap gap-2">{user?.role === 'admin' && <CalendarReminderSettings />}<Button onClick={() => openCreate()}><Plus className="h-4 w-4" /> Ny händelse</Button></div>}
       />
 
       {error && !modalOpen && (

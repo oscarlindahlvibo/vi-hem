@@ -1,5 +1,6 @@
 import { DashboardCards } from '../components/DashboardCards';
 import React, { useEffect, useState } from 'react';
+import { TodayCalendarCard } from '../components/TodayCalendarCard';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, Badge, LoadingPage, Avatar, Button } from '../components/ui';
@@ -485,6 +486,8 @@ export function StaffDashboard({ onNavigate, notificationCount = 0 }: StaffDashb
           </div>
         )}
       </section>
+
+      <TodayCalendarCard onOpen={() => onNavigate('calendar')} />
 
       <section className="vihem-surface overflow-hidden rounded-card">
         <button
