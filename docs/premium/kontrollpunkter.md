@@ -460,3 +460,5 @@ Klient: SUBSCRIBED bekräftar status utan obligatorisk extra system/ok; aktiv tr
 2026-10-12: tvättbokning och tvättstugeskärm till säljsida/klickdemo, med appens delade kalender-/skärmkomponenter och syntetiska data. Bokning/avbokning/gräns/dubbeltryck/Escape/reset/rollfri lokal demo/synkad skärm provade 390/768/1440; inget API-anrop. App-TS/build, sajtbuild/premiumprov/riktad lint PASS (befintliga hookvarningar); mobilgridöverströmning rättad. Tidigare publicering försökte aldrig ändra backend; uppdaterad klickdemo ska publiceras separat efter aktuell main integrerats.
 
 2026-10-12: klickdemo borttagen på användarens begäran. Säljsidan visar appbilder, tvättstugeskärm och personlig demo-/demokontoförfrågan. Prototypkod/länkar/demo-mobilbild borttagna; riktiga appens komponenter och backend bevarade. Eventuell framtida live-demo kräver riktig app och isolerade data.
+
+2026-10-13: säljsidans layout/bildval förfinade; sju nya verkliga appvyer med isolerade exempeldata, gemensamma proportioner/marginaler och linjerade åtgärder. TS/sajtbuild/lint, responsiva kontroller 320–1440 och kontaktregression PASS. Inga backend-/verksamhetsdataändringar eller ny klickdemo.
