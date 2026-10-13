@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock, Link2, MapPin, Plus, RefreshCw, Trash2, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { CalendarReminderSettings } from '../components/CalendarReminderSettings';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select, Textarea, Tabs, Avatar } from '../components/ui';
 import type { CalendarEvent, CalendarEventCategory, CalendarEventVisibility, CalendarSource, Profile } from '../types';
 
@@ -397,7 +398,7 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
       <PageHeader
         title="Kalender"
         subtitle="Gemensamma händelser för organisationen och personliga händelser för personal."
-        action={<Button onClick={() => openCreate()}><Plus className="h-4 w-4" /> Ny händelse</Button>}
+        action={<div className="flex flex-wrap gap-2">{user?.role === 'admin' && <CalendarReminderSettings />}<Button onClick={() => openCreate()}><Plus className="h-4 w-4" /> Ny händelse</Button></div>}
       />
 
       {error && !modalOpen && (
@@ -450,8 +451,8 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
                   </span>
                   <span className="mt-1 flex justify-center gap-1 sm:hidden" aria-hidden="true">{dayEvents.slice(0,3).map(event=><span key={event.id} className="h-1.5 w-1.5 rounded-full" style={{backgroundColor:event.color}}/>)}</span><span className="mt-2 hidden space-y-1 sm:block">
                     {dayEvents.slice(0, 3).map(event => (
-                      <span key={event.id} className="block truncate rounded-md px-2 py-1 text-xs font-bold text-white" style={{ backgroundColor: event.color }}>
-                        {eventTimeLabel(event)} · {event.title}
+                      <span key={event.id} title={event.title} className="block truncate rounded-md px-2 py-1 text-xs font-bold text-white" style={{ backgroundColor: event.color }}>
+                        {event.all_day ? event.title : `${eventTimeLabel(event)} · ${event.title}`}
                       </span>
                     ))}
                     {dayEvents.length > 3 && <span className="block text-xs font-bold text-slate-500">+{dayEvents.length - 3} fler</span>}
