@@ -19,6 +19,7 @@ export function Home() {
         <div className="hero-actions"><Link to="/utbildningar" className="btn primary large">Se utbildningar →</Link><Link to="/foretag" className="btn ghost large">För företag</Link></div>
         <ul className="trust"><li>Intyg med QR-verifiering</li><li>Betala med kort eller faktura</li><li>Mobil, surfplatta och dator</li></ul>
       </section>
+      <section className="id06-band" aria-label="ID06 Kompetensdatabas"><div className="id06-band-inner"><img src="/brand/id06-kompetensdatabas-2026.png" alt="ID06 Kompetensdatabas – ackrediterad kompetensregistrator 2026" width="320" height="84" /><p>Ackrediterad kompetensregistrator i ID06 Kompetensdatabas. För utbildningar som omfattas ingår registreringen utan extra kostnad – den görs som ett separat steg efter godkänt prov och utfärdat intyg.</p></div></section>
       <section className="section">
         <p className="eyebrow">För dig i branschen</p>
         <h2>Anpassat för arbetsplatser där säkerhet och dokumentation spelar roll</h2>

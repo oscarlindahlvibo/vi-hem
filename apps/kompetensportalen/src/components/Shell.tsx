@@ -31,7 +31,7 @@ export function Shell({ children, site }: { children: React.ReactNode; site: Sit
       </header>
       <main id="main">{children}</main>
       <footer className="site-footer">
-        <div><img className="footer-logo" src="/brand/kompetensportalen.jpg" alt="Kompetensportalen.se" width="150" height="44" /><p>Utbildning och dokumenterad kompetens för ett säkrare arbetsliv.</p></div>
+        <div><img className="footer-logo" src="/brand/kompetensportalen.jpg" alt="Kompetensportalen.se" width="150" height="44" /><img className="footer-id06" src="/brand/id06-kompetensdatabas-2026.png" alt="ID06 Kompetensdatabas – ackrediterad kompetensregistrator 2026" width="220" height="58" loading="lazy" /><p>Utbildning och dokumenterad kompetens för ett säkrare arbetsliv.</p></div>
         <div><strong>Utbildning</strong><p><Link to="/utbildningar">Alla utbildningar</Link></p><p><Link to="/foretag">För företag</Link></p><p><Link to="/verifiera">Verifiera intyg</Link></p></div>
         <div><strong>Information</strong><p><Link to="/villkor">Köpvillkor</Link></p><p><Link to="/integritet">Integritetspolicy</Link></p><p><Link to="/angerratt">Ångerrätt</Link></p><p><Link to="/vanliga-fragor">Frågor & svar</Link></p></div>
         <div><strong>{site?.seller_name || "WPE Sweden AB"}</strong>{site?.seller_org_number && <p>Org.nr {site.seller_org_number}</p>}{site?.seller_vat_number && <p>Moms.nr {site.seller_vat_number}</p>}{site?.seller_address && <p>{site.seller_address}</p>}{site?.phone && <p><a href={`tel:${site.phone.replace(/\s/g, "")}`}>{site.phone}</a></p>}{site?.support_email && <p><a href={`mailto:${site.support_email}`}>{site.support_email}</a></p>}<p><Link to="/kontakt">Kontakta oss</Link></p></div>
