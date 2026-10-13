@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /kassa
+Disallow: /varukorg
+Disallow: /order/
+Disallow: /mina-sidor
+Disallow: /utbildning/
+Disallow: /foretag/portal
+Disallow: /bekrafta
+Disallow: /nytt-losenord
+Sitemap: https://kompetensportalen.se/sitemap.xml

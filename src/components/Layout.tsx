@@ -15,6 +15,7 @@ import {
   ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase,
   BedDouble, CalendarDays, Landmark, MessageSquareText, Monitor, ScanLine, SlidersHorizontal,
   Truck, Package, FileSpreadsheet, Mail, FileSignature, ShieldCheck, ShieldAlert, Car, Sparkles, BookOpen, ReceiptText,
+  GraduationCap,
 } from 'lucide-react';
 
 interface NavItem {
@@ -143,6 +144,9 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     ] },
     { label: 'Uthyrning', icon: <Truck className="w-5 h-5" />, items: [
       { label: 'Översikt', icon: <Truck className="w-5 h-5" />, page: 'rental', roles: ['staff', 'admin'], module: 'rental_management' },
+    ] },
+    { label: 'Kompetensportalen', icon: <GraduationCap className="w-5 h-5" />, items: [
+      { label: 'Kompetensportalen', icon: <GraduationCap className="w-5 h-5" />, page: 'kompetensportalen', roles: ['staff', 'admin'], module: 'kompetensportalen' },
     ] },
     { label: 'Inköp & lager', icon: <Package className="w-5 h-5" />, items: [
       { label: 'Inköpslista', icon: <ShoppingCart className="w-5 h-5" />, page: 'purchases', roles: ['staff', 'admin'] },

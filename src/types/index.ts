@@ -13,6 +13,7 @@ export type ModuleKey =
   | 'customer_projects'
   | 'short_stay'
   | 'rental_management'
+  | 'kompetensportalen'
   | 'staff_ledger'
   | 'year_planning'
   | 'meetings'

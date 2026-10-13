@@ -4,6 +4,7 @@
 #   ./deploy_sites.sh ekangen         -> only ekangensvandrarhem.se
 #   ./deploy_sites.sh grav            -> only gavirserum.se
 #   ./deploy_sites.sh viborent        -> only viborent.se (+ www)
+#   ./deploy_sites.sh kompetensportalen -> only kompetensportalen.se (+ www)
 #   ./deploy_sites.sh vibofast        -> only vibofast.se
 #   ./deploy_sites.sh vihem           -> only VI-HEM (runs ./deploy_vihem.sh)
 #   ./deploy_sites.sh all             -> ekangen + grav + vibofast + VI-HEM
@@ -18,7 +19,7 @@ ENV_FILE="${DEPLOY_ENV_FILE:-/home/vibo/barorder/.env}"
 targets=("$@")
 [[ ${#targets[@]} -eq 0 ]] && targets=(ekangen grav vibofast)
 [[ "${targets[0]}" == all ]] && targets=(ekangen grav vibofast vihem)
-for t in "${targets[@]}"; do [[ "$t" =~ ^(ekangen|grav|viborent|vibofast|vibogruppen|vihem-site|vihem)$ ]] || { echo "Unknown target: $t"; exit 2; }; done
+for t in "${targets[@]}"; do [[ "$t" =~ ^(ekangen|grav|viborent|kompetensportalen|vibofast|vibogruppen|vihem-site|vihem)$ ]] || { echo "Unknown target: $t"; exit 2; }; done
 
 log() { printf '\n[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 needs_repo=false; for t in "${targets[@]}"; do [[ "$t" != vihem ]] && needs_repo=true; done

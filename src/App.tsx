@@ -1,6 +1,7 @@
 import { PortalAdmin } from './modules/vibogruppen/PortalAdmin';
 import { WebsiteAdmin } from './modules/vibofast/WebsiteAdmin';
 import { EkangenAdmin } from './modules/ekangen/EkangenAdmin';
+import { KompetensportalenPage } from './modules/kompetensportalen/KompetensportalenPage';
 import { GravAdmin } from './modules/grav/GravAdmin';
 import { InterestsAdmin } from './modules/vibofast/InterestsAdmin';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -121,6 +122,7 @@ const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
   'meetings',
   'finance',
   'rental_management',
+  'kompetensportalen',
   'inventory_management',
   'skatteverket',
   'jour',
@@ -586,6 +588,10 @@ function AppInner() {
       case 'short-stay':
         if (!isStaff || !enabledModules.short_stay) return renderDashboard();
         return <ShortStayPage onNavigate={navigate} />;
+
+      case 'kompetensportalen':
+        if (!isStaff || !enabledModules.kompetensportalen) return renderDashboard();
+        return <KompetensportalenPage />;
 
       case 'rental':
         if (!isStaff || !enabledModules.rental_management) return renderDashboard();

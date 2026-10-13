@@ -32,7 +32,8 @@
     "mobile:build": "node scripts/build-mobile-release.mjs",
     "test:mobile-release": "node scripts/check-mobile-release-config.mjs",
     "vibogruppen:build": "npm --prefix apps/vibogruppen run build",
-    "vibogruppen:dev": "npm --prefix apps/vibogruppen run dev"
+    "vibogruppen:dev": "npm --prefix apps/vibogruppen run dev",
+    "test:kp": "node scripts/kp-unit-check.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
