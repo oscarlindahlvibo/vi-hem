@@ -11,6 +11,7 @@ delete from public.vihem_kp_session_bookings where session_id in (select id from
 delete from public.vihem_kp_seats where order_id in (select id from e2e_orders) or course_id in (select id from e2e_courses);
 delete from public.vihem_kp_receipts where order_id in (select id from e2e_orders);
 delete from public.vihem_kp_payments where order_id in (select id from e2e_orders);
+select setval('public.vihem_kp_receipt_seq', greatest((select coalesce(max((regexp_replace(receipt_number, '^.*-', ''))::int), 0) from public.vihem_kp_receipts), 1), (select count(*) > 0 from public.vihem_kp_receipts)) \g /dev/null
 delete from public.vihem_kp_refunds where order_id in (select id from e2e_orders);
 delete from public.vihem_kp_stripe_events where order_id in (select id from e2e_orders);
 delete from public.vihem_kp_audit_log where entity_type = 'order' and entity_id in (select id::text from e2e_orders);
