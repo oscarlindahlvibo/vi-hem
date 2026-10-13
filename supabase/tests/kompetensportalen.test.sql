@@ -156,6 +156,23 @@ begin
   perform pg_temp.expect('rätt svar ger godkänt 100 %', (r ->> 'passed')::boolean and (r ->> 'percent')::numeric = 100, r::text);
   perform pg_temp.expect('godkänt prov slutför utbildningen och utfärdar certifikat', (select status from public.vihem_kp_enrollments where id = v_enr) = 'completed' and (select count(*) from public.vihem_kp_certificates where enrollment_id = v_enr and status = 'issued') = 1);
   v_cert := (select id from public.vihem_kp_certificates where enrollment_id = v_enr);
+  -- Rättning i publicerad kurs: ändrar innehåll men aldrig det som redan är avklarat (framsteg, godkänt prov, certifikat, enrollment)
+  declare v_lp_before integer; v_blk uuid;
+  begin
+    select count(*) into v_lp_before from public.vihem_kp_lesson_progress where enrollment_id = v_enr and status = 'completed';
+    select id into v_blk from public.vihem_kp_lesson_blocks where lesson_id = v_l_view and kind = 'text' limit 1;
+    if v_blk is null then perform set_config('vihem.kp_clone', 'on', true); insert into public.vihem_kp_lesson_blocks (organisation_id, version_id, lesson_id, kind, sort_order, content) values (v_org, v_ver, v_l_view, 'text', 1, '{"markdown":"gammal"}') returning id into v_blk; perform set_config('vihem.kp_clone', 'off', true); end if;
+    perform public.vihem_kp_live_edit('lesson', v_l_view, '{"title":"Text (rättad rubrik)"}', 'test');
+    perform public.vihem_kp_live_edit('block', v_blk, '{"markdown":"Rättad text"}', 'test');
+    perform public.vihem_kp_live_edit('exam', v_exam, '{"pass_percent":100}', 'test');
+    perform pg_temp.expect('rättning i publicerad kurs ändrar rubrik, text och provgräns', (select title from public.vihem_kp_lessons where id = v_l_view) = 'Text (rättad rubrik)' and (select content ->> 'markdown' from public.vihem_kp_lesson_blocks where id = v_blk) = 'Rättad text' and (select pass_percent from public.vihem_kp_exams where id = v_exam) = 100);
+    perform pg_temp.expect('avklarade delar förblir avklarade efter rättning', (select count(*) from public.vihem_kp_lesson_progress where enrollment_id = v_enr and status = 'completed') = v_lp_before);
+    perform pg_temp.expect('certifikat och slutförd kurs påverkas inte av rättning', (select status from public.vihem_kp_certificates where id = v_cert) = 'issued' and (select status from public.vihem_kp_enrollments where id = v_enr) = 'completed');
+    perform pg_temp.expect('godkänt försök förblir godkänt trots höjd gräns', exists (select 1 from public.vihem_kp_exam_attempts where enrollment_id = v_enr and passed));
+    perform pg_temp.expect_error('regler och struktur kan inte ändras live', format('select public.vihem_kp_live_edit(%L, %L, %L, %L)', 'exam', v_exam, '{"kind":"quiz"}', ''), 'E_INVALID');
+    perform pg_temp.expect_error('byte av film i publicerad kurs nekas', format('select public.vihem_kp_live_edit(%L, %L, jsonb_build_object(%L, gen_random_uuid()), %L)', 'block', (select id from public.vihem_kp_lesson_blocks where lesson_id = v_l_video and kind = 'video' limit 1), 'asset_id', ''), 'E_STATE');
+    perform pg_temp.expect('rättningen loggas med före och efter', exists (select 1 from public.vihem_kp_audit_log where action = 'live_edit' and entity_id = v_blk::text and detail ? 'before'));
+  end;
   perform pg_temp.expect('certifikatet knyts till kursversionen och har giltighet', (select course_version_id from public.vihem_kp_certificates where id = v_cert) = v_ver and (select valid_until from public.vihem_kp_certificates where id = v_cert) > current_date + 365 * 4);
   perform pg_temp.expect('samma certifikat utfärdas inte två gånger', public.vihem_kp_issue_certificate(v_enr, null) = v_cert);
   perform pg_temp.expect('ID06-ärende skapas men markeras som kräver åtgärd utan verifierat personnummer (ingen simulerad registrering)',
@@ -325,6 +342,24 @@ begin
   set local role authenticated;
   perform pg_temp.expect('översikten kan beräknas av administratör', public.vihem_kp_overview(current_date - 365, current_date) ?& array['orders_by_month', 'received_by_month', 'refunded_by_month', 'seats', 'learning', 'id06']);
   reset role;
+
+  -- Frågor per kurs: prov kan bara använda sin egen kurs frågor, och en kopierad kurs får egen frågebank
+  declare v_ca uuid; v_cb uuid; v_va uuid; v_ea uuid; v_qa uuid; v_qb uuid; v_dup uuid; v_org2 uuid := '38fe702d-e72c-49a2-9750-5e0b6934959b';
+  begin
+    insert into public.vihem_kp_courses (organisation_id, code, slug, title, status) values (v_org2, 'PCA', 'pc-a', 'Kurs A', 'draft') returning id into v_ca;
+    insert into public.vihem_kp_courses (organisation_id, code, slug, title, status) values (v_org2, 'PCB', 'pc-b', 'Kurs B', 'draft') returning id into v_cb;
+    insert into public.vihem_kp_course_versions (organisation_id, course_id, version, status) values (v_org2, v_ca, 1, 'draft') returning id into v_va;
+    insert into public.vihem_kp_exams (organisation_id, version_id, kind, title, question_count) values (v_org2, v_va, 'final', 'Prov A', 1) returning id into v_ea;
+    insert into public.vihem_kp_questions (organisation_id, course_id, topic, type, prompt) values (v_org2, v_ca, 'T', 'single', 'Fråga A') returning id into v_qa;
+    insert into public.vihem_kp_questions (organisation_id, course_id, topic, type, prompt) values (v_org2, v_cb, 'T', 'single', 'Fråga B') returning id into v_qb;
+    insert into public.vihem_kp_question_options (organisation_id, question_id, label, is_correct, sort_order) values (v_org2, v_qa, 'ja', true, 1), (v_org2, v_qa, 'nej', false, 2);
+    insert into public.vihem_kp_exam_questions (exam_id, question_id, organisation_id) values (v_ea, v_qa, v_org2);
+    perform pg_temp.expect('prov kan använda sin egen kurs frågor', exists (select 1 from public.vihem_kp_exam_questions where exam_id = v_ea and question_id = v_qa));
+    perform pg_temp.expect_error('prov kan inte använda en annan kurs fråga', format('insert into public.vihem_kp_exam_questions (exam_id, question_id, organisation_id) values (%L, %L, %L)', v_ea, v_qb, v_org2), 'E_INVALID');
+    v_dup := public.vihem_kp_duplicate_course(v_ca, 'PCA2', 'pc-a2');
+    perform pg_temp.expect('kopierad kurs får egen frågebank med alternativ', (select count(*) from public.vihem_kp_questions where course_id = v_dup) = 1 and (select count(*) from public.vihem_kp_question_options o join public.vihem_kp_questions q on q.id = o.question_id where q.course_id = v_dup) = 2);
+    perform pg_temp.expect('kopians prov pekar på kopians frågor, inte originalets', not exists (select 1 from public.vihem_kp_exam_questions eq join public.vihem_kp_exams e on e.id = eq.exam_id join public.vihem_kp_course_versions v on v.id = e.version_id where v.course_id = v_dup and eq.question_id = v_qa));
+  end;
 
   raise notice 'ALLA KP-TESTER GODKÄNDA';
 end $$;
