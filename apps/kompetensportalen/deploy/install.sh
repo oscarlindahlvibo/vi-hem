@@ -6,13 +6,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 DOMAIN=kompetensportalen.se
-ROOT=/var/www/$DOMAIN/html
+ROOT=/var/www/kompetensportalen/html
 CONF=/etc/nginx/sites-available/$DOMAIN.conf
 [[ $EUID -eq 0 ]] || { echo "Kör med sudo."; exit 1; }
 
 mkdir -p "$ROOT"
 [[ -f "$ROOT/index.html" ]] || echo '<!doctype html><title>Kompetensportalen</title><p>Kommer snart.</p>' > "$ROOT/index.html"
-chown -R www-data:www-data "/var/www/$DOMAIN"
+chown -R www-data:www-data /var/www/kompetensportalen
 
 if [[ -f "$CONF" || -f /etc/nginx/sites-enabled/$DOMAIN.conf ]]; then
   BACKUP="/root/kompetensportalen.se.conf.backup-$(date +%Y%m%dT%H%M%S)"
