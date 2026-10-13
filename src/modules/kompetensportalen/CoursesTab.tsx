@@ -28,7 +28,8 @@ export function CoursesTab({ organisationId, isAdmin, onOpenBuilder }: TabProps 
     const res = edit?.id ? await db.from('vihem_kp_courses').update(payload).eq('id', edit.id).select('id').single() : await db.from('vihem_kp_courses').insert({ ...payload, status: 'draft' }).select('id').single();
     if (res.error) { setSaving(false); setError(clean(res.error.message)); return; }
     if (!edit?.id) await db.from('vihem_kp_course_versions').insert({ organisation_id: organisationId, course_id: res.data.id, version: 1, status: 'draft' });
-    setSaving(false); setEdit(null); await load();
+    const created = !edit?.id; setSaving(false); setEdit(null); await load();
+    if (created) onOpenBuilder(res.data.id); // ny kurs: gå direkt till kursbyggaren för att lägga in innehåll
   };
   const setStatus = async (c: any, status: string) => { const { error } = await db.from('vihem_kp_courses').update({ status }).eq('id', c.id); if (error) alert(clean(error.message)); await load(); };
   const dup = async (c: any) => { const code = prompt('Kurskod för kopian', `${c.code}-2`); if (!code) return; const { error } = await db.rpc('vihem_kp_duplicate_course', { p_course: c.id, p_code: code.toUpperCase(), p_slug: slugify(`${c.slug}-${code}`) }); if (error) alert(clean(error.message)); await load(); };

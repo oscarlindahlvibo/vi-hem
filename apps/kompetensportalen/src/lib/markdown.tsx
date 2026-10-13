@@ -22,6 +22,7 @@ export function Markdown({ source }: { source: string }) {
   for (const raw of lines) {
     const line = raw.trimEnd(); let m: RegExpExecArray | null;
     if (!line.trim()) { flushPara(); flushList(); continue; }
+    if ((m = /^!\[([^\]]*)\]\((https:\/\/[^)\s]+)\)$/.exec(line.trim()))) { flushPara(); flushList(); blocks.push(<figure key={`i${k++}`} style={{ margin: "16px 0" }}><img src={m[2]} alt={m[1]} loading="lazy" style={{ maxWidth: "100%", borderRadius: 12 }} /></figure>); continue; }
     if ((m = /^(#{1,3})\s+(.*)$/.exec(line))) { flushPara(); flushList(); const level = m[1].length + 1; const Tag = (`h${Math.min(level, 4)}`) as keyof JSX.IntrinsicElements; blocks.push(<Tag key={`h${k++}`}>{inline(m[2], `h${k}`)}</Tag>); continue; }
     if ((m = /^\s*[-*]\s+(.*)$/.exec(line))) { flushPara(); if (!list || list.ordered) { flushList(); list = { ordered: false, items: [], levels: [] }; } list.items.push(m[1]); list.levels.push(Math.min(2, Math.floor((line.length - line.trimStart().length) / 2))); continue; }
     if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(line))) { flushPara(); if (!list || !list.ordered) { flushList(); list = { ordered: true, items: [], levels: [] }; } list.items.push(m[1]); list.levels.push(0); continue; }

@@ -319,5 +319,12 @@ begin
     end;
   end;
 
+  -- Rapportöversikten (regression: GROUP BY med aggregat) körs som administratör och returnerar alla delrapporter
+  perform set_config('request.jwt.claims', json_build_object('sub', 'c03d0d59-4641-4baa-a45b-adadbc5d162b', 'role', 'authenticated')::text, true);
+  perform set_config('request.jwt.claim.sub', 'c03d0d59-4641-4baa-a45b-adadbc5d162b', true);
+  set local role authenticated;
+  perform pg_temp.expect('översikten kan beräknas av administratör', public.vihem_kp_overview(current_date - 365, current_date) ?& array['orders_by_month', 'received_by_month', 'refunded_by_month', 'seats', 'learning', 'id06']);
+  reset role;
+
   raise notice 'ALLA KP-TESTER GODKÄNDA';
 end $$;
