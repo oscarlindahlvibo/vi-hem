@@ -51,6 +51,9 @@ try {
   const me = (await anna.learn('me')).body; assert.equal(me.enrollments.length, 1); assert.equal(me.enrollments[0].access_enabled, true); assert.equal((await getOrder(o1.id)).status, 'fulfilled'); ok('F1: efter verifierad betalning har Anna åtkomst (order levererad)');
   h = await handleStripeEvent(admin, e1, { quiet: true }); assert.equal(h.body.outcome, 'duplicate'); ok('F14: samma Stripe-händelse två gånger ger "duplicate"');
   h = await handleStripeEvent(admin, sessEvent(o1), { quiet: true }); assert.equal((await admin.from('vihem_kp_payments').select('id').eq('order_id', o1.id)).data.length, 1); assert.equal((await admin.from('vihem_kp_seats').select('id').eq('order_id', o1.id)).data.length, 1); ok('F14: ny händelse-id för samma betalning skapar ingen andra betalning eller plats');
+  const rcs = (await admin.from('vihem_kp_receipts').select('*').eq('order_id', o1.id)).data; assert.equal(rcs.length, 1); assert.ok(/^KV-\d{4}-\d{6}$/.test(rcs[0].receipt_number)); assert.ok(rcs[0].pdf_path); assert.equal(Number(rcs[0].total), Number(o1.total)); assert.equal(rcs[0].kind, 'receipt'); ok('Kvitto skapas exakt en gång per kortbetalning (även vid dubbla Stripe-händelser) med löpnummer och PDF');
+  { const mine = (await anna.learn('me')).body; assert.equal(mine.receipts.length, 1); r = await anna.learn('receipt_pdf', { receipt_id: rcs[0].id }); assert.equal(r.status, 200); const pdfRes = await fetch(r.body.url); const pdfBytes = new Uint8Array(await pdfRes.arrayBuffer()); assert.equal(new TextDecoder().decode(pdfBytes.slice(0, 5)), '%PDF-'); ok('Köparen öppnar sitt kvitto (PDF) i portalen');
+    r = await bertil.learn('receipt_pdf', { receipt_id: rcs[0].id }); assert.equal(r.status, 404); ok('En annan användare kan inte öppna någon annans kvitto'); }
   const oBad = await createCardOrder(bertil, [{ product_id: ids.product, quantity: 1 }], 'e2e-bertil-1');
   h = await handleStripeEvent(admin, sessEvent(oBad, { amount_total: 100 }), { quiet: true }); assert.equal(h.body.outcome, 'mismatch'); assert.equal((await bertil.learn('me')).body.enrollments.length, 0); ok('F2: betalning med fel belopp ger ingen åtkomst');
   h = await handleStripeEvent(admin, { id: 'evt_exp', type: 'checkout.session.expired', data: { object: { metadata: { kp_order_id: oBad.id } } } }, { quiet: true }); assert.equal((await getOrder(oBad.id)).status, 'expired'); ok('F2: avbruten/utgången betalning ger förfallen order utan åtkomst');
@@ -151,6 +154,7 @@ try {
   const refundEvt = { id: 'evt_refund_e2e', type: 'charge.refunded', data: { object: { id: 'ch_e2e', payment_intent: e1.data.object.payment_intent, amount_refunded: Math.round(Number(o1.total) * 100), amount_captured: Math.round(Number(o1.total) * 100) } } };
   h = await handleStripeEvent(admin, refundEvt, { quiet: true }); assert.equal(h.body.outcome, 'refund_recorded');
   const o1b = await getOrder(o1.id); assert.equal(o1b.status, 'refunded'); assert.equal(Number(o1b.amount_refunded), Number(o1.total)); ok('F12: återbetalning registreras på ordern (belopp, status)');
+  { const cr = (await admin.from('vihem_kp_receipts').select('*').eq('order_id', o1.id).eq('kind', 'credit_receipt')).data; assert.equal(cr.length, 1); assert.ok(/^KK-\d{4}-\d{6}$/.test(cr[0].receipt_number)); assert.equal(Number(cr[0].total), Number(o1.total)); assert.ok(cr[0].pdf_path); ok('Återbetalning ger ett kreditkvitto med eget nummer och PDF'); }
   const annaEnr = (await anna.learn('me')).body.enrollments[0]; assert.equal(annaEnr.access_enabled, false); r = await anna.learn('lesson', { enrollment_id: annaEnr.id, lesson_id: ids.lesson_view }); assert.equal(r.status, 403); ok('F12: åtkomsten återkallas – deltagaren nekas innehållet');
   h = await handleStripeEvent(admin, refundEvt, { quiet: true }); assert.equal(h.body.outcome, 'duplicate'); assert.equal((await admin.from('vihem_kp_refunds').select('id').eq('order_id', o1.id)).data.length, 1); ok('F12/F14: samma återbetalningshändelse igen ger ingen dubblett');
   const o3 = await createCardOrder(emps[6], [{ product_id: ids.product, quantity: 1 }], 'e2e-disp-1'); await handleStripeEvent(admin, sessEvent(o3), { quiet: true });
@@ -160,6 +164,7 @@ try {
   // ============ Säkerhet: personnummer
   r = await emps[7].learn('identity_submit', { personal_number: '19121212-1213', consent: true }); assert.equal(r.status, 400); ok('Ogiltigt personnummer (Luhn) nekas');
   r = await emps[7].learn('identity_submit', { personal_number: '810203-2398', consent: false }); assert.equal(r.status, 400); ok('Personnummer kräver samtycke');
+  { const { data: testReceipts } = await admin.from('vihem_kp_receipts').select('pdf_path').like('buyer_email', '%@e2e.kp.test'); const paths = (testReceipts ?? []).map((x) => x.pdf_path).filter(Boolean); if (paths.length) await admin.storage.from('vihem-kp-private').remove(paths); }
   await admin.storage.from(asset.bucket).remove([asset.storage_path]);
   console.log(`\nALLA ${n} E2E-KONTROLLER GODKÄNDA`);
 } catch (e) {

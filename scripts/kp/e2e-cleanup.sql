@@ -9,6 +9,7 @@ delete from public.vihem_kp_certificates where course_id in (select id from e2e_
 delete from public.vihem_kp_enrollments where course_id in (select id from e2e_courses);
 delete from public.vihem_kp_session_bookings where session_id in (select id from public.vihem_kp_sessions where course_id in (select id from e2e_courses)) or order_item_id in (select id from public.vihem_kp_order_items where order_id in (select id from e2e_orders));
 delete from public.vihem_kp_seats where order_id in (select id from e2e_orders) or course_id in (select id from e2e_courses);
+delete from public.vihem_kp_receipts where order_id in (select id from e2e_orders);
 delete from public.vihem_kp_payments where order_id in (select id from e2e_orders);
 delete from public.vihem_kp_refunds where order_id in (select id from e2e_orders);
 delete from public.vihem_kp_stripe_events where order_id in (select id from e2e_orders);

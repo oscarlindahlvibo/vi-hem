@@ -8,6 +8,7 @@ import { CoursesTab } from './CoursesTab';
 import { BuilderTab } from './BuilderTab';
 import { SessionsTab } from './SessionsTab';
 import { OrdersTab } from './OrdersTab';
+import { DocumentsTab } from './DocumentsTab';
 import { CustomersTab } from './CustomersTab';
 import { ParticipantsTab } from './ParticipantsTab';
 import { QuestionsTab } from './QuestionsTab';
@@ -17,7 +18,7 @@ import { ContentTab } from './ContentTab';
 import { SettingsTab } from './SettingsTab';
 
 const TABS = [
-  ['overview', 'Översikt'], ['courses', 'Kurser'], ['builder', 'Kursbyggare'], ['sessions', 'Kurstillfällen'], ['orders', 'Ordrar & betalningar'], ['customers', 'Företagskunder'],
+  ['overview', 'Översikt'], ['courses', 'Kurser'], ['builder', 'Kursbyggare'], ['sessions', 'Kurstillfällen'], ['orders', 'Ordrar & betalningar'], ['documents', 'Kvitton & fakturor'], ['customers', 'Företagskunder'],
   ['participants', 'Deltagare'], ['questions', 'Quiz & prov'], ['certificates', 'Certifikat'], ['id06', 'ID06'], ['content', 'Webbplats'], ['settings', 'Inställningar'],
 ] as const;
 
@@ -44,6 +45,7 @@ export function KompetensportalenPage() {
       {tab === 'builder' && <BuilderTab {...props} initialCourse={builderCourse} />}
       {tab === 'sessions' && <SessionsTab {...props} />}
       {tab === 'orders' && <OrdersTab {...props} />}
+      {tab === 'documents' && <DocumentsTab {...props} />}
       {tab === 'customers' && <CustomersTab {...props} />}
       {tab === 'participants' && <ParticipantsTab {...props} />}
       {tab === 'questions' && <QuestionsTab {...props} />}

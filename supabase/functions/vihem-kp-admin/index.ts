@@ -7,7 +7,8 @@ import { isUuid, mapKpError, money, queueMail, text } from "../_shared/kp-common
 import { stripeConfigured, stripePost } from "../_shared/kp-stripe.ts";
 import { createInvoiceForOrder } from "../_shared/kp-accounted.ts";
 import { ensureCertificatePdf } from "../_shared/kp-certificate-render.ts";
-import { buildLessonBlocks, makeSigner } from "../_shared/kp-lesson.ts";
+import { buildLessonBlocks, makeSigner, publicize } from "../_shared/kp-lesson.ts";
+import { ensureReceiptPdf, processReceipt } from "../_shared/kp-receipt.ts";
 import { deliverOutboxRow } from "../_shared/kp-mail.ts";
 
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
@@ -112,7 +113,16 @@ Deno.serve(async (request: Request) => {
         ref = r.id;
       } else ref = `manual:${crypto.randomUUID()}`; // faktura/manuell: kreditering sker i Accounted, här registreras den
       const res = await rpc("vihem_kp_record_refund", { p_order: o.id, p_amount: amount, p_ref: ref, p_reason: reason, p_kind: o.payment_method === "stripe" ? "refund" : "credit_note", p_actor: profile.id, p_revoke: body.revoke_access === true });
+      if (o.payment_method === "stripe") { const { data: rf } = await admin.from("vihem_kp_refunds").select("id").eq("order_id", o.id).eq("provider_ref", ref).maybeSingle(); if (rf?.id) await processReceipt(admin, o.id, { refundId: rf.id }); }
       return json({ ok: true, reference: ref, ...res });
+    }
+    if (action === "receipt_pdf") {
+      const { data: r } = await admin.from("vihem_kp_receipts").select("id,pdf_path,organisation_id,receipt_number").eq("id", body.receipt_id).eq("organisation_id", org).maybeSingle();
+      if (!r) return json({ error: "Kvittot hittades inte." }, 404);
+      const path = r.pdf_path ?? await ensureReceiptPdf(admin, r.id);
+      const { data: signed, error } = await admin.storage.from("vihem-kp-private").createSignedUrl(path, 600, { download: `${r.receipt_number}.pdf` });
+      if (error) throw error;
+      return json({ url: publicize(signed.signedUrl) });
     }
     if (action === "approve_invoice_order") {
       needAdmin();

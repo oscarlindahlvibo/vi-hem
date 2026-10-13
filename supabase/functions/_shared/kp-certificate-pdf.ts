@@ -10,21 +10,21 @@ const BOLD: Record<string, number> = {...HELV, A:722,B:722,C:722,D:722,E:667,F:6
   a:556,b:611,c:556,d:611,e:556,f:333,g:611,h:611,i:278,j:278,k:556,l:278,m:889,n:611,o:611,p:611,q:611,r:389,s:556,t:333,u:611,v:556,w:778,x:556,y:556,z:500,":":333};
 const CP1252: Record<string, number> = { "–": 0x96, "—": 0x97, "€": 0x80, "’": 0x92, "‘": 0x91, "“": 0x93, "”": 0x94, "•": 0x95, "…": 0x85 };
 const code = (ch: string) => CP1252[ch] ?? (ch.charCodeAt(0) <= 255 ? ch.charCodeAt(0) : 63);
-const hex = (s: string) => "<" + [...s].map((c) => code(c).toString(16).padStart(2, "0")).join("") + ">";
-const width = (s: string, size: number, bold: boolean) => [...s].reduce((sum, c) => sum + ((bold ? BOLD : HELV)[c] ?? 556), 0) * size / 1000;
-const fmt = (n: number) => n.toFixed(2);
+export const hex = (s: string) => "<" + [...s].map((c) => code(c).toString(16).padStart(2, "0")).join("") + ">";
+export const width = (s: string, size: number, bold: boolean) => [...s].reduce((sum, c) => sum + ((bold ? BOLD : HELV)[c] ?? 556), 0) * size / 1000;
+export const fmt = (n: number) => n.toFixed(2);
 function colour(hexColour: string): [number, number, number] {
   const m = /^#?([0-9a-f]{6})$/i.exec(hexColour || ""); const v = m ? parseInt(m[1], 16) : 0x0b6b4c;
   return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
 }
 
-function wrap(textValue: string, size: number, bold: boolean, maxWidth: number): string[] {
+export function wrap(textValue: string, size: number, bold: boolean, maxWidth: number): string[] {
   const words = textValue.split(/\s+/).filter(Boolean); const lines: string[] = []; let line = "";
   for (const w of words) { const next = line ? `${line} ${w}` : w; if (width(next, size, bold) > maxWidth && line) { lines.push(line); line = w; } else line = next; }
   if (line) lines.push(line); return lines;
 }
 
-function jpegInfo(bytes: Uint8Array): { width: number; height: number; components: number } | null {
+export function jpegInfo(bytes: Uint8Array): { width: number; height: number; components: number } | null {
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
   let i = 2;
   while (i < bytes.length) {
