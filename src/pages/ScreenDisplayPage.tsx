@@ -9,6 +9,7 @@ import type { CalendarEvent, CustomerProject, LaundryBooking, LaundryRoom, Laund
 import { formatDate, formatDateTime, MR_PRIORITY_LABELS, MR_STATUS_LABELS, WO_PRIORITY_LABELS, WO_STATUS_LABELS, entryKindLabel, clockTone } from '../lib/utils';
 import { useTimeCategories } from '../contexts/TimeCategoriesContext';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
+import { presentationLayout } from '../lib/screenPresentationLayout';
 import {
   DEFAULT_SCREEN_KEY,
   defaultScreenConfig,
@@ -31,7 +32,7 @@ import {
 } from '../lib/screenSettings';
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
-const SCREEN_APP_VERSION = '2026-08-07-tv-layout-11';
+const SCREEN_APP_VERSION = '2026-10-13-tv-layout-12';
 const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
 const SCREEN_SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const SCREEN_SESSION_REFRESH_MARGIN_SECONDS = 15 * 60;
@@ -1493,9 +1494,9 @@ function PresentationScreen({
   const [weatherText, setWeatherText] = useState('Laddar väder...');
   const todayKey = dateKey(today());
   const absentToday = absenceRequests.filter(request => request.start_date <= todayKey && request.end_date >= todayKey);
-  const availableHeight = Math.max(screenHeight - 54, 480);
+  const availableHeight = Math.max(screenHeight - 54, 320);
   const compact = true;
-  const narrow = screenWidth < 1024;
+  const { narrow, columns, panelRows } = presentationLayout(settings, screenWidth, screenHeight);
 
   // Drives the orange/red lunch-overrun coloring on the Instämplade panel
   // below -- ticks independently of the ~60s data refresh so a lunch entry
@@ -1577,7 +1578,6 @@ function PresentationScreen({
   const isOrderOverdue = (order: WorkOrder) => Boolean(order.due_date && new Date(`${order.due_date}T23:59:59`).getTime() < Date.now());
   const assigneeLabel = (order: WorkOrder) => workOrderAssigneeLabel(order, staffMembers, true);
   const rightPanelCount = [settings.showNews, settings.showClockedIn, settings.showMeetings].filter(Boolean).length;
-  const rightPanelRows = rightPanelCount === 0 ? '1fr' : rightPanelCount === 1 ? '1fr' : rightPanelCount === 2 ? '0.62fr 1.38fr' : '0.66fr 1.15fr 0.35fr';
   const scrollingNews = !narrow && activeNews.length > 1;
   const visibleNews = scrollingNews ? [...activeNews, ...activeNews] : activeNews;
   const scrollingWorkOrders = !narrow && activeWorkOrders.length > 10;
@@ -1597,10 +1597,11 @@ function PresentationScreen({
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.3),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(20,184,166,0.2),transparent_32%)]" />
 
       <main
-        className="relative min-h-0"
+        className="relative min-h-0 min-w-0"
         style={{
           display: 'grid',
-          gridTemplateColumns: !narrow && settings.showWorkOrders && rightPanelCount > 0 ? 'minmax(0, 1.35fr) minmax(300px, 0.95fr)' : '1fr',
+          gridTemplateColumns: columns,
+          gridTemplateRows: narrow ? undefined : 'minmax(0, 1fr)',
           gap: 8,
         }}
       >
@@ -1646,7 +1647,7 @@ function PresentationScreen({
         )}
 
         {rightPanelCount > 0 && (
-          <div className="min-h-0 overflow-hidden" style={{ display: 'grid', gridTemplateRows: narrow ? 'auto' : rightPanelRows, gap: 8 }}>
+          <div className="min-h-0 min-w-0 overflow-hidden" style={{ display: 'grid', gridTemplateRows: panelRows, gap: 8 }}>
             {settings.showNews && (
               <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white/10 p-2.5 ring-1 ring-white/10">
                 <div className="mb-1.5 flex items-center gap-2">
