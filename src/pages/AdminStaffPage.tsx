@@ -1,3 +1,4 @@
+import {StaffNotificationAssignments} from '../components/StaffNotificationAssignments';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Users, Plus, Edit2, ShieldCheck, KeyRound, RefreshCw, Clock } from 'lucide-react';
@@ -119,6 +120,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
   const [copyTargets,setCopyTargets]=useState<number[]>([]);
   const [copySource,setCopySource]=useState<number|null>(null);
   const [scheduleRows, setScheduleRows] = useState<ScheduleFormRow[]>([]);
+  const [notificationPerson,setNotificationPerson]=useState<Profile|null>(null);
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(defaultNotificationSettings);
   const [savingNotificationSettings, setSavingNotificationSettings] = useState(false);
   const [moduleAccess, setModuleAccess] = useState<Set<ModuleKey>>(new Set());
@@ -505,7 +507,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                       </button>
                     </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">{staffMember.role!=='screen'&&<Button variant="secondary" size="sm" onClick={()=>setNotificationPerson(staffMember)}>Aviseringar</Button>}
                     <Badge className={ROLE_COLORS[staffMember.role] || 'text-slate-600 bg-slate-100'}>
                       {ROLE_LABELS[staffMember.role] || staffMember.role}
                     </Badge>
@@ -557,7 +559,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
                         </div>
                       </td>
                       <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1">
+                        <div className="flex items-center justify-end gap-1">{staffMember.role!=='screen'&&<Button variant="ghost" size="sm" onClick={()=>setNotificationPerson(staffMember)}>Aviseringar</Button>}
                           <button
                             onClick={() => handleResetPassword(staffMember)}
                             title="Skicka lösenordsåterställning"
@@ -594,6 +596,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       </div>
 
       {/* Create / Edit modal */}
+      <StaffNotificationAssignments person={notificationPerson} onClose={()=>setNotificationPerson(null)}/>
       <Modal mobileFullscreen
         open={showStaffModal}
         onClose={closeEditor}

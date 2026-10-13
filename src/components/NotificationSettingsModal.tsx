@@ -77,7 +77,7 @@ export function NotificationSettingsModal({ open, onClose }: NotificationSetting
     <Modal open={open} onClose={onClose} title="Notisinställningar" size="lg">
       <div className="space-y-4">
         <p className="text-sm text-slate-500">
-          Stäng av notistyper du inte vill ha. En avstängd typ syns varken i notislistan eller som push till din telefon för dig -- andra i organisationen påverkas inte.
+          Stäng av notistyper du inte vill ha. En avstängd typ syns varken i notislistan eller som push till din telefon för dig -- andra i organisationen påverkas inte. Admin väljer vilka typer som tilldelas dig; dina egna inställningar kan bara stänga av tilldelade typer.
         </p>
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>

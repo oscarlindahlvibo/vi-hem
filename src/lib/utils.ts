@@ -275,6 +275,10 @@ export type NotificationSettings = {
   lunch_late_reminder: boolean;
   shift_end_reminder: boolean;
   admin_broadcast: boolean;
+  kompetensportalen: boolean;
+  website_inquiry: boolean;
+  calendar_reminder: boolean;
+  other_notifications: boolean;
   default_lunch_return_minutes: number;
 };
 
@@ -297,6 +301,10 @@ export const defaultNotificationSettings: NotificationSettings = {
   lunch_late_reminder: true,
   shift_end_reminder: true,
   admin_broadcast: true,
+  kompetensportalen: true,
+  website_inquiry: true,
+  calendar_reminder: true,
+  other_notifications: true,
   default_lunch_return_minutes: 45,
 };
 
@@ -320,6 +328,10 @@ export const NOTIFICATION_SETTING_LABELS: { key: BooleanNotificationSettingKey; 
   { key: 'lunch_return_reminder', label: 'Lunch slutar', description: 'Påminn efter organisationens eller personalens lunchlängd.' },
   { key: 'lunch_late_reminder', label: 'Sen från lunch', description: 'Påminn igen 50 minuter efter instämpling på lunch om personen inte stämplat ut från lunchen.' },
   { key: 'shift_end_reminder', label: 'Pass slutar', description: 'Påminn om att stämpla ut vid schemalagt slut.' },
+  { key: 'kompetensportalen', label: 'Kompetensportalen', description: 'Order, företagskonton, betalningar och ärenden i Kompetensportalen.' },
+  { key: 'website_inquiry', label: 'Webbförfrågningar', description: 'Kontakt- och intresseanmälningar från verksamheternas webbplatser.' },
+  { key: 'calendar_reminder', label: 'Kalenderpåminnelser', description: 'Påminnelser om de kalenderhändelser där personen valts som mottagare.' },
+  { key: 'other_notifications', label: 'Övriga systemaviseringar', description: 'Övriga och framtida aviseringar som inte hör till typerna ovan.' },
   { key: 'admin_broadcast', label: 'Meddelande från administrationen', description: 'Notifiera vid utskick som en administratör skickar till dig eller din grupp.' },
 ];
 
