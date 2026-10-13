@@ -34,6 +34,9 @@ def parse(path):
 def q(s): return "'" + s.replace("'", "''") + "'"
 if __name__ == '__main__':
     rows = parse(sys.argv[1])
+    rename = lambda n: re.sub(r'^FNI (\d)', r'Kärl \1', n)
+    size = lambda n, k: ('storlek ' + re.sub(r'^KÄRL\d\s*', '', k)) if n.startswith('FNI') else f'kärl {k}'
+    rows = [(d, wd, pr, [(rename(n), size(n, k)) for n, k in items]) for d, wd, pr, items in rows]
     print("-- Hämtningsschema 2026 (Virserum Bostäder & Fastighet AB): en heldagshändelse per datum och fastighet. Genererad av scripts/import-waste-schedule.py")
     print("begin;")
     print("delete from public.vihem_calendar_events where organisation_id = '38fe702d-e72c-49a2-9750-5e0b6934959b' and source_type = 'waste_schedule_2026';")
@@ -53,9 +56,8 @@ if __name__ == '__main__':
     for (d, wd, names), entries in sorted(groups.items()):
         props = [pr for pr, _ in entries]; what = ', '.join(names); where = addresses(props)
         lines = []
-        for pr, items in entries: lines.append(f"{pr}: " + ', '.join(f"{n} (kärl {k})" for n, k in items))
+        for pr, items in entries: lines.append(f"{pr}: " + ', '.join(f"{n} ({k})" for n, k in items))
         desc = f"Tömning enligt hämtningsschema 2026 ({wd}).\n" + '\n'.join(lines)
-        if all(n.startswith('FNI') for n in names): desc += "\nBeteckningen FNI anges så i underlaget; avfallsslag framgår inte av schemat."
         vals.append(f"('38fe702d-e72c-49a2-9750-5e0b6934959b', {q(f'{what} – {where}')}, {q(desc)}, {q(', '.join(p + ', Virserum' if i == len(props) - 1 else p for i, p in enumerate(props)))}, ({q(d)}::date::timestamp at time zone 'Europe/Stockholm'), (({q(d)}::date + time '23:59') at time zone 'Europe/Stockholm'), true, 'organisation', 'operations', '#16a34a', 'waste_schedule_2026')")
     n_events = len(vals)
     print(',\n'.join(vals) + ';')
