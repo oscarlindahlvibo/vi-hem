@@ -25,6 +25,9 @@ Status 2026-10-13. Läs tillsammans med `PLAN.md` (inventering, arkitektur, bero
 - **Kommunikation**: redigerbara mallar, outbox med unik idempotensnyckel och återförsök.
 - **Rapporter**: ordervärde, mottagna betalningar och återbetalningar redovisas separat; CSV med BOM (öppnas i Excel).
 
+- **Rättningar i publicerade kurser** (`vihem_kp_live_edit`): texter, rubriker, länkar, bilder/dokument och provinställningar ändras direkt med före/efter-logg. Krav, struktur och film byts bara i nytt utkast. Framsteg, godkända försök och certifikat berörs aldrig (SQL-testat).
+- **Frågor och prov hör till en kurs**: frågebanken är per kurs, prov och ämnesregler använder bara kursens egna frågor, och en kopierad kurs får egen frågebank.
+
 ## 3. Tester
 
 - `scripts/test_kp_sql.sh` – SQL-logik (kvot, order, betalning, platser, prov, intyg, RLS). Grönt.
