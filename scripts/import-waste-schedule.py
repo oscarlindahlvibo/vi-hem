@@ -38,12 +38,26 @@ if __name__ == '__main__':
     print("begin;")
     print("delete from public.vihem_calendar_events where organisation_id = '38fe702d-e72c-49a2-9750-5e0b6934959b' and source_type = 'waste_schedule_2026';")
     print("insert into public.vihem_calendar_events (organisation_id, title, description, location, starts_at, ends_at, all_day, visibility, category, color, source_type) values")
-    vals = []
+    # Slå ihop samma dag och samma avfallsslag över flera fastigheter till en händelse som listar alla berörda fastigheter
+    groups = {}
     for d, wd, prop, items in rows:
-        names = ', '.join(i[0] for i in items)
-        desc = f"Tömning enligt hämtningsschema 2026 ({wd}).\n" + '\n'.join(f"{n} – kärl {k}" for n, k in items)
-        if all(n.startswith('FNI') for n, _ in items): desc += "\nBeteckningen FNI anges så i underlaget; avfallsslag framgår inte av schemat."
-        vals.append(f"('38fe702d-e72c-49a2-9750-5e0b6934959b', {q(f'{prop}: {names}')}, {q(desc)}, {q(prop + ', Virserum')}, ({q(d)}::date::timestamp at time zone 'Europe/Stockholm'), (({q(d)}::date + time '23:59') at time zone 'Europe/Stockholm'), true, 'organisation', 'operations', '#16a34a', 'waste_schedule_2026')")
+        groups.setdefault((d, wd, tuple(n for n, _ in items)), []).append((prop, items))
+    def addresses(props):
+        out, kyrk = [], []
+        for pr in props:
+            if pr.startswith('Kyrkogatan '): kyrk.append(pr[len('Kyrkogatan '):])
+            else: out.append(pr)
+        if kyrk: out.append('Kyrkogatan ' + ', '.join(kyrk))
+        return ', '.join(out)
+    vals = []
+    for (d, wd, names), entries in sorted(groups.items()):
+        props = [pr for pr, _ in entries]; what = ', '.join(names); where = addresses(props)
+        lines = []
+        for pr, items in entries: lines.append(f"{pr}: " + ', '.join(f"{n} (kärl {k})" for n, k in items))
+        desc = f"Tömning enligt hämtningsschema 2026 ({wd}).\n" + '\n'.join(lines)
+        if all(n.startswith('FNI') for n in names): desc += "\nBeteckningen FNI anges så i underlaget; avfallsslag framgår inte av schemat."
+        vals.append(f"('38fe702d-e72c-49a2-9750-5e0b6934959b', {q(f'{what} – {where}')}, {q(desc)}, {q(', '.join(p + ', Virserum' if i == len(props) - 1 else p for i, p in enumerate(props)))}, ({q(d)}::date::timestamp at time zone 'Europe/Stockholm'), (({q(d)}::date + time '23:59') at time zone 'Europe/Stockholm'), true, 'organisation', 'operations', '#16a34a', 'waste_schedule_2026')")
+    n_events = len(vals)
     print(',\n'.join(vals) + ';')
     print("commit;")
-    print(f"-- {len(rows)} händelser", file=sys.stderr)
+    print(f"-- {n_events} händelser (från {len(rows)} fastighetstömningar)", file=sys.stderr)
