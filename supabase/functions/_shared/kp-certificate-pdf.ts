@@ -40,7 +40,7 @@ export interface CertificatePdfInput {
   title: string; bodyText: string; footerText: string; accent: string; signerName: string; signerTitle: string;
   holderName: string; courseTitle: string; courseCode: string; certificateNumber: string; verificationUrl: string; issuerName: string;
   completedOn: string; validUntil: string | null; issuedAt: string; resultText: string; kind: "training_certificate" | "competence_proof";
-  id06Reference?: string | null; logoJpeg?: Uint8Array | null; id06LogoJpeg?: Uint8Array | null; statusNote?: string;
+  id06Reference?: string | null; logoJpeg?: Uint8Array | null; footerLogos?: Uint8Array[]; statusNote?: string;
 }
 
 export async function renderCertificatePdf(c: CertificatePdfInput): Promise<Uint8Array> {
@@ -77,9 +77,13 @@ export async function renderCertificatePdf(c: CertificatePdfInput): Promise<Uint
   ops.push(`0.4 0.4 0.4 RG 0.6 w 60 104 m 260 104 l S`);
   text(c.signerName || c.issuerName, 60, 90, 10, true); if (c.signerTitle) text(c.signerTitle, 60, 77, 9, false, "left", [0.4, 0.43, 0.45]);
   text(`Utfärdat ${c.issuedAt}`, 60, 60, 9, false, "left", [0.4, 0.43, 0.45]);
-  // ID06-logotyp (bara för utbildningar som omfattas av ID06)
-  let id06Dims: { w: number; h: number } | null = null;
-  if (c.id06LogoJpeg) { const info = jpegInfo(c.id06LogoJpeg); if (info && info.components !== 4) { const wMax = 190; const scale = wMax / info.width; id06Dims = { w: info.width * scale, h: info.height * scale }; ops.push(`q ${fmt(id06Dims.w)} 0 0 ${fmt(id06Dims.h)} ${fmt(W / 2 - id06Dims.w / 2 - 40)} 74 cm /Im2 Do Q`); } }
+  // Logotyper i fotraden bredvid varandra (t.ex. Kompetensportalen + ID06), centrerade mellan signatur och QR
+  const footerImgs: Array<{ bytes: Uint8Array; info: { width: number; height: number; components: number }; w: number; h: number; x: number }> = [];
+  { const list = (c.footerLogos ?? []).map((bytes) => ({ bytes, info: jpegInfo(bytes) })).filter((x): x is { bytes: Uint8Array; info: { width: number; height: number; components: number } } => !!x.info && x.info.components !== 4);
+    const hTarget = 40, gap = 26; const sized = list.map((x) => { const sc = Math.min(hTarget / x.info.height, 200 / x.info.width); return { ...x, w: x.info.width * sc, h: x.info.height * sc }; });
+    const total = sized.reduce((t, x) => t + x.w, 0) + gap * Math.max(0, sized.length - 1); let cx = W / 2 + 40 - total / 2;
+    for (const x of sized) { footerImgs.push({ ...x, x: cx }); cx += x.w + gap; } }
+  footerImgs.forEach((im, i) => ops.push(`q ${fmt(im.w)} 0 0 ${fmt(im.h)} ${fmt(im.x)} ${fmt(96 - im.h / 2)} cm /Fl${i + 1} Do Q`));
   // QR (vektor)
   const qr = QRCode.create(c.verificationUrl, { errorCorrectionLevel: "M" }); const n = qr.modules.size; const cell = 3.1; const qrSize = n * cell; const qx = W - 60 - qrSize, qy = 66;
   ops.push("0 0 0 rg");
@@ -103,17 +107,16 @@ export async function renderCertificatePdf(c: CertificatePdfInput): Promise<Uint
     const all = new Uint8Array(head.length + c.logoJpeg.length + tail.length); all.set(head); all.set(c.logoJpeg, head.length); all.set(tail, head.length + c.logoJpeg.length);
     imgObj = add(all);
   }
-  let img2Obj = 0;
-  if (id06Dims && c.id06LogoJpeg) {
-    const info2 = jpegInfo(c.id06LogoJpeg)!;
-    const head2 = new TextEncoder().encode(`<< /Type /XObject /Subtype /Image /Width ${info2.width} /Height ${info2.height} /ColorSpace /${info2.components === 1 ? "DeviceGray" : "DeviceRGB"} /BitsPerComponent 8 /Filter /DCTDecode /Length ${c.id06LogoJpeg.length} >>\nstream\n`);
-    const tail2 = new TextEncoder().encode("\nendstream");
-    const all2 = new Uint8Array(head2.length + c.id06LogoJpeg.length + tail2.length); all2.set(head2); all2.set(c.id06LogoJpeg, head2.length); all2.set(tail2, head2.length + c.id06LogoJpeg.length);
-    img2Obj = add(all2);
+  const flObjs: number[] = [];
+  for (const im of footerImgs) {
+    const headF = new TextEncoder().encode(`<< /Type /XObject /Subtype /Image /Width ${im.info.width} /Height ${im.info.height} /ColorSpace /${im.info.components === 1 ? "DeviceGray" : "DeviceRGB"} /BitsPerComponent 8 /Filter /DCTDecode /Length ${im.bytes.length} >>\nstream\n`);
+    const tailF = new TextEncoder().encode("\nendstream");
+    const allF = new Uint8Array(headF.length + im.bytes.length + tailF.length); allF.set(headF); allF.set(im.bytes, headF.length); allF.set(tailF, headF.length + im.bytes.length);
+    flObjs.push(add(allF));
   }
   objs[catalog - 1] = `<< /Type /Catalog /Pages ${pages} 0 R >>`;
   objs[pages - 1] = `<< /Type /Pages /Kids [${page} 0 R] /Count 1 >>`;
-  objs[page - 1] = `<< /Type /Page /Parent ${pages} 0 R /MediaBox [0 0 ${W} ${H}] /Contents ${stream} 0 R /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >>${imgObj || img2Obj ? ` /XObject << ${imgObj ? `/Im1 ${imgObj} 0 R ` : ""}${img2Obj ? `/Im2 ${img2Obj} 0 R ` : ""}>>` : ""} >> >>`;
+  objs[page - 1] = `<< /Type /Page /Parent ${pages} 0 R /MediaBox [0 0 ${W} ${H}] /Contents ${stream} 0 R /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >>${imgObj || flObjs.length ? ` /XObject << ${imgObj ? `/Im1 ${imgObj} 0 R ` : ""}${flObjs.map((o, i) => `/Fl${i + 1} ${o} 0 R `).join("")}>>` : ""} >> >>`;
   const chunks: Uint8Array[] = []; const enc = new TextEncoder(); const offsets: number[] = []; let pos = 0;
   const push = (d: Uint8Array) => { chunks.push(d); pos += d.length; };
   push(enc.encode("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n"));

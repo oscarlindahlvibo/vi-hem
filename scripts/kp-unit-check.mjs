@@ -12,7 +12,7 @@ mkdirSync('node_modules/.cache', { recursive: true });
 const dir = mkdtempSync(path.join(path.resolve('node_modules/.cache'), 'kp-unit-'));
 const root = path.resolve('supabase/functions/_shared');
 const entry = path.join(dir, 'entry.ts');
-writeFileSync(entry, ['kp-common', 'kp-certificate-pdf', 'kp-lesson', 'kp-id06-logo'].map((f) => `export * from ${JSON.stringify(path.join(root, f + '.ts'))};`).join('\n') + `export * as stripe from ${JSON.stringify(path.join(root, 'kp-stripe.ts'))};`);
+writeFileSync(entry, ['kp-common', 'kp-certificate-pdf', 'kp-lesson', 'kp-id06-logo', 'kp-brand-logo'].map((f) => `export * from ${JSON.stringify(path.join(root, f + '.ts'))};`).join('\n') + `export * as stripe from ${JSON.stringify(path.join(root, 'kp-stripe.ts'))};`);
 const out = path.join(dir, 'bundle.mjs');
 await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error', external: ['npm:*', 'jsr:*'], plugins: [{ name: 'npm-specifiers', setup(b) { b.onResolve({ filter: /^npm:/ }, (a) => ({ path: a.path.replace(/^npm:/, '').replace(/@[\d.^~]+$/, ''), external: true })); b.onResolve({ filter: /^jsr:/ }, () => ({ path: 'node:module', external: true })); } }] });
 const env = { VIHEM_KP_SECRET_KEY: 'unit-test-secret', STRIPE_KP_WEBHOOK_SECRET: 'whsec_unit', KP_PUBLIC_API_URL: 'https://api.example.test/' };
@@ -54,7 +54,7 @@ assert.equal(m.publicize('http://kong:8000/storage/v1/object/sign/x?token=abc'),
 assert.equal(m.publicize(null), null); ok('publicize(null) ger null');
 
 // Certifikat-PDF
-const pdf = await m.renderCertificatePdf({ title: 'Utbildningsintyg', bodyText: 'har genomfört och godkänts i', footerText: 'WPE Sweden AB', accent: '#2e5b7a', signerName: 'Anna Åberg', signerTitle: 'Utbildningsansvarig', holderName: 'Åsa Öman', courseTitle: 'Arbete på väg', courseCode: 'APV', certificateNumber: 'KP-2026-000001', verificationUrl: 'https://kompetensportalen.se/verifiera?kod=ABC', issuerName: 'WPE Sweden AB', completedOn: '2026-10-12', validUntil: '2029-10-12', issuedAt: '2026-10-12', resultText: '92 %', kind: 'training_certificate', id06LogoJpeg: m.ID06_LOGO_JPEG });
+const pdf = await m.renderCertificatePdf({ title: 'Utbildningsintyg', bodyText: 'har genomfört och godkänts i', footerText: 'WPE Sweden AB', accent: '#2e5b7a', signerName: 'Anna Åberg', signerTitle: 'Utbildningsansvarig', holderName: 'Åsa Öman', courseTitle: 'Arbete på väg', courseCode: 'APV', certificateNumber: 'KP-2026-000001', verificationUrl: 'https://kompetensportalen.se/verifiera?kod=ABC', issuerName: 'WPE Sweden AB', completedOn: '2026-10-12', validUntil: '2029-10-12', issuedAt: '2026-10-12', resultText: '92 %', kind: 'training_certificate', footerLogos: [m.KP_LOGO_JPEG, m.ID06_LOGO_JPEG] });
 const file = path.join(dir, 'cert.pdf'); writeFileSync(file, pdf); if (process.env.KP_KEEP_PDF) writeFileSync(process.env.KP_KEEP_PDF, pdf);
 assert.equal(Buffer.from(pdf.slice(0, 5)).toString(), '%PDF-'); ok('PDF har giltig header');
 try { const info = execFileSync('pdfinfo', [file], { encoding: 'utf8' }); assert.match(info, /Pages:\s+1/); assert.match(info, /Page size:\s+842 x 595 pts \(A4\)/); ok('pdfinfo: en sida A4 liggande'); } catch (e) { if (e.code === 'ENOENT') console.log('skip - pdfinfo saknas'); else throw e; }
