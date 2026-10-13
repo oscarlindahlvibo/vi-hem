@@ -2,6 +2,7 @@
 import { renderCertificatePdf } from "./kp-certificate-pdf.ts";
 import type { KpContext } from "./kp-common.ts";
 import { ID06_LOGO_JPEG } from "./kp-id06-logo.ts";
+import { KP_LOGO_JPEG } from "./kp-brand-logo.ts";
 
 const sv = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("sv-SE", { year: "numeric", month: "long", day: "numeric", timeZone: "Europe/Stockholm" }) : "");
 
@@ -23,7 +24,7 @@ export async function ensureCertificatePdf(admin: any, ctx: KpContext, certifica
     accent: tpl?.accent_color ?? "#0b6b4c", signerName: tpl?.signer_name ?? "", signerTitle: tpl?.signer_title ?? "", holderName: cert.holder_name, courseTitle: cert.course_title, courseCode: cert.course_code,
     certificateNumber: cert.certificate_number, verificationUrl: `${ctx.baseUrl}/verifiera?kod=${cert.verification_code}`, issuerName: cert.issuer_name, completedOn: sv(cert.completed_on), validUntil: cert.valid_until ? sv(cert.valid_until) : null,
     issuedAt: sv(cert.issued_at), resultText: exam.percent != null ? `Godkänd (${Math.round(Number(exam.percent))} %)` : "Godkänd", kind: cert.kind,
-    id06Reference: reg?.status === "registered" ? reg.external_reference : null, logoJpeg: logo, id06LogoJpeg: courseRow?.id06_enabled ? ID06_LOGO_JPEG : null, statusNote,
+    id06Reference: reg?.status === "registered" ? reg.external_reference : null, logoJpeg: logo, footerLogos: courseRow?.id06_enabled ? [KP_LOGO_JPEG, ID06_LOGO_JPEG] : [KP_LOGO_JPEG], statusNote,
   });
   const path = `certificates/${cert.organisation_id}/${cert.id}${force ? `-${Date.now()}` : ""}.pdf`;
   const { error } = await admin.storage.from("vihem-kp-private").upload(path, bytes, { contentType: "application/pdf", upsert: true });
