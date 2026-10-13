@@ -1,0 +1,107 @@
+-- Isolerad QA. Alla resurser och användare är syntetiska; transaktionen rullas tillbaka.
+begin;
+create function pg_temp.expect(label text,ok boolean) returns void language plpgsql as $$ begin if not coalesce(ok,false) then raise exception 'FAIL %',label; end if;raise notice 'PASS %',label;end $$;
+create function pg_temp.reject(label text,statement text) returns void language plpgsql as $$ declare failed boolean:=false;begin begin execute statement;exception when others then failed:=true;end;if not failed then raise exception 'FAIL %: expected rejection',label;end if;raise notice 'PASS %',label;end $$;
+insert into public.vihem_module_registry(module_key,name) values('rental_management','QA Rental'),('inventory_management','QA Inventory') on conflict(module_key) do nothing;
+create temp table fixture(org uuid,other_org uuid,staff uuid,admin uuid,tenant uuid,other_staff uuid,coworker uuid,product uuid,asset uuid,item uuid,location uuid,work_order uuid,operation uuid,reservation uuid);
+do $$
+declare o uuid:=gen_random_uuid();o2 uuid:=gen_random_uuid();u uuid:=gen_random_uuid();ad uuid:=gen_random_uuid();te uuid:=gen_random_uuid();u2 uuid:=gen_random_uuid();u3 uuid:=gen_random_uuid();p uuid:=gen_random_uuid();a uuid:=gen_random_uuid();i uuid:=gen_random_uuid();l uuid:=gen_random_uuid();w uuid:=gen_random_uuid();
+begin
+ insert into public.vihem_organisations(id,name,slug) values(o,'QA Resources','qa-resources-'||o),(o2,'QA Other Resources','qa-resources-'||o2);
+ insert into auth.users(id,email) values(u,u||'@example.invalid'),(ad,ad||'@example.invalid'),(te,te||'@example.invalid'),(u2,u2||'@example.invalid'),(u3,u3||'@example.invalid');
+ insert into public.vihem_profiles(id,organisation_id,name,email,role,active) values(u,o,'QA Staff',u||'@example.invalid','staff',true),(ad,o,'QA Admin',ad||'@example.invalid','admin',true),(te,o,'QA Tenant',te||'@example.invalid','tenant',true),(u2,o2,'QA Other Staff',u2||'@example.invalid','staff',true),(u3,o,'QA Colleague',u3||'@example.invalid','staff',true) on conflict(id) do update set organisation_id=excluded.organisation_id,role=excluded.role,active=true;
+ insert into public.vihem_organisation_modules(organisation_id,module_key,enabled) values(o,'rental_management',true),(o,'inventory_management',true),(o2,'rental_management',true),(o2,'inventory_management',true) on conflict (organisation_id,module_key) do update set enabled=true;
+ insert into public.vihem_rental_products(id,organisation_id,name,slug,active) values(p,o,'QA Maskin','qa-machine-'||p,true);
+ insert into public.vihem_rental_assets(id,organisation_id,product_id,name,internal_identifier) values(a,o,p,'QA Exemplar','qa-asset-'||a);
+ insert into public.vihem_inventory_stock_items(id,organisation_id,article_number,name,barcode,qr_identifier,unit) values(i,o,'QA-MATERIAL','QA Skruv','synthetic-material-code','qa-item-'||i,'st');
+ insert into public.vihem_inventory_locations(id,organisation_id,name,type) values(l,o,'QA Hylla','shelf');
+ insert into public.vihem_inventory_balances(organisation_id,item_id,location_id,quantity) values(o,i,l,10);
+ insert into public.vihem_work_orders(id,organisation_id,title) values(w,o,'QA Arbetsorder');
+ insert into fixture values(o,o2,u,ad,te,u2,u3,p,a,i,l,w,gen_random_uuid(),null);
+ perform set_config('request.jwt.claim.sub',u::text,true);perform set_config('request.jwt.claim.role','authenticated',true);
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',u,'role','authenticated')::text,true);
+end $$;
+grant select,update on fixture to authenticated;
+set local role authenticated;
+select pg_temp.expect('staff cannot read customers',(select count(*)=0 from public.vihem_rental_customers));
+select pg_temp.expect('staff cannot read rental pricing',(select count(*)=0 from public.vihem_rental_pricing_rules));
+select pg_temp.expect('staff cannot read admin bookings',(select count(*)=0 from public.vihem_rental_bookings));
+select pg_temp.reject('staff cannot read administrative reservations','select public.vihem_resource_admin_reservations()');
+select pg_temp.reject('staff cannot call price RPC',format('select public.vihem_rental_quote(%L,now()+interval ''1 day'',now()+interval ''2 days'',1)',product)) from fixture;
+select pg_temp.reject('staff cannot read raw free-assets RPC',format('select * from public.vihem_rental_free_assets(%L,now()+interval ''1 day'',now()+interval ''2 days'')',product)) from fixture;
+select pg_temp.expect('catalog has material and equipment',jsonb_array_length(public.vihem_resource_catalog()->'materials')=1 and jsonb_array_length(public.vihem_resource_catalog()->'equipment')=1);
+select pg_temp.expect('catalog does not expose purchase/rental prices',public.vihem_resource_catalog()::text not like '%purchase_price%' and public.vihem_resource_catalog()::text not like '%deposit%' and public.vihem_resource_catalog()::text not like '%customer%');
+do $$
+declare f fixture%rowtype; result jsonb; m jsonb; e jsonb; id uuid; begin
+ select * into f from fixture;
+ m:=jsonb_build_array(jsonb_build_object('item_id',f.item,'location_id',f.location,'quantity',2));
+ e:=jsonb_build_array(jsonb_build_object('asset_id',f.asset,'product_id',f.product,'start_at',now()+interval '1 day','end_at',now()+interval '2 days'));
+ perform pg_temp.expect('asset initially available',(public.vihem_resource_availability(f.asset,now()+interval '1 day',now()+interval '2 days')->>'available')::boolean);
+ result:=public.vihem_resource_checkout(f.operation,m,e,f.work_order,'QA Combined');
+ update fixture set reservation=(result->'reservations'->>0)::uuid;
+ perform pg_temp.expect('combined save returned both records',jsonb_array_length(result->'reservations')=1 and jsonb_array_length(result->'transactions')=1);
+ perform pg_temp.expect('repeat operation idempotent',public.vihem_resource_checkout(f.operation,m,e,f.work_order,'QA Combined')=result);
+ perform pg_temp.reject('same operation different payload',format('select public.vihem_resource_checkout(%L,%L::jsonb,%L::jsonb,%L,%L)',f.operation,m,e,f.work_order,'Different'));
+ perform pg_temp.expect('internal reservation blocks availability',not(public.vihem_resource_availability(f.asset,now()+interval '1 day',now()+interval '2 days')->>'available')::boolean);
+ perform pg_temp.expect('next free period suggested',(public.vihem_resource_availability(f.asset,now()+interval '1 day',now()+interval '2 days')->>'next_start') is not null);
+ perform pg_temp.reject('occupied asset rejects combined batch',format('select public.vihem_resource_checkout(%L,%L::jsonb,%L::jsonb,%L,%L)',gen_random_uuid(),m,e,f.work_order,''));
+ -- Material failure happens AFTER equipment block creation; both must roll back.
+ perform pg_temp.reject('insufficient material rejects entire batch',format('select public.vihem_resource_checkout(%L,%L::jsonb,%L::jsonb,%L,%L)',gen_random_uuid(),jsonb_build_array(jsonb_build_object('item_id',f.item,'location_id',f.location,'quantity',1000)),jsonb_build_array(jsonb_build_object('asset_id',f.asset,'product_id',f.product,'start_at',now()+interval '3 days','end_at',now()+interval '4 days')),f.work_order,''));
+ perform pg_temp.expect('failed batch left later period free',(public.vihem_resource_availability(f.asset,now()+interval '3 days',now()+interval '4 days')->>'available')::boolean);
+end $$;
+reset role;
+select pg_temp.expect('stock decremented exactly once',(select b.quantity=8 from public.vihem_inventory_balances b join fixture f on f.item=b.item_id and f.location=b.location_id));
+select pg_temp.expect('no financial booking created',(select count(*)=0 from public.vihem_rental_bookings b join fixture f on f.org=b.organisation_id));
+select pg_temp.expect('single reservation after rollback',(select count(*)=1 from public.vihem_resource_reservations r join fixture f on f.org=r.organisation_id));
+select set_config('request.jwt.claim.sub',other_staff::text,true),set_config('request.jwt.claims',jsonb_build_object('sub',other_staff,'role','authenticated')::text,true) from fixture;
+set local role authenticated;
+select pg_temp.reject('other org cannot check asset',format('select public.vihem_resource_availability(%L,now()+interval ''1 day'',now()+interval ''2 days'')',asset)) from fixture;
+select pg_temp.reject('other org cannot cancel reservation',format('select public.vihem_resource_update(%L,%L)',reservation,'cancelled')) from fixture;
+select pg_temp.reject('other org cannot read work order history',format('select public.vihem_resource_history(%L)',work_order)) from fixture;
+reset role;
+select set_config('request.jwt.claim.sub',coworker::text,true),set_config('request.jwt.claims',jsonb_build_object('sub',coworker,'role','authenticated')::text,true) from fixture;
+set local role authenticated;
+select pg_temp.reject('colleague cannot cancel another staff reservation',format('select public.vihem_resource_update(%L,%L)',reservation,'cancelled')) from fixture;
+select pg_temp.expect('colleague personal history is empty',jsonb_array_length(public.vihem_resource_history()->'reservations')=0);
+reset role;
+select set_config('request.jwt.claim.sub',tenant::text,true),set_config('request.jwt.claims',jsonb_build_object('sub',tenant,'role','authenticated')::text,true) from fixture;
+set local role authenticated;
+select pg_temp.reject('tenant cannot access resources','select public.vihem_resource_catalog()');
+reset role;
+select set_config('request.jwt.claim.sub',staff::text,true),set_config('request.jwt.claims',jsonb_build_object('sub',staff,'role','authenticated')::text,true) from fixture;
+set local role authenticated;
+select public.vihem_resource_update(reservation,'cancelled') from fixture;
+select public.vihem_resource_update(reservation,'cancelled') from fixture; -- retry after lost response
+
+select pg_temp.expect('cancel releases asset',(select(public.vihem_resource_availability(asset,now()+interval '1 day',now()+interval '2 days')->>'available')::boolean from fixture));
+select pg_temp.expect('history preserved',jsonb_array_length(public.vihem_resource_history()->'reservations')=1);
+reset role;
+select set_config('request.jwt.claim.sub',admin::text,true),set_config('request.jwt.claims',jsonb_build_object('sub',admin,'role','authenticated')::text,true) from fixture;
+set local role authenticated;
+select pg_temp.expect('admin sees preserved internal reservation',jsonb_array_length(public.vihem_resource_admin_reservations())=1);
+select pg_temp.expect('admin retains product administration',(select count(*)=1 from public.vihem_rental_products));
+reset role;
+update public.vihem_profiles set active=false where id=(select staff from fixture);
+select set_config('request.jwt.claim.sub',staff::text,true),set_config('request.jwt.claims',jsonb_build_object('sub',staff,'role','authenticated')::text,true) from fixture;
+set local role authenticated;
+select pg_temp.reject('inactive staff denied','select public.vihem_resource_catalog()');
+reset role;
+update public.vihem_profiles set active=true where id=(select staff from fixture);
+set local role authenticated;
+do $$ declare f fixture%rowtype; result jsonb; rid uuid; begin
+ select * into f from fixture;
+ result:=public.vihem_resource_checkout(gen_random_uuid(),'[]',jsonb_build_array(jsonb_build_object('asset_id',f.asset,'product_id',f.product,'start_at',now(),'end_at',now()+interval '1 hour')));
+ rid:=(result->'reservations'->>0)::uuid;
+ perform public.vihem_resource_update(rid,'picked_up');
+ perform public.vihem_resource_update(rid,'picked_up');
+ perform public.vihem_resource_update(rid,'returned');
+ perform public.vihem_resource_update(rid,'returned');
+ perform pg_temp.expect('return releases equipment',(public.vihem_resource_availability(f.asset,now(),now()+interval '1 hour')->>'available')::boolean);
+end $$;
+reset role;
+update public.vihem_organisation_modules set enabled=false where organisation_id=(select org from fixture) and module_key='rental_management';
+set local role authenticated;
+select pg_temp.expect('disabled rental module hides equipment',jsonb_array_length(public.vihem_resource_catalog()->'equipment')=0);
+select pg_temp.reject('disabled rental module denies availability',format('select public.vihem_resource_availability(%L,now(),now()+interval ''1 hour'')',asset)) from fixture;
+reset role;
+rollback;

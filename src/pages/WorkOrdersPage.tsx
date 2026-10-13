@@ -1,3 +1,4 @@
+import { WorkOrderResources } from "../components/resources/WorkOrderResources";
 import { betaExternalRestricted, betaLegacyFileNotice, betaWorkOrderFileNotice } from '../lib/betaCapabilities';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { WorkOrderChatFiles } from '../components/chat/WorkOrderChatFiles';
@@ -279,7 +280,7 @@ function WorkOrderCategoryManagerModal({ open, onClose, organisationId, userId }
   );
 }
 
-export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, sourceChatMessageId }: { onNavigate: (page: string) => void; initialWorkOrderId?: string; sourceChatMessageId?: string }) {
+export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, sourceChatMessageId, resourcesEnabled=false }: { resourcesEnabled?: boolean; onNavigate: (page: string) => void; initialWorkOrderId?: string; sourceChatMessageId?: string }) {
   const { user, loading: authLoading } = useAuth();
   const { categories: timeCategories } = useTimeCategories();
   const { categories: woCategories } = useWorkOrderCategories();
@@ -2300,6 +2301,7 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
               </div>
             )}
 
+            {isStaff&&resourcesEnabled&&<WorkOrderResources key={selectedWorkOrder.id} workOrderId={selectedWorkOrder.id}/>}
             <WorkOrderChatFiles workOrderId={selectedWorkOrder.id}/>
             <WorkOrderOperationsPanel
               workOrderId={selectedWorkOrder.id}

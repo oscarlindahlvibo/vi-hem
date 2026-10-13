@@ -41,6 +41,7 @@ interface LayoutProps {
   onNavigate: (page: string) => void;
   notificationCount?: number;
   chatNotificationCount?: number;
+  resourcesEnabled?: boolean;
   enabledModules?: Partial<Record<ModuleKey, boolean>>;
 }
 
@@ -62,7 +63,7 @@ function useKeyboardOpen() {
   return open;
 }
 
-export function Layout({ children, currentPage, onNavigate, notificationCount = 0, chatNotificationCount = 0, enabledModules = {} }: LayoutProps) {
+export function Layout({ children, currentPage, onNavigate, notificationCount = 0, chatNotificationCount = 0, enabledModules = {}, resourcesEnabled = false }: LayoutProps) {
   const { user, signOut, bankIDAvailable, refreshProfile } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const keyboardOpen = useKeyboardOpen();
@@ -143,13 +144,14 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Korttidsuthyrning', icon: <BedDouble className="w-5 h-5" />, page: 'short-stay', roles: ['staff', 'admin'], module: 'short_stay' },
     ] },
     { label: 'Uthyrning', icon: <Truck className="w-5 h-5" />, items: [
-      { label: 'Översikt', icon: <Truck className="w-5 h-5" />, page: 'rental', roles: ['staff', 'admin'], module: 'rental_management' },
+      { label: 'Översikt', icon: <Truck className="w-5 h-5" />, page: 'rental', roles: ['admin'], module: 'rental_management' },
     ] },
     { label: 'Kompetensportalen', icon: <GraduationCap className="w-5 h-5" />, items: [
       { label: 'Kompetensportalen', icon: <GraduationCap className="w-5 h-5" />, page: 'kompetensportalen', roles: ['staff', 'admin'], module: 'kompetensportalen' },
     ] },
     { label: 'Inköp & lager', icon: <Package className="w-5 h-5" />, items: [
       { label: 'Inköpslista', icon: <ShoppingCart className="w-5 h-5" />, page: 'purchases', roles: ['staff', 'admin'] },
+      { label: 'Material & utrustning', icon: <Wrench className="w-5 h-5" />, page: 'resources', roles: ['staff', 'admin'] },
       { label: 'Lager', icon: <Package className="w-5 h-5" />, page: 'inventory', roles: ['staff', 'admin'], module: 'inventory_management' },
     ] },
     { label: 'Fordon', icon: <Car className="w-5 h-5" />, items: [
@@ -193,6 +195,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     user
     && item.roles.includes(user.role)
     && ((!item.page.startsWith('vibogruppen-') && !item.page.startsWith('vibofast-') && !item.page.startsWith('ekangen-') && !item.page.startsWith('grav-')) || user.organisation_id === '38fe702d-e72c-49a2-9750-5e0b6934959b')
+    && (item.page !== 'resources' || resourcesEnabled)
     && (!item.module || enabledModules[item.module])
     && (!item.systemAdminOnly || user.role === 'superadmin' || user.is_system_admin)
   );

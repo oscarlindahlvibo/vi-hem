@@ -34,7 +34,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VI-HEM behöver mikrofonen för att spela in röstmeddelanden i chatten.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>VI-HEM använder kameran för profilbilder, chattbilagor och skanning av kvitton och dokument.</string>
+	<string>VI-HEM använder kameran för profilbilder, bilagor, dokument samt QR- och streckkoder på material och utrustning.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>VI-HEM behöver åtkomst till de bilder du väljer för profil, chatt eller dokument.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

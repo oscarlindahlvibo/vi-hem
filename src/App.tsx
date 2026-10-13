@@ -1,3 +1,4 @@
+import { StaffResourcesPage } from "./pages/StaffResourcesPage";
 import { PortalAdmin } from './modules/vibogruppen/PortalAdmin';
 import { WebsiteAdmin } from './modules/vibofast/WebsiteAdmin';
 import { EkangenAdmin } from './modules/ekangen/EkangenAdmin';
@@ -192,11 +193,12 @@ function AppInner() {
   const navigate=useCallback((page:string)=>{if(hasUnsavedForms()){setPendingPage(page);return;}setCurrentPage(page);if(page==='notifications')setNotificationCount(0);scrollAppTo(0);},[]);
   const [notificationCount, setNotificationCount] = useState(0);
   const [chatNotificationCount, setChatNotificationCount] = useState(0);
+  const [resourcesEnabled,setResourcesEnabled]=useState(false);
   const [enabledModules, setEnabledModules] = useState<ModuleState>(DEFAULT_MODULE_STATE);
 
   const loadOrganisationModules = useCallback(async () => {
     if (!user?.organisation_id || user.role === 'superadmin') {
-      setEnabledModules(DEFAULT_MODULE_STATE);
+      setEnabledModules(DEFAULT_MODULE_STATE);setResourcesEnabled(false);
       return;
     }
 
@@ -254,6 +256,9 @@ function AppInner() {
       console.warn('Could not load organisation modules, using legacy module fields where available:', moduleResult.error);
     }
 
+    // The limited service-use workspace does not grant access to rental administration.
+    setResourcesEnabled(Boolean(nextModules.inventory_management || nextModules.rental_management));
+
     // Org-level enabling only decides whether a module is available to the
     // organisation at all -- for role 'staff' it also requires an explicit
     // per-person grant (vihem_permission_grants, key 'module.<key>'),
@@ -283,7 +288,7 @@ function AppInner() {
       setCurrentPage('dashboard');
       setNotificationCount(0);
       setChatNotificationCount(0);
-      setEnabledModules(DEFAULT_MODULE_STATE);
+      setEnabledModules(DEFAULT_MODULE_STATE);setResourcesEnabled(false);
       return;
     }
 
@@ -492,7 +497,7 @@ function AppInner() {
 
     if (currentPage.startsWith('workorder-new/')) {
       if (!isStaff) return renderDashboard();
-      return <WorkOrdersPage onNavigate={navigate} sourceChatMessageId={currentPage.split('/')[1]} />;
+      return <WorkOrdersPage resourcesEnabled={resourcesEnabled} onNavigate={navigate} sourceChatMessageId={currentPage.split('/')[1]} />;
     }
     if (currentPage.startsWith('customer-project/')) {
       if (!isStaff || !enabledModules.customer_projects) return renderDashboard();
@@ -522,7 +527,7 @@ function AppInner() {
 
       case 'workorders':
         if (!isStaff) return <MaintenancePage onNavigate={navigate} />;
-        return <WorkOrdersPage onNavigate={navigate} />;
+        return <WorkOrdersPage resourcesEnabled={resourcesEnabled} onNavigate={navigate} />;
 
       case 'timetracking':
         if (!isStaff) return renderDashboard();
@@ -593,8 +598,14 @@ function AppInner() {
         if (!isStaff || !enabledModules.kompetensportalen) return renderDashboard();
         return <KompetensportalenPage />;
 
+      case 'resources':
+        if (!isStaff || !resourcesEnabled) return renderDashboard();
+        return <StaffResourcesPage />;
+
       case 'rental':
-        if (!isStaff || !enabledModules.rental_management) return renderDashboard();
+        if (!isStaff) return renderDashboard();
+        if (!isAdmin) return resourcesEnabled ? <StaffResourcesPage /> : renderDashboard();
+        if (!enabledModules.rental_management) return renderDashboard();
         return <RentalPage onNavigate={navigate} />;
 
       case 'inventory':
@@ -746,7 +757,7 @@ function AppInner() {
       default:
         if (currentPage.startsWith('workorder/')) {
           if (!isStaff) return renderDashboard();
-          return <WorkOrdersPage onNavigate={navigate} initialWorkOrderId={currentPage.split('/')[1]} />;
+          return <WorkOrdersPage resourcesEnabled={resourcesEnabled} onNavigate={navigate} initialWorkOrderId={currentPage.split('/')[1]} />;
         }
         return renderDashboard();
 
@@ -757,6 +768,7 @@ function AppInner() {
 
   return (
     <Layout
+      resourcesEnabled={resourcesEnabled}
       currentPage={currentPage}
       onNavigate={navigate}
       notificationCount={notificationCount}
