@@ -1,10 +1,10 @@
--- Importerar APV 1.1–1.3 ur Odoo-exporten (texter, diagnostiska prov, slutprov) som UTKAST. Ersätter det tidigare tomma skelettet (APV-113).
--- Ej importerat: de 11 dokumentavsnitten (saknar filer i Odoo), videon (endast Google Drive-länk) och riktiga pris/produkt.
+-- Importerar APV 1.1–1.3 ur Odoo-exporten (texter, diagnostiska prov, slutprov) som UTKAST. Ersätter ett tidigare utkast (APV-113).
+-- Ej importerat: de 11 dokumentavsnitten (saknar filer i Odoo), videon (endast Google Drive-länk) samt pris/produkt. Genererad av odoo-build-import.py.
 begin;
 do $$
 declare v_org uuid := '38fe702d-e72c-49a2-9750-5e0b6934959b'; v_course uuid; v_ver uuid; v_mod uuid; v_les uuid; v_q uuid; v_exam uuid;
 begin
-  if exists (select 1 from public.vihem_kp_courses c where c.organisation_id = v_org and c.code = 'APV-113' and (c.status <> 'draft' or exists (select 1 from public.vihem_kp_orders o where false))) then raise exception 'APV-113 är inte ett utkast – avbryter'; end if;
+  if exists (select 1 from public.vihem_kp_courses c where c.organisation_id = v_org and c.code = 'APV-113' and c.status <> 'draft') then raise exception 'APV-113 är inte ett utkast – avbryter'; end if;
   delete from public.vihem_kp_exam_questions where exam_id in (select e.id from public.vihem_kp_exams e join public.vihem_kp_course_versions v on v.id = e.version_id join public.vihem_kp_courses c on c.id = v.course_id where c.code = 'APV-113' and c.organisation_id = v_org);
   delete from public.vihem_kp_courses where organisation_id = v_org and code = 'APV-113';
   delete from public.vihem_kp_questions where organisation_id = v_org and 'odoo-apv' = any(tags);
@@ -20,14 +20,14 @@ begin
 
 - Varje år sker olyckor där vägarbetare och trafikanter skadas eller dör.
 - Olyckorna beror ofta på:
-- För hög hastighet
-- Bristande uppmärksamhet (mobil, stress, trötthet)
-- Dålig utmärkning av arbetsplatsen
+  - För hög hastighet
+  - Bristande uppmärksamhet (mobil, stress, trötthet)
+  - Dålig utmärkning av arbetsplatsen
 - Förebygg olyckor genom:
-- Tydlig planering
-- Rätt skyltning och avstängning
-- Användning av personlig skyddsutrustning
-- Att alltid sätta säkerhet före tidsplan'));
+  - Tydlig planering
+  - Rätt skyltning och avstängning
+  - Användning av personlig skyddsutrustning
+  - Att alltid sätta säkerhet före tidsplan'));
   insert into public.vihem_kp_lessons (organisation_id, version_id, module_id, title, kind, sort_order, estimated_minutes, completion_rule) values (v_org, v_ver, v_mod, 'Trafiksäkerhet & Olycksförebyggande', 'video', 2, 10, '{"type":"view"}'::jsonb) returning id into v_les;
   insert into public.vihem_kp_lesson_blocks (organisation_id, version_id, lesson_id, kind, sort_order, content) values (v_org, v_ver, v_les, 'link', 1, jsonb_build_object('url', 'https://drive.google.com/file/d/1SuP0qc1L_rXjFyKXdEB62FOuRC3sXdi4/view?usp=sharing', 'title', 'Filmen i Odoo/Google Drive – ladda upp filen som videomedia och ersätt denna länk'));
   insert into public.vihem_kp_lessons (organisation_id, version_id, module_id, title, kind, sort_order, estimated_minutes, completion_rule) values (v_org, v_ver, v_mod, 'Trafiksäkerhet & Olycksförebyggande', 'content', 3, 15, '{"type":"view"}'::jsonb) returning id into v_les;
@@ -83,9 +83,9 @@ Sammanfattning: Trafiksäkerhet handlar inte om att göra arbetet bekvämt, utan
 - **Trafikförordningen (TRF kap. 12)** – regler för arbete på väg
 - **Arbetsmiljölagen (AML)** – arbetsgivarens ansvar för säkerhet och hälsa
 - **Trafikverkets styrande dokument:**
-- TDOK 2018:0371 – Kompetenskrav
-- TDOK 2018:0372 – Råd och vägledning
-- TDOK 2012:86 – Tekniska krav på utmärkning och skydd
+  - TDOK 2018:0371 – Kompetenskrav
+  - TDOK 2018:0372 – Råd och vägledning
+  - TDOK 2012:86 – Tekniska krav på utmärkning och skydd
 - Alla på arbetsplatsen är skyldiga att följa gällande lagar och krav'));
   insert into public.vihem_kp_lessons (organisation_id, version_id, module_id, title, kind, sort_order, estimated_minutes, completion_rule) values (v_org, v_ver, v_mod, 'Lagar och regler', 'content', 2, 15, '{"type":"view"}'::jsonb) returning id into v_les;
   insert into public.vihem_kp_lesson_blocks (organisation_id, version_id, lesson_id, kind, sort_order, content) values (v_org, v_ver, v_les, 'text', 1, jsonb_build_object('markdown', 'Arbete på väg styrs av flera lagar och styrande dokument. Dessa regler finns för att skydda både vägarbetare och trafikanter. Som arbetstagare är det viktigt att känna till grunderna, även om arbetsgivaren har huvudansvaret.
@@ -147,10 +147,10 @@ Sammanfattning: Lagar och regler är inte hinder – de är skydd som gör att a
 - **Arbetsledaren:** Ansvarar för planering och samordning av arbetet
 - **Arbetstagaren:** Ska följa regler, använda utrustning och rapportera risker
 - **Roller på arbetsplatsen:**
-- Entreprenör
-- Flaggvakt
-- Lotsförare
-- Trafikvakt'));
+  - Entreprenör
+  - Flaggvakt
+  - Lotsförare
+  - Trafikvakt'));
   insert into public.vihem_kp_lessons (organisation_id, version_id, module_id, title, kind, sort_order, estimated_minutes, completion_rule) values (v_org, v_ver, v_mod, 'Arbetsmiljö, roller och ansvar', 'content', 2, 15, '{"type":"view"}'::jsonb) returning id into v_les;
   insert into public.vihem_kp_lesson_blocks (organisation_id, version_id, lesson_id, kind, sort_order, content) values (v_org, v_ver, v_les, 'text', 1, jsonb_build_object('markdown', 'Arbete på väg är inte bara en fråga om trafiksäkerhet. Det är också en arbetsmiljöfråga. Alla som arbetar på eller vid väg ska kunna göra sitt jobb utan att riskera sin hälsa eller sitt liv. Därför finns tydliga roller och ansvarsfördelning.
 
@@ -283,10 +283,10 @@ Sammanfattning: Skyddsutrustningen är inte en rekommendation – den är en nö
 - **Riskbedömning:** Bedöm sannolikhet + konsekvens
 - **Handlingsplan:** Bestäm åtgärder (t.ex. hastighetssänkning, barriärer, varselkläder)
 - Exempel på risker:
-- Hög trafikmängd
-- Begränsad sikt
-- Dåligt väder
-- Maskiner nära personal'));
+  - Hög trafikmängd
+  - Begränsad sikt
+  - Dåligt väder
+  - Maskiner nära personal'));
   insert into public.vihem_kp_lessons (organisation_id, version_id, module_id, title, kind, sort_order, estimated_minutes, completion_rule) values (v_org, v_ver, v_mod, 'Riskanalys', 'content', 2, 15, '{"type":"view"}'::jsonb) returning id into v_les;
   insert into public.vihem_kp_lesson_blocks (organisation_id, version_id, lesson_id, kind, sort_order, content) values (v_org, v_ver, v_les, 'text', 1, jsonb_build_object('markdown', 'Innan ett arbete på väg startar måste en **riskanalys** göras. Riskanalysen är grunden för en säker arbetsplats. Utan den vet man inte vilka hot som finns – eller hur de ska hanteras.
 
@@ -533,9 +533,9 @@ Sammanfattning: Rätt vägmärken och skydd räddar liv – både för arbetare 
 
 - **Väghållningsfordon:** ska vara utmärkta med gult varningsljus, reflexer och skyltar
 - **Utmärkning av fordon:**
-- Gul varningslykta alltid påslagen vid arbete
-- X2-pil eller blinkpil vid körfältsspärr
-- Reflexer fram, bak och på sidor
+  - Gul varningslykta alltid påslagen vid arbete
+  - X2-pil eller blinkpil vid körfältsspärr
+  - Reflexer fram, bak och på sidor
 - **Last och redskap:** ska vara säkrade och får inte utgöra fara för trafikanter eller personal'));
   insert into public.vihem_kp_lessons (organisation_id, version_id, module_id, title, kind, sort_order, estimated_minutes, completion_rule) values (v_org, v_ver, v_mod, 'Fordon och utrustning', 'content', 2, 15, '{"type":"view"}'::jsonb) returning id into v_les;
   insert into public.vihem_kp_lesson_blocks (organisation_id, version_id, lesson_id, kind, sort_order, content) values (v_org, v_ver, v_les, 'text', 1, jsonb_build_object('markdown', 'Vid arbete på väg används olika typer av fordon och utrustning. Dessa är inte bara arbetsredskap, utan även en del av säkerheten. Rätt utmärkning och utrustning kan förhindra olyckor och rädda liv.
@@ -590,12 +590,12 @@ Sammanfattning: Fordon och utrustning är inte bara verktyg – de är en del av
   insert into public.vihem_kp_lesson_blocks (organisation_id, version_id, lesson_id, kind, sort_order, content) values (v_org, v_ver, v_les, 'text', 1, jsonb_build_object('markdown', '**Mål:** Veta hur trafiken kan styras förbi arbetsplatsen.
 
 - **Med vakt:**
-- Flaggvakt används vid tillfälliga arbeten där trafik måste stoppas
-- Ska vara tydligt utmärkt och ha kontakt med arbetsledare
+  - Flaggvakt används vid tillfälliga arbeten där trafik måste stoppas
+  - Ska vara tydligt utmärkt och ha kontakt med arbetsledare
 - **Med lots:**
-- En lotsbil leder trafiken förbi arbetsplatsen
-- Används vid enkelriktad passage
-- Kräver radiosamband och tydlig planering'));
+  - En lotsbil leder trafiken förbi arbetsplatsen
+  - Används vid enkelriktad passage
+  - Kräver radiosamband och tydlig planering'));
   insert into public.vihem_kp_lessons (organisation_id, version_id, module_id, title, kind, sort_order, estimated_minutes, completion_rule) values (v_org, v_ver, v_mod, 'Trafikdirigering', 'content', 2, 15, '{"type":"view"}'::jsonb) returning id into v_les;
   insert into public.vihem_kp_lesson_blocks (organisation_id, version_id, lesson_id, kind, sort_order, content) values (v_org, v_ver, v_les, 'text', 1, jsonb_build_object('markdown', 'När arbete utförs på vägar där trafiken inte kan passera fritt krävs **trafikdirigering**. Det handlar om att leda trafiken på ett säkert sätt förbi arbetsplatsen och samtidigt skydda de som arbetar.
 

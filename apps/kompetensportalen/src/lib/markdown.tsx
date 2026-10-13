@@ -16,15 +16,15 @@ function inline(text: string, key: string): React.ReactNode[] {
 }
 
 export function Markdown({ source }: { source: string }) {
-  const lines = source.replace(/\r/g, "").split("\n"); const blocks: React.ReactNode[] = []; let list: { ordered: boolean; items: string[] } | null = null; let para: string[] = []; let k = 0;
+  const lines = source.replace(/\r/g, "").split("\n"); const blocks: React.ReactNode[] = []; let list: { ordered: boolean; items: string[]; levels: number[] } | null = null; let para: string[] = []; let k = 0;
   const flushPara = () => { if (para.length) { blocks.push(<p key={`p${k++}`}>{inline(para.join(" "), `p${k}`)}</p>); para = []; } };
-  const flushList = () => { if (list) { const Tag = list.ordered ? "ol" : "ul"; blocks.push(<Tag key={`l${k++}`}>{list.items.map((it, i) => <li key={i}>{inline(it, `li${k}${i}`)}</li>)}</Tag>); list = null; } };
+  const flushList = () => { if (list) { const Tag = list.ordered ? "ol" : "ul"; blocks.push(<Tag key={`l${k++}`}>{list.items.map((it, i) => <li key={i} style={list!.levels[i] ? { marginLeft: list!.levels[i] * 22, listStyleType: "circle" } : undefined}>{inline(it, `li${k}${i}`)}</li>)}</Tag>); list = null; } };
   for (const raw of lines) {
     const line = raw.trimEnd(); let m: RegExpExecArray | null;
     if (!line.trim()) { flushPara(); flushList(); continue; }
     if ((m = /^(#{1,3})\s+(.*)$/.exec(line))) { flushPara(); flushList(); const level = m[1].length + 1; const Tag = (`h${Math.min(level, 4)}`) as keyof JSX.IntrinsicElements; blocks.push(<Tag key={`h${k++}`}>{inline(m[2], `h${k}`)}</Tag>); continue; }
-    if ((m = /^\s*[-*]\s+(.*)$/.exec(line))) { flushPara(); if (!list || list.ordered) { flushList(); list = { ordered: false, items: [] }; } list.items.push(m[1]); continue; }
-    if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(line))) { flushPara(); if (!list || !list.ordered) { flushList(); list = { ordered: true, items: [] }; } list.items.push(m[1]); continue; }
+    if ((m = /^\s*[-*]\s+(.*)$/.exec(line))) { flushPara(); if (!list || list.ordered) { flushList(); list = { ordered: false, items: [], levels: [] }; } list.items.push(m[1]); list.levels.push(Math.min(2, Math.floor((line.length - line.trimStart().length) / 2))); continue; }
+    if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(line))) { flushPara(); if (!list || !list.ordered) { flushList(); list = { ordered: true, items: [], levels: [] }; } list.items.push(m[1]); list.levels.push(0); continue; }
     if ((m = /^>\s?(.*)$/.exec(line))) { flushPara(); flushList(); blocks.push(<blockquote key={`q${k++}`}>{inline(m[1], `q${k}`)}</blockquote>); continue; }
     flushList(); para.push(line.trim());
   }
