@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 // Varukorgen ligger i localStorage och töms ALDRIG förrän betalningen är bekräftad (inte vid start av betalning).
 export type CartLine = { key: string; productId: string; slug: string; name: string; image: string; quantity: number; startAt: string; endAt: string };
-export type PendingBooking = { id: string; reference: string; token: string; createdAt: number; holdExpiresAt: string | null };
+export type PendingBooking = { id: string; reference: string; token: string; createdAt: number; holdExpiresAt: string | null; checkoutDigest?: string };
 type State = { items: CartLine[]; pending: PendingBooking | null };
 const KEY = "viborent-cart-v2";
 const empty: State = { items: [], pending: null };
@@ -26,6 +26,13 @@ export const cartActions = {
     const key = lineKey(line);
     const existing = state.items.find((i) => i.key === key);
     write({ pending: null, items: existing ? state.items.map((i) => (i.key === key ? { ...i, quantity: i.quantity + line.quantity } : i)) : [...state.items, { ...line, key }] });
+  },
+  replace(key: string, line: Omit<CartLine, "key">) {
+    const nextKey = lineKey(line);
+    if (nextKey !== key && state.items.some(i => i.key === nextKey)) return false;
+    if (!state.items.some(i => i.key === key)) return false;
+    write({ pending: null, items: state.items.map(i => i.key === key ? { ...line, key: nextKey } : i) });
+    return true;
   },
   setQuantity(key: string, quantity: number) {
     write({ pending: null, items: state.items.map((i) => (i.key === key ? { ...i, quantity } : i)).filter((i) => i.quantity > 0) });

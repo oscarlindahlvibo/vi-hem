@@ -141,3 +141,26 @@ footer { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 28px; padding: 
 .narrow-card { max-width: 480px; margin: 24px auto; }
 .portal-booking .actions-row { margin-top: 10px; justify-content: flex-start; }
 .reply { margin: 8px 0 0; padding: 10px 14px; border-left: 4px solid var(--teal); background: var(--teal-soft); border-radius: 0 10px 10px 0; }
+
+/* Produktens bokningsflöde har företräde framför den längre beskrivningen. */
+.product-media { grid-column: 1; grid-row: 1; min-width: 0; }
+.product-description { grid-column: 1; grid-row: 2; margin-top: 0; }
+.product-layout > .booking-panel { grid-column: 2; grid-row: 1 / span 2; }
+.hero-img { object-fit: contain; background: #fff; max-height: 480px; }
+.line-actions { flex-wrap: wrap; }
+fieldset:disabled { opacity: .8; }
+@media (max-width: 880px) {
+  .product-media { grid-column: 1; grid-row: 1; }
+  .product-layout > .booking-panel { grid-column: 1; grid-row: 2; max-height: none; overflow: visible; }
+  .product-description { grid-column: 1; grid-row: 3; }
+  .hero-img { max-height: 280px; aspect-ratio: 16 / 9; }
+  .summary { max-height: none; overflow: visible; }
+  .product-layout { gap: 22px; }
+}
+@media (min-width: 601px) and (max-width: 880px) {
+  .range-picker { max-width: 480px; margin: 18px auto; }
+  .grid2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.optional-details summary { min-height: 44px; padding: 10px 0; cursor: pointer; color: var(--teal-dark); font-weight: 600; }
+.optional-fields { display: grid; gap: 14px; padding-top: 8px; }

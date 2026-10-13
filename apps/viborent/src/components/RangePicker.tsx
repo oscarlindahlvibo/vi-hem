@@ -26,7 +26,7 @@ export function RangePicker({ calendar, timeZone, quantity, value, onChange, min
   minAdvanceHours?: number; maxAdvanceDays?: number; onMonthChange?: (monthStart: string) => void;
 }) {
   const today = todayLocal(timeZone);
-  const [month, setMonth] = useState(() => today.slice(0, 7));
+  const [month, setMonth] = useState(() => value?.startDate.slice(0, 7) || today.slice(0, 7));
   const [pickingEnd, setPickingEnd] = useState(false);
   const [startHour, setStartHour] = useState(value?.startHour ?? 9);
   const [endHour, setEndHour] = useState(value?.endHour ?? 17);

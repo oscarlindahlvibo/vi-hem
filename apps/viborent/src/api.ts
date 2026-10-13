@@ -7,7 +7,7 @@ export type Product = {
 
 export type SiteConfig = {
   site_name: string; organisation_name: string; currency: string; customer_support_email: string; customer_support_phone: string;
-  terms_url: string; privacy_url: string; timezone: string; minimum_advance_hours?: number; maximum_advance_days?: number;
+  vat_rate?: number; terms_url: string; privacy_url: string; timezone: string; minimum_advance_hours?: number; maximum_advance_days?: number;
   free_cancellation_minutes: number; access_dispatch_minutes: number; booking_hold_minutes: number; access_enabled?: boolean;
   contract_version?: { id: string; version: number; title: string } | null;
 };
