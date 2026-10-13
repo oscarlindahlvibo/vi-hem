@@ -14,7 +14,7 @@ begin
 end $$;
 -- Hela administrationsregistret skyddas i databasen; personal får endast de nedanstående begränsade RPC-svaren.
 do $$ declare t text; p record; begin
- foreach t in array array['vihem_rental_settings','vihem_rental_products','vihem_rental_assets','vihem_rental_pricing_rules','vihem_rental_customers','vihem_rental_bookings','vihem_rental_booking_items','vihem_rental_blocks','vihem_rental_contract_versions','vihem_rental_locks','vihem_rental_access_codes','vihem_rental_access_events'] loop
+ foreach t in array array['vihem_rental_settings','vihem_rental_products','vihem_rental_assets','vihem_rental_pricing_rules','vihem_rental_customers','vihem_rental_bookings','vihem_rental_booking_items','vihem_rental_blocks','vihem_rental_contract_versions','vihem_rental_locks','vihem_rental_access_codes','vihem_rental_access_events','vihem_rental_access_credentials','vihem_rental_customer_messages','vihem_rental_customer_requests'] loop
   for p in select policyname from pg_policies where schemaname='public' and tablename=t loop execute format('drop policy %I on public.%I',p.policyname,t); end loop;
   execute format('create policy "Rental administration only" on public.%I for all to authenticated using (public.vihem_rental_admin_access(organisation_id) and public.vihem_rental_enabled(organisation_id)) with check (public.vihem_rental_admin_access(organisation_id) and public.vihem_rental_enabled(organisation_id))',t);
  end loop;

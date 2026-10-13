@@ -5,7 +5,7 @@ create function pg_temp.reject(label text,statement text) returns void language 
 insert into public.vihem_module_registry(module_key,name) values('rental_management','QA Rental'),('inventory_management','QA Inventory') on conflict(module_key) do nothing;
 create temp table fixture(org uuid,other_org uuid,staff uuid,admin uuid,tenant uuid,other_staff uuid,coworker uuid,product uuid,asset uuid,item uuid,location uuid,work_order uuid,operation uuid,reservation uuid);
 do $$
-declare o uuid:=gen_random_uuid();o2 uuid:=gen_random_uuid();u uuid:=gen_random_uuid();ad uuid:=gen_random_uuid();te uuid:=gen_random_uuid();u2 uuid:=gen_random_uuid();u3 uuid:=gen_random_uuid();p uuid:=gen_random_uuid();a uuid:=gen_random_uuid();i uuid:=gen_random_uuid();l uuid:=gen_random_uuid();w uuid:=gen_random_uuid();
+declare o uuid:=gen_random_uuid();o2 uuid:=gen_random_uuid();u uuid:=gen_random_uuid();ad uuid:=gen_random_uuid();te uuid:=gen_random_uuid();u2 uuid:=gen_random_uuid();u3 uuid:=gen_random_uuid();p uuid:=gen_random_uuid();a uuid:=gen_random_uuid();i uuid:=gen_random_uuid();l uuid:=gen_random_uuid();w uuid:=gen_random_uuid();c uuid:=gen_random_uuid();b uuid:=gen_random_uuid();
 begin
  insert into public.vihem_organisations(id,name,slug) values(o,'QA Resources','qa-resources-'||o),(o2,'QA Other Resources','qa-resources-'||o2);
  insert into auth.users(id,email) values(u,u||'@example.invalid'),(ad,ad||'@example.invalid'),(te,te||'@example.invalid'),(u2,u2||'@example.invalid'),(u3,u3||'@example.invalid');
@@ -17,6 +17,11 @@ begin
  insert into public.vihem_inventory_locations(id,organisation_id,name,type) values(l,o,'QA Hylla','shelf');
  insert into public.vihem_inventory_balances(organisation_id,item_id,location_id,quantity) values(o,i,l,10);
  insert into public.vihem_work_orders(id,organisation_id,title) values(w,o,'QA Arbetsorder');
+ insert into public.vihem_rental_customers(id,organisation_id,first_name) values(c,o,'QA Customer');
+ insert into public.vihem_rental_bookings(id,organisation_id,customer_id,public_reference,status,start_at,end_at,source) values(b,o,c,'QA-'||b,'cancelled',now(),now()+interval '1 day','QA_ROLE_FIXTURE');
+ insert into public.vihem_rental_customer_messages(organisation_id,customer_id,direction,message) values(o,c,'customer','QA Private Message');
+ insert into public.vihem_rental_customer_requests(organisation_id,customer_id,request_type,message) values(o,c,'question','QA Private Request');
+ insert into public.vihem_rental_access_credentials(organisation_id,booking_id,asset_id,provider,credential,valid_from,valid_until) values(o,b,a,'qa','SYNTHETIC-NOT-A-REAL-CODE',now(),now()+interval '1 day');
  insert into fixture values(o,o2,u,ad,te,u2,u3,p,a,i,l,w,gen_random_uuid(),null);
  perform set_config('request.jwt.claim.sub',u::text,true);perform set_config('request.jwt.claim.role','authenticated',true);
  perform set_config('request.jwt.claims',jsonb_build_object('sub',u,'role','authenticated')::text,true);
@@ -24,6 +29,9 @@ end $$;
 grant select,update on fixture to authenticated;
 set local role authenticated;
 select pg_temp.expect('staff cannot read customers',(select count(*)=0 from public.vihem_rental_customers));
+select pg_temp.expect('staff cannot read customer messages',(select count(*)=0 from public.vihem_rental_customer_messages));
+select pg_temp.expect('staff cannot read customer requests',(select count(*)=0 from public.vihem_rental_customer_requests));
+select pg_temp.expect('staff cannot read legacy lock credentials',(select count(*)=0 from public.vihem_rental_access_credentials));
 select pg_temp.expect('staff cannot read rental pricing',(select count(*)=0 from public.vihem_rental_pricing_rules));
 select pg_temp.expect('staff cannot read admin bookings',(select count(*)=0 from public.vihem_rental_bookings));
 select pg_temp.reject('staff cannot read administrative reservations','select public.vihem_resource_admin_reservations()');
@@ -52,7 +60,7 @@ declare f fixture%rowtype; result jsonb; m jsonb; e jsonb; id uuid; begin
 end $$;
 reset role;
 select pg_temp.expect('stock decremented exactly once',(select b.quantity=8 from public.vihem_inventory_balances b join fixture f on f.item=b.item_id and f.location=b.location_id));
-select pg_temp.expect('no financial booking created',(select count(*)=0 from public.vihem_rental_bookings b join fixture f on f.org=b.organisation_id));
+select pg_temp.expect('no financial booking created',(select count(*)=0 from public.vihem_rental_bookings b join fixture f on f.org=b.organisation_id where b.source<>'QA_ROLE_FIXTURE'));
 select pg_temp.expect('single reservation after rollback',(select count(*)=1 from public.vihem_resource_reservations r join fixture f on f.org=r.organisation_id));
 select set_config('request.jwt.claim.sub',other_staff::text,true),set_config('request.jwt.claims',jsonb_build_object('sub',other_staff,'role','authenticated')::text,true) from fixture;
 set local role authenticated;
@@ -80,6 +88,8 @@ reset role;
 select set_config('request.jwt.claim.sub',admin::text,true),set_config('request.jwt.claims',jsonb_build_object('sub',admin,'role','authenticated')::text,true) from fixture;
 set local role authenticated;
 select pg_temp.expect('admin sees preserved internal reservation',jsonb_array_length(public.vihem_resource_admin_reservations())=1);
+select pg_temp.expect('admin retains private customer messages',(select count(*)=1 from public.vihem_rental_customer_messages));
+select pg_temp.expect('admin retains legacy credentials',(select count(*)=1 from public.vihem_rental_access_credentials));
 select pg_temp.expect('admin retains product administration',(select count(*)=1 from public.vihem_rental_products));
 reset role;
 update public.vihem_profiles set active=false where id=(select staff from fixture);

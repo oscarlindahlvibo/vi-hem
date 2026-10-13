@@ -12,7 +12,7 @@ Checkout tar samma sorterade produktlås som kundbokning, kontrollerar exemplar 
 
 ## Verifierat
 
-- Isolerad `vihem-chat-qa-db`: 35 rollback-/roll-/organisations-/modul-/historikprov PASS.
+- Isolerad `vihem-chat-qa-db`: 40 rollback-/roll-/organisations-/modul-/historikprov PASS.
 - Två samtidiga sessioner: ett uttag vid återförsök; kund kontra personal i båda riktningar; oförändrat materialsaldo när maskinen upptagen; service-role-prisåtkomst PASS. UUID-avgränsade syntetiska resurser borttagna.
 - Riktiga React-komponenter med lokal mocktransport: blandad sparning, sparfel + rättning, förlorat svar + idempotent retry, bevarat utkast, nästa period, uthämtning/retur, adminavbokning/filter och kodväg PASS. Mobil 390, iPad 768, desktop 1440 visuellt granskade. Ingen verklig bokning ändrad.
 - Riktig ZXing bildavkodning av syntetisk QR-etikett PASS; manuellt EAN-värde/äldre lager-QR/ambiguitet provade. Kamera/fysiska iOS/Android-enheter EJ KÖRT. Foto avkodas lokalt utan uppladdning.
@@ -27,3 +27,5 @@ Checkout tar samma sorterade produktlås som kundbokning, kontrollerar exemplar 
 5. Vid frontendproblem: återgå till tidigare frontend men behåll säkerhetsbegränsningen. Återställ inte den sårbara RPC-kontrollen/breda läspolicyerna. Vid backendproblem: stäng den nya arbetsytan, bevara reservationer/spärrar/transaktioner/idempotensposter och rätta framåt; ingen tabellradering eller återställning av hela databasen efter nya uttag.
 
 Kvar: separat installationsgodkännande, ny backup/preflight i verklig miljö, fysisk kameraskanning och native-test. SessionStorage bevarar korg/operations-ID under samma flik/session; ingen offline-bokning utlovas. Tillgängligheten är preliminär tills checkout bekräftats. Återlämning efter sluttid visar varning men inför ingen ny obegränsad spärrregel. Befintliga kommersiella priser, betalning, BankID, låskoder och kunddata ändras inte av internbokningar.
+
+2026-10-13 inför godkänd installation: servern hade Claudes ba14c4c med kvitto-/BankID-backend installerad och matchad. Verklig lager-RPC innehöll den tidigare organisationshotfixen; QA uppdaterad till samma definition och 40 roll-/rollbackprov PASS. Kvarvarande breda policyer på kundmeddelanden, kundförfrågningar och äldre låskoder ingår nu i samma adminbegränsning (inklusive positiva adminprov). Färsk privat databasbackup tagen på servern; inga filer eller kundbokningar migreras av resursinstallationen.
