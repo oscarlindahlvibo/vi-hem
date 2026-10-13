@@ -450,8 +450,8 @@ export function CalendarPage({ onNavigate: _onNavigate }: { onNavigate: (page: s
                   </span>
                   <span className="mt-1 flex justify-center gap-1 sm:hidden" aria-hidden="true">{dayEvents.slice(0,3).map(event=><span key={event.id} className="h-1.5 w-1.5 rounded-full" style={{backgroundColor:event.color}}/>)}</span><span className="mt-2 hidden space-y-1 sm:block">
                     {dayEvents.slice(0, 3).map(event => (
-                      <span key={event.id} className="block truncate rounded-md px-2 py-1 text-xs font-bold text-white" style={{ backgroundColor: event.color }}>
-                        {eventTimeLabel(event)} · {event.title}
+                      <span key={event.id} title={event.title} className="block truncate rounded-md px-2 py-1 text-xs font-bold text-white" style={{ backgroundColor: event.color }}>
+                        {event.all_day ? event.title : `${eventTimeLabel(event)} · ${event.title}`}
                       </span>
                     ))}
                     {dayEvents.length > 3 && <span className="block text-xs font-bold text-slate-500">+{dayEvents.length - 3} fler</span>}

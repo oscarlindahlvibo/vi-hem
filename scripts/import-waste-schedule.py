@@ -41,9 +41,9 @@ if __name__ == '__main__':
     vals = []
     for d, wd, prop, items in rows:
         names = ', '.join(i[0] for i in items)
-        desc = f"Hämtning enligt hämtningsschema 2026 ({wd}).\n" + '\n'.join(f"{n} – kärl {k}" for n, k in items)
+        desc = f"Tömning enligt hämtningsschema 2026 ({wd}).\n" + '\n'.join(f"{n} – kärl {k}" for n, k in items)
         if all(n.startswith('FNI') for n, _ in items): desc += "\nBeteckningen FNI anges så i underlaget; avfallsslag framgår inte av schemat."
-        vals.append(f"('38fe702d-e72c-49a2-9750-5e0b6934959b', {q(f'Tömning {prop}: {names}')}, {q(desc)}, {q(prop + ', Virserum')}, ({q(d)}::date::timestamp at time zone 'Europe/Stockholm'), (({q(d)}::date + time '23:59') at time zone 'Europe/Stockholm'), true, 'organisation', 'operations', '#16a34a', 'waste_schedule_2026')")
+        vals.append(f"('38fe702d-e72c-49a2-9750-5e0b6934959b', {q(f'{prop}: {names}')}, {q(desc)}, {q(prop + ', Virserum')}, ({q(d)}::date::timestamp at time zone 'Europe/Stockholm'), (({q(d)}::date + time '23:59') at time zone 'Europe/Stockholm'), true, 'organisation', 'operations', '#16a34a', 'waste_schedule_2026')")
     print(',\n'.join(vals) + ';')
     print("commit;")
     print(f"-- {len(rows)} händelser", file=sys.stderr)
