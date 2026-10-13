@@ -40,7 +40,7 @@ export interface CertificatePdfInput {
   title: string; bodyText: string; footerText: string; accent: string; signerName: string; signerTitle: string;
   holderName: string; courseTitle: string; courseCode: string; certificateNumber: string; verificationUrl: string; issuerName: string;
   completedOn: string; validUntil: string | null; issuedAt: string; resultText: string; kind: "training_certificate" | "competence_proof";
-  id06Reference?: string | null; logoJpeg?: Uint8Array | null; statusNote?: string;
+  id06Reference?: string | null; logoJpeg?: Uint8Array | null; id06LogoJpeg?: Uint8Array | null; statusNote?: string;
 }
 
 export async function renderCertificatePdf(c: CertificatePdfInput): Promise<Uint8Array> {
@@ -77,6 +77,9 @@ export async function renderCertificatePdf(c: CertificatePdfInput): Promise<Uint
   ops.push(`0.4 0.4 0.4 RG 0.6 w 60 104 m 260 104 l S`);
   text(c.signerName || c.issuerName, 60, 90, 10, true); if (c.signerTitle) text(c.signerTitle, 60, 77, 9, false, "left", [0.4, 0.43, 0.45]);
   text(`Utfärdat ${c.issuedAt}`, 60, 60, 9, false, "left", [0.4, 0.43, 0.45]);
+  // ID06-logotyp (bara för utbildningar som omfattas av ID06)
+  let id06Dims: { w: number; h: number } | null = null;
+  if (c.id06LogoJpeg) { const info = jpegInfo(c.id06LogoJpeg); if (info && info.components !== 4) { const wMax = 190; const scale = wMax / info.width; id06Dims = { w: info.width * scale, h: info.height * scale }; ops.push(`q ${fmt(id06Dims.w)} 0 0 ${fmt(id06Dims.h)} ${fmt(W / 2 - id06Dims.w / 2 - 40)} 74 cm /Im2 Do Q`); } }
   // QR (vektor)
   const qr = QRCode.create(c.verificationUrl, { errorCorrectionLevel: "M" }); const n = qr.modules.size; const cell = 3.1; const qrSize = n * cell; const qx = W - 60 - qrSize, qy = 66;
   ops.push("0 0 0 rg");
@@ -100,9 +103,17 @@ export async function renderCertificatePdf(c: CertificatePdfInput): Promise<Uint
     const all = new Uint8Array(head.length + c.logoJpeg.length + tail.length); all.set(head); all.set(c.logoJpeg, head.length); all.set(tail, head.length + c.logoJpeg.length);
     imgObj = add(all);
   }
+  let img2Obj = 0;
+  if (id06Dims && c.id06LogoJpeg) {
+    const info2 = jpegInfo(c.id06LogoJpeg)!;
+    const head2 = new TextEncoder().encode(`<< /Type /XObject /Subtype /Image /Width ${info2.width} /Height ${info2.height} /ColorSpace /${info2.components === 1 ? "DeviceGray" : "DeviceRGB"} /BitsPerComponent 8 /Filter /DCTDecode /Length ${c.id06LogoJpeg.length} >>\nstream\n`);
+    const tail2 = new TextEncoder().encode("\nendstream");
+    const all2 = new Uint8Array(head2.length + c.id06LogoJpeg.length + tail2.length); all2.set(head2); all2.set(c.id06LogoJpeg, head2.length); all2.set(tail2, head2.length + c.id06LogoJpeg.length);
+    img2Obj = add(all2);
+  }
   objs[catalog - 1] = `<< /Type /Catalog /Pages ${pages} 0 R >>`;
   objs[pages - 1] = `<< /Type /Pages /Kids [${page} 0 R] /Count 1 >>`;
-  objs[page - 1] = `<< /Type /Page /Parent ${pages} 0 R /MediaBox [0 0 ${W} ${H}] /Contents ${stream} 0 R /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >>${imgObj ? ` /XObject << /Im1 ${imgObj} 0 R >>` : ""} >> >>`;
+  objs[page - 1] = `<< /Type /Page /Parent ${pages} 0 R /MediaBox [0 0 ${W} ${H}] /Contents ${stream} 0 R /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >>${imgObj || img2Obj ? ` /XObject << ${imgObj ? `/Im1 ${imgObj} 0 R ` : ""}${img2Obj ? `/Im2 ${img2Obj} 0 R ` : ""}>>` : ""} >> >>`;
   const chunks: Uint8Array[] = []; const enc = new TextEncoder(); const offsets: number[] = []; let pos = 0;
   const push = (d: Uint8Array) => { chunks.push(d); pos += d.length; };
   push(enc.encode("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n"));
