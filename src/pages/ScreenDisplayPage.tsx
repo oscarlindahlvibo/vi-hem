@@ -32,7 +32,7 @@ import {
 } from '../lib/screenSettings';
 
 const SCREEN_REFRESH_INTERVAL_MS = 60_000;
-const SCREEN_APP_VERSION = '2026-10-14-tv-shortstay-14';
+const SCREEN_APP_VERSION = '2026-10-14-tv-shortstay-15';
 const SCREEN_BUILD_QUERY_KEY = 'screenBuild';
 const SCREEN_SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const SCREEN_SESSION_REFRESH_MARGIN_SECONDS = 15 * 60;
@@ -1786,7 +1786,7 @@ function ShortStayScreen({ units, bookings, days, screenWidth, screenHeight }: {
   const denseBookingBand = bookingBandHeight < 40;
 
   return (
-    <div className="grid min-h-0 min-w-0 gap-2" style={{ gridTemplateColumns: narrow ? 'minmax(0, 1fr)' : `minmax(0, 1fr) ${screenWidth < 1280 ? 280 : 320}px`, gridTemplateRows: narrow ? undefined : 'minmax(0, 1fr)', height: narrow ? undefined : availableHeight }}>
+    <div className="grid min-h-0 min-w-0 gap-2" style={{ gridTemplateColumns: narrow ? 'minmax(0, 1fr)' : `minmax(0, 1fr) ${Math.min(360, Math.round(screenWidth * 0.34))}px`, gridTemplateRows: narrow ? undefined : 'minmax(0, 1fr)', height: narrow ? undefined : availableHeight }}>
       <div tabIndex={0} aria-label="Bokningskalender, rulla i sidled för fler datum" className="min-h-0 min-w-0 overflow-auto rounded-xl bg-slate-950 text-white ring-1 ring-white/10 focus-visible:ring-2 focus-visible:ring-blue-300"><div style={{ minWidth: unitColumnWidth + days.length * 50 }}>
         <div className="grid border-b border-white/[0.07] bg-slate-900" style={{ gridTemplateColumns: `${unitColumnWidth}px repeat(${days.length}, minmax(50px, 1fr))`, height: calendarHeaderHeight }}>
           <div className="px-2 py-2 text-[11px] font-black uppercase tracking-wide text-slate-300">Rum/lgh</div>
@@ -1879,25 +1879,22 @@ function TodayEventsPanel({ units, bookings, fixedHeight = false }: { units: Sho
     .sort((a, b) => a.end_date.localeCompare(b.end_date));
 
   const renderItems = (items: ShortStayBooking[], emptyText: string, options: { showGuestCount?: boolean; showCleaningStatus?: boolean; showEndDate?: boolean } = {}) => (
-    <div className="min-h-0 space-y-1.5 overflow-y-auto">
+    <div className={`min-h-0 ${fixedHeight ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+      <div className="space-y-1.5" style={fixedHeight && items.length > 2 ? { animation: `vihemNewsScroll ${Math.max(32, items.length * 10)}s linear infinite` } : undefined}>
       {items.length === 0 ? (
         <p className="rounded-lg bg-white/5 px-2 py-2 text-xs font-semibold text-slate-400">{emptyText}</p>
-      ) : items.slice(0, 5).map(booking => (
-        <div key={booking.id} className="rounded-lg bg-white/10 px-2 py-2 ring-1 ring-white/10">
+      ) : (fixedHeight && items.length > 2 ? [...items, ...items] : items).map((booking, index) => (
+        <div key={`${booking.id}-${index}`} className="rounded-lg bg-white/10 px-2 py-2 ring-1 ring-white/10">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-1.5">
                 <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-black ring-1 ${getShortStayChannelMeta(booking.channel_name).darkBadgeClass}`}>
                   {getShortStayChannelMeta(booking.channel_name).shortLabel}
                 </span>
-                <div className="truncate text-xs font-black text-white">{guestLabel(booking)}</div>
+                <div className="truncate text-sm font-black text-white">{guestLabel(booking)}</div>
+                {options.showCleaningStatus && <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${cleaningStatusClass(booking)}`}>{cleaningStatusLabel(booking)}</span>}
               </div>
-              {options.showCleaningStatus && (
-                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-black ${cleaningStatusClass(booking)}`}>
-                  {cleaningStatusLabel(booking)}
-                </div>
-              )}
-              <div className="mt-0.5 truncate text-[11px] font-semibold text-slate-300">
+              <div className="mt-0.5 truncate text-xs font-semibold text-slate-300">
                 {unitName(booking.unit_id)}
                 {options.showEndDate && booking.end_date !== todayValue && (
                   <> · utcheckad {new Date(`${booking.end_date}T12:00:00`).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}</>
@@ -1912,9 +1909,7 @@ function TodayEventsPanel({ units, bookings, fixedHeight = false }: { units: Sho
           </div>
         </div>
       ))}
-      {items.length > 5 && (
-        <p className="text-center text-[11px] font-bold text-slate-400">+{items.length - 5} fler</p>
-      )}
+      </div>
     </div>
   );
 
@@ -1924,7 +1919,7 @@ function TodayEventsPanel({ units, bookings, fixedHeight = false }: { units: Sho
         <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Idag</p>
         <h2 className="text-lg font-black">{new Date(`${todayValue}T12:00:00`).toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'short' })}</h2>
       </div>
-      <div className="grid min-h-0 flex-1 gap-3" style={fixedHeight ? { gridTemplateRows: 'repeat(3, minmax(0, 1fr))' } : undefined}>
+      <div className="grid min-h-0 flex-1 gap-3" style={fixedHeight ? { gridTemplateRows: [checkIns.length, checkOuts.length, pendingCleanings.length].map(count => `minmax(0, ${28 + Math.max(1, Math.min(count, 3)) * 54}fr)`).join(' ') } : undefined}>
         <section className="flex min-h-0 flex-col">
           <div className="mb-1.5 flex shrink-0 items-center justify-between">
             <h3 className="text-sm font-black text-emerald-300">Incheckning</h3>

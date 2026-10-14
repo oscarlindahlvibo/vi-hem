@@ -21,6 +21,8 @@ const version=JSON.parse(fs.readFileSync(new URL('../public/version.json',import
 assert.ok(page.includes(`SCREEN_APP_VERSION = '${version}'`));
 const shortStay=page.slice(page.indexOf('function ShortStayScreen('),page.indexOf('function WorkOrderScreen('));
 assert.ok(shortStay.includes('screenUsesStackedLayout(screenWidth, screenHeight)'));
-assert.ok(shortStay.includes('repeat(3, minmax(0, 1fr))'));
+assert.ok(shortStay.includes('[checkIns.length, checkOuts.length, pendingCleanings.length]'));
+assert.ok(shortStay.includes('[...items, ...items]'));
+assert.ok(!shortStay.includes('items.slice(0, 5)'));
 assert.ok(shortStay.includes('fixedHeight={!narrow}'));
 console.log('PASS: 64 TV panel combinations, portrait stacking and reload version');
