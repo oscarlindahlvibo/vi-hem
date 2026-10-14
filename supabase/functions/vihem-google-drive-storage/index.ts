@@ -13,13 +13,22 @@ Deno.serve(async (req) => {
     if (!authHeader) return json({ error: "Unauthorized" }, 401);
     const userClient = createClient(url, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: authHeader } } });
     const db = createClient(url, serviceKey);
-    const { data: { user } } = await userClient.auth.getUser();
-    if (!user) return json({ error: "Unauthorized" }, 401);
-    const { data: profile } = await db.from("vihem_profiles").select("id,role,organisation_id,active").eq("id", user.id).maybeSingle();
+    const body = await req.json().catch(() => ({}));
+    // Serverintern körning (servicenyckel + angiven organisation) för driftjobb, t.ex. att komplettera Drive-arkivering av redan inskickade underlag.
+    const internalRun = Boolean(serviceKey) && authHeader === `Bearer ${serviceKey}`;
+    let profile: any;
+    if (internalRun) {
+      if (typeof body.organisation_id !== "string" || !body.organisation_id) return json({ error: "organisation_id krävs för serverintern körning." }, 400);
+      profile = { id: null, role: "admin", organisation_id: body.organisation_id, active: true };
+    } else {
+      const { data: { user } } = await userClient.auth.getUser();
+      if (!user) return json({ error: "Unauthorized" }, 401);
+      const { data: profileRow } = await db.from("vihem_profiles").select("id,role,organisation_id,active").eq("id", user.id).maybeSingle();
+      profile = profileRow;
+    }
     if (!profile?.active || !profile?.organisation_id || !["staff", "admin", "superadmin"].includes(profile.role)) return json({ error: "Endast personal kan använda dokumentlagringen." }, 403);
     const settings = await getSettings(db, profile.organisation_id);
     const { data: organisation } = await db.from("vihem_organisations").select("name").eq("id", profile.organisation_id).maybeSingle();
-    const body = await req.json().catch(() => ({}));
     const action = String(body.action || "settings");
     if (action === "settings") return json({ ok: true, settings: publicSettings(settings) });
     if (action === "rename") {
