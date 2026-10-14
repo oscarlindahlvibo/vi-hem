@@ -2,8 +2,12 @@ import type { PresentationSettings } from './screenSettings';
 
 // TV browsers can report 960×540 CSS pixels despite a full-HD panel.
 // Keep landscape displays in blocks; only phones/portrait previews stack.
+export function screenUsesStackedLayout(width: number, height: number) {
+  return width < 640 || width < height;
+}
+
 export function presentationLayout(settings: PresentationSettings, width: number, height: number) {
-  const narrow = width < 640 || width < height;
+  const narrow = screenUsesStackedLayout(width, height);
   const weights = [
     settings.showNews ? 0.66 : 0,
     settings.showClockedIn ? 1.15 : 0,
