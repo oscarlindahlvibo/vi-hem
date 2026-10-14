@@ -109,16 +109,27 @@ Deno.serve(async (req: Request) => {
     });
     const serviceClient = createClient(supabaseUrl, serviceKey);
 
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) return json({ error: "Unauthorized" }, 401);
-
-    const { data: profile, error: profileError } = await serviceClient
-      .from("vihem_profiles")
-      .select("id, role, organisation_id")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (profileError || !profile) return json({ error: "Kunde inte verifiera användaren." }, 403);
+    // Serverintern körning: bara den som har servicenyckeln (t.ex. driftkörning på servern) kan anropa utan användarsession.
+    // Den körs för en angiven organisation och tillskriver arbetet den som skannade in underlaget (invoice.created_by).
+    const internalRun = Boolean(serviceKey) && authHeader === `Bearer ${serviceKey}`;
+    let user: { id: string } | null = null;
+    let profile: any = null;
+    if (internalRun) {
+      const organisationId = typeof body.organisation_id === "string" ? body.organisation_id : "";
+      if (!organisationId) return json({ error: "organisation_id krävs för serverintern körning." }, 400);
+      profile = { id: null, role: "admin", organisation_id: organisationId };
+    } else {
+      const { data: { user: authUser }, error: userError } = await userClient.auth.getUser();
+      if (userError || !authUser) return json({ error: "Unauthorized" }, 401);
+      user = authUser;
+      const { data: profileRow, error: profileError } = await serviceClient
+        .from("vihem_profiles")
+        .select("id, role, organisation_id")
+        .eq("id", authUser.id)
+        .maybeSingle();
+      if (profileError || !profileRow) return json({ error: "Kunde inte verifiera användaren." }, 403);
+      profile = profileRow;
+    }
     const runtimeSettings = await loadOcrRuntimeSettings(serviceClient, profile.organisation_id);
 
     let allowedCompanyIds: string[] | null = null;
@@ -154,7 +165,9 @@ Deno.serve(async (req: Request) => {
 
     const results = [];
     for (const invoice of invoices || []) {
-      const result = await processInvoice(serviceClient, invoice, { forceVision, actorId: user.id, settings: runtimeSettings });
+      const actorId = user?.id ?? invoice.created_by;
+      if (!actorId) { results.push({ id: invoice.id, status: "skipped", error: "Saknar användare att tillskriva (created_by)." }); continue; }
+      const result = await processInvoice(serviceClient, invoice, { forceVision, actorId, settings: runtimeSettings });
       results.push(result);
     }
 
