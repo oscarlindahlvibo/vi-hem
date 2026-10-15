@@ -1,6 +1,6 @@
 # Snö & halka
 
-Implementerad på `codex/snow-operations`. Adminpilot godkänd för installation 2026-10-15. Modulnyckeln `snow` är avstängd från början. Originalinventeringens 60 områden ändras inte av denna nya modul.
+Driftsatt som adminpilot på webben 2026-10-15, main/release `874d5c0`. Utvecklad på `codex/snow-operations`. Modulnyckeln `snow` är avstängd från början. Originalinventeringens 60 områden ändras inte av denna nya modul.
 
 ## Användning
 
@@ -37,3 +37,9 @@ Kvar före drift: ovanstående installations-/Auth-/Edge-vägkontroller och fysi
 ## Adminpilot
 
 Endast Vibogruppen AB får modulen aktiverad vid denna installation; övriga organisationer förblir avstängda. Behörigheten kontrolleras i `vihem_snow_access()`, inte bara i menyn. Personal behåller sin befintliga snöjour i Jour eftersom deras nya snömodul är dold. Global PostgREST-konfiguration ändras inte, inga externa konton skapas och inga kundrutter förifylls. Nytt prov `snow_admin_pilot.test.sql` verifierar admin-klocka, personalnekande trots grant samt avstängd extern provisionering. Befintlig native-app får gränssnittet först i en ny TestFlight/App Store-build; webbdeploy uppdaterar inte redan installerade appbundles.
+
+### Installationsutfall 2026-10-15
+
+Alla fyra migrationer installerade i en transaktion och ledger/hashmatchning godkänd. Endast `Vibogruppen AB` aktiverad, `admin_only=true`; 0 externa snökonton. Uppdaterad create-user installerad. Produktions-HTTP: admin `snow_access=true`, personal `false`, externa kontoskapanden stoppas med 409 utan kontoskapande. Frontend publicerad med alla HTTPS-filhashar verifierade. Övriga fyra publika verksamhetssajter svarade HTTP 200.
+
+Databasbackup: `/mnt/md0/supabase-backups/shared/snow-admin-20261015T135320Z` (fullt arkiv, läst och dekomprimerat). Återläst isolerat med schema/data/ACL och alla fyra migrationer + pilotprov PASS. Endast cron-schemaläggning och en versionsspecifik GraphQL-extension-ACL utelämnades i QA-klonen; dessa finns kvar i originalbackupen. Klonen borttagen efter provet. Frontendbackup: `/mnt/md0/supabase-backups/shared/vihem-frontend/release-20261015T135911-6a4e3418`. Övriga backend-/PostgREST-inställningar oförändrade. Native-distribution/fysisk enhet fortfarande inte verifierad.
