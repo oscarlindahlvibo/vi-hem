@@ -26,15 +26,17 @@ import { JourPage } from "../../pages/JourPage";
 import { SnowMap } from "./SnowMap";
 import {
   activityLabel,
-  geometryPoints,
+  geometrySegments,
   methodLabel,
-  routeGeometry,
+  segmentedGeometry,
   sortRoutes,
   type SnowActivity,
   type SnowClient,
   type SnowMethod,
   type SnowRoute,
 } from "./model";
+
+const NO_ROUTES: SnowRoute[] = [];
 
 export function SnowPage(props: { onNavigate?: (page: string) => void }) {
   const { user, signOut } = useAuth();
@@ -162,10 +164,19 @@ function SnowWorkspace({
       instructions: "",
       active: true,
     }),
-    [points, setPoints] = useState<number[][]>([]),
+    [segments, setSegments] = useState<number[][][]>([[]]),
+    [activeSegment, setActiveSegment] = useState(0),
     [area, setArea] = useState(false);
   const [discard, setDiscard] = useState(false);
-  const dirty = useUnsavedChanges({ form, points, area }, !!editor);
+  const points = segments[activeSegment] || [];
+  const setPoints = useCallback(
+    (next: number[][]) =>
+      setSegments((current) =>
+        current.map((line, index) => (index === activeSegment ? next : line)),
+      ),
+    [activeSegment],
+  );
+  const dirty = useUnsavedChanges({ form, segments, area }, !!editor);
   function closeEditor() {
     if (busy) return;
     if (dirty) setDiscard(true);
@@ -358,7 +369,8 @@ function SnowWorkspace({
       instructions: route?.instructions || "",
       active: route?.active ?? true,
     });
-    setPoints(geometryPoints(route?.geometry));
+    setSegments(geometrySegments(route?.geometry));
+    setActiveSegment(0);
     setArea(route?.geometry.type === "Polygon");
     setError("");
   }
@@ -373,7 +385,7 @@ function SnowWorkspace({
           : {
               ...form,
               priority: Number(form.priority),
-              geometry: routeGeometry(points, area),
+              geometry: segmentedGeometry(segments, area),
             };
       const { error: e } = await supabase.rpc("vihem_snow_save", {
         p_kind: editor.kind,
@@ -650,7 +662,7 @@ function SnowWorkspace({
             </>
           ) : (
             <>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <Input
                   label="Sök rutt eller område"
                   value={filter}
@@ -854,6 +866,7 @@ function SnowWorkspace({
       )}
       <Modal
         open={!!editor}
+        size={editor?.kind === "route" ? "xxl" : "md"}
         onClose={closeEditor}
         title={editor?.kind === "client" ? "Uppdragsgivare" : "Rutt / område"}
         mobileFullscreen
@@ -878,58 +891,130 @@ function SnowWorkspace({
               {error}
             </p>
           )}
-          <Input
-            label="Namn"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
+          {editor?.kind === "client" && (
+            <Input
+              label="Namn"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+          )}
           {editor?.kind === "route" && (
             <>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Select
-                  label="Uppdragsgivare"
-                  value={form.client_id}
-                  onChange={(e) =>
-                    setForm({ ...form, client_id: e.target.value })
-                  }
-                  options={clients
-                    .filter((c) => c.active)
-                    .map((c) => ({ value: c.id, label: c.name }))}
-                />
-                <Select
-                  label="Arbetsmetod"
-                  value={form.method}
-                  onChange={(e) =>
-                    setForm({ ...form, method: e.target.value as SnowMethod })
-                  }
-                  options={[
-                    { value: "machine", label: "Maskinskottning" },
-                    { value: "hand", label: "Handskottning" },
-                  ]}
-                />
-                <Select
-                  label="Prioritet"
-                  value={form.priority}
-                  onChange={(e) =>
-                    setForm({ ...form, priority: e.target.value })
-                  }
-                  options={[1, 2, 3, 4, 5].map((n) => ({
-                    value: String(n),
-                    label: `Prio ${n}${n === 1 ? " · Först" : ""}`,
-                  }))}
-                />
-                <Select
-                  label="Kartmarkering"
-                  value={area ? "area" : "route"}
-                  onChange={(e) => setArea(e.target.value === "area")}
-                  options={[
-                    { value: "route", label: "Rutt · linje" },
-                    { value: "area", label: "Område · yta" },
-                  ]}
-                />
-              </div>
+              <details
+                open={!editor?.revision}
+                className="rounded-xl border border-slate-200 bg-white p-3"
+              >
+                <summary className="cursor-pointer font-semibold">
+                  Ruttuppgifter · {form.name || "Ny rutt"}
+                </summary>
+                <div className="mt-3 space-y-3">
+                  <Input
+                    label="Namn"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <Select
+                      label="Uppdragsgivare"
+                      value={form.client_id}
+                      onChange={(e) =>
+                        setForm({ ...form, client_id: e.target.value })
+                      }
+                      options={clients
+                        .filter((c) => c.active)
+                        .map((c) => ({ value: c.id, label: c.name }))}
+                    />
+                    <Select
+                      label="Arbetsmetod"
+                      value={form.method}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          method: e.target.value as SnowMethod,
+                        })
+                      }
+                      options={[
+                        { value: "machine", label: "Maskinskottning" },
+                        { value: "hand", label: "Handskottning" },
+                      ]}
+                    />
+                    <Select
+                      label="Prioritet"
+                      value={form.priority}
+                      onChange={(e) =>
+                        setForm({ ...form, priority: e.target.value })
+                      }
+                      options={[1, 2, 3, 4, 5].map((n) => ({
+                        value: String(n),
+                        label: `Prio ${n}${n === 1 ? " · Först" : ""}`,
+                      }))}
+                    />
+                    <Select
+                      label="Kartmarkering"
+                      value={area ? "area" : "route"}
+                      onChange={(e) => {
+                        if (e.target.value === "area" && segments.length > 1) {
+                          setError(
+                            "Rutten har flera sträckor. Behåll linje eller skapa ett separat område.",
+                          );
+                          return;
+                        }
+                        setArea(e.target.value === "area");
+                      }}
+                      options={[
+                        { value: "route", label: "Rutt · linje" },
+                        { value: "area", label: "Område · yta" },
+                      ]}
+                    />
+                  </div>
+                </div>
+              </details>
+              {!area && (
+                <div className="flex flex-wrap items-end gap-2 rounded-xl bg-slate-50 p-3">
+                  <div className="min-w-36 flex-1">
+                    <Select
+                      label="Redigera sträcka"
+                      value={String(activeSegment)}
+                      onChange={(e) => setActiveSegment(Number(e.target.value))}
+                      options={segments.map((line, i) => ({
+                        value: String(i),
+                        label: `Sträcka ${i + 1} · ${line.length} punkter`,
+                      }))}
+                    />
+                  </div>
+                  <Button
+                    variant="secondary"
+                    disabled={points.length < 2 || segments.length >= 100}
+                    onClick={() => {
+                      setSegments([...segments, []]);
+                      setActiveSegment(segments.length);
+                    }}
+                  >
+                    Ny sträcka
+                  </Button>
+                  {segments.length > 1 && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setSegments(
+                          segments.filter((_, i) => i !== activeSegment),
+                        );
+                        setActiveSegment(0);
+                      }}
+                    >
+                      Ta bort sträcka
+                    </Button>
+                  )}
+                  <p className="w-full text-sm text-slate-600">
+                    Ny sträcka låter dig rita en förgrening eller fortsätta på
+                    en annan plats utan en linje emellan.
+                  </p>
+                </div>
+              )}
               <SnowMap
-                routes={[]}
+                routes={NO_ROUTES}
+                segments={segments}
+                activeSegment={activeSegment}
                 points={points}
                 area={area}
                 onPoints={setPoints}

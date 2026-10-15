@@ -10,7 +10,13 @@ const compile = (s) =>
       target: ts.ScriptTarget.ES2022,
     },
   }).outputText;
-const { routeGeometry, geometryPoints, sortRoutes } = await import(
+const {
+  routeGeometry,
+  geometryPoints,
+  geometrySegments,
+  segmentedGeometry,
+  sortRoutes,
+} = await import(
   `data:text/javascript;base64,${Buffer.from(compile(fs.readFileSync("src/modules/snow/model.ts", "utf8"))).toString("base64")}`
 );
 const points = [
@@ -36,6 +42,37 @@ assert.deepEqual(
     { priority: 1, name: "A" },
   ]).map((r) => r.name),
   ["A", "B"],
+);
+const branches = [
+  points,
+  [
+    [15.8, 57.4],
+    [15.9, 57.4],
+  ],
+];
+assert.equal(segmentedGeometry(branches, false).type, "MultiLineString");
+assert.deepEqual(
+  geometrySegments(segmentedGeometry(branches, false)),
+  branches,
+);
+assert.deepEqual(geometrySegments(routeGeometry(points, false)), [points]);
+assert.deepEqual(geometrySegments(routeGeometry(points, true)), [points]);
+assert.throws(() => segmentedGeometry([points, []], false));
+assert.throws(() => segmentedGeometry(branches, true));
+assert.throws(() =>
+  segmentedGeometry(
+    Array.from({ length: 101 }, () => points),
+    false,
+  ),
+);
+assert.throws(() =>
+  segmentedGeometry(
+    [
+      Array.from({ length: 1500 }, () => points[0]),
+      Array.from({ length: 501 }, () => points[0]),
+    ],
+    false,
+  ),
 );
 const source = fs
   .readFileSync("supabase/functions/vihem-create-user/index.ts", "utf8")
