@@ -6,14 +6,17 @@
 // server-side i databasen (se supabase/migrations/20260826100000_jour_module.sql)
 // -- detta är bara läsningar/skrivningar direkt via supabase-js + RLS,
 // samma mönster som AdminStaffPage.tsx/listMyAgreements().
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Avatar, Tabs, Select } from '../components/ui';
 import type { JourDutyType, JourEligibility, JourRotationRule, JourShift, JourSwapOffer, Profile } from '../types';
 import { ArrowLeft, ArrowRight, Plus, RefreshCw, ShieldAlert, ShieldCheck, Snowflake, Trash2, Users } from 'lucide-react';
 
-const DUTY_TYPES: JourDutyType[] = ['fastighet', 'sno', 'stad'];
+const NORMAL_DUTIES: JourDutyType[] = ['fastighet','stad'];
+const LEGACY_DUTIES: JourDutyType[] = ['fastighet','sno','stad'];
+const SNOW_DUTIES: JourDutyType[] = ['sno'];
+const DutyTypesContext = createContext<JourDutyType[]>(NORMAL_DUTIES);
 const DUTY_LABELS: Record<JourDutyType, string> = { fastighet: 'Fastighetsjour', sno: 'Snöjour', stad: 'Städjour' };
 const DUTY_BAR_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-500 hover:bg-blue-600', sno: 'bg-orange-500 hover:bg-orange-600', stad: 'bg-emerald-500 hover:bg-emerald-600' };
 const DUTY_BADGE_CLASS: Record<JourDutyType, string> = { fastighet: 'bg-blue-100 text-blue-700', sno: 'bg-orange-100 text-orange-700', stad: 'bg-emerald-100 text-emerald-700' };
@@ -71,7 +74,12 @@ function describeError(err: unknown): string {
   return 'Något gick fel.';
 }
 
-export function JourPage() {
+export function JourPage({snowOnly=false,includeSnow=true}:{snowOnly?:boolean;includeSnow?:boolean}) {
+  return <DutyTypesContext.Provider value={snowOnly?SNOW_DUTIES:includeSnow?LEGACY_DUTIES:NORMAL_DUTIES}><JourWorkspace snowOnly={snowOnly}/></DutyTypesContext.Provider>;
+}
+
+function JourWorkspace({snowOnly}:{snowOnly:boolean}) {
+  const DUTY_TYPES=useContext(DutyTypesContext);
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
   const [tab, setTab] = useState<'dagbesked' | 'byten' | 'schema' | 'behorighet' | 'grundschema'>('dagbesked');
@@ -82,14 +90,14 @@ export function JourPage() {
 
   useEffect(() => {
     if (!user?.organisation_id) return;
-    supabase.from('vihem_profiles').select('id, name').eq('organisation_id', user.organisation_id).in('role', ['staff', 'admin', 'superadmin']).eq('active', true).order('name')
+    supabase.from('vihem_profiles').select('id, name').eq('organisation_id', user.organisation_id).in('role', ['staff', 'admin', 'superadmin',...(snowOnly?['snow']:[])]).eq('active', true).order('name')
       .then(({ data }) => setProfiles(data || []));
-    supabase.from('vihem_jour_eligibility').select('*').eq('user_id', user.id)
+    supabase.from('vihem_jour_eligibility').select('*').in('duty_type',DUTY_TYPES).eq('user_id', user.id)
       .then(({ data }) => setMyEligibility((data || []) as JourEligibility[]));
-  }, [user?.organisation_id, user?.id, reloadKey]);
+  }, [user?.organisation_id, user?.id, reloadKey,DUTY_TYPES,snowOnly]);
 
   const profilesById = useMemo(() => new Map(profiles.map((p) => [p.id, p])), [profiles]);
-  const myDutyTypes = useMemo(() => myEligibility.filter((e) => e.active).map((e) => e.duty_type), [myEligibility]);
+  const myDutyTypes = useMemo(() => myEligibility.filter((e) => e.active && DUTY_TYPES.includes(e.duty_type)).map((e) => e.duty_type), [myEligibility,DUTY_TYPES]);
 
   if (!user?.organisation_id) return <LoadingPage />;
 
@@ -103,7 +111,7 @@ export function JourPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-7xl px-4 py-8">
-        <PageHeader title="Jour" subtitle="Fastighetsjour och snöjour -- schema, dagbesked och passbyten" icon={ShieldAlert} />
+        <PageHeader title={snowOnly?"Snöjour":"Jour"} subtitle={snowOnly?"Befintligt schema, dagbesked och passbyten för snöjouren":"Fastighetsjour och städjour -- schema, dagbesked och passbyten"} icon={snowOnly?Snowflake:ShieldAlert} />
         <Tabs tabs={tabs} active={tab} onChange={key => setTab(key as typeof tab)} />
 
         {tab === 'dagbesked' && <DagbeskedTab organisationId={user.organisation_id} profilesById={profilesById} profiles={profiles} isAdmin={isAdmin} userId={user.id} />}
@@ -124,6 +132,7 @@ function anchorForMode(mode: ViewMode, base: Date) {
 }
 
 function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId }: { organisationId: string; profilesById: Map<string, Pick<Profile, 'id' | 'name'>>; profiles: Pick<Profile, 'id' | 'name'>[]; isAdmin: boolean; userId: string }) {
+  const DUTY_TYPES=useContext(DutyTypesContext);
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [anchor, setAnchor] = useState(() => anchorForMode('day', new Date()));
   const [shifts, setShifts] = useState<JourShift[]>([]);
@@ -157,7 +166,7 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
     const from = days[0].toISOString();
     const to = new Date(days[days.length - 1].getTime() + 86400000).toISOString();
     const [{ data: shiftRows, error: shiftError }, { data: offerRows, error: offerError }, { data: absenceRows, error: absenceError }] = await Promise.all([
-      supabase.from('vihem_jour_shifts').select('*').eq('organisation_id', organisationId).lt('starts_at', to).gt('ends_at', from).order('starts_at'),
+      supabase.from('vihem_jour_shifts').select('*').in('duty_type',DUTY_TYPES).eq('organisation_id', organisationId).lt('starts_at', to).gt('ends_at', from).order('starts_at'),
       supabase.from('vihem_jour_swap_offers').select('*').eq('organisation_id', organisationId).in('status', ['open', 'claimed']),
       supabase.rpc('vihem_jour_absence_overlaps', { p_from: dateKey(days[0]), p_to: dateKey(days[days.length - 1]) }),
     ]);
@@ -166,7 +175,7 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
     setOffers((offerRows || []) as JourSwapOffer[]);
     setAbsences((absenceRows || []) as { user_id: string; start_date: string; end_date: string }[]);
     setLoading(false);
-  }, [organisationId, days]);
+  }, [organisationId, days,DUTY_TYPES]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -706,6 +715,7 @@ function DagbeskedTab({ organisationId, profilesById, profiles, isAdmin, userId 
 // ── Byten: bytesmarknad ──────────────────────────────────────────────────
 
 function BytenTab({ userId, organisationId, profilesById, isAdmin, onChanged }: { userId: string; organisationId: string; profilesById: Map<string, Pick<Profile, 'id' | 'name'>>; isAdmin: boolean; onChanged: () => void }) {
+  const DUTY_TYPES=useContext(DutyTypesContext);
   const [offers, setOffers] = useState<JourSwapOffer[]>([]);
   const [shiftsById, setShiftsById] = useState<Map<string, JourShift>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -717,7 +727,7 @@ function BytenTab({ userId, organisationId, profilesById, isAdmin, onChanged }: 
   const [claimError, setClaimError] = useState('');
   const [claimSaving, setClaimSaving] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createDutyType, setCreateDutyType] = useState<JourDutyType>('fastighet');
+  const [createDutyType, setCreateDutyType] = useState<JourDutyType>(DUTY_TYPES[0]);
   const [createStart, setCreateStart] = useState('');
   const [createEnd, setCreateEnd] = useState('');
   const [createAllowPartial, setCreateAllowPartial] = useState(true);
@@ -732,13 +742,13 @@ function BytenTab({ userId, organisationId, profilesById, isAdmin, onChanged }: 
     setOffers(offersList);
     const shiftIds = [...new Set(offersList.map((o) => o.shift_id))];
     if (shiftIds.length > 0) {
-      const { data: shiftRows } = await supabase.from('vihem_jour_shifts').select('*').in('id', shiftIds);
+      const { data: shiftRows } = await supabase.from('vihem_jour_shifts').select('*').in('duty_type',DUTY_TYPES).in('id', shiftIds);
       setShiftsById(new Map((shiftRows || []).map((s: any) => [s.id, s as JourShift])));
     } else {
       setShiftsById(new Map());
     }
     setLoading(false);
-  }, [organisationId]);
+  }, [organisationId,DUTY_TYPES]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -933,6 +943,7 @@ function BytenTab({ userId, organisationId, profilesById, isAdmin, onChanged }: 
 // ── Mitt schema ───────────────────────────────────────────────────────────
 
 function MittSchemaTab({ userId, myDutyTypes, onChanged }: { userId: string; myDutyTypes: JourDutyType[]; onChanged: () => void }) {
+  const DUTY_TYPES=useContext(DutyTypesContext);
   const [shifts, setShifts] = useState<JourShift[]>([]);
   const [openOfferShiftIds, setOpenOfferShiftIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -949,13 +960,13 @@ function MittSchemaTab({ userId, myDutyTypes, onChanged }: { userId: string; myD
     setLoading(true);
     const nowIso = new Date().toISOString();
     const [{ data: shiftRows }, { data: offerRows }] = await Promise.all([
-      supabase.from('vihem_jour_shifts').select('*').eq('user_id', userId).gt('ends_at', nowIso).order('starts_at'),
+      supabase.from('vihem_jour_shifts').select('*').in('duty_type',DUTY_TYPES).eq('user_id', userId).gt('ends_at', nowIso).order('starts_at'),
       supabase.from('vihem_jour_swap_offers').select('shift_id').eq('offered_by', userId).eq('status', 'open'),
     ]);
     setShifts((shiftRows || []) as JourShift[]);
     setOpenOfferShiftIds(new Set((offerRows || []).map((o: any) => o.shift_id)));
     setLoading(false);
-  }, [userId]);
+  }, [userId,DUTY_TYPES]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1062,16 +1073,17 @@ function MittSchemaTab({ userId, myDutyTypes, onChanged }: { userId: string; myD
 // ── Admin: Behörighet ────────────────────────────────────────────────────
 
 function BehorighetTab({ organisationId, userId, profiles }: { organisationId: string; userId: string; profiles: Pick<Profile, 'id' | 'name'>[] }) {
+  const DUTY_TYPES=useContext(DutyTypesContext);
   const [rows, setRows] = useState<JourEligibility[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from('vihem_jour_eligibility').select('*').eq('organisation_id', organisationId);
+    const { data } = await supabase.from('vihem_jour_eligibility').select('*').in('duty_type',DUTY_TYPES).eq('organisation_id', organisationId);
     setRows((data || []) as JourEligibility[]);
     setLoading(false);
-  }, [organisationId]);
+  }, [organisationId,DUTY_TYPES]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1144,10 +1156,11 @@ type SingleShiftDraft = { start: string; end: string; owner: string };
 const EMPTY_SINGLE_SHIFT_DRAFT: SingleShiftDraft = { start: '', end: '', owner: '' };
 
 function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: string; userId: string; profiles: Pick<Profile, 'id' | 'name'>[] }) {
+  const DUTY_TYPES=useContext(DutyTypesContext);
   const [rules, setRules] = useState<JourRotationRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<JourRotationRule | 'new' | null>(null);
-  const [modalDutyType, setModalDutyType] = useState<JourDutyType>('fastighet');
+  const [modalDutyType, setModalDutyType] = useState<JourDutyType>(DUTY_TYPES[0]);
   const [draft, setDraft] = useState<RuleDraft>(EMPTY_RULE_DRAFT);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -1156,17 +1169,17 @@ function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: 
   const [untilDate, setUntilDate] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() + 3); return d.toISOString().slice(0, 10); });
   const [generateResult, setGenerateResult] = useState('');
   const [singleShiftOpen, setSingleShiftOpen] = useState(false);
-  const [singleShiftDutyType, setSingleShiftDutyType] = useState<JourDutyType>('fastighet');
+  const [singleShiftDutyType, setSingleShiftDutyType] = useState<JourDutyType>(DUTY_TYPES[0]);
   const [singleShiftDraft, setSingleShiftDraft] = useState<SingleShiftDraft>(EMPTY_SINGLE_SHIFT_DRAFT);
   const [singleShiftSaving, setSingleShiftSaving] = useState(false);
   const [singleShiftError, setSingleShiftError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from('vihem_jour_rotation_rules').select('*').eq('organisation_id', organisationId).order('start_date');
+    const { data } = await supabase.from('vihem_jour_rotation_rules').select('*').in('duty_type',DUTY_TYPES).eq('organisation_id', organisationId).order('start_date');
     setRules((data || []) as JourRotationRule[]);
     setLoading(false);
-  }, [organisationId]);
+  }, [organisationId,DUTY_TYPES]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1175,7 +1188,7 @@ function GrundschemaTab({ organisationId, userId, profiles }: { organisationId: 
     for (const dt of DUTY_TYPES) map.set(dt, []);
     for (const r of rules) map.get(r.duty_type)?.push(r);
     return map;
-  }, [rules]);
+  }, [rules,DUTY_TYPES]);
 
   const openNewModal = (dutyType: JourDutyType) => {
     setModalDutyType(dutyType);

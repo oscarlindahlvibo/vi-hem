@@ -1288,7 +1288,8 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
   /** Beskriver passet man lämnar, för frågan i 'leaving'-läget. */
   leavingLabel?: string;
 }) {
-  const { categories } = useTimeCategories();
+  const { categories: allCategories } = useTimeCategories();
+  const categories=allCategories.filter(c=>!c.key.startsWith('snow_'));
   const submission = useFormSubmission('Stämplingen kunde inte sparas. Dina val finns kvar. Kontrollera anslutningen och försök igen.');
   useEffect(() => { if (open) submission.clearError(); }, [open, submission.clearError]);
   const [category, setCategory] = useState<TimeCategory>('general');
@@ -1339,7 +1340,7 @@ function StampInModal({ open, onClose, onSubmit, workOrders, customerProjects, t
           </div>
         )}
         <Select label={commentMode === 'leaving' ? 'Byt till (kategori)' : 'Kategori'} value={category} onChange={e => setCategory(e.target.value as TimeCategory)}
-          options={categories.length > 0 ? categories.map(c => ({ value: c.key, label: c.label })) : Object.entries(TIME_CATEGORY_LABELS).map(([k, v]) => ({ value: k, label: v }))} />
+          options={categories.length > 0 ? categories.map(c => ({ value: c.key, label: c.label })) : Object.entries(TIME_CATEGORY_LABELS).filter(([k]) => !k.startsWith('snow_')).map(([k, v]) => ({ value: k, label: v }))} />
         <Select label="Arbetsorder (valfritt)" value={workOrderId} onChange={e => {
           const id = e.target.value;
           setWorkOrderId(id);

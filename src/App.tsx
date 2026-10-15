@@ -114,6 +114,9 @@ class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasErr
   }
 }
 
+const LazySnowPage=React.lazy(()=>import('./modules/snow/SnowPage').then(module=>({default:module.SnowPage})));
+function SnowPage(props:{onNavigate?:(page:string)=>void}) { return <React.Suspense fallback={<LoadingPage/>}><LazySnowPage {...props}/></React.Suspense>; }
+
 type ModuleState = Partial<Record<ModuleKey, boolean>>;
 
 const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
@@ -127,6 +130,7 @@ const OPTIONAL_MODULE_KEYS: ModuleKey[] = [
   'inventory_management',
   'skatteverket',
   'jour',
+  'snow',
   'fleet_management',
   'operations',
   'payroll',
@@ -147,6 +151,7 @@ const DEFAULT_MODULE_STATE: ModuleState = {
   inventory_management: false,
   skatteverket: false,
   jour: false,
+  snow: false,
   fleet_management: false,
   operations: false,
   payroll: false,
@@ -197,6 +202,7 @@ function AppInner() {
   const [enabledModules, setEnabledModules] = useState<ModuleState>(DEFAULT_MODULE_STATE);
 
   const loadOrganisationModules = useCallback(async () => {
+    if(user?.role==='snow'){setEnabledModules({snow:true});setResourcesEnabled(false);return;}
     if (!user?.organisation_id || user.role === 'superadmin') {
       setEnabledModules(DEFAULT_MODULE_STATE);setResourcesEnabled(false);
       return;
@@ -739,9 +745,13 @@ function AppInner() {
         if (!isStaff || !enabledModules.skatteverket) return renderDashboard();
         return <SkatteverketPage onNavigate={navigate} />;
 
+      case 'snow':
+        if (!isStaff || !enabledModules.snow) return renderDashboard();
+        return <SnowPage onNavigate={navigate}/>;
+
       case 'jour':
         if (!isStaff || !enabledModules.jour) return renderDashboard();
-        return <JourPage />;
+        return <JourPage includeSnow={!enabledModules.snow}/>;
 
       case 'fleet':
         if (!isStaff || !enabledModules.fleet_management) return renderDashboard();
@@ -770,6 +780,8 @@ function AppInner() {
   }
 
   if (isScreen) return <ScreenDisplayPage />;
+
+  if(user.role==='snow')return <SnowPage/>;
 
   return (
     <Layout

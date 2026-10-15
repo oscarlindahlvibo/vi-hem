@@ -69,6 +69,7 @@ interface OrgFormData {
   inventory_management_enabled: boolean;
   skatteverket_enabled: boolean;
   jour_enabled: boolean;
+  snow_enabled: boolean;
   fleet_management_enabled: boolean;
   operations_enabled: boolean;
   active: boolean;
@@ -102,6 +103,7 @@ const defaultForm: OrgFormData = {
   inventory_management_enabled: false,
   skatteverket_enabled: false,
   jour_enabled: false,
+  snow_enabled: false,
   fleet_management_enabled: false,
   operations_enabled: false,
   active: true,
@@ -251,7 +253,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       const { data: moduleRows } = await supabase
         .from('vihem_organisation_modules')
         .select('organisation_id, module_key, enabled')
-        .in('module_key', ['customer_projects', 'short_stay', 'year_planning', 'meetings', 'finance', 'rental_management', 'inventory_management', 'skatteverket', 'jour', 'fleet_management', 'operations']);
+        .in('module_key', ['customer_projects', 'short_stay', 'year_planning', 'meetings', 'finance', 'rental_management', 'inventory_management', 'skatteverket', 'jour', 'snow', 'fleet_management', 'operations']);
 
       const nextOrgModules = (moduleRows || []).reduce((acc, row: any) => {
         const organisationId = row.organisation_id as string;
@@ -443,6 +445,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
             enabled: form.jour_enabled,
             limits: {},
           },
+{
+            module_key: 'snow',
+            enabled: form.snow_enabled,
+            limits: {},
+          },
           {
             module_key: 'fleet_management',
             enabled: form.fleet_management_enabled,
@@ -510,6 +517,11 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
               enabled: form.jour_enabled,
               limits: {},
             },
+{
+              module_key: 'snow',
+              enabled: form.snow_enabled,
+              limits: {},
+            },
             {
               module_key: 'fleet_management',
               enabled: form.fleet_management_enabled,
@@ -570,6 +582,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       inventory_management_enabled: Boolean(moduleState.inventory_management),
       skatteverket_enabled: Boolean(moduleState.skatteverket),
       jour_enabled: Boolean(moduleState.jour),
+      snow_enabled: Boolean(moduleState.snow),
       fleet_management_enabled: Boolean(moduleState.fleet_management),
       operations_enabled: Boolean(moduleState.operations),
       active: org.active,
@@ -584,7 +597,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
       .from('vihem_organisation_modules')
       .select('module_key, enabled')
       .eq('organisation_id', org.id)
-      .in('module_key', ['year_planning', 'meetings', 'finance', 'rental_management', 'inventory_management', 'skatteverket', 'jour', 'fleet_management', 'operations']);
+      .in('module_key', ['year_planning', 'meetings', 'finance', 'rental_management', 'inventory_management', 'skatteverket', 'jour', 'snow', 'fleet_management', 'operations']);
 
     if (!error) {
       const rows = (data || []) as Array<{ module_key: ModuleKey; enabled: boolean }>;
@@ -597,6 +610,7 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
         inventory_management_enabled: Boolean(rows.find(row => row.module_key === 'inventory_management')?.enabled),
         skatteverket_enabled: Boolean(rows.find(row => row.module_key === 'skatteverket')?.enabled),
         jour_enabled: Boolean(rows.find(row => row.module_key === 'jour')?.enabled),
+        snow_enabled: Boolean(rows.find(row => row.module_key === 'snow')?.enabled),
         fleet_management_enabled: Boolean(rows.find(row => row.module_key === 'fleet_management')?.enabled),
         operations_enabled: Boolean(rows.find(row => row.module_key === 'operations')?.enabled),
       }));
@@ -1344,6 +1358,24 @@ export function AdminOrganisationsPage({ onNavigate: _onNavigate }: AdminOrganis
                 </span>
                 <span className="block text-xs text-slate-500">
                   Ger personal fastighetsjour och snöjour -- schema, dagbesked och passbyten.
+                </span>
+              </span>
+            </label>
+          </div>
+<div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.snow_enabled}
+                onChange={e => setForm({ ...form, snow_enabled: e.target.checked })}
+                className="mt-1 w-4 h-4 rounded border-slate-300"
+              />
+              <span>
+                <span className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <ShieldAlert className="w-4 h-4 text-blue-600" /> Aktivera Snö & halka
+                </span>
+                <span className="block text-xs text-slate-500">
+                  Karta, prioriterade rutter, snöjour och snabb stämpling. Personal får åtkomst genom modulbehörighet.
                 </span>
               </span>
             </label>

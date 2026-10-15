@@ -45,7 +45,7 @@ Deno.serve(async (req: Request) => {
     // Fetch caller profile to verify role
     const { data: callerProfile, error: profileError } = await adminClient
       .from("vihem_profiles")
-      .select("role, organisation_id")
+      .select("role, organisation_id, active")
       .eq("id", caller.id)
       .maybeSingle();
 
@@ -56,7 +56,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    if (!["admin", "superadmin"].includes(callerProfile.role)) {
+    if (!callerProfile.active || !["admin", "superadmin"].includes(callerProfile.role)) {
       return new Response(JSON.stringify({ error: "Forbidden: only admins can create users" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -72,7 +72,7 @@ Deno.serve(async (req: Request) => {
       organisation_id?: string;
     };
 
-    if (!name || !email || !role) {
+    if (!name || !email || !["staff","admin","superadmin","screen","tenant","snow"].includes(role)) {
       return new Response(JSON.stringify({ error: "name, email and role are required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -144,6 +144,11 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    if(role === "snow") {
+      const {data:ready,error:gateError}=await userClient.rpc("vihem_snow_external_ready");
+      if(gateError || ready !== true) return new Response(JSON.stringify({error:"Externa snökonton kan skapas när serverns åtkomstskydd har aktiverats och verifierats."}),{status:409,headers:{...corsHeaders,"Content-Type":"application/json"}});
+    }
+
     // Generate a secure temporary password
     const tempPassword = generatePassword();
 
@@ -162,16 +167,19 @@ Deno.serve(async (req: Request) => {
     }
 
     // Create the profile row (trigger may also create one — use upsert)
-    await adminClient.from("vihem_profiles").upsert({
+    const {error:profileCreateError} = await adminClient.from("vihem_profiles").upsert({
       id: newAuthUser.user!.id,
       name,
       email,
       phone: phone ?? "",
       role,
       active: true,
+      snow_time_access: role === "snow" && body.snow_time_access === true,
       organisation_id: targetOrgId,
       auth_method: "password",
     });
+
+    if(profileCreateError){await adminClient.auth.admin.deleteUser(newAuthUser.user!.id);throw new Error("Personalkontot kunde inte skapas. Inga inloggningsuppgifter har lämnats ut.");}
 
     // Create a recovery link for production email integrations. The temporary
     // password is still returned so admins can share it securely when needed.

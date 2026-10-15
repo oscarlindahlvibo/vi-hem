@@ -44,6 +44,7 @@ const GRANTABLE_MODULES: { key: ModuleKey; label: string }[] = [
   { key: 'year_planning', label: 'Årsplanering' },
   { key: 'meetings', label: 'Möten & uppföljning' },
   { key: 'jour', label: 'Jour' },
+  { key: 'snow', label: 'Snö & halka' },
   { key: 'fleet_management', label: 'Fleet Manager' },
   { key: 'operations', label: 'Drift & rutiner' },
   { key: 'finance', label: 'Ekonomi' },
@@ -130,6 +131,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
     email: '',
     phone: '',
     role: 'staff',
+    snow_time_access:false,
     active: true,
     bankid_personal_number: '',
     is_system_admin: false,
@@ -181,7 +183,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       const { data, error } = await supabase
         .from('vihem_profiles')
         .select('*')
-        .in('role', ['staff', 'admin', 'superadmin', 'screen'])
+        .in('role', ['staff', 'admin', 'superadmin', 'screen','snow'])
         .order('name');
       if (error) throw error;
       if (data) setStaff(data);
@@ -216,7 +218,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
         validateStaffSchedule();
         const payload={
           p_target:editingStaff.id,
-          p_profile:{name:staffFormData.name,phone:staffFormData.phone,role:staffFormData.role,active:staffFormData.active,bankid_personal_number:normalizedPno,is_system_admin:canManageSystemAdminFlag?staffFormData.is_system_admin:editingStaff.is_system_admin===true},
+          p_profile:{snow_time_access:staffFormData.snow_time_access,name:staffFormData.name,phone:staffFormData.phone,role:staffFormData.role,active:staffFormData.active,bankid_personal_number:normalizedPno,is_system_admin:canManageSystemAdminFlag?staffFormData.is_system_admin:editingStaff.is_system_admin===true},
           p_schedule:scheduleRows.map(row=>({...row,work_start:row.work_start||'08:00',work_end:row.work_end||'17:00',lunch_start:row.active&&row.lunch_start?row.lunch_start:null,lunch_minutes:row.active&&row.lunch_start&&row.lunch_minutes?Math.max(0,parseInt(row.lunch_minutes,10)||0):0})),
           p_grant:staffFormData.role==='staff'?[...moduleAccess].filter(key=>!initialModuleAccess.has(key)):[],
           p_revoke:staffFormData.role==='staff'?[...initialModuleAccess].filter(key=>!moduleAccess.has(key)):[],
@@ -235,6 +237,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
           email: staffFormData.email,
           phone: staffFormData.phone,
           role: staffFormData.role as Profile['role'],
+          snow_time_access:staffFormData.snow_time_access,
           organisation_id: user?.organisation_id,
         });
         // Personnummer isn't part of vihem-create-user's own input --
@@ -260,7 +263,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
 
   const resetForm = () => {
     saveOperation.current=null;setCopySource(null);setCopyTargets([]);
-    setStaffFormData({ name: '', email: '', phone: '', role: 'staff', active: true, bankid_personal_number: '', is_system_admin: false });
+    setStaffFormData({ name: '', email: '', phone: '', role: 'staff', active: true, snow_time_access:false, bankid_personal_number: '', is_system_admin: false });
     setScheduleRows(defaultScheduleRows());
     setModuleAccess(new Set());
     setInitialModuleAccess(new Set());
@@ -332,6 +335,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
       email: staffMember.email || '',
       phone: staffMember.phone || '',
       role: staffMember.role || 'staff',
+      snow_time_access:staffMember.snow_time_access===true,
       active: staffMember.active !== false,
       bankid_personal_number: staffMember.bankid_personal_number || '',
       is_system_admin: staffMember.is_system_admin === true,
@@ -635,7 +639,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
             placeholder="T.ex. 199001011234 eller 900101-1234"
           />
           </div><div hidden={editingStaff!==null&&editorStep!=='access'} className="space-y-4">
-          <Select label="Roll" value={staffFormData.role} onChange={e=>setStaffFormData({...staffFormData,role:e.target.value})} options={[{value:'staff',label:'Personal'},{value:'admin',label:'Admin'},{value:'screen',label:'TV-skärm'},...(user?.role==='superadmin'?[{value:'superadmin',label:'Superadmin'}]:[])]}/>
+          <Select label="Roll" value={staffFormData.role} onChange={e=>setStaffFormData({...staffFormData,role:e.target.value})} options={[{value:'staff',label:'Personal'},{value:'admin',label:'Admin'},{value:'screen',label:'TV-skärm'},{value:'snow',label:'Snöpersonal – begränsad åtkomst'},...(user?.role==='superadmin'?[{value:'superadmin',label:'Superadmin'}]:[])]}/>
           {editingStaff && (
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -661,6 +665,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
               </span>
             </label>
           )}
+          {staffFormData.role==='snow'&&<label className="flex items-start gap-3 rounded-xl bg-blue-50 p-4 text-sm"><input type="checkbox" checked={staffFormData.snow_time_access} onChange={e=>setStaffFormData({...staffFormData,snow_time_access:e.target.checked})}/><span>Tillåt snöjobb och egen tidrapportering. Utan detta visas endast personens egna snöjourspass.</span></label>}
           {editingStaff && staffFormData.role === 'staff' && (
             <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p className="text-sm font-semibold text-slate-800">Modulåtkomst</p>

@@ -15,7 +15,7 @@ import {
   ChevronRight, FileX, Settings, BarChart3, ClipboardCheck, Globe, KeyRound, ShoppingCart, Briefcase,
   BedDouble, CalendarDays, Landmark, MessageSquareText, Monitor, ScanLine, SlidersHorizontal,
   Truck, Package, FileSpreadsheet, Mail, FileSignature, ShieldCheck, ShieldAlert, Car, Sparkles, BookOpen, ReceiptText,
-  GraduationCap,
+  GraduationCap, Snowflake,
 } from 'lucide-react';
 
 interface NavItem {
@@ -176,6 +176,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     { label: 'Kommunikation', icon: <Users className="w-5 h-5" />, items: [
       { label: 'Personal', icon: <Settings className="w-5 h-5" />, page: 'admin-staff', roles: ['admin'] },
       { label: 'Schema', icon: <CalendarDays className="w-5 h-5" />, page: 'staff-schedule', roles: ['staff', 'admin'] },
+      { label: 'Snö & halka', icon: <Snowflake className="w-5 h-5" />, page: 'snow', roles: ['staff', 'admin'], module: 'snow' },
       { label: 'Jour', icon: <ShieldAlert className="w-5 h-5" />, page: 'jour', roles: ['staff', 'admin'], module: 'jour' },
       { label: 'Chatt', icon: <MessageCircle className="w-5 h-5" />, page: 'chat', roles: ['tenant', 'staff', 'admin'] },
       { label: 'Nyheter', icon: <Newspaper className="w-5 h-5" />, page: 'news', roles: ['tenant', 'staff', 'admin'] },

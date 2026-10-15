@@ -1,4 +1,4 @@
-export type Role = 'tenant' | 'staff' | 'admin' | 'superadmin' | 'screen';
+export type Role = 'tenant' | 'staff' | 'admin' | 'superadmin' | 'screen' | 'snow';
 
 export type ModuleKey =
   | 'properties'
@@ -24,6 +24,7 @@ export type ModuleKey =
   | 'crm'
   | 'ai'
   | 'skatteverket'
+  | 'snow'
   | 'jour'
   | 'fleet_management'
   | 'operations'
@@ -57,6 +58,7 @@ export interface Profile {
   phone: string;
   role: Role;
   active: boolean;
+  snow_time_access?: boolean;
   /** Admin-only: unlocks API/integration settings (AI/OCR, Google Workspace, BankID, Cellsynt) within their own org. */
   is_system_admin: boolean;
   avatar_url: string;
@@ -964,7 +966,7 @@ export interface ShortStayPriceSyncLog {
   created_at: string;
 }
 
-export type TimeCategory = 'general' | 'work_order' | 'maintenance' | 'customer_project' | 'admin' | 'travel' | 'shopping' | 'standby' | 'other';
+export type TimeCategory = 'snow_plowing' | 'snow_sanding' | 'general' | 'work_order' | 'maintenance' | 'customer_project' | 'admin' | 'travel' | 'shopping' | 'standby' | 'other';
 export type TimeStatus = 'draft' | 'submitted' | 'change_requested' | 'approved' | 'rejected';
 export type TimeEntryType = 'work' | 'break' | 'lunch';
 export type StaffAbsenceType = 'sick' | 'vab' | 'vacation' | 'leave' | 'unpaid_leave' | 'parental_leave';

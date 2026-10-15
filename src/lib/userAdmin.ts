@@ -7,6 +7,7 @@ interface CreateUserInput {
   email: string;
   phone?: string;
   role: Role;
+  snow_time_access?: boolean;
   organisation_id?: string | null;
 }
 

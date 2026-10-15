@@ -178,6 +178,7 @@ export function ProfilePage() {
     staff: "Personal",
     tenant: "Hyresgäst",
     superadmin: "Plattformsadministratör",
+    snow: "Snöpersonal",
     screen: "Skärmkonto",
   }[user.role];
   return (

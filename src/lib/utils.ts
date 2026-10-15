@@ -90,6 +90,8 @@ export const WO_PRIORITY_LABELS: Record<WOPriority, string> = {
 };
 
 export const TIME_CATEGORY_LABELS: Record<TimeCategory, string> = {
+  snow_plowing: 'Snöröjning',
+  snow_sanding: 'Sandning',
   general: 'Allmänt fastighetsunderhåll',
   work_order: 'Arbetsorder',
   maintenance: 'Felanmälan',
@@ -107,6 +109,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   admin: 'Admin',
   superadmin: 'Superadmin',
   screen: 'TV-skärm',
+  snow: 'Snöpersonal (begränsad)',
 };
 
 export const APARTMENT_STATUS_LABELS: Record<string, string> = {
