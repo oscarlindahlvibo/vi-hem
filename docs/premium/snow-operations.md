@@ -1,6 +1,6 @@
 # Snö & halka
 
-Implementerad på `codex/snow-operations`, inte installerad i befintlig beta. Modulnyckeln `snow` är avstängd från början. Originalinventeringens 60 områden ändras inte av denna nya modul.
+Implementerad på `codex/snow-operations`. Adminpilot godkänd för installation 2026-10-15. Modulnyckeln `snow` är avstängd från början. Originalinventeringens 60 områden ändras inte av denna nya modul.
 
 ## Användning
 
@@ -15,7 +15,7 @@ Implementerad på `codex/snow-operations`, inte installerad i befintlig beta. Mo
 ## Installation – separat godkännande krävs
 
 1. Kontrollera aktuell serverrevision, användbar databasbackup/återställningsväg och senaste definitionerna av `vihem_clock_transition`, `vihem_clock_operation_status` och `vihem_save_staff_editor`. Migreringarna bygger vidare på befintlig atomisk klocka och personalredigerare; jämför mot eventuell parallell utveckling före installation.
-2. Installera i ordning `20261022100000_snow_operations.sql` → `20261022110000_snow_external_accounts.sql` → `20261022120000_snow_api_guard.sql`. Beroenden omfattar tidigare modulregister, jour, behörighetsgrants och atomisk personal-/klockgrund. Inga verkliga filer ändras.
+2. Installera i ordning `20261022100000_snow_operations.sql` → `20261022110000_snow_external_accounts.sql` → `20261022120000_snow_api_guard.sql` → `20261022130000_snow_admin_pilot.sql`. Den sista sätter `settings.admin_only=true`: både API och meny stängs för personal trots tidigare modulgrants. Externa konton förblir spärrade. Beroenden omfattar tidigare modulregister, jour, behörighetsgrants och atomisk personal-/klockgrund. Inga verkliga filer ändras.
 3. Externa snökonton kräver ett **aktivt PostgREST pre-request-skydd**. Inventera befintlig hook och bevara dess kontroller; ändra inte delad konfiguration blint. `vihem_snow_external_ready()` kräver `pgrst.db_pre_request=public.vihem_snow_api_guard`. Om en befintlig hook behöver kedjas måste installation och readiness-kontroll anpassas/granskas tillsammans. Migreringen ändrar inte serverkonfigurationen automatiskt.
 4. Verifiera över riktiga HTTP-anrop att externa snöidentiteter nekas övriga tabeller, vyer och RPC, samt befintliga Edge Functions/storage-vägar. PostgREST-skyddet skyddar inte automatiskt en Edge Function som använder service-role. Den nya rollen ska inte aktiveras innan dessa installerade vägar kontrollerats. Bevara övriga appars åtkomst; även identiteter utan VI-HEM-profil ska fungera.
 5. Installera uppdaterad `vihem-create-user` före frontend. Både skapande och rollbyte via personalredigeraren spärras tills API-skyddets readiness är uppfylld. Kör ett riktigt Auth-skapa/logga-in/avaktivera-prov med syntetisk användare innan externa konton lämnas ut.
@@ -33,3 +33,7 @@ Implementerad på `codex/snow-operations`, inte installerad i befintlig beta. Mo
 - Verklig komponent i isolerad UI-harness: 390/768/1440 px, start/fel/återförsök/byte/utstämpling, kund- och ruttritning, klarmarkering samt osparat-skydd. Kartdata verkliga OSM, kund-/passdata syntetiska; detta är inte Auth-E2E.
 
 Kvar före drift: ovanstående installations-/Auth-/Edge-vägkontroller och fysisk iOS-/Androidkontroll, inklusive återkomst från bakgrund och nätavbrott. Kartan kräver nät och visar planerade geometrier; ingen GPS-spårning, navigering eller offlinekartnedladdning ingår. OSM-attribution bevaras, inga massnedladdningar. Ingen snow-deployment, produktionsmigration eller verklig användarändring gjord.
+
+## Adminpilot
+
+Endast Vibogruppen AB får modulen aktiverad vid denna installation; övriga organisationer förblir avstängda. Behörigheten kontrolleras i `vihem_snow_access()`, inte bara i menyn. Personal behåller sin befintliga snöjour i Jour eftersom deras nya snömodul är dold. Global PostgREST-konfiguration ändras inte, inga externa konton skapas och inga kundrutter förifylls. Nytt prov `snow_admin_pilot.test.sql` verifierar admin-klocka, personalnekande trots grant samt avstängd extern provisionering. Befintlig native-app får gränssnittet först i en ny TestFlight/App Store-build; webbdeploy uppdaterar inte redan installerade appbundles.

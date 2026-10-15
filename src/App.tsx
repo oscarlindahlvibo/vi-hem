@@ -214,14 +214,14 @@ function AppInner() {
 
     const moduleResult = await supabase
       .from('vihem_organisation_modules')
-      .select('module_key, enabled')
+      .select('module_key, enabled, settings')
       .eq('organisation_id', organisationId);
 
     if (!moduleResult.error && moduleResult.data?.length) {
       moduleResult.data.forEach((row: any) => {
         const moduleKey = row.module_key as ModuleKey;
         loadedModuleKeys.add(moduleKey);
-        nextModules[moduleKey] = Boolean(row.enabled);
+        nextModules[moduleKey] = Boolean(row.enabled) && (moduleKey !== 'snow' || user.role === 'admin' || row.settings?.admin_only === false);
       });
     }
 
@@ -291,6 +291,8 @@ function AppInner() {
       }
     }
 
+    // Fail closed for the admin pilot if organisation settings could not be read.
+    if (user.role !== 'admin' && (moduleResult.error || !moduleResult.data?.some((row: any) => row.module_key === 'snow' && row.settings?.admin_only === false))) nextModules.snow = false;
     setEnabledModules(nextModules);
   }, [user?.organisation_id, user?.role, user?.id]);
 

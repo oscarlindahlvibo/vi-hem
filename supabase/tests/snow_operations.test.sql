@@ -7,7 +7,7 @@ do $$declare o uuid:=gen_random_uuid();o2 uuid:=gen_random_uuid();a uuid:=gen_ra
  insert into public.vihem_organisations(id,name,slug) values(o,'QA Snow','snow-'||o),(o2,'QA Other Snow','snow-'||o2);
  insert into auth.users(id,email) values(a,a||'@example.invalid'),(s,s||'@example.invalid');
  insert into public.vihem_profiles(id,organisation_id,name,email,role,active) values(a,o,'Snow Admin',a||'@example.invalid','admin',true),(s,o,'Snow Staff',s||'@example.invalid','staff',true) on conflict(id) do update set organisation_id=excluded.organisation_id,role=excluded.role,active=true;
- insert into public.vihem_organisation_modules(organisation_id,module_key,enabled) values(o,'snow',true),(o2,'snow',true) on conflict(organisation_id,module_key) do update set enabled=true;
+ insert into public.vihem_organisation_modules(organisation_id,module_key,enabled,settings) values(o,'snow',true,'{"admin_only":false}'),(o2,'snow',true,'{"admin_only":false}') on conflict(organisation_id,module_key) do update set enabled=true;
  insert into public.vihem_permission_grants(organisation_id,user_id,permission_key) values(o,s,'module.snow');
  insert into public.vihem_time_categories(organisation_id,key,label,active) values(o,'snow_plowing','Snöröjning',true),(o,'snow_sanding','Sandning',true) on conflict do nothing;
  insert into public.vihem_snow_clients(id,organisation_id,name) values(c,o,'SVEVIA VIRSERUM'),(c2,o2,'Other org client');

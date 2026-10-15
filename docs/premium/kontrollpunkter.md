@@ -478,3 +478,7 @@ Klient: SUBSCRIBED bekräftar status utan obligatorisk extra system/ok; aktiv tr
 ## 2026-10-15 – Snö & halka (featurebranch, inte driftsatt)
 
 Karta med prioriterade maskin-/handrutter och områden, kund-/aktivitetsbyte i ordinarie atomiska klockan, dagens klarmarkering och bevarad snöjour. Externa snökonton är begränsade och skyddade av aktiveringsgrind. Riktade SQL-, HTTP-, samtidighets- och UI-prov passerade; 390/768/1440. TypeScript, webb-/mobilbuild och mobilbundle PASS; riktad lint utan fel (12 befintliga hookvarningar i App/TimeTracking). Inga produktionsändringar. Tre nya migrationer och uppdaterad create-user kräver backend före frontend; API-hook/installerade Edge-vägar och riktigt Auth-prov kvar innan externa konton lämnas ut. Se [snömodulens installation](snow-operations.md). Originalinventeringen oförändrad.
+
+### Snömodul – adminpilot godkänd 2026-10-15
+
+Användaren har begärt driftsättning endast för admin. Ny migration `20261022130000_snow_admin_pilot.sql` låser API och frontend till admin; externa konton är fortsatt spärrade. Vibogruppens modul aktiveras separat, inga kund-/ruttdatum eller andra organisationer ändras. Aktuell produktionsbackup provas i isolerad QA-klon före migration; cron-schemaläggning exkluderas i klonen så inga driftjobb startar. `snow_admin_pilot.test.sql` PASS, TypeScript och snöenhetstester PASS. Native-gränssnitt kräver separat distribuerad appbuild.
