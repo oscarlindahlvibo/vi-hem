@@ -16,6 +16,7 @@ const {
   geometrySegments,
   segmentedGeometry,
   sortRoutes,
+  snowClientColors,
 } = await import(
   `data:text/javascript;base64,${Buffer.from(compile(fs.readFileSync("src/modules/snow/model.ts", "utf8"))).toString("base64")}`
 );
@@ -73,6 +74,25 @@ assert.throws(() =>
     ],
     false,
   ),
+);
+const ids = ["customer-a", "customer-k", "customer-u"]; // deliberately collide in the ten-colour palette
+const colors = snowClientColors(ids);
+assert.equal(new Set(Object.values(colors)).size, 3);
+assert.deepEqual(snowClientColors([...ids].reverse()), colors);
+assert.deepEqual(snowClientColors([...ids, ids[0]]), colors);
+assert.equal(
+  Object.values(
+    snowClientColors(Array.from({ length: 10 }, (_, i) => String(i))),
+  ).length,
+  10,
+);
+assert.equal(
+  new Set(
+    Object.values(
+      snowClientColors(Array.from({ length: 10 }, (_, i) => String(i))),
+    ),
+  ).size,
+  10,
 );
 const source = fs
   .readFileSync("supabase/functions/vihem-create-user/index.ts", "utf8")

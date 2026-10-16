@@ -90,3 +90,34 @@ export function segmentedGeometry(
     ? lines[0]
     : { type: "MultiLineString", coordinates: segments };
 }
+
+// Allocate from the complete customer set, never from the filtered route list.
+// Resolve palette collisions so the first ten customers always have distinct colours.
+const CLIENT_PALETTE = [
+  "#2563eb",
+  "#dc2626",
+  "#0f766e",
+  "#9333ea",
+  "#c2410c",
+  "#be185d",
+  "#4338ca",
+  "#4d7c0f",
+  "#0e7490",
+  "#a16207",
+];
+export function snowClientColors(ids: string[]): Record<string, string> {
+  const colors: Record<string, string> = {};
+  const used = new Set<number>();
+  [...new Set(ids)].sort().forEach((id, index) => {
+    let hash = 0;
+    for (const char of id)
+      hash = (Math.imul(hash, 31) + char.charCodeAt(0)) >>> 0;
+    let slot = hash % CLIENT_PALETTE.length;
+    if (index < CLIENT_PALETTE.length) {
+      while (used.has(slot)) slot = (slot + 1) % CLIENT_PALETTE.length;
+      used.add(slot);
+      colors[id] = CLIENT_PALETTE[slot];
+    } else colors[id] = `hsl(${(index * 137.508) % 360} 65% 35%)`;
+  });
+  return colors;
+}

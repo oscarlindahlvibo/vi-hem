@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import type { Feature } from "geojson";
 import "leaflet/dist/leaflet.css";
-import type { SnowRoute } from "./model";
+import type { SnowRoute, SnowMethod } from "./model";
 import { Button } from "../../components/ui";
 
 export function SnowMap({
   routes,
+  clientColors,
+  drawingColor = "#2563eb",
+  drawingMethod = "machine",
   selected,
   onSelect,
   points,
@@ -16,6 +19,9 @@ export function SnowMap({
   onPoints,
 }: {
   routes: SnowRoute[];
+  clientColors: Record<string, string>;
+  drawingColor?: string;
+  drawingMethod?: SnowMethod;
   selected?: string;
   onSelect?: (id: string) => void;
   points?: number[][];
@@ -78,7 +84,7 @@ export function SnowMap({
     if (!group || !m) return;
     group.clearLayers();
     for (const route of routes) {
-      const color = route.method === "machine" ? "#2563eb" : "#9333ea";
+      const color = clientColors[route.client_id] || "#2563eb";
       const layer = L.geoJSON(
         {
           type: "Feature",
@@ -103,16 +109,27 @@ export function SnowMap({
       if (index !== activeSegment && line.length > 1)
         L.polyline(
           line.map((p) => L.latLng(p[1], p[0])),
-          { color: "#0f766e", weight: 4, opacity: 0.45, interactive: false },
+          {
+            color: drawingColor,
+            weight: 4,
+            opacity: 0.45,
+            interactive: false,
+            dashArray: drawingMethod === "hand" ? "7 5" : undefined,
+          },
         ).addTo(group);
     });
     if (points?.length) {
       const latLngs = points.map((p) => L.latLng(p[1], p[0]));
       (area && points.length >= 3
-        ? L.polygon(latLngs, { color: "#0f766e", interactive: false })
+        ? L.polygon(latLngs, {
+            color: drawingColor,
+            interactive: false,
+            dashArray: drawingMethod === "hand" ? "7 5" : undefined,
+          })
         : L.polyline(latLngs, {
-            color: "#0f766e",
+            color: drawingColor,
             weight: 4,
+            dashArray: drawingMethod === "hand" ? "7 5" : undefined,
             interactive: false,
           })
       ).addTo(group);
@@ -121,7 +138,7 @@ export function SnowMap({
           radius: 4,
           color: "white",
           weight: 2,
-          fillColor: "#0f766e",
+          fillColor: drawingColor,
           fillOpacity: 1,
           interactive: false,
         }).addTo(group);
@@ -131,7 +148,10 @@ export function SnowMap({
             draggable: true,
             icon: L.divIcon({
               className: "",
-              html: '<span style="display:block;margin:7px;width:10px;height:10px;border:2px solid white;border-radius:50%;background:#0f766e;box-shadow:0 0 0 1px #0f766e"></span>',
+              html:
+                '<span style="display:block;margin:7px;width:10px;height:10px;border:2px solid white;border-radius:50%;background:currentColor;box-shadow:0 0 0 1px currentColor;color:' +
+                drawingColor +
+                '"></span>',
               iconSize: [24, 24],
               iconAnchor: [12, 12],
             }),
@@ -147,6 +167,9 @@ export function SnowMap({
     }
   }, [
     routes,
+    clientColors,
+    drawingColor,
+    drawingMethod,
     selected,
     onSelect,
     points,

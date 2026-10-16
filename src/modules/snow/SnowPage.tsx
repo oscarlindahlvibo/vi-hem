@@ -30,6 +30,7 @@ import {
   methodLabel,
   segmentedGeometry,
   sortRoutes,
+  snowClientColors,
   type SnowActivity,
   type SnowClient,
   type SnowMethod,
@@ -244,6 +245,10 @@ function SnowWorkspace({
   }, [load]);
   const current = entries.find((e) => !e.end_time),
     selectedRoute = routes.find((r) => r.id === selected);
+  const clientColors = useMemo(
+    () => snowClientColors(clients.map((c) => c.id)),
+    [clients],
+  );
   const shownRoutes = useMemo(
     () =>
       sortRoutes(
@@ -680,9 +685,33 @@ function SnowWorkspace({
                   ]}
                 />
               </div>
+              <div
+                aria-label="Uppdragsgivarnas kartfärger"
+                className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-700"
+              >
+                {clients
+                  .filter((c) => shownRoutes.some((r) => r.client_id === c.id))
+                  .map((c) => (
+                    <span
+                      key={c.id}
+                      className="inline-flex min-w-0 items-center gap-2"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="h-3 w-6 shrink-0 rounded-sm"
+                        style={{ backgroundColor: clientColors[c.id] }}
+                      />
+                      {c.name}
+                    </span>
+                  ))}
+                <span className="text-xs text-slate-500">
+                  Heldragen: maskin · Streckad: handskottning
+                </span>
+              </div>
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
                 <SnowMap
                   routes={shownRoutes}
+                  clientColors={clientColors}
                   selected={selected}
                   onSelect={setSelected}
                 />
@@ -691,6 +720,10 @@ function SnowWorkspace({
                     <button
                       key={r.id}
                       onClick={() => setSelected(r.id)}
+                      style={{
+                        borderLeftColor: clientColors[r.client_id],
+                        borderLeftWidth: 4,
+                      }}
                       className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${selected === r.id ? "border-blue-400 bg-blue-50" : "border-slate-200 bg-white"}`}
                     >
                       <span className="rounded-lg bg-slate-100 px-3 py-2 text-lg font-black">
@@ -1013,6 +1046,9 @@ function SnowWorkspace({
               )}
               <SnowMap
                 routes={NO_ROUTES}
+                clientColors={clientColors}
+                drawingColor={clientColors[form.client_id] || "#2563eb"}
+                drawingMethod={form.method}
                 segments={segments}
                 activeSegment={activeSegment}
                 points={points}
