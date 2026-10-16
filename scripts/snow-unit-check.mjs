@@ -14,6 +14,8 @@ const {
   routeGeometry,
   geometryPoints,
   geometrySegments,
+  geometryParts,
+  mixedGeometry,
   segmentedGeometry,
   sortRoutes,
   snowClientColors,
@@ -93,6 +95,44 @@ assert.equal(
     ),
   ).size,
   10,
+);
+const mixedParts = [
+  { points, area: false },
+  {
+    points: [
+      [15.5, 57.3],
+      [15.6, 57.3],
+      [15.6, 57.4],
+    ],
+    area: true,
+  },
+];
+const mixed = mixedGeometry(mixedParts);
+assert.equal(mixed.type, "GeometryCollection");
+assert.deepEqual(geometryParts(mixed), mixedParts);
+assert.deepEqual(geometryParts(routeGeometry(points, false)), [
+  { points, area: false },
+]);
+assert.deepEqual(geometryParts(routeGeometry(points, true)), [
+  { points, area: true },
+]);
+assert.equal(
+  mixedGeometry([
+    { points, area: false },
+    { points, area: false },
+  ]).type,
+  "MultiLineString",
+);
+assert.throws(() => mixedGeometry([...mixedParts, { points: [], area: true }]));
+assert.throws(() =>
+  mixedGeometry([{ points: points.slice(0, 2), area: true }]),
+);
+assert.equal(
+  mixedGeometry([
+    { points, area: true },
+    { points, area: true },
+  ]).geometries.length,
+  2,
 );
 const source = fs
   .readFileSync("supabase/functions/vihem-create-user/index.ts", "utf8")

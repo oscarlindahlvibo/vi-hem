@@ -1,9 +1,16 @@
 export type SnowMethod = "machine" | "hand";
 export type SnowActivity = "snow_plowing" | "snow_sanding";
-export type Geometry =
+export type SimpleGeometry =
   | { type: "LineString"; coordinates: number[][] }
-  | { type: "MultiLineString"; coordinates: number[][][] }
   | { type: "Polygon"; coordinates: number[][][] };
+export type Geometry =
+  | SimpleGeometry
+  | { type: "MultiLineString"; coordinates: number[][][] }
+  | { type: "GeometryCollection"; geometries: SimpleGeometry[] };
+export interface SnowDrawingPart {
+  points: number[][];
+  area: boolean;
+}
 export interface SnowClient {
   id: string;
   name: string;
@@ -29,7 +36,10 @@ export const activityLabel = (category: string) =>
     : category === "snow_plowing"
       ? "Snöröjning"
       : category;
-export function routeGeometry(points: number[][], area: boolean): Geometry {
+export function routeGeometry(
+  points: number[][],
+  area: boolean,
+): SimpleGeometry {
   if (points.length < (area ? 3 : 2))
     throw Error(
       area
@@ -53,6 +63,8 @@ export function routeGeometry(points: number[][], area: boolean): Geometry {
 }
 export function geometryPoints(geometry?: Geometry): number[][] {
   if (!geometry) return [];
+  if (geometry.type === "GeometryCollection")
+    return geometryPoints(geometry.geometries[0]);
   return geometry.type === "MultiLineString"
     ? geometry.coordinates[0] || []
     : geometry.type === "Polygon"
@@ -67,6 +79,8 @@ export function sortRoutes(routes: SnowRoute[]) {
 
 export function geometrySegments(geometry?: Geometry): number[][][] {
   if (!geometry) return [[]];
+  if (geometry.type === "GeometryCollection")
+    return geometry.geometries.map((g) => geometryPoints(g));
   return geometry.type === "MultiLineString"
     ? geometry.coordinates.map((line) => line.map((point) => [...point]))
     : [geometryPoints(geometry)];
@@ -120,4 +134,32 @@ export function snowClientColors(ids: string[]): Record<string, string> {
     } else colors[id] = `hsl(${(index * 137.508) % 360} 65% 35%)`;
   });
   return colors;
+}
+
+export function geometryParts(geometry?: Geometry): SnowDrawingPart[] {
+  if (!geometry) return [{ points: [], area: false }];
+  if (geometry.type === "MultiLineString")
+    return geometry.coordinates.map((points) => ({
+      points: points.map((p) => [...p]),
+      area: false,
+    }));
+  const shapes =
+    geometry.type === "GeometryCollection" ? geometry.geometries : [geometry];
+  return shapes.map((g) => ({
+    points: geometryPoints(g).map((p) => [...p]),
+    area: g.type === "Polygon",
+  }));
+}
+export function mixedGeometry(parts: SnowDrawingPart[]): Geometry {
+  if (
+    !parts.length ||
+    parts.length > 100 ||
+    parts.reduce((sum, p) => sum + p.points.length + (p.area ? 1 : 0), 0) > 2000
+  )
+    throw Error("Rutten får ha högst 100 markeringar och 2000 punkter.");
+  const geometries = parts.map((p) => routeGeometry(p.points, p.area));
+  if (geometries.length === 1) return geometries[0];
+  if (parts.every((p) => !p.area))
+    return { type: "MultiLineString", coordinates: parts.map((p) => p.points) };
+  return { type: "GeometryCollection", geometries };
 }

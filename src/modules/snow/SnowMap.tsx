@@ -14,6 +14,7 @@ export function SnowMap({
   onSelect,
   points,
   segments,
+  segmentAreas,
   activeSegment = 0,
   area = false,
   onPoints,
@@ -26,6 +27,7 @@ export function SnowMap({
   onSelect?: (id: string) => void;
   points?: number[][];
   segments?: number[][][];
+  segmentAreas?: boolean[];
   activeSegment?: number;
   area?: boolean;
   onPoints?: (points: number[][]) => void;
@@ -106,17 +108,20 @@ export function SnowMap({
       layer.on("click", () => onSelect?.(route.id));
     }
     (segments || []).forEach((line, index) => {
-      if (index !== activeSegment && line.length > 1)
-        L.polyline(
-          line.map((p) => L.latLng(p[1], p[0])),
-          {
-            color: drawingColor,
-            weight: 4,
-            opacity: 0.45,
-            interactive: false,
-            dashArray: drawingMethod === "hand" ? "7 5" : undefined,
-          },
-        ).addTo(group);
+      if (index === activeSegment || line.length < 2) return;
+      const latLngs = line.map((p) => L.latLng(p[1], p[0]));
+      const options = {
+        color: drawingColor,
+        weight: 4,
+        opacity: 0.5,
+        fillOpacity: 0.12,
+        interactive: false,
+        dashArray: drawingMethod === "hand" ? "7 5" : undefined,
+      };
+      (segmentAreas?.[index] && line.length >= 3
+        ? L.polygon(latLngs, options)
+        : L.polyline(latLngs, options)
+      ).addTo(group);
     });
     if (points?.length) {
       const latLngs = points.map((p) => L.latLng(p[1], p[0]));
@@ -176,6 +181,7 @@ export function SnowMap({
     onPoints,
     area,
     segments,
+    segmentAreas,
     activeSegment,
     mode,
   ]);
@@ -245,7 +251,7 @@ export function SnowMap({
         <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-3">
           <span className="text-sm text-slate-600">
             {mode === "draw"
-              ? "Klicka längs vägen. Välj Ny sträcka för en förgrening."
+              ? "Klicka för att rita. Lägg till fler sträckor eller områden med knapparna ovan."
               : mode === "pan"
                 ? "Flytta och zooma utan att lägga till punkter."
                 : "Dra de små punkterna för att justera. Välj Rita när du är klar."}

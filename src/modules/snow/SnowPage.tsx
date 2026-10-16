@@ -26,9 +26,9 @@ import { JourPage } from "../../pages/JourPage";
 import { SnowMap } from "./SnowMap";
 import {
   activityLabel,
-  geometrySegments,
+  geometryParts,
   methodLabel,
-  segmentedGeometry,
+  mixedGeometry,
   sortRoutes,
   snowClientColors,
   type SnowActivity,
@@ -167,9 +167,20 @@ function SnowWorkspace({
     }),
     [segments, setSegments] = useState<number[][][]>([[]]),
     [activeSegment, setActiveSegment] = useState(0),
-    [area, setArea] = useState(false);
+    [areas, setAreas] = useState<boolean[]>([false]);
   const [discard, setDiscard] = useState(false);
   const points = segments[activeSegment] || [];
+  const area = areas[activeSegment] || false;
+  const setArea = (value: boolean) =>
+    setAreas((current) =>
+      current.map((old, index) => (index === activeSegment ? value : old)),
+    );
+  function addPart(isArea: boolean) {
+    setSegments([...segments, []]);
+    setAreas([...areas, isArea]);
+    setActiveSegment(segments.length);
+  }
+
   const setPoints = useCallback(
     (next: number[][]) =>
       setSegments((current) =>
@@ -177,7 +188,7 @@ function SnowWorkspace({
       ),
     [activeSegment],
   );
-  const dirty = useUnsavedChanges({ form, segments, area }, !!editor);
+  const dirty = useUnsavedChanges({ form, segments, areas }, !!editor);
   function closeEditor() {
     if (busy) return;
     if (dirty) setDiscard(true);
@@ -374,9 +385,11 @@ function SnowWorkspace({
       instructions: route?.instructions || "",
       active: route?.active ?? true,
     });
-    setSegments(geometrySegments(route?.geometry));
+    const parts = geometryParts(route?.geometry);
+    setSegments(parts.map((p) => p.points));
+    setAreas(parts.map((p) => p.area));
     setActiveSegment(0);
-    setArea(route?.geometry.type === "Polygon");
+
     setError("");
   }
   async function save() {
@@ -390,7 +403,12 @@ function SnowWorkspace({
           : {
               ...form,
               priority: Number(form.priority),
-              geometry: segmentedGeometry(segments, area),
+              geometry: mixedGeometry(
+                segments.map((points, i) => ({
+                  points,
+                  area: areas[i] || false,
+                })),
+              ),
             };
       const { error: e } = await supabase.rpc("vihem_snow_save", {
         p_kind: editor.kind,
@@ -982,49 +1000,53 @@ function SnowWorkspace({
                         label: `Prio ${n}${n === 1 ? " · Först" : ""}`,
                       }))}
                     />
-                    <Select
-                      label="Kartmarkering"
-                      value={area ? "area" : "route"}
-                      onChange={(e) => {
-                        if (e.target.value === "area" && segments.length > 1) {
-                          setError(
-                            "Rutten har flera sträckor. Behåll linje eller skapa ett separat område.",
-                          );
-                          return;
-                        }
-                        setArea(e.target.value === "area");
-                      }}
-                      options={[
-                        { value: "route", label: "Rutt · linje" },
-                        { value: "area", label: "Område · yta" },
-                      ]}
-                    />
                   </div>
                 </div>
               </details>
-              {!area && (
+              {
                 <div className="flex flex-wrap items-end gap-2 rounded-xl bg-slate-50 p-3">
                   <div className="min-w-36 flex-1">
                     <Select
-                      label="Redigera sträcka"
+                      label="Redigera markering"
                       value={String(activeSegment)}
                       onChange={(e) => setActiveSegment(Number(e.target.value))}
                       options={segments.map((line, i) => ({
                         value: String(i),
-                        label: `Sträcka ${i + 1} · ${line.length} punkter`,
+                        label: `${i + 1}. ${areas[i] ? "Område" : "Sträcka"} · ${line.length} punkter`,
                       }))}
                     />
                   </div>
                   <Button
                     variant="secondary"
-                    disabled={points.length < 2 || segments.length >= 100}
+                    disabled={
+                      points.length < (area ? 3 : 2) || segments.length >= 100
+                    }
                     onClick={() => {
-                      setSegments([...segments, []]);
-                      setActiveSegment(segments.length);
+                      addPart(false);
                     }}
                   >
                     Ny sträcka
                   </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={
+                      points.length < (area ? 3 : 2) || segments.length >= 100
+                    }
+                    onClick={() => addPart(true)}
+                  >
+                    Nytt område
+                  </Button>
+                  <div className="min-w-36">
+                    <Select
+                      label="Typ av markering"
+                      value={area ? "area" : "line"}
+                      onChange={(e) => setArea(e.target.value === "area")}
+                      options={[
+                        { value: "line", label: "Sträcka" },
+                        { value: "area", label: "Område" },
+                      ]}
+                    />
+                  </div>
                   {segments.length > 1 && (
                     <Button
                       variant="secondary"
@@ -1032,24 +1054,27 @@ function SnowWorkspace({
                         setSegments(
                           segments.filter((_, i) => i !== activeSegment),
                         );
+                        setAreas(areas.filter((_, i) => i !== activeSegment));
                         setActiveSegment(0);
                       }}
                     >
-                      Ta bort sträcka
+                      Ta bort markering
                     </Button>
                   )}
                   <p className="w-full text-sm text-slate-600">
-                    Ny sträcka låter dig rita en förgrening eller fortsätta på
-                    en annan plats utan en linje emellan.
+                    Lägg till sträckor och områden i samma rutt. Varje markering
+                    ritas separat och delar ruttens uppdragsgivare och
+                    prioritet.
                   </p>
                 </div>
-              )}
+              }
               <SnowMap
                 routes={NO_ROUTES}
                 clientColors={clientColors}
                 drawingColor={clientColors[form.client_id] || "#2563eb"}
                 drawingMethod={form.method}
                 segments={segments}
+                segmentAreas={areas}
                 activeSegment={activeSegment}
                 points={points}
                 area={area}
