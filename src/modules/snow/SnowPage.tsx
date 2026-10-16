@@ -23,6 +23,7 @@ import {
 } from "../../lib/clockTransitions";
 import type { TimeEntry } from "../../types";
 import { JourPage } from "../../pages/JourPage";
+import { SnowDriverHome } from "./SnowDriverHome";
 import { SnowAvailability } from "./SnowAvailability";
 import { SnowMap } from "./SnowMap";
 import {
@@ -49,7 +50,7 @@ export function SnowPage(props: { onNavigate?: (page: string) => void }) {
   return (
     <div className="min-h-dvh bg-slate-50">
       <header className="flex items-center justify-between border-b bg-white p-4">
-        <strong>VI-HEM · Snöjour</strong>
+        <strong>VI-HEM · Snökörning</strong>
         <Button variant="secondary" size="sm" onClick={() => void signOut()}>
           Logga ut
         </Button>
@@ -133,7 +134,7 @@ function SnowWorkspace({
 }) {
   const { user } = useAuth();
   const admin = user?.role === "admin" || user?.role === "superadmin";
-  const [tab, setTab] = useState("work"),
+  const [tab, setTab] = useState(user?.role === "snow" ? "home" : "work"),
     [clients, setClients] = useState<SnowClient[]>([]),
     [routes, setRoutes] = useState<SnowRoute[]>([]),
     [entries, setEntries] = useState<SnowTime[]>([]);
@@ -456,12 +457,19 @@ function SnowWorkspace({
   return (
     <div className="mx-auto max-w-7xl space-y-5 px-4 py-5 sm:px-6">
       <PageHeader
-        title="Snö & halka"
-        subtitle="Dina rutter, din jour och dina körpass på samma plats."
+        title={user?.role === "snow" ? "Min snökörning" : "Snö & halka"}
+        subtitle={
+          user?.role === "snow"
+            ? "Körpass, tillgänglighet och snöjour – din arbetsyta som snöchaufför."
+            : "Dina rutter, din jour och dina körpass på samma plats."
+        }
         icon={Snowflake}
       />
       <Tabs
         tabs={[
+          ...(user?.role === "snow"
+            ? [{ key: "home", label: "Översikt" }]
+            : []),
           { key: "work", label: "Körpass" },
           { key: "map", label: "Karta & prioritet" },
           { key: "jour", label: "Snöjour" },
@@ -524,6 +532,9 @@ function SnowWorkspace({
             </Button>
           </div>
         </section>
+      )}
+      {tab === "home" && user?.role === "snow" && (
+        <SnowDriverHome current={current} onNavigate={setTab} />
       )}
       {(tab === "work" || tab === "map") && (
         <>

@@ -665,7 +665,7 @@ export function AdminStaffPage({ onNavigate: _onNavigate }: AdminStaffPageProps)
               </span>
             </label>
           )}
-          {staffFormData.role==='snow'&&<label className="flex items-start gap-3 rounded-xl bg-blue-50 p-4 text-sm"><input type="checkbox" checked={staffFormData.snow_time_access} onChange={e=>setStaffFormData({...staffFormData,snow_time_access:e.target.checked})}/><span>Tillåt snöjobb och egen tidrapportering. Utan detta visas endast personens egna snöjourspass.</span></label>}
+          {staffFormData.role==='snow'&&<label className="flex items-start gap-3 rounded-xl bg-blue-50 p-4 text-sm"><input type="checkbox" checked={staffFormData.snow_time_access} onChange={e=>setStaffFormData({...staffFormData,snow_time_access:e.target.checked})}/><span>Snöchaufför: egen dashboard med körpass, karta, tillgänglighet och egen tid. Utan detta visas endast personens egna snöjourspass.</span></label>}
           {editingStaff && staffFormData.role === 'staff' && (
             <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p className="text-sm font-semibold text-slate-800">Modulåtkomst</p>

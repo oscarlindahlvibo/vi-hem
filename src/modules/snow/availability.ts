@@ -169,3 +169,23 @@ export function dutyConflict(
       );
   });
 }
+
+export function monthStart(date: string) {
+  return date.slice(0, 7) + "-01";
+}
+export function shiftMonth(date: string, by: number) {
+  const d = new Date(monthStart(date) + "T12:00:00Z");
+  d.setUTCMonth(d.getUTCMonth() + by);
+  return d.toISOString().slice(0, 10);
+}
+export function monthDays(date: string) {
+  const first = monthStart(date);
+  const count = new Date(shiftMonth(first, 1) + "T12:00:00Z");
+  count.setUTCDate(0);
+  return Array.from({ length: count.getUTCDate() }, (_, i) =>
+    addDays(first, i),
+  );
+}
+export function monthLeadingDays(date: string) {
+  return (new Date(monthStart(date) + "T12:00:00Z").getUTCDay() + 6) % 7;
+}

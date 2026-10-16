@@ -28,6 +28,10 @@ import {
   statusLabels,
   validateSlots,
   weekStart,
+  monthStart,
+  monthDays,
+  shiftMonth,
+  monthLeadingDays,
   type AvailabilityStatus,
   type SnowAvailabilitySnapshot,
 } from "./availability";
@@ -52,13 +56,26 @@ const styles: Record<AvailabilityStatus, string> = {
 };
 export function SnowAvailability() {
   const { user } = useAuth();
+  const selfOnly = user?.role === "snow";
+  const [view, setView] = useState<"week" | "month">(
+    selfOnly ? "month" : "week",
+  );
+  const [showDays, setShowDays] = useState(false);
+  const [picking, setPicking] = useState(false),
+    [picked, setPicked] = useState<string[]>([]);
   const admin = user?.role === "admin" || user?.role === "superadmin";
   const [loadedAnchor, setLoadedAnchor] = useState("");
-  const [anchor, setAnchor] = useState(() => weekStart(calendarDay()));
-  const days = useMemo(
-    () => Array.from({ length: 7 }, (_, i) => addDays(anchor, i)),
-    [anchor],
+  const [anchor, setAnchor] = useState(() =>
+    selfOnly ? monthStart(calendarDay()) : weekStart(calendarDay()),
   );
+  const days = useMemo(
+    () =>
+      view === "month"
+        ? monthDays(anchor)
+        : Array.from({ length: 7 }, (_, i) => addDays(anchor, i)),
+    [anchor, view],
+  );
+  const rangeKey = anchor + ":" + view;
   const [selected, setSelected] = useState(calendarDay()),
     [target, setTarget] = useState(user?.id || ""),
     [data, setData] = useState<SnowAvailabilitySnapshot>(EMPTY),
@@ -107,12 +124,12 @@ export function SnowAvailability() {
     try {
       const { data: next, error: e } = await supabase.rpc(
         "vihem_snow_availability_snapshot",
-        { p_from: anchor, p_days: 7 },
+        { p_from: anchor, p_days: days.length },
       );
       if (e) throw e;
       if (request === generation.current) {
         setData(next as SnowAvailabilitySnapshot);
-        setLoadedAnchor(anchor);
+        setLoadedAnchor(rangeKey);
         setError("");
         return next as SnowAvailabilitySnapshot;
       }
@@ -127,7 +144,7 @@ export function SnowAvailability() {
     } finally {
       if (request === generation.current) setLoading(false);
     }
-  }, [anchor]);
+  }, [anchor, days.length, rangeKey]);
   useEffect(() => {
     void load();
     const timer = setInterval(() => void load(), 60000);
@@ -137,10 +154,15 @@ export function SnowAvailability() {
     };
   }, [load, invalidate]);
   function changeWeek(by: number) {
-    const next = addDays(anchor, by);
+    const next =
+      view === "month"
+        ? shiftMonth(anchor, by < 0 ? -1 : 1)
+        : addDays(anchor, by);
     setAnchor(next);
     setSelected(next);
     setNotice("");
+    setPicked([]);
+    setPicking(false);
   }
   function openEditor(dates: string[], person = target) {
     const entry = data.days.find(
@@ -166,6 +188,7 @@ export function SnowAvailability() {
     setSaveError("");
     setStale(false);
     pending.current = null;
+    setShowDays(false);
     setEditing(true);
   }
   function closeEditor() {
@@ -235,6 +258,8 @@ export function SnowAvailability() {
       }));
       pending.current = null;
       setEditing(false);
+      setPicked([]);
+      setPicking(false);
       setNotice(
         `${chosen.length} ${chosen.length === 1 ? "dag sparad" : "dagar sparade"} för ${data.people.find((p) => p.id === target)?.name || "dig"}.`,
       );
@@ -270,6 +295,23 @@ export function SnowAvailability() {
   const min = coverage.length
     ? Math.min(...coverage.map((c) => c.people.length))
     : 0;
+  const dailyCapacity = useMemo(
+    () =>
+      Object.fromEntries(
+        days.map((day) => [
+          day,
+          Math.min(
+            ...capacitySegments(
+              data,
+              day,
+              from < to ? from : 0,
+              from < to ? to : 1440,
+            ).map((p) => p.people.length),
+          ),
+        ]),
+      ),
+    [days, data, from, to],
+  );
   const rowFor = (person: string, date: string) =>
     data.days.find((d) => d.user_id === person && d.work_date === date);
   const absent = (person: string, date: string) =>
@@ -290,30 +332,60 @@ export function SnowAvailability() {
   return (
     <section className="space-y-5">
       <PageHeader
-        title="Tillgänglighet för snö"
-        subtitle="Planera tre chaufförer samtidigt. Jouransvarig visas grönt och räknas högst en gång."
+        title={selfOnly ? "Min tillgänglighet" : "Tillgänglighet för snö"}
+        subtitle={
+          selfOnly
+            ? "Ange när du kan köra. Välj en dag eller flera dagar samtidigt."
+            : "Planera tre chaufförer samtidigt. Jouransvarig visas grönt och räknas högst en gång."
+        }
         icon={Users}
       />
+      <div className="flex gap-2" role="group" aria-label="Kalendervy">
+        {(
+          [
+            ["week", "Vecka"],
+            ["month", "Månad"],
+          ] as const
+        ).map(([key, label]) => (
+          <Button
+            key={key}
+            variant={view === key ? "primary" : "secondary"}
+            aria-pressed={view === key}
+            onClick={() => {
+              setView(key);
+              setAnchor(
+                key === "month" ? monthStart(selected) : weekStart(selected),
+              );
+              setPicked([]);
+              setPicking(false);
+            }}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="secondary"
-          aria-label="Föregående vecka"
+          aria-label={
+            view === "month" ? "Föregående månad" : "Föregående vecka"
+          }
           onClick={() => changeWeek(-7)}
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <strong className="min-w-44">
-          {dateLabel(anchor)} – {dateLabel(days[6])}{" "}
-          <span className="text-sm font-normal text-slate-500">
-            {anchor.slice(0, 4)}
-            {anchor.slice(0, 4) !== days[6].slice(0, 4)
-              ? "/" + days[6].slice(0, 4)
-              : ""}
-          </span>
+          {view === "month"
+            ? new Date(anchor + "T12:00:00Z").toLocaleDateString("sv-SE", {
+                month: "long",
+                year: "numeric",
+                timeZone: "UTC",
+              })
+            : `${dateLabel(anchor)} – ${dateLabel(days[6])} ${anchor.slice(0, 4)}${anchor.slice(0, 4) !== days[6].slice(0, 4) ? "/" + days[6].slice(0, 4) : ""}`}
         </strong>
         <Button
           variant="secondary"
-          aria-label="Nästa vecka"
+          aria-label={view === "month" ? "Nästa månad" : "Nästa vecka"}
           onClick={() => changeWeek(7)}
         >
           <ChevronRight className="h-4 w-4" />
@@ -322,11 +394,13 @@ export function SnowAvailability() {
           variant="secondary"
           onClick={() => {
             const today = calendarDay();
-            setAnchor(weekStart(today));
+            setAnchor(view === "month" ? monthStart(today) : weekStart(today));
+            setPicked([]);
+            setPicking(false);
             setSelected(today);
           }}
         >
-          Denna vecka
+          {view === "month" ? "Denna månad" : "Denna vecka"}
         </Button>
         <Button
           variant="secondary"
@@ -353,241 +427,370 @@ export function SnowAvailability() {
       {!error && loading && data.people.length === 0 && (
         <p role="status">Läser tillgänglighet…</p>
       )}
-      <div className="flex flex-wrap items-end gap-3 rounded-2xl border bg-white p-4">
-        {admin && (
-          <div className="min-w-48 flex-1">
-            <Select
-              label="Registrera för"
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              options={data.people.map((p) => ({ value: p.id, label: p.name }))}
-            />
-          </div>
-        )}
-        <Button
-          disabled={loading || !!error || !target}
-          onClick={() => openEditor([selected])}
-        >
-          Ange tillgänglighet
-        </Button>
-        <Button
-          variant="secondary"
-          disabled={loading || !!error || !target}
-          onClick={() => openEditor(days)}
-        >
-          Fyll flera dagar
-        </Button>
-        <p className="w-full text-sm text-slate-500">
-          Tillgänglighet är ett besked om när man kan köra. Jourpass tilldelas
-          som vanligt under Snöjour. Ett tomt svar räknas inte som tillgängligt,
-          förutom under tilldelad jour.
-        </p>
-      </div>
-      {!error && loadedAnchor === anchor && (
-        <>
-          <div
-            ref={dayRow}
-            className="relative flex gap-2 overflow-x-auto pb-1 sm:grid sm:grid-cols-4 lg:grid-cols-7"
-            aria-label="Välj dag"
+      {(!selfOnly || view === "week") && (
+        <div className="flex flex-wrap items-end gap-3 rounded-2xl border bg-white p-4">
+          {admin && (
+            <div className="min-w-48 flex-1">
+              <Select
+                label="Registrera för"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                options={data.people.map((p) => ({
+                  value: p.id,
+                  label: p.name,
+                }))}
+              />
+            </div>
+          )}
+          <Button
+            disabled={loading || !!error || !target}
+            onClick={() => openEditor([selected])}
           >
-            {days.map((day) => {
-              const parts = capacitySegments(
-                data,
-                day,
-                from < to ? from : 0,
-                from < to ? to : 1440,
-              );
-              const count = Math.min(...parts.map((p) => p.people.length));
-              return (
-                <button
-                  key={day}
-                  data-day={day}
-                  aria-pressed={selected === day}
-                  onClick={() => setSelected(day)}
-                  className={`min-h-24 min-w-28 shrink-0 rounded-xl border p-3 text-left sm:min-w-0 ${selected === day ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-white"}`}
+            Ange tillgänglighet
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={loading || !!error || !target}
+            onClick={() => openEditor(days)}
+          >
+            Fyll flera dagar
+          </Button>
+          <p className="w-full text-sm text-slate-500">
+            Tillgänglighet är ett besked om när man kan köra. Jourpass tilldelas
+            som vanligt under Snöjour. Ett tomt svar räknas inte som
+            tillgängligt, förutom under tilldelad jour.
+          </p>
+        </div>
+      )}
+      {!error && loadedAnchor === rangeKey && (
+        <>
+          {view === "month" ? (
+            <section
+              className="overflow-hidden rounded-2xl border bg-white"
+              aria-label="Månadskalender"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3">
+                <p className="text-sm text-slate-600">
+                  {picking
+                    ? `${picked.length} dagar valda`
+                    : "Tryck på en dag för att ange tillgänglighet."}
+                </p>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setPicking(!picking);
+                    setPicked([]);
+                  }}
                 >
-                  <span className="block text-sm font-semibold">
-                    {dateLabel(day)}
-                  </span>
-                  <strong
-                    className={`block text-lg ${count >= 3 ? "text-emerald-700" : "text-amber-800"}`}
+                  {picking ? "Avsluta dagval" : "Välj flera dagar"}
+                </Button>
+                {picking && (
+                  <Button
+                    disabled={!picked.length}
+                    onClick={() => openEditor(picked)}
                   >
-                    {windowError ? "–" : `${count}/3`}
-                  </strong>
-                  <span className="text-xs text-slate-600">
-                    minst samtidigt
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-            <section className="overflow-hidden rounded-2xl border bg-white">
-              <div className="border-b p-4">
-                <h2 className="font-bold">Bemanning {dateLabel(selected)}</h2>
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  <Input
-                    label="Kontrollera från"
-                    type="time"
-                    value={windowStart}
-                    onChange={(e) => setWindowStart(e.target.value)}
-                  />
-                  <Input
-                    label="Kontrollera till"
-                    value={windowEnd}
-                    placeholder="24:00"
-                    inputMode="numeric"
-                    onChange={(e) => setWindowEnd(e.target.value)}
-                  />
-                </div>
-                {windowError ? (
-                  <p role="alert" className="mt-2 text-sm text-red-700">
-                    {windowError}
-                  </p>
-                ) : (
-                  <p className="mt-3 text-sm">
-                    {min >= 3
-                      ? "Minst tre chaufförer täcker hela det valda intervallet."
-                      : `Som lägst ${min} av 3 chaufförer under det valda intervallet.`}
-                  </p>
+                    Registrera {picked.length} dagar
+                  </Button>
                 )}
               </div>
-              {!windowError &&
-                coverage.map((part) => (
+              <div className="grid grid-cols-7 border-b bg-slate-50 text-center text-xs font-semibold">
+                {["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"].map((d) => (
+                  <span className="py-3" key={d}>
+                    {d}
+                  </span>
+                ))}
+              </div>
+              <div className="grid grid-cols-7">
+                {Array.from({ length: monthLeadingDays(anchor) }, (_, i) => (
                   <div
-                    key={part.start}
-                    className="flex flex-wrap items-start gap-x-4 gap-y-1 border-b px-4 py-3 last:border-0"
-                  >
-                    <strong className="w-28 shrink-0 text-sm tabular-nums">
-                      {minuteLabel(part.start)}–{minuteLabel(part.end)}
-                    </strong>
-                    <span
-                      className={`rounded px-2 py-0.5 text-sm font-semibold ${part.people.length >= 3 ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}
+                    key={"blank" + i}
+                    aria-hidden="true"
+                    className="min-h-24 border-b border-r bg-slate-50"
+                  />
+                ))}
+                {days.map((day) => {
+                  const jour = dutySlots(data, day, target).length > 0;
+                  const entry = rowFor(target, day);
+                  return (
+                    <button
+                      key={day}
+                      aria-label={`${dateLabel(day)}: ${labelFor(target, day)}${jour ? ", jouransvarig" : ""}`}
+                      aria-pressed={
+                        picking ? picked.includes(day) : selected === day
+                      }
+                      onClick={() => {
+                        setSelected(day);
+                        if (picking)
+                          setPicked((old) =>
+                            old.includes(day)
+                              ? old.filter((d) => d !== day)
+                              : [...old, day],
+                          );
+                        else openEditor([day]);
+                      }}
+                      className={`min-h-24 min-w-0 border-b border-r p-1 text-left sm:min-h-28 sm:p-3 ${picked.includes(day) || (!picking && selected === day) ? "ring-2 ring-inset ring-blue-500 " : ""}${jour ? "bg-emerald-50" : styles[entry?.status || "unknown"]}`}
                     >
-                      {part.people.length}/3
+                      <strong className="block text-sm">
+                        {Number(day.slice(-2))}
+                      </strong>
+                      <span className="block break-words text-[11px] leading-4 sm:text-xs">
+                        {entry?.status === "partial"
+                          ? "Del av dag"
+                          : entry?.status === "available"
+                            ? "Kan köra"
+                            : entry?.status === "unavailable"
+                              ? "Kan inte"
+                              : "Ej svar"}
+                      </span>
+                      {jour && (
+                        <span className="block text-[10px] font-bold text-emerald-800 sm:text-xs">
+                          Jour
+                        </span>
+                      )}
+                      {!selfOnly && (
+                        <span className="mt-1 block text-[10px] text-slate-500 sm:text-xs">
+                          {windowError ? "–" : `${dailyCapacity[day]}/3`}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+                {Array.from(
+                  {
+                    length:
+                      (7 - ((monthLeadingDays(anchor) + days.length) % 7)) % 7,
+                  },
+                  (_, i) => (
+                    <div
+                      key={"endblank" + i}
+                      aria-hidden="true"
+                      className="min-h-24 border-b border-r bg-slate-50"
+                    />
+                  ),
+                )}
+              </div>
+            </section>
+          ) : (
+            <div
+              ref={dayRow}
+              className="relative flex gap-2 overflow-x-auto pb-1 sm:grid sm:grid-cols-4 lg:grid-cols-7"
+              aria-label="Välj dag"
+            >
+              {days.map((day) => {
+                const count = dailyCapacity[day];
+                return (
+                  <button
+                    key={day}
+                    data-day={day}
+                    aria-pressed={selected === day}
+                    onClick={() => setSelected(day)}
+                    className={`min-h-24 min-w-28 shrink-0 rounded-xl border p-3 text-left sm:min-w-0 ${selected === day ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-white"}`}
+                  >
+                    <span className="block text-sm font-semibold">
+                      {dateLabel(day)}
                     </span>
-                    <span className="min-w-0 flex-1 text-sm text-slate-600">
-                      {part.people.map((p) => p.name).join(", ") ||
-                        "Ingen har angett tillgänglighet eller tilldelats jour."}
+                    <strong
+                      className={`block text-lg ${count >= 3 ? "text-emerald-700" : "text-amber-800"}`}
+                    >
+                      {selfOnly
+                        ? rowFor(target, day)?.status === "partial"
+                          ? "Del av dag"
+                          : rowFor(target, day)?.status === "available"
+                            ? "Kan köra"
+                            : rowFor(target, day)?.status === "unavailable"
+                              ? "Kan inte"
+                              : "Ej svar"
+                        : windowError
+                          ? "–"
+                          : `${count}/3`}
+                    </strong>
+                    <span className="text-xs text-slate-600">
+                      {selfOnly
+                        ? dutySlots(data, day, target).length
+                          ? "Jouransvarig"
+                          : "Min tillgänglighet"
+                        : "minst samtidigt"}
                     </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {!selfOnly && (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <section className="overflow-hidden rounded-2xl border bg-white">
+                <div className="border-b p-4">
+                  <h2 className="font-bold">Bemanning {dateLabel(selected)}</h2>
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <Input
+                      label="Kontrollera från"
+                      type="time"
+                      value={windowStart}
+                      onChange={(e) => setWindowStart(e.target.value)}
+                    />
+                    <Input
+                      label="Kontrollera till"
+                      value={windowEnd}
+                      placeholder="24:00"
+                      inputMode="numeric"
+                      onChange={(e) => setWindowEnd(e.target.value)}
+                    />
+                  </div>
+                  {windowError ? (
+                    <p role="alert" className="mt-2 text-sm text-red-700">
+                      {windowError}
+                    </p>
+                  ) : (
+                    <p className="mt-3 text-sm">
+                      {min >= 3
+                        ? "Minst tre chaufförer täcker hela det valda intervallet."
+                        : `Som lägst ${min} av 3 chaufförer under det valda intervallet.`}
+                    </p>
+                  )}
+                </div>
+                {!windowError &&
+                  coverage.map((part) => (
+                    <div
+                      key={part.start}
+                      className="flex flex-wrap items-start gap-x-4 gap-y-1 border-b px-4 py-3 last:border-0"
+                    >
+                      <strong className="w-28 shrink-0 text-sm tabular-nums">
+                        {minuteLabel(part.start)}–{minuteLabel(part.end)}
+                      </strong>
+                      <span
+                        className={`rounded px-2 py-0.5 text-sm font-semibold ${part.people.length >= 3 ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}
+                      >
+                        {part.people.length}/3
+                      </span>
+                      <span className="min-w-0 flex-1 text-sm text-slate-600">
+                        {part.people.map((p) => p.name).join(", ") ||
+                          "Ingen har angett tillgänglighet eller tilldelats jour."}
+                      </span>
+                    </div>
+                  ))}
+              </section>
+              <section className="rounded-2xl border bg-white p-4">
+                <h2 className="font-bold">Jouransvarig</h2>
+                {!dayJour.length && (
+                  <p className="mt-3 text-sm text-amber-800">
+                    Ingen tilldelad snöjour denna dag.
+                  </p>
+                )}
+                {dayJour.map((p) => (
+                  <div key={p.id} className="mt-3 rounded-lg bg-emerald-50 p-3">
+                    <strong className="text-emerald-900">{p.name}</strong>
+                    <p className="text-sm text-emerald-800">
+                      {dutySlots(data, selected, p.id)
+                        .map(([a, b]) => `${minuteLabel(a)}–${minuteLabel(b)}`)
+                        .join(", ")}
+                    </p>
+                    {dutyConflict(data, selected, p.id) && (
+                      <p className="mt-2 text-sm font-semibold text-red-800">
+                        Jouren krockar med angiven tillgänglighet eller godkänd
+                        frånvaro.
+                      </p>
+                    )}
                   </div>
                 ))}
+              </section>
+            </div>
+          )}
+          {view === "week" && !selfOnly && (
+            <section className="hidden overflow-hidden rounded-2xl border bg-white md:block">
+              <h2 className="border-b p-4 font-bold">Veckans tillgänglighet</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 bg-white p-3">Chaufför</th>
+                      {days.map((d) => (
+                        <th key={d} className="min-w-28 p-3">
+                          {dateLabel(d)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.people.map((p) => (
+                      <tr key={p.id} className="border-t">
+                        <th className="sticky left-0 bg-white p-3 font-semibold">
+                          {p.name}
+                        </th>
+                        {days.map((d) => {
+                          const jour = dutySlots(data, d, p.id).length > 0;
+                          return (
+                            <td key={d} className="p-1">
+                              <button
+                                disabled={!admin && p.id !== user?.id}
+                                onClick={() => openEditor([d], p.id)}
+                                className={`min-h-16 w-full rounded-lg p-2 text-left ${styles[rowFor(p.id, d)?.status || "unknown"]} ${jour ? "ring-2 ring-inset ring-emerald-500" : ""}`}
+                              >
+                                <span className="block">
+                                  {labelFor(p.id, d)}
+                                </span>
+                                {absent(p.id, d) && (
+                                  <strong className="block text-xs text-red-700">
+                                    Ej i tjänst
+                                  </strong>
+                                )}
+                                {jour && (
+                                  <strong className="block text-xs text-emerald-800">
+                                    Jouransvarig
+                                  </strong>
+                                )}
+                                {dutyConflict(data, d, p.id) && (
+                                  <strong className="block text-xs text-red-700">
+                                    Jourkonflikt
+                                  </strong>
+                                )}
+                              </button>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </section>
-            <section className="rounded-2xl border bg-white p-4">
-              <h2 className="font-bold">Jouransvarig</h2>
-              {!dayJour.length && (
-                <p className="mt-3 text-sm text-amber-800">
-                  Ingen tilldelad snöjour denna dag.
-                </p>
-              )}
-              {dayJour.map((p) => (
-                <div key={p.id} className="mt-3 rounded-lg bg-emerald-50 p-3">
-                  <strong className="text-emerald-900">{p.name}</strong>
-                  <p className="text-sm text-emerald-800">
-                    {dutySlots(data, selected, p.id)
-                      .map(([a, b]) => `${minuteLabel(a)}–${minuteLabel(b)}`)
-                      .join(", ")}
-                  </p>
-                  {dutyConflict(data, selected, p.id) && (
-                    <p className="mt-2 text-sm font-semibold text-red-800">
-                      Jouren krockar med angiven tillgänglighet eller godkänd
-                      frånvaro.
-                    </p>
+          )}
+          {!selfOnly && (
+            <section className="space-y-2 md:hidden">
+              <h2 className="font-bold">Chaufförer {dateLabel(selected)}</h2>
+              {data.people.map((p) => (
+                <div
+                  key={p.id}
+                  className={`flex items-center justify-between gap-2 rounded-xl border p-3 ${dutySlots(data, selected, p.id).length ? "border-emerald-500 bg-emerald-50" : "bg-white"}`}
+                >
+                  <div>
+                    <strong className="block">{p.name}</strong>
+                    <span className="text-sm text-slate-600">
+                      {labelFor(p.id, selected)}
+                    </span>
+                    {absent(p.id, selected) && (
+                      <strong className="block text-xs text-red-700">
+                        Ej i tjänst
+                      </strong>
+                    )}
+                    {dutySlots(data, selected, p.id).length > 0 && (
+                      <span className="block text-xs font-semibold text-emerald-800">
+                        Jouransvarig
+                      </span>
+                    )}
+                  </div>
+                  {(admin || p.id === user?.id) && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => openEditor([selected], p.id)}
+                    >
+                      Ändra
+                    </Button>
                   )}
                 </div>
               ))}
             </section>
-          </div>
-          <section className="hidden overflow-hidden rounded-2xl border bg-white md:block">
-            <h2 className="border-b p-4 font-bold">Veckans tillgänglighet</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr>
-                    <th className="sticky left-0 bg-white p-3">Chaufför</th>
-                    {days.map((d) => (
-                      <th key={d} className="min-w-28 p-3">
-                        {dateLabel(d)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.people.map((p) => (
-                    <tr key={p.id} className="border-t">
-                      <th className="sticky left-0 bg-white p-3 font-semibold">
-                        {p.name}
-                      </th>
-                      {days.map((d) => {
-                        const jour = dutySlots(data, d, p.id).length > 0;
-                        return (
-                          <td key={d} className="p-1">
-                            <button
-                              disabled={!admin && p.id !== user?.id}
-                              onClick={() => openEditor([d], p.id)}
-                              className={`min-h-16 w-full rounded-lg p-2 text-left ${styles[rowFor(p.id, d)?.status || "unknown"]} ${jour ? "ring-2 ring-inset ring-emerald-500" : ""}`}
-                            >
-                              <span className="block">{labelFor(p.id, d)}</span>
-                              {absent(p.id, d) && (
-                                <strong className="block text-xs text-red-700">
-                                  Ej i tjänst
-                                </strong>
-                              )}
-                              {jour && (
-                                <strong className="block text-xs text-emerald-800">
-                                  Jouransvarig
-                                </strong>
-                              )}
-                              {dutyConflict(data, d, p.id) && (
-                                <strong className="block text-xs text-red-700">
-                                  Jourkonflikt
-                                </strong>
-                              )}
-                            </button>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-          <section className="space-y-2 md:hidden">
-            <h2 className="font-bold">Chaufförer {dateLabel(selected)}</h2>
-            {data.people.map((p) => (
-              <div
-                key={p.id}
-                className={`flex items-center justify-between gap-2 rounded-xl border p-3 ${dutySlots(data, selected, p.id).length ? "border-emerald-500 bg-emerald-50" : "bg-white"}`}
-              >
-                <div>
-                  <strong className="block">{p.name}</strong>
-                  <span className="text-sm text-slate-600">
-                    {labelFor(p.id, selected)}
-                  </span>
-                  {absent(p.id, selected) && (
-                    <strong className="block text-xs text-red-700">
-                      Ej i tjänst
-                    </strong>
-                  )}
-                  {dutySlots(data, selected, p.id).length > 0 && (
-                    <span className="block text-xs font-semibold text-emerald-800">
-                      Jouransvarig
-                    </span>
-                  )}
-                </div>
-                {(admin || p.id === user?.id) && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => openEditor([selected], p.id)}
-                  >
-                    Ändra
-                  </Button>
-                )}
-              </div>
-            ))}
-          </section>
+          )}
         </>
       )}
       {!loading && !error && data.people.length === 0 && (
@@ -622,26 +825,53 @@ export function SnowAvailability() {
           className="min-w-0 space-y-4"
         >
           <div>
-            <p className="mb-2 font-semibold">Välj dagar</p>
-            <div className="flex flex-wrap gap-2">
-              {days.map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  aria-pressed={chosen.includes(d)}
-                  onClick={() =>
-                    setChosen((old) =>
-                      old.includes(d)
-                        ? old.filter((v) => v !== d)
-                        : [...old, d],
-                    )
-                  }
-                  className={`min-h-11 rounded-lg border px-3 py-2 text-sm ${chosen.includes(d) ? "border-blue-500 bg-blue-50 text-blue-800" : "border-slate-200"}`}
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="font-semibold">
+                {view === "month"
+                  ? `${chosen.length} dagar valda`
+                  : "Välj dagar"}
+              </p>
+              {view === "month" && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowDays(!showDays)}
                 >
-                  {dateLabel(d)}
-                </button>
-              ))}
+                  {showDays ? "Dölj dagar" : "Ändra dagar"}
+                </Button>
+              )}
             </div>
+            {(view === "week" || showDays) && (
+              <div className="flex flex-wrap gap-2">
+                {days.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    aria-pressed={chosen.includes(d)}
+                    onClick={() =>
+                      setChosen((old) =>
+                        old.includes(d)
+                          ? old.filter((v) => v !== d)
+                          : [...old, d],
+                      )
+                    }
+                    className={`min-h-11 rounded-lg border px-3 py-2 text-sm ${chosen.includes(d) ? "border-blue-500 bg-blue-50 text-blue-800" : "border-slate-200"}`}
+                  >
+                    {view === "month"
+                      ? `${Number(d.slice(-2))} ${new Date(d + "T12:00:00Z").toLocaleDateString("sv-SE", { weekday: "short", timeZone: "UTC" })}`
+                      : dateLabel(d)}
+                  </button>
+                ))}
+              </div>
+            )}
+            {view === "month" && !showDays && (
+              <p className="text-sm text-slate-600">
+                {chosen
+                  .slice()
+                  .sort()
+                  .map((d) => dateLabel(d))
+                  .join(", ")}
+              </p>
+            )}
           </div>
           <Select
             label="När kan du köra?"

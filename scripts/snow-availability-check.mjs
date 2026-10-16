@@ -13,6 +13,10 @@ const source = ts.transpileModule(
 const {
   addDays,
   weekStart,
+  monthStart,
+  shiftMonth,
+  monthDays,
+  monthLeadingDays,
   calendarDay,
   capacitySegments,
   dutyConflict,
@@ -23,6 +27,16 @@ const {
   "data:text/javascript;base64," + Buffer.from(source).toString("base64")
 );
 assert.equal(addDays("2025-12-31", 1), "2026-01-01");
+assert.equal(monthStart("2026-10-16"), "2026-10-01");
+assert.equal(shiftMonth("2026-12-15", 1), "2027-01-01");
+assert.equal(shiftMonth("2026-01-31", -1), "2025-12-01");
+assert.equal(monthDays("2028-02-01").length, 29);
+assert.equal(monthDays("2026-02-01").length, 28);
+assert.equal(monthDays("2026-10-01").length, 31);
+assert.equal(monthDays("2026-10-01").at(-1), "2026-10-31");
+assert.equal(monthLeadingDays("2026-10-01"), 3);
+assert.equal(monthLeadingDays("2026-06-01"), 0);
+
 assert.equal(weekStart("2026-10-18"), "2026-10-12");
 assert.equal(calendarDay(new Date("2026-10-15T23:00:00Z")), "2026-10-16");
 assert.equal(parseMinute("24:00"), 1440);

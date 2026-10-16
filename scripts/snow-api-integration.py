@@ -66,6 +66,15 @@ try:
   status,result=call('/rpc/vihem_clock_transition',method='POST',data=operation);assert status==200,result
   assert call('/rpc/vihem_clock_transition',method='POST',data=operation)==(200,result)
   assert len(call('/vihem_time_entries')[1])==1
+  status,snapshot=call('/rpc/vihem_snow_availability_snapshot',method='POST',data={'p_from':'2026-10-01','p_days':31});assert status==200,snapshot
+  assert snapshot['people']==[{'id':user,'name':'Snow API User'}],snapshot
+  availability={'p_operation':str(uuid.uuid4()),'p_user':user,'p_days':['2026-10-01','2026-10-31'],'p_status':'available','p_slots':[],'p_expected':{'2026-10-01':0,'2026-10-31':0}}
+  status,saved=call('/rpc/vihem_snow_availability_save',method='POST',data=availability);assert status==200 and len(saved)==2,saved
+  assert call('/rpc/vihem_snow_availability_save',method='POST',data=availability)==(200,saved)
+  assert call('/rpc/vihem_snow_availability_save',method='POST',data={**availability,'p_operation':str(uuid.uuid4()),'p_user':admin})[0]==403
+  assert call('/vihem_snow_availability')[0]==403  # Direct REST remains outside the driver's allowlist; use own-scoped snapshot.
+  status,reloaded=call('/rpc/vihem_snow_availability_snapshot',method='POST',data={'p_from':'2026-10-01','p_days':31});assert status==200 and len(reloaded['days'])==2
+  print('PASS driver calendar HTTP: self-only month, own save/reload/retry, other-person denied')
   print('PASS real HTTP: restricted tables/RPC/write denial, own data, clock + retry, admin unaffected, readiness hook verified')
 finally:
  subprocess.run(['docker','rm','-fv',container],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
