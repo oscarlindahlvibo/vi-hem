@@ -35,7 +35,7 @@
     "vibogruppen:dev": "npm --prefix apps/vibogruppen run dev",
     "test:kp": "node scripts/kp-unit-check.mjs",
     "test:resources": "node scripts/staff-resources-check.mjs",
-    "test:snow": "node scripts/snow-unit-check.mjs"
+    "test:snow": "node scripts/snow-unit-check.mjs && node scripts/snow-availability-check.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

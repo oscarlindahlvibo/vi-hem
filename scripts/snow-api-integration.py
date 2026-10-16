@@ -43,6 +43,14 @@ try:
   assert call('/rpc/vihem_snow_external_ready',who=admin,method='POST',data={})==(200,False)
   assert len(call('/vihem_snow_clients',who=admin)[1])==1
   status,result=call('/rpc/vihem_clock_transition',who=admin,method='POST',data=operation);assert status==200,result
+  status,snapshot=call('/rpc/vihem_snow_availability_snapshot',who=admin,method='POST',data={'p_from':'2026-11-02','p_days':7});assert status==200,snapshot
+  assert len(snapshot['people'])==2 and all(set(person)=={'id','name'} for person in snapshot['people'])
+  assert call('/rpc/vihem_snow_availability_snapshot',method='POST',data={'p_from':'2026-11-02','p_days':7})[0]==403
+  availability={'p_operation':str(uuid.uuid4()),'p_user':user,'p_days':['2026-11-02','2026-11-03'],'p_status':'partial','p_slots':[[0,360],[1020,1440]],'p_expected':{'2026-11-02':0,'2026-11-03':0}}
+  status,saved=call('/rpc/vihem_snow_availability_save',who=admin,method='POST',data=availability);assert status==200 and len(saved)==2,saved
+  assert call('/rpc/vihem_snow_availability_save',who=admin,method='POST',data=availability)==(200,saved)
+  assert call('/rpc/vihem_snow_availability_save',method='POST',data={**availability,'p_operation':str(uuid.uuid4())})[0]==403
+  print('PASS availability HTTP: admin snapshot/save/retry, minimal roster, staff denied, exactly two saved dates')
   print('PASS admin pilot HTTP: staff and external denied snow clock/data; admin allowed; external provisioning disabled')
  else:
   status,rows=call('/vihem_snow_clients');assert status==200 and len(rows)==1,(status,rows)
@@ -61,5 +69,5 @@ try:
   print('PASS real HTTP: restricted tables/RPC/write denial, own data, clock + retry, admin unaffected, readiness hook verified')
 finally:
  subprocess.run(['docker','rm','-fv',container],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
- sql(f"begin;delete from public.vihem_clock_operations where organisation_id='{org}';delete from public.vihem_time_entries where organisation_id='{org}';delete from public.vihem_snow_clients where organisation_id='{org}';delete from public.vihem_organisations where id='{org}';delete from auth.users where id in ('{user}','{admin}');commit;drop role if exists {role};",False)
+ sql(f"begin;delete from public.vihem_snow_availability_operations where organisation_id='{org}';delete from public.vihem_snow_availability where organisation_id='{org}';delete from public.vihem_clock_operations where organisation_id='{org}';delete from public.vihem_time_entries where organisation_id='{org}';delete from public.vihem_snow_clients where organisation_id='{org}';delete from public.vihem_organisations where id='{org}';delete from auth.users where id in ('{user}','{admin}');commit;drop role if exists {role};",False)
  print('Temporary REST container and synthetic QA fixtures removed')

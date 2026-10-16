@@ -23,6 +23,7 @@ import {
 } from "../../lib/clockTransitions";
 import type { TimeEntry } from "../../types";
 import { JourPage } from "../../pages/JourPage";
+import { SnowAvailability } from "./SnowAvailability";
 import { SnowMap } from "./SnowMap";
 import {
   activityLabel,
@@ -464,6 +465,7 @@ function SnowWorkspace({
           { key: "work", label: "Körpass" },
           { key: "map", label: "Karta & prioritet" },
           { key: "jour", label: "Snöjour" },
+          { key: "availability", label: "Tillgänglighet" },
           { key: "history", label: "Min tid" },
           ...(admin ? [{ key: "admin", label: "Planering" }] : []),
         ]}
@@ -794,6 +796,9 @@ function SnowWorkspace({
             </>
           )}
         </>
+      )}
+      {tab === "availability" && (
+        <SnowAvailability key={`${user?.id}:${user?.organisation_id}`} />
       )}
       {tab === "jour" &&
         (user?.role === "snow" ? <SnowDutyOnly /> : <JourPage snowOnly />)}
