@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import ts from 'typescript';
+const source = await readFile(new URL('../src/lib/shortStayMessageBookings.ts', import.meta.url), 'utf8');
+const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } }).outputText;
+const { messageBookings } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const booking = { id: 'qa-booking', unit_id: 'qa-unit', beds24_booking_id: '123', guest_name: 'Anna Andersson', channel_name: 'Booking.com', start_date: '2026-10-17', end_date: '2026-10-20', unit: { name: 'Rum 2' } };
+assert.deepEqual(messageBookings([booking]), [{ ...Object.fromEntries(Object.entries(booking).filter(([key]) => key !== 'unit')), unit_name: 'Rum 2' }]);
+assert.equal(messageBookings([booking, { ...booking, id: 'old-booking' }]).length, 1);
+assert.equal(messageBookings([{ ...booking, unit: [{ name: 'Rum 1' }] }])[0].unit_name, 'Rum 1');
+assert.equal(messageBookings([{ ...booking, unit: null }])[0].unit_name, 'Boende');
+for (const beds24_booking_id of [null, '', 'manual-id']) assert.deepEqual(messageBookings([{ ...booking, beds24_booking_id }]), []);
+console.log('PASS: booking without history is selectable, duplicate provider IDs collapsed, room mapping and unconnected manual bookings excluded.');

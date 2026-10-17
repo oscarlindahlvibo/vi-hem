@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Download, MessageSquare, RefreshCw } from 'lucide-react';
 import { ShortStayTemplatePicker } from './ShortStayTemplatePicker';
 import { supabase } from '../lib/supabase';
-import { Button, Input } from './ui';
+import { Button, Input, Modal } from './ui';
+import { ShortStayMessageBookingPicker } from './ShortStayMessageBookingPicker';
+import { messageBookingColumns, messageBookings, type GuestMessageBooking } from '../lib/shortStayMessageBookings';
 
 interface Thread {
   unit_id: string; beds24_booking_id: string; booking_id: string | null; guest_name: string | null;
@@ -20,6 +22,23 @@ export function ShortStayMessages({ organisationId, bookingId, onOpenBooking }: 
   organisationId: string; bookingId?: string; onOpenBooking?: (id: string) => void;
 }) {
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [bookingPickerOpen, setBookingPickerOpen] = useState(false);
+  const [threadDirty, setThreadDirty] = useState(false);
+  const [threadBusy, setThreadBusy] = useState(false);
+  const onDraftState = useCallback((dirty: boolean, busy: boolean) => { setThreadDirty(dirty); setThreadBusy(busy); }, []);
+  const [pendingSelection, setPendingSelection] = useState<{ id: string | null; booking?: GuestMessageBooking } | null>(null);
+  function switchThread(next: string | null, booking?: GuestMessageBooking) {
+    if (booking) setTarget({ ...booking, organisation_id: organisationId });
+    setThreadDirty(false); setSelected(next); setBookingPickerOpen(false); setPendingSelection(null);
+  }
+  function chooseThread(next: string | null, booking?: GuestMessageBooking) {
+    if (threadBusy) return;
+    if (next === selected) { setBookingPickerOpen(false); return; }
+    if (threadDirty) { setPendingSelection({ id: next, booking }); return; }
+    switchThread(next, booking);
+  }
+  const [target, setTarget] = useState<(GuestMessageBooking & { organisation_id: string }) | null>(null);
+  const [targetError, setTargetError] = useState('');
   const [selected, setSelected] = useState<string | null>(bookingId || null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -31,6 +50,22 @@ export function ShortStayMessages({ organisationId, bookingId, onOpenBooking }: 
   const [revision, setRevision] = useState(0);
 
   useEffect(() => { setSelected(bookingId || null); }, [bookingId, organisationId]);
+  useEffect(() => {
+    let live = true;
+    setTargetError('');
+    if (!selected) return;
+    void (async () => {
+      try {
+        const { data, error } = await supabase.from('vihem_short_stay_bookings').select(messageBookingColumns)
+          .eq('organisation_id', organisationId).eq('beds24_booking_id', selected).order('created_at', { ascending: false }).limit(1);
+        if (error) throw error;
+        const booking = messageBookings(data || [])[0];
+        if (live) setTarget(booking ? { ...booking, organisation_id: organisationId } : null);
+      } catch { if (live) setTargetError('Kunde inte läsa bokningsuppgifterna. Hämta meddelanden för att försöka igen.'); }
+    })();
+    return () => { live = false; };
+  }, [organisationId, selected, revision]);
+
   useEffect(() => {
     let live = true;
     async function load() {
@@ -65,19 +100,20 @@ export function ShortStayMessages({ organisationId, bookingId, onOpenBooking }: 
     finally { setSyncing(false); setRevision(value => value + 1); }
   }
   const filtered = useMemo(() => threads.filter(thread => `${thread.guest_name || ''} ${thread.unit_name} ${thread.beds24_booking_id} ${thread.channel_name || ''}`.toLowerCase().includes(search.toLowerCase())), [threads, search]);
-  const current = threads.find(thread => thread.beds24_booking_id === selected);
+  const current = threads.find(thread => thread.beds24_booking_id === selected) || (target?.organisation_id === organisationId && target.beds24_booking_id === selected ? { ...target, booking_id: target.id } : undefined);
   return <section className="space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h2 className="font-semibold text-slate-900 flex items-center gap-2"><MessageSquare className="h-5 w-5" /> Gästmeddelanden</h2><p className="text-sm text-slate-500">Hämtas från Beds24 var 15:e minut. Svara direkt i konversationen för kanalbokningar.</p></div>
-      <Button variant="secondary" onClick={() => void sync()} loading={syncing}><RefreshCw className="h-4 w-4" /> Hämta meddelanden</Button>
+      <div><h2 className="font-semibold text-slate-900 flex items-center gap-2"><MessageSquare className="h-5 w-5" /> Gästmeddelanden</h2><p className="text-sm text-slate-500">Hämtas från Beds24 var 15:e minut. Skriv till gästen via bokningskanalen, även innan gästen har hört av sig.</p></div>
+      <div className="flex flex-wrap gap-2">{!bookingId && <Button disabled={threadBusy} onClick={() => setBookingPickerOpen(true)}>Nytt meddelande</Button>}<Button variant="secondary" onClick={() => void sync()} loading={syncing}><RefreshCw className="h-4 w-4" /> Hämta meddelanden</Button></div>
     </div>
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+    {targetError && <p role="alert" className="text-sm text-red-700">{targetError}</p>}
     {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
     <div className={`grid gap-3 ${bookingId ? '' : 'md:grid-cols-[minmax(220px,1fr)_minmax(0,2fr)]'}`}>
       {!bookingId && <div className={`rounded-xl border bg-white p-3 ${selected ? 'hidden md:block' : ''}`}>
         <Input aria-label="Sök konversation" placeholder="Sök gäst, rum eller bokning" value={search} onChange={event => setSearch(event.target.value)} />
         <div className="mt-3 max-h-[65vh] overflow-y-auto space-y-1">
-          {loading && !threads.length ? <p className="p-3 text-sm text-slate-500">Hämtar konversationer…</p> : !filtered.length ? <p className="p-3 text-sm text-slate-500">Inga konversationer hittades. Hämta meddelanden för att uppdatera från Beds24.</p> : filtered.map(thread => <button key={thread.beds24_booking_id} onClick={() => setSelected(thread.beds24_booking_id)} className={`w-full rounded-lg p-3 text-left ${selected === thread.beds24_booking_id ? 'bg-blue-50 ring-1 ring-blue-200' : 'hover:bg-slate-50'}`}>
+          {loading && !threads.length ? <p className="p-3 text-sm text-slate-500">Hämtar konversationer…</p> : !filtered.length ? <p className="p-3 text-sm text-slate-500">Inga konversationer hittades. Välj Nytt meddelande för att kontakta en bokad gäst eller hämta meddelanden från Beds24.</p> : filtered.map(thread => <button key={thread.beds24_booking_id} disabled={threadBusy} onClick={() => { chooseThread(thread.beds24_booking_id); }} className={`w-full rounded-lg p-3 text-left ${selected === thread.beds24_booking_id ? 'bg-blue-50 ring-1 ring-blue-200' : 'hover:bg-slate-50'}`}>
             <div className="font-medium text-slate-900">{thread.guest_name || `Bokning ${thread.beds24_booking_id}`}</div>
             <p className="text-xs text-slate-500">{thread.unit_name} · {thread.channel_name || 'Beds24'}</p>
             <p className="mt-1 truncate text-sm text-slate-600">{thread.last_message || 'Bilaga'}</p>
@@ -88,16 +124,24 @@ export function ShortStayMessages({ organisationId, bookingId, onOpenBooking }: 
       </div>}
       <div className={`min-w-0 rounded-xl border bg-white p-3 sm:p-4 ${!selected && !bookingId ? 'hidden md:block' : ''}`}>
         {selected ? <>
-          {!bookingId && <button onClick={() => setSelected(null)} className="mb-3 flex items-center gap-1 text-sm text-blue-600 md:hidden"><ArrowLeft className="h-4 w-4" /> Konversationer</button>}
+          {!bookingId && <button disabled={threadBusy} onClick={() => { chooseThread(null); }} className="mb-3 flex items-center gap-1 text-sm text-blue-600 md:hidden"><ArrowLeft className="h-4 w-4" /> Konversationer</button>}
           <div className="mb-4 flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-semibold">{current?.guest_name || `Bokning ${selected}`}</h3><p className="text-sm text-slate-500">{current?.unit_name} {current?.channel_name && `· ${current.channel_name}`}</p>{current?.start_date && <p className="text-xs text-slate-500">{current.start_date} – {current.end_date}</p>}</div>{current?.booking_id && onOpenBooking && <Button variant="secondary" onClick={() => onOpenBooking(current.booking_id!)}>Öppna bokning</Button>}</div>
-          <ShortStayMessageThread key={`${organisationId}:${selected}`} organisationId={organisationId} bookingId={selected} unitId={current?.unit_id} guestName={current?.guest_name} revision={revision} onSent={() => setRevision(value => value + 1)} />
-        </> : <p className="py-12 text-center text-sm text-slate-500">Välj en konversation för att läsa chattflödet.</p>}
+          <ShortStayMessageThread key={`${organisationId}:${selected}`} organisationId={organisationId} bookingId={selected} unitId={current?.unit_id} guestName={current?.guest_name} onDraftState={onDraftState} revision={revision} onSent={() => setRevision(value => value + 1)} />
+        </> : <p className="py-12 text-center text-sm text-slate-500">Välj en konversation eller Nytt meddelande för att kontakta en bokad gäst.</p>}
       </div>
     </div>
+    <Modal open={bookingPickerOpen} onClose={() => setBookingPickerOpen(false)} title="Nytt gästmeddelande" size="lg" mobileFullscreen>
+      {bookingPickerOpen && <ShortStayMessageBookingPicker key={organisationId} organisationId={organisationId} onSelect={booking => {
+        chooseThread(booking.beds24_booking_id, booking);
+      }} />}
+    </Modal>
+    <Modal open={!!pendingSelection} onClose={() => setPendingSelection(null)} title="Lämna oskickat meddelande?" size="sm" footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setPendingSelection(null)}>Behåll utkastet</Button><Button variant="danger" onClick={() => { if (pendingSelection) switchThread(pendingSelection.id, pendingSelection.booking); }}>Byt konversation</Button></div>}>
+      <p className="text-sm text-slate-600">Texten har inte skickats och försvinner om du byter konversation. Vill du fortsätta?</p>
+    </Modal>
   </section>;
 }
 
-function ShortStayMessageThread({ organisationId, bookingId, unitId, guestName, revision, onSent }: { organisationId: string; bookingId: string; unitId?: string; guestName?: string | null; revision: number; onSent: () => void }) {
+function ShortStayMessageThread({ organisationId, bookingId, unitId, guestName, onDraftState, revision, onSent }: { organisationId: string; bookingId: string; unitId?: string; guestName?: string | null; onDraftState: (dirty: boolean, busy: boolean) => void; revision: number; onSent: () => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -112,6 +156,7 @@ function ShortStayMessageThread({ organisationId, bookingId, unitId, guestName, 
   const [uncertain, setUncertain] = useState(false);
   const requestId = useRef<string | null>(null);
   const inFlight = useRef(false);
+  useEffect(() => { onDraftState(!!draft.trim(), sending); }, [draft, sending, onDraftState]);
   useEffect(() => {
     let live = true;
     void supabase.functions.invoke('vihem-send-beds24-message', { body: { action: 'context', bookingId } }).then(({ data, error }) => {
@@ -166,7 +211,7 @@ function ShortStayMessageThread({ organisationId, bookingId, unitId, guestName, 
     void refresh();
     const timer = window.setInterval(() => void refresh(), 60000);
     return () => { live = false; window.clearInterval(timer); };
-  }, [load, revision, limit]);
+  }, [load, revision, limit, bookingId, organisationId]);
   async function attachment(message: Message) {
     setError('');
     const { data, error: downloadError } = await supabase.from('vihem_short_stay_messages').select('attachment_base64').eq('organisation_id', organisationId).eq('id', message.id).single();
@@ -183,7 +228,7 @@ function ShortStayMessageThread({ organisationId, bookingId, unitId, guestName, 
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
     {hasMore && <Button variant="secondary" onClick={() => setLimit(value => value + 100)}>Visa äldre meddelanden</Button>}
     <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-1">
-      {loading ? <p className="text-sm text-slate-500">Hämtar meddelanden…</p> : !messages.length ? <p className="text-sm text-slate-500">Inga meddelanden har hämtats för bokningen ännu.</p> : messages.map(message => <article key={message.id} className={`max-w-[95%] rounded-xl p-3 ${message.source === 'host' ? 'ml-auto bg-blue-50' : message.source === 'guest' ? 'bg-slate-100' : 'border border-amber-100 bg-amber-50'}`}>
+      {loading ? <p className="text-sm text-slate-500">Hämtar meddelanden…</p> : !messages.length ? <p className="text-sm text-slate-500">Inga tidigare meddelanden. Du kan skriva det första meddelandet nedan.</p> : messages.map(message => <article key={message.id} className={`max-w-[95%] rounded-xl p-3 ${message.source === 'host' ? 'ml-auto bg-blue-50' : message.source === 'guest' ? 'bg-slate-100' : 'border border-amber-100 bg-amber-50'}`}>
         <div className="mb-1 flex flex-wrap gap-x-3 text-xs text-slate-500"><span className="font-medium">{labels[message.source]}</span><time dateTime={message.sent_at}>{dateTime(message.sent_at)}</time></div>
         <p className="whitespace-pre-wrap break-words text-sm text-slate-800">{message.message}</p>
         {message.attachment_name && <button onClick={() => void attachment(message)} className="mt-2 flex max-w-full items-center gap-1 break-all text-left text-sm text-blue-700"><Download className="h-4 w-4 shrink-0" /> {message.attachment_name}</button>}

@@ -2686,7 +2686,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
           <section hidden={bookingStep !== 'stay'} className="space-y-4">
           {editingBooking?.beds24_booking_id && organisationId && ['admin', 'superadmin', 'staff'].includes(user?.role || '') && (
             <details className="rounded-lg border border-slate-200 p-3">
-              <summary className="cursor-pointer font-medium text-slate-800">Gästmeddelanden från Beds24</summary>
+              <summary className="cursor-pointer font-medium text-slate-800">Skriv till gästen · Beds24</summary>
               <div className="mt-3"><ShortStayMessages organisationId={organisationId} bookingId={editingBooking.beds24_booking_id} /></div>
             </details>
           )}
