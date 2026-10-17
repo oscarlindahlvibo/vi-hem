@@ -19,3 +19,15 @@ export function validateTemplate(name: string, variants: { language: string; tex
   }
   return translations;
 }
+
+/** Bookings currently store a full guest_name. Keep hyphenated names intact. */
+export function renderMessageTemplate(text: string, guestName?: string | null): string {
+  const firstName = guestName?.trim().split(/\s+/u)[0] || '';
+  if (/\[FIRST_NAME\]/i.test(text) && !firstName) {
+    throw new Error('Gästens namn saknas i bokningen. Lägg till namnet eller skriv meddelandet manuellt.');
+  }
+  // A callback keeps characters such as $& in the guest name as literal text.
+  const rendered = text.replace(/\[FIRST_NAME\]/gi, () => firstName);
+  if (rendered.length > 5000) throw new Error('Meddelandet blir längre än 5 000 tecken med gästens namn. Korta mallen innan du använder den.');
+  return rendered;
+}

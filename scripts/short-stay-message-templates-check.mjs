@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import ts from 'typescript';
 const source = await readFile(new URL('../src/lib/shortStayMessageTemplates.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } }).outputText;
-const { validateTemplate, languageLabel } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const { validateTemplate, languageLabel, renderMessageTemplate } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 const translations = validateTemplate(' Incheckning ', [{language:' SV ',text:' Hej!\nVälkommen. '},{language:'en-gb',text:'Welcome!'},{language:'ar',text:'أهلاً'}]);
 assert.deepEqual(translations,{sv:'Hej!\nVälkommen.','en-gb':'Welcome!',ar:'أهلاً'});
 assert.equal(languageLabel('sv'),'Svenska'); assert.equal(languageLabel('en-gb'),'en-gb');
@@ -16,3 +16,14 @@ assert.throws(()=>validateTemplate('Mall',[{language:'en',text:'  '}]),/Skriv en
 assert.throws(()=>validateTemplate('Mall',[{language:'sv',text:'a'.repeat(5001)}]),/Skriv en text/);
 assert.equal(validateTemplate('Mall',[{language:'sv',text:'a'.repeat(5000)}]).sv.length,5000);
 console.log('PASS: independent multilingual texts, custom language codes, Swedish/English/Arabic, duplicate languages, empty/oversized content and preserved line breaks.');
+
+assert.equal(renderMessageTemplate('Hej [FIRST_NAME], välkommen!\nHälsningar', '  Anna-Lena   Andersson  '), 'Hej Anna-Lena, välkommen!\nHälsningar');
+assert.equal(renderMessageTemplate('Hi [FIRST_NAME]! [first_name]', '李 雷'), 'Hi 李! 李');
+assert.equal(renderMessageTemplate('[FIRST_NAME]', 'Jean-Pierre'), 'Jean-Pierre');
+assert.equal(renderMessageTemplate('[FIRST_NAME] [FIRST_NAME]', '$& Test'), '$& $&');
+for (const name of [null, undefined, '', '  ']) assert.throws(() => renderMessageTemplate('Hej [FIRST_NAME]', name), /namn saknas/);
+assert.equal(renderMessageTemplate('Välkommen!\n[OTHER_TOKEN]', null), 'Välkommen!\n[OTHER_TOKEN]');
+assert.throws(() => renderMessageTemplate('[FIRST_NAME]'.repeat(500), 'Anna-Maria-Louise'), /5 000/);
+assert.equal(renderMessageTemplate('Hej [FIRST_NAME]', 'Östen Åkesson'), 'Hej Östen');
+assert.equal(validateTemplate('Välkommen', [{language:'sv',text:'Hej [FIRST_NAME]!'}]).sv, 'Hej [FIRST_NAME]!');
+console.log('PASS: guest first-name preview/apply, repeated tokens, Unicode/hyphens/literal replacement, missing guest blocked, rendered length limit, stored template unchanged.');

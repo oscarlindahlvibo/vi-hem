@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { Button } from './ui';
-import { languageLabel, MessageTemplate } from '../lib/shortStayMessageTemplates';
+import { languageLabel, MessageTemplate, renderMessageTemplate } from '../lib/shortStayMessageTemplates';
 
-export function ShortStayTemplatePicker({ organisationId, bookingId, unitId, disabled, hasDraft, onApply }: {
-  organisationId: string; bookingId: string; unitId?: string; disabled: boolean; hasDraft: boolean; onApply: (text: string) => void;
+export function ShortStayTemplatePicker({ organisationId, bookingId, unitId, guestName, disabled, hasDraft, onApply }: {
+  organisationId: string; bookingId: string; unitId?: string; guestName?: string | null; disabled: boolean; hasDraft: boolean; onApply: (text: string) => void;
 }) {
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [selected, setSelected] = useState('');
@@ -30,6 +30,12 @@ export function ShortStayTemplatePicker({ organisationId, bookingId, unitId, dis
   }, [organisationId, bookingId, unitId]);
   const template = templates.find(value => value.id === selected);
   const languages = Object.keys(template?.translations || {});
+  const rawText = template?.translations[language] || '';
+  let renderedText = rawText;
+  let renderError = '';
+  try { renderedText = renderMessageTemplate(rawText, guestName); }
+  catch (err) { renderError = (err as Error).message; }
+
   return <div className="space-y-2 rounded-lg bg-slate-50 p-3">
     <p className="text-sm font-medium">Använd meddelandemall</p>
     {loading ? <p className="text-sm text-slate-500">Hämtar lägenhetens mallar…</p> : error ? <p className="text-sm text-amber-700">{error}</p> : !templates.length ? <p className="text-sm text-slate-500">Inga mallar för den här lägenheten. Skapa dem under Meddelandemallar.</p> : <>
@@ -40,12 +46,14 @@ export function ShortStayTemplatePicker({ organisationId, bookingId, unitId, dis
           setLanguage(Object.prototype.hasOwnProperty.call(translations, language) ? language : Object.prototype.hasOwnProperty.call(translations, 'sv') ? 'sv' : Object.keys(translations)[0] || '');
         }} className="mt-1 block w-full rounded-lg border p-2 text-base"><option value="">Välj mall</option>{templates.map(value => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label>
         <label className="min-w-[120px] flex-1 text-sm">Språk<select aria-label="Välj mallspråk" value={language} disabled={disabled || !template} onChange={event => setLanguage(event.target.value)} className="mt-1 block w-full rounded-lg border p-2 text-base">{!template && <option value="">Välj språk</option>}{languages.map(code => <option key={code} value={code}>{languageLabel(code)}</option>)}</select></label>
-        <Button type="button" variant="secondary" disabled={disabled || !template?.translations[language]} onClick={() => {
+        <Button type="button" variant="secondary" disabled={disabled || !rawText || !!renderError} onClick={() => {
           if (hasDraft && !window.confirm('Ersätta texten i svarsfältet med mallen?')) return;
-          onApply(template!.translations[language]);
+          if (renderError) return;
+          onApply(renderedText);
         }}>Lägg in mall</Button>
       </div>
-      {template?.translations[language] && <details className="text-sm"><summary className="cursor-pointer text-slate-500">Förhandsvisa mall</summary><p className="mt-2 whitespace-pre-wrap break-words text-slate-700">{template.translations[language]}</p></details>}
+      {renderError && <p role="alert" className="text-sm text-amber-800">{renderError}</p>}
+      {template?.translations[language] && <details className="text-sm"><summary className="cursor-pointer text-slate-500">Förhandsvisa mall</summary><p className="mt-2 whitespace-pre-wrap break-words text-slate-700">{renderedText}</p></details>}
     </>}
   </div>;
 }
