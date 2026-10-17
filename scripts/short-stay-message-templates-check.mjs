@@ -21,7 +21,7 @@ assert.equal(renderMessageTemplate('Hej [FIRST_NAME], välkommen!\nHälsningar',
 assert.equal(renderMessageTemplate('Hi [FIRST_NAME]! [first_name]', '李 雷'), 'Hi 李! 李');
 assert.equal(renderMessageTemplate('[FIRST_NAME]', 'Jean-Pierre'), 'Jean-Pierre');
 assert.equal(renderMessageTemplate('[FIRST_NAME] [FIRST_NAME]', '$& Test'), '$& $&');
-for (const name of [null, undefined, '', '  ']) assert.throws(() => renderMessageTemplate('Hej [FIRST_NAME]', name), /namn saknas/);
+for (const name of [null, undefined, '', '  ', 'Beds24-bokning']) assert.throws(() => renderMessageTemplate('Hej [FIRST_NAME]', name), /namn saknas/);
 assert.equal(renderMessageTemplate('Välkommen!\n[OTHER_TOKEN]', null), 'Välkommen!\n[OTHER_TOKEN]');
 assert.throws(() => renderMessageTemplate('[FIRST_NAME]'.repeat(500), 'Anna-Maria-Louise'), /5 000/);
 assert.equal(renderMessageTemplate('Hej [FIRST_NAME]', 'Östen Åkesson'), 'Hej Östen');

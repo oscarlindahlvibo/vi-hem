@@ -22,7 +22,8 @@ export function validateTemplate(name: string, variants: { language: string; tex
 
 /** Bookings currently store a full guest_name. Keep hyphenated names intact. */
 export function renderMessageTemplate(text: string, guestName?: string | null): string {
-  const firstName = guestName?.trim().split(/\s+/u)[0] || '';
+  const name = guestName?.trim() || '';
+  const firstName = name.toLocaleLowerCase('sv-SE') === 'beds24-bokning' ? '' : name.split(/\s+/u)[0];
   if (/\[FIRST_NAME\]/i.test(text) && !firstName) {
     throw new Error('Gästens namn saknas i bokningen. Lägg till namnet eller skriv meddelandet manuellt.');
   }
