@@ -4,7 +4,7 @@ import ts from 'typescript';
 const source = await readFile(new URL('../supabase/functions/_shared/beds24-send-message.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 const { sendGuestMessage, acceptsChannelMessages } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
-for (const channel of ['booking', 'airbnb', 'expedia', 'agoda']) assert.equal(acceptsChannelMessages({ channel }), true);
+for (const channel of ['booking', 'airbnb', 'expedia', 'agoda', 'vrbo']) assert.equal(acceptsChannelMessages({ channel }), true);
 for (const channel of [null, '', 'direct', 'airbnbical']) assert.equal(acceptsChannelMessages({ channel }), false);
 let calls = 0;
 const capture = async (url, options) => {

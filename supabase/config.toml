@@ -530,3 +530,7 @@ verify_jwt = false
 
 [functions.vihem-kp-worker]
 verify_jwt = false
+
+[functions.vihem-auto-guest-messages]
+# Authenticates the private scheduled-sync secret in the function, never a browser token.
+verify_jwt = false

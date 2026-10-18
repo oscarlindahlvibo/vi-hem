@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ShortStayAutoMessages } from './ShortStayAutoMessages';
 import { supabase } from '../lib/supabase';
 import { Button, Input } from './ui';
 import { languageLabel, MessageTemplate, templateLanguages, validateTemplate } from '../lib/shortStayMessageTemplates';
@@ -54,6 +55,7 @@ export function ShortStayMessageTemplates({ organisationId, units, canManage }: 
     setBusy(true); setError(''); setNotice('');
     try {
       const { data, error } = await supabase.from('vihem_short_stay_message_templates').delete().eq('organisation_id', organisationId).eq('unit_id', unitId).eq('id', template.id).eq('updated_at', template.updated_at).select('id');
+      if (error?.code === '23503') throw new Error('Mallen används av en automatisk utskicksregel och behålls för historiken. Stäng av regeln om den inte ska användas.');
       if (error || !data?.length) throw new Error('Kunde inte ta bort mallen. Den kan ha ändrats av någon annan.');
       setOpened(false); setNotice('Mallen är borttagen.'); setRevision(value => value + 1);
     } catch (err) { setError((err as Error).message); }
@@ -81,5 +83,6 @@ export function ShortStayMessageTemplates({ organisationId, units, canManage }: 
         <Button type="button" variant="ghost" disabled={busy} onClick={() => { if (!canManage || window.confirm('Stänga mallen och lämna utkastet?')) setOpened(false); }}>Stäng</Button>
       </form>}
     </div>
+    {canManage && <ShortStayAutoMessages key={`${organisationId}:${revision}`} organisationId={organisationId} units={units} />}
   </section>;
 }

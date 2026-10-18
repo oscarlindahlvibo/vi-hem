@@ -15,5 +15,5 @@ export async function sendGuestMessage(token: string, bookingId: string, message
   } catch { return 'pending'; }
 }
 export function acceptsChannelMessages(booking: any) {
-  return ['booking', 'airbnb', 'expedia', 'agoda'].includes(String(booking.channel || '').toLowerCase());
+  return ['booking', 'airbnb', 'expedia', 'agoda', 'vrbo'].includes(String(booking.channel || '').toLowerCase());
 }
