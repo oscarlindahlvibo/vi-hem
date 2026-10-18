@@ -22,7 +22,7 @@ SELECT public.vihem_save_guest_message_rule(r,0,u,t,ARRAY['booking','expedia'],'
 SELECT pg_temp.expect('lost create response retries one rule',(SELECT count(*)=1 FROM public.vihem_guest_message_rules));
 SELECT pg_temp.expect('admin reads own rule',(SELECT count(*)=1 FROM public.vihem_guest_message_rules));
 SELECT pg_temp.reject('admin cannot use foreign template',format('select public.vihem_save_guest_message_rule(%L,0,%L,%L,ARRAY[%L],%L,%L,0,%L,false)',gen_random_uuid(),u2,t2,'booking','en','arrival','10:00')) FROM f;
-SELECT pg_temp.reject('missing translation rejected',format('select public.vihem_save_guest_message_rule(%L,0,%L,%L,ARRAY[%L],%L,%L,0,%L,false)',gen_random_uuid(),u,t,'booking','zz','arrival','10:00')) FROM f;
+SELECT pg_temp.reject('missing translation rejected',format('select public.vihem_save_guest_message_rule(%L,0,%L,%L,ARRAY[%L],%L,%L,0,%L,true)',gen_random_uuid(),u,t,'booking','zz','arrival','10:00')) FROM f;
 SELECT pg_temp.reject('direct admin writes denied',format('update public.vihem_guest_message_rules set enabled=true where id=%L',r)) FROM f;
 SELECT public.vihem_save_guest_message_rule(r,1,u,t,ARRAY['booking','expedia'],'en','arrival',0,(stamp AT TIME ZONE 'Europe/Stockholm')::time,true) IS NOT NULL FROM f;
 SELECT pg_temp.reject('stale revision rejected',format('select public.vihem_save_guest_message_rule(%L,1,%L,%L,ARRAY[%L],%L,%L,0,%L,false)',r,u,t,'booking','en','arrival','10:00')) FROM f;
@@ -38,6 +38,14 @@ SELECT pg_temp.expect('stale rule rejected',public.vihem_claim_guest_message(r,1
 SELECT pg_temp.expect('one durable claim allowed',public.vihem_claim_guest_message(r,2,b,'Hi QA',(select updated_at FROM public.vihem_short_stay_message_templates WHERE id=f.t)) IS NOT NULL) FROM f;
 SELECT pg_temp.expect('same booking cannot be claimed twice',public.vihem_claim_guest_message(r,2,b,'Hi QA',(select updated_at FROM public.vihem_short_stay_message_templates WHERE id=f.t)) IS NULL) FROM f;
 SELECT pg_temp.expect('one job and one receipt created',(select count(*)=1 FROM public.vihem_guest_message_jobs WHERE organisation_id=f.o) AND (select count(*)=1 FROM public.vihem_short_stay_message_sends WHERE organisation_id=f.o)) FROM f;
+RESET ROLE;
+UPDATE public.vihem_short_stay_units SET beds24_enabled=false WHERE id=(SELECT u FROM f);
+UPDATE public.vihem_short_stay_message_templates SET translations='{"sv":"Hej"}' WHERE id=(SELECT t FROM f);
+SELECT set_config('request.jwt.claims',jsonb_build_object('sub',a,'role','authenticated')::text,true),set_config('request.jwt.claim.sub',a::text,true) FROM f;
+SET LOCAL ROLE authenticated;
+SELECT public.vihem_save_guest_message_rule(r,2,u,t,ARRAY['booking'],'en','arrival',0,'10:00',false) FROM f;
+SELECT pg_temp.expect('pause succeeds after room or language removed',(SELECT NOT enabled FROM public.vihem_guest_message_rules WHERE id=(SELECT r FROM f)));
+SELECT pg_temp.reject('broken room or translation cannot be reactivated',format('select public.vihem_save_guest_message_rule(%L,3,%L,%L,ARRAY[%L],%L,%L,0,%L,true)',r,u,t,'booking','en','arrival','10:00')) FROM f;
 RESET ROLE;
 SELECT set_config('request.jwt.claims',jsonb_build_object('sub',s,'role','authenticated')::text,true),set_config('request.jwt.claim.sub',s::text,true) FROM f;
 SET LOCAL ROLE authenticated;

@@ -139,7 +139,8 @@ export function ShortStayAutoMessages({
   async function save() {
     if (!editing || lock.current) return;
     if (
-      !template?.translations[editing.language] ||
+      !template ||
+      (editing.enabled && !template.translations[editing.language]) ||
       !editing.channels.length ||
       !editing.send_time ||
       !Number.isInteger(editing.days_offset) ||
