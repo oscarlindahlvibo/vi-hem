@@ -8,7 +8,7 @@ const compile = (source) =>
       target: ts.ScriptTarget.ES2022,
     },
   }).outputText;
-const core = await import(
+const originalCore = await import(
   "data:text/javascript;base64," +
     Buffer.from(
       compile(
@@ -19,6 +19,52 @@ const core = await import(
       ),
     ).toString("base64")
 );
+const languageCore = await import(
+  "data:text/javascript;base64," +
+    Buffer.from(
+      compile(
+        fs.readFileSync(
+          "supabase/functions/_shared/shortstay-language.ts",
+          "utf8",
+        ),
+      ),
+    ).toString("base64")
+);
+const core = { ...originalCore, ...languageCore };
+const translations = {
+  sv: "Hej [FIRST_NAME]",
+  en: "Hi [FIRST_NAME]",
+  de: "Hallo [FIRST_NAME]",
+  no: "Hei",
+  "en-GB": "Hello",
+};
+const pick = (booking, mode = "auto", fallback = "en", texts = translations) =>
+  core.chooseGuestMessageLanguage(texts, fallback, booking, mode);
+assert.deepEqual(pick({ country2: "SE" }), {
+  language: "sv",
+  source: "country",
+});
+assert.equal(pick({ country: "Sweden" }).language, "sv");
+assert.equal(pick({ country2: " de " }).language, "de");
+assert.equal(pick({ lang: "EN_gb", country2: "SE" }).language, "en-GB");
+assert.equal(pick({ lang: "sv-SE", country2: "GB" }).language, "sv");
+assert.equal(pick({ lang: "nb-NO" }).language, "no");
+assert.deepEqual(pick({ lang: "fr", country2: "SE" }), {
+  language: "en",
+  source: "fallback",
+});
+assert.equal(
+  pick({ country2: "DE" }, "auto", "en", { en: "Hi", sv: "Hej" }).language,
+  "en",
+);
+for (const country2 of ["", "ZZ", "CH", "BE", "CA"])
+  assert.equal(pick({ country2 }).source, "fallback");
+assert.equal(pick({ country2: "SE" }, "fixed").language, "en");
+assert.equal(
+  pick({ lang: "sv" }, "auto", "en", { en: "Hi", sv: "  " }).language,
+  "en",
+);
+assert.throws(() => pick({}, "auto", "de", { en: "Hi" }), /reservspråk/);
 const rule = {
   event: "arrival",
   days_offset: 0,
@@ -93,7 +139,8 @@ const live = {
 };
 assert(core.providerMatches(live, local, unit, rule));
 for (const change of [
-  { status: "cancelled" }, { status: "new" },
+  { status: "cancelled" },
+  { status: "new" },
   { roomId: 9 },
   { propertyId: 9 },
   { channel: "airbnb" },
@@ -117,7 +164,10 @@ let handler,
   providerStatus,
   ruleEnabled,
   mirrorFail,
-  dataRule;
+  dataRule,
+  guestFields,
+  sentText,
+  templateTranslations;
 const dueDate = new Date(Date.now() - 60000),
   clock = core.swedishNow(dueDate),
   send_time = `${Math.floor(clock.minute / 60)
@@ -130,6 +180,9 @@ const booking = {
   end_date: core.dayShift(clock.day, 2),
 };
 const reset = () => {
+  guestFields = {};
+  sentText = "";
+  templateTranslations = { en: "Hi [FIRST_NAME]", sv: "Hej [FIRST_NAME]" };
   posts = 0;
   claims = 0;
   job = null;
@@ -198,7 +251,7 @@ const db = {
           data = { active: true, role: "admin" };
         else if (table === "vihem_short_stay_message_templates")
           data = {
-            translations: { en: "Hi [FIRST_NAME]" },
+            translations: templateTranslations,
             updated_at: "2026-01-01",
           };
         else if (table === "vihem_short_stay_units")
@@ -248,7 +301,8 @@ new Function(
   json,
   (c, m, s) => json({ error: c }, s),
   (b) => ["booking", "expedia", "airbnb", "vrbo"].includes(b.channel),
-  async () => {
+  async (...args) => {
+    sentText = JSON.stringify(args);
     posts++;
     return "sent";
   },
@@ -264,6 +318,7 @@ new Function(
       data: [
         {
           ...live,
+          ...guestFields,
           ...booking,
           id: 123,
           arrival: booking.start_date,
@@ -323,4 +378,32 @@ await handler(request());
 assert.equal(posts, 1);
 console.log(
   "PASS automatic messages: Swedish dates/offsets/midnight/DST, names, live booking/channel/property/cancellation checks, scheduler secret, claim-before-POST, pause, lost receipt and mirror safety; no real transports.",
+);
+
+for (const [fields, expected] of [
+  [{ country2: "SE" }, "Hej Anna"],
+  [{ lang: "en", country2: "SE" }, "Hi Anna"],
+  [{ lang: "fr", country2: "SE" }, "Hi Anna"],
+  [{ country2: "DE" }, "Hi Anna"],
+  [{}, "Hi Anna"],
+]) {
+  reset();
+  dataRule.language_mode = "auto";
+  guestFields = fields;
+  await handler(request());
+  assert.equal(posts, 1);
+  assert(sentText.includes(expected), sentText);
+}
+reset();
+guestFields = { country2: "SE" };
+await handler(request());
+assert(sentText.includes("Hi Anna"), "Existing rules stay fixed language");
+reset();
+dataRule.language_mode = "auto";
+templateTranslations = { sv: "Hej" };
+await handler(request());
+assert.equal(posts, 0);
+assert.equal(claims, 0);
+console.log(
+  "PASS automatic language: explicit language, country, missing/unsupported translation, regional locales, ambiguous country, fixed-rule compatibility, missing fallback fails closed; mock transports only.",
 );

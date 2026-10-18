@@ -1,3 +1,4 @@
+import { chooseGuestMessageLanguage } from "../_shared/shortstay-language.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { json, errorJson } from "../_shared/vihem-auth.ts";
@@ -190,8 +191,14 @@ Deno.serve(async (req: Request) => {
         )
           continue;
         const name = [live.firstName, live.lastName].filter(Boolean).join(" ");
+        const selected = chooseGuestMessageLanguage(
+          template.translations,
+          rule.language,
+          live,
+          rule.language_mode || "fixed",
+        );
         const message = automaticText(
-          template.translations[rule.language],
+          template.translations[selected.language],
           name,
         );
         const { data: id, error: claimError } = await db.rpc(

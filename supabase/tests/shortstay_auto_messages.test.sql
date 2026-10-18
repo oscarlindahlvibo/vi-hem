@@ -39,6 +39,30 @@ SELECT pg_temp.expect('one durable claim allowed',public.vihem_claim_guest_messa
 SELECT pg_temp.expect('same booking cannot be claimed twice',public.vihem_claim_guest_message(r,2,b,'Hi QA',(select updated_at FROM public.vihem_short_stay_message_templates WHERE id=f.t)) IS NULL) FROM f;
 SELECT pg_temp.expect('one job and one receipt created',(select count(*)=1 FROM public.vihem_guest_message_jobs WHERE organisation_id=f.o) AND (select count(*)=1 FROM public.vihem_short_stay_message_sends WHERE organisation_id=f.o)) FROM f;
 RESET ROLE;
+-- v2 is atomic, revision checked, and cannot bypass legacy role/org checks.
+SELECT set_config('request.jwt.claim.sub',s::text,true) FROM f;
+SET LOCAL ROLE authenticated;
+SELECT pg_temp.reject('staff cannot save v2',format('select public.vihem_save_guest_message_rule_v2(%L,2,%L,%L,ARRAY[%L],%L,%L,0,%L,false,%L)',r,u,t,'booking','en','arrival','10:00','auto')) FROM f;
+RESET ROLE;
+SELECT set_config('request.jwt.claim.sub',a::text,true) FROM f;
+SET LOCAL ROLE authenticated;
+SELECT pg_temp.reject('v2 rejects foreign room',format('select public.vihem_save_guest_message_rule_v2(%L,2,%L,%L,ARRAY[%L],%L,%L,0,%L,false,%L)',r,u2,t2,'booking','en','arrival','10:00','auto')) FROM f;
+SELECT pg_temp.reject('v2 rejects invalid mode',format('select public.vihem_save_guest_message_rule_v2(%L,2,%L,%L,ARRAY[%L],%L,%L,0,%L,false,%L)',r,u,t,'booking','en','arrival','10:00','unknown')) FROM f;
+SELECT pg_temp.expect('failed changes preserve revision and mode',(SELECT revision=2 AND language_mode='fixed' FROM public.vihem_guest_message_rules WHERE id=(SELECT r FROM f)));
+SELECT public.vihem_save_guest_message_rule_v2(r,2,u,t,ARRAY['booking'],'en','arrival',0,'10:00',false,'auto') FROM f;
+SELECT pg_temp.expect('v2 changes mode atomically',(SELECT revision=3 AND language_mode='auto' AND NOT enabled FROM public.vihem_guest_message_rules WHERE id=(SELECT r FROM f)));
+SELECT public.vihem_save_guest_message_rule_v2(b2,0,u,t,ARRAY['booking'],'en','departure',0,'10:00',false,'auto') FROM f;
+SELECT public.vihem_save_guest_message_rule_v2(b2,0,u,t,ARRAY['booking'],'en','departure',0,'10:00',false,'auto') FROM f;
+SELECT pg_temp.expect('v2 lost create response returns same rule',(SELECT count(*)=1 FROM public.vihem_guest_message_rules WHERE id=(SELECT b2 FROM f) AND revision=1 AND language_mode='auto'));
+SELECT pg_temp.reject('v2 retry cannot change language mode',format('select public.vihem_save_guest_message_rule_v2(%L,0,%L,%L,ARRAY[%L],%L,%L,0,%L,false,%L)',b2,u,t,'booking','en','departure','10:00','fixed')) FROM f;
+SELECT pg_temp.reject('auto activation needs fallback translation',format('select public.vihem_save_guest_message_rule_v2(%L,1,%L,%L,ARRAY[%L],%L,%L,0,%L,true,%L)',b2,u,t,'booking','zz','departure','10:00','auto')) FROM f;
+SELECT pg_temp.expect('anon cannot call v2',NOT has_function_privilege('anon','public.vihem_save_guest_message_rule_v2(uuid,integer,uuid,uuid,text[],text,text,integer,time,boolean,text)','EXECUTE'));
+SELECT pg_temp.reject('stale v2 rejected',format('select public.vihem_save_guest_message_rule_v2(%L,2,%L,%L,ARRAY[%L],%L,%L,0,%L,false,%L)',r,u,t,'booking','en','arrival','10:00','fixed')) FROM f;
+SELECT public.vihem_save_guest_message_rule(r,3,u,t,ARRAY['booking'],'en','arrival',0,'10:00',false) FROM f;
+SELECT pg_temp.expect('legacy save explicitly selects fixed language',(SELECT revision=4 AND language_mode='fixed' FROM public.vihem_guest_message_rules WHERE id=(SELECT r FROM f)));
+RESET ROLE;
+-- Keep original pause regression's expected revision for the fixture below.
+UPDATE public.vihem_guest_message_rules SET revision=2 WHERE id=(SELECT r FROM f);
 UPDATE public.vihem_short_stay_units SET beds24_enabled=false WHERE id=(SELECT u FROM f);
 UPDATE public.vihem_short_stay_message_templates SET translations='{"sv":"Hej"}' WHERE id=(SELECT t FROM f);
 SELECT set_config('request.jwt.claims',jsonb_build_object('sub',a,'role','authenticated')::text,true),set_config('request.jwt.claim.sub',a::text,true) FROM f;

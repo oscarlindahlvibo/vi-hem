@@ -1,3 +1,4 @@
+import { chooseGuestMessageLanguage } from "../../supabase/functions/_shared/shortstay-language";
 import { useEffect, useRef, useState } from "react";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { supabase } from "../lib/supabase";
@@ -13,6 +14,7 @@ type Rule = {
   template_id: string;
   channels: string[];
   language: string;
+  language_mode?: "fixed" | "auto";
   event: string;
   days_offset: number;
   send_time: string;
@@ -41,6 +43,7 @@ const fresh = (unit: string): Rule => ({
   template_id: "",
   channels: ["booking", "expedia"],
   language: "en",
+  language_mode: "auto",
   event: "arrival",
   days_offset: 0,
   send_time: "10:00",
@@ -67,6 +70,7 @@ export function ShortStayAutoMessages({
   const lock = useRef(false);
   const dirty = useUnsavedChanges(editing, !!editing);
   const [discard, setDiscard] = useState(false);
+  const [previewCountry, setPreviewCountry] = useState("SE");
   useEffect(() => {
     let live = true;
     setLoading(true);
@@ -117,13 +121,22 @@ export function ShortStayAutoMessages({
   const template = templates.find(
     (t) => t.id === editing?.template_id && t.unit_id === editing?.unit_id,
   );
+  let previewLanguage = "";
   let preview = "",
     previewError = "";
   try {
-    preview = renderMessageTemplate(
-      template?.translations[editing?.language || ""] || "",
-      "Anna Exempel",
-    );
+    if (template && editing) {
+      previewLanguage = chooseGuestMessageLanguage(
+        template.translations,
+        editing.language,
+        { country2: previewCountry },
+        editing.language_mode || "fixed",
+      ).language;
+      preview = renderMessageTemplate(
+        template.translations[previewLanguage],
+        "Anna Exempel",
+      );
+    }
   } catch (e) {
     previewError = (e as Error).message;
   }
@@ -145,7 +158,7 @@ export function ShortStayAutoMessages({
       !editing.send_time ||
       !Number.isInteger(editing.days_offset) ||
       Math.abs(editing.days_offset) > 7 ||
-      previewError
+      (editing.enabled && previewError)
     ) {
       setError(
         "Välj mall, språk, minst en kanal, tid och förskjutning −7 till 7 dagar.",
@@ -158,7 +171,7 @@ export function ShortStayAutoMessages({
     setNotice("");
     try {
       const { error: saveError } = await supabase.rpc(
-        "vihem_save_guest_message_rule",
+        "vihem_save_guest_message_rule_v2",
         {
           p_id: editing.id,
           p_revision: editing.revision,
@@ -166,6 +179,7 @@ export function ShortStayAutoMessages({
           p_template: editing.template_id,
           p_channels: editing.channels,
           p_language: editing.language,
+          p_language_mode: editing.language_mode || "fixed",
           p_event: editing.event,
           p_days: editing.days_offset,
           p_time: editing.send_time,
@@ -185,6 +199,7 @@ export function ShortStayAutoMessages({
           saved.unit_id === editing.unit_id &&
           saved.template_id === editing.template_id &&
           saved.language === editing.language &&
+          saved.language_mode === (editing.language_mode || "fixed") &&
           saved.event === editing.event &&
           saved.days_offset === editing.days_offset &&
           saved.send_time.slice(0, 5) === editing.send_time.slice(0, 5) &&
@@ -289,7 +304,10 @@ export function ShortStayAutoMessages({
                   {r.channels
                     .map((c) => channels.find((v) => v[0] === c)?.[1])
                     .join(", ")}{" "}
-                  · {languageLabel(r.language)}
+                  ·{" "}
+                  {r.language_mode === "auto"
+                    ? `Automatiskt · reserv: ${languageLabel(r.language)}`
+                    : languageLabel(r.language)}
                 </span>
                 {r.last_error && (
                   <span className="mt-1 block text-sm text-red-700">
@@ -400,7 +418,32 @@ export function ShortStayAutoMessages({
               }}
             />
             <Select
-              label="Språk för utskicket"
+              label="Språkval"
+              value={editing.language_mode || "fixed"}
+              options={[
+                { value: "auto", label: "Automatiskt från bokningen" },
+                { value: "fixed", label: "Samma språk till alla" },
+              ]}
+              onChange={(e) =>
+                setEditing({
+                  ...editing,
+                  language_mode: e.target.value as "auto" | "fixed",
+                })
+              }
+            />
+            {editing.language_mode === "auto" && (
+              <p className="text-sm text-slate-600">
+                Gästens angivna språk i Beds24 används först, annars bokningens
+                land. Saknas rätt översättning används reservspråket. Landet är
+                en vägledning och garanterar inte vilket språk gästen talar.
+              </p>
+            )}
+            <Select
+              label={
+                editing.language_mode === "auto"
+                  ? "Reservspråk"
+                  : "Språk för utskicket"
+              }
               value={editing.language}
               options={Object.keys(template?.translations || {}).map(
                 (code) => ({ value: code, label: languageLabel(code) }),
@@ -495,10 +538,23 @@ export function ShortStayAutoMessages({
                 {previewError}
               </p>
             )}
+            {editing.language_mode === "auto" && template && (
+              <Select
+                label="Prova språkval · exempelbokning"
+                value={previewCountry}
+                options={[
+                  { value: "SE", label: "Sverige" },
+                  { value: "DE", label: "Tyskland" },
+                  { value: "GB", label: "Storbritannien" },
+                  { value: "", label: "Okänt land" },
+                ]}
+                onChange={(e) => setPreviewCountry(e.target.value)}
+              />
+            )}
             {preview && (
               <div className="rounded-xl bg-slate-50 p-4">
                 <h3 className="font-semibold">
-                  Förhandsvisning · exempelgästen Anna
+                  Förhandsvisning · Anna · {languageLabel(previewLanguage)}
                 </h3>
                 <p className="mt-2 whitespace-pre-wrap break-words text-sm">
                   {preview}
@@ -532,7 +588,10 @@ export function ShortStayAutoMessages({
       >
         <p className="mb-3 text-sm font-semibold">
           {units.find((u) => u.id === editing?.unit_id)?.name} ·{" "}
-          {template?.name} · {languageLabel(editing?.language || "")}
+          {template?.name} ·{" "}
+          {editing?.language_mode === "auto"
+            ? `Automatiskt språk · reserv: ${languageLabel(editing.language)}`
+            : languageLabel(editing?.language || "")}
           <br />
           {editing?.channels
             .map((c) => channels.find((v) => v[0] === c)?.[1])
