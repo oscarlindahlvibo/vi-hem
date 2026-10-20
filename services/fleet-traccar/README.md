@@ -12,6 +12,14 @@ Branch `codex/fleet-traccar`. Reuses Fleet vehicles, devices, assignments, readi
 - Isolated QA already passed synthetic Codec 8 Extended → real Traccar → durable outbox → QA Edge/Fleet, lost-ACK retries, concurrent dedupe, negative roles/org, journal CAS, restart persistence, responsive UI and TS/build. The actual IMEI is never simulated. Physical SIM/Nissan OBD, drive/stop/offline-buffer and native acceptance remain unverified until actual readings arrive.
 - Server UFW TCP 5027 opening confirmed by operator; router-to-receiver TCP now passes. Existing router hairpin covers eth1, while the local test computer is on switch0.100; a forced public-IP test from that LAN fails and is not an independent 4G test. Pi-hole resolves the GPS name directly to the LAN receiver. Real 4G reception remains unverified until the device sends data. Do not change unrelated hairpin/NAT rules to mask this distinction.
 
+### Live acceptance checkpoint, 2026-10-20 10:58 Europe/Stockholm
+
+The physical FMC003 now reaches the public TCP listener over mobile data: 213 received Traccar positions, 25 delivered Fleet readings at the checkpoint. Latest real fix 08:58:00 UTC, receiver timestamp 08:58:02.913 UTC; device online. Real valid GPS, ignition and 13.52 V external voltage received. Latest odometer is **gps_estimated**, not measured OBD; RPM/fuel absent, so no claim of verified Nissan OBD mileage/service integration. Driver must compare measured values when they become available.
+
+188 buffered samples predate the existing Fleet assignment (07:24:27 UTC); they remain in the durable receiver queue, not misattributed/backdated to the vehicle. No samples were deleted. Review pre-assignment backlog explicitly; do not bypass assignment/organisation validation. Current samples continue to deliver despite that backlog.
+
+Web frontend `2897a7ce41e549de34fc29c65d57fb7410974a6c` published through `deploy_vihem.sh`, backend hash guard and public HTTPS asset hashes passed. Native TestFlight/App Store distribution is not verified by this web deployment. Real driving/stop/offline-buffer, native exports and protected first-hop transport remain acceptance work. The earlier firewall/physical-reception pending notes above describe the preceding installation checkpoint; public physical reception is now confirmed.
+
 ## Design and safeguards
 
 Traccar uses a **dedicated database and owner/relay roles in the existing PostgreSQL engine**. Never point it at Supabase's `postgres` database or let Liquibase own its schema. Traccar API/UI is loopback/private-Docker only; do not expose port 8082 publicly. Only the protocol port is exposed for the explicitly authorised plaintext pilot; the transport risk is recorded above. Unknown-device registration is disabled.
