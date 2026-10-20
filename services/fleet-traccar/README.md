@@ -1,0 +1,87 @@
+# VI-HEM GPS / FMC003
+
+Branch `codex/fleet-traccar`. Reuses Fleet vehicles, devices, assignments, readings, trips and meter readings. Traccar 6.16.0 (image digest pinned) is a protocol receiver, not a parallel fleet application. No tracking SaaS fee; SIM/data, hosting and operations still cost money.
+
+## Actual status 2026-10-20
+
+- Public DNS `gps.vi-hem.se → 194.17.156.10`; Pi-hole `gps.vi-hem.se → 172.16.100.20`, verified by separate DNS queries. Existing 29 local entries preserved; backup `/home/vibo/pihole-dns-backups/before-gps-20261020T073433Z.json`.
+- Real Traccar running **only in isolated QA** (`vihem-gps-qa`): Teltonika TCP at server loopback `127.0.0.1:15027`, admin `127.0.0.1:18082`. Not a verified public GPS endpoint. Port 5027 was unused before work. No production database/Edge/frontend deployment, NAT/firewall/proxy change, or real tracker registration performed.
+- Synthetic IMEI `990000000000001`: Codec 8 Extended handshake, four AVL acknowledgements, decoded GPS/ignition/RPM/fuel/voltage/OBD, durable PostgreSQL queue → actual QA Edge → Fleet RPC tested. Lost receiver acknowledgement causes safe duplicate retry. HTTP was used only by the test adapter on the private QA network; production relay requires HTTPS and rejects redirects.
+- Actual IMEI `860848082712242` already registered/assigned in Fleet, model FMC003; organisation's fleet module enabled. Live SIM/OBD/Nissan compatibility and external network ingress **not verified**. Never simulate the real IMEI.
+
+## Design and safeguards
+
+Traccar uses a **dedicated database and owner/relay roles in the existing PostgreSQL engine**. Never point it at Supabase's `postgres` database or let Liquibase own its schema. Traccar API/UI is loopback/private-Docker only; do not expose port 8082 publicly. Only the protocol port may be published after transport review. Unknown-device registration is disabled.
+
+`outbox.sql` is installed **as the dedicated Traccar owner**, after Traccar initializes `tc_positions`, before public ingress. A trigger inserts a minimal position payload in the same DB transaction as the position. Installation locks the position table and backfills existing rows to close the startup race. Relay has queue rights and bounded cleanup only, no Supabase credentials or direct access to its business data. Traccar admin API credentials are private to the bridge and never used by the frontend.
+
+The relay reads pending rows, not a potentially lossy high-water cursor. Success is recorded only after a positive VI-HEM acknowledgement. HTTP/network/DB errors back off indefinitely (10 seconds → one hour), survive restarts and do not block other queue items. Unknown/unassigned/inactive/expired devices remain pending for operator repair; do not delete them blindly. Pending quarantine needs regular review and an explicit retention decision. Log error classes/status only, never positions, credentials or raw response bodies.
+
+Registry sync uses the **supported Traccar API**, not direct table updates, to invalidate device caches. Each minute it registers active, assigned Teltonika devices in enabled organisations and disables managed devices that are no longer eligible. Organisation/vehicle routing is always resolved by Fleet on receipt, never accepted from a Traccar payload. API sync touches only explicitly managed devices. If registry/maintenance fails the relay reconnects with backoff and preserves the queue.
+
+VI-HEM authentication is a random 256-bit server secret over HTTPS; missing/wrong secret fails before reading the body. Ingest RPC/maintenance are service-role-only. IMEI is globally unique; ownership immutable. Assignment intervals are used at **GPS time**, with vehicle/organisation snapshotted in each row; delayed data cannot move to a newly assigned vehicle. Duplicate provider IDs and identical decoded samples with a different Traccar row ID both deduplicate. Pair/unpair/audit are atomic; journal edits use revision checks. Positions/journal are admin/superadmin-only, with active-profile, module and organisation checks; ordinary staff/screens/tenants cannot read them. Legacy per-device API keys are not exposed or used.
+
+## Deployment order (review required)
+
+1. Confirm branch diff/current main, backup and restore path. A current full backup was restored in isolated QA with the candidate migration and negative SQL tests. Backup `/mnt/md0/supabase-backups/shared/fleet-traccar-20261020T075203Z` (8.8 MB custom dump; archive/decompression checked, full isolated restore and migration/SQL probes passed). No production migration has been applied.
+2. Prepare private files OUTSIDE the repo: `python3 services/fleet-traccar/prepare_install.py --output /home/vibo/vihem-gps-config`. This only generates files; does not change any running service. Protect the folder and include it in encrypted backups; never commit or paste `.env`, XML passwords or provision.sql.
+3. Review generated `provision.sql`; apply to existing engine as DBA **only after checking that roles/database do not already exist**. No DROP/reset/replacement. Set dedicated DB timezone UTC. **Before enabling the new logins**, merge `pg_hba_gps.conf.example` ahead of broad allow rules, back up the existing HBA, reload and test. PostgreSQL roles are cluster-wide; revoking a role-specific CONNECT grant does not cancel inherited PUBLIC CONNECT. Public SECURITY DEFINER functions in another database can therefore make a bare “separate database” inadequate. HBA allows the two new roles only into vihem_traccar and leaves other roles' rules unchanged. Verify denied connections to every other database, and test all published poolers too (a forced backend user can change this threat model). QA direct-DB isolation was tested; production HBA/poolers have not been changed or certified. Verify existing applications still authenticate after the reviewed reload.
+4. Install `20261024100000_fleet_telematics_pipeline.sql` after Fleet foundation/RLS, atomic editor/service migrations and `20261011103000_fleet_read_role_guard.sql`. It fails on duplicate IMEIs or overlapping assignment history rather than guessing. Record its exact SHA256 in the existing migration ledger. Install `vihem-fleet-ingest/index.ts` and `_shared/fleet-telematics.ts` and configure `FLEET_TRACCAR_SECRET` from the private generated `edge-secret.env`. Preserve all shared Edge environment values and unrelated functions; schedule any required shared-runtime restart explicitly. Function uses its own bearer authentication (`verify_jwt=false`), not public anonymous writes.
+5. In private config folder, `docker compose up -d traccar`; wait for schema initialization. Run `outbox.sql` in **vihem_traccar as vihem_traccar**, never in `postgres`. Initial bootstrap and permissions must be verified before opening ingress. Create the first Traccar administrator through SSH-tunnelled local API/UI using the generated integration email/password; first user is administrator even when public registration is disabled. Do not log the password. There must be no default/shared password.
+6. `docker compose up -d relay`. Verify registry sync finds the existing FMC003 and creates the same IMEI in Traccar with model FMC003. Verify unauthenticated ingest=401, queue permissions, queue age/errors, and no other application's services/configuration changed. Install frontend through the established VI-HEM publisher **after** backend verification. Do not merge/push main automatically from this branch.
+7. Decide device transport (below), then NAT/firewall: TCP 5027 only to `172.16.100.20`. Do not expose Traccar admin/API, PostgreSQL or the QA port. Verify from an independent network/4G; LAN DNS success is insufficient. A Cloudflare DNS record must be DNS-only for a raw TCP service unless an appropriate TCP proxy is separately configured.
+8. Inform drivers, set organisation retention and do the physical acceptance test below before calling this production ready.
+
+**Older installed apps:** old Fleet code used `SELECT *` on devices and multi-step writes. The new migration revokes these paths to protect keys/integrity. Old telematics cards/pairing can fail until the frontend/native bundle is updated. Other modules/vehicle records are retained. Coordinate migration + web/native rollout; do not claim old telematics clients are compatible. Rollback should retain privacy restrictions, histories and dedupe rows, not restore broad grants just to make an old client work.
+
+## Device transport / security gate
+
+[Traccar's supported-device list](https://www.traccar.org/devices/) confirms FMC003 → Teltonika → port **5027**. This is binary TCP, not an HTTPS web page. Standard Teltonika login uses IMEI, which is an identifier, **not a cryptographic device credential**. Plain public TCP exposes position traffic and allows impersonation by someone who knows an IMEI. Backend secret/RLS do not fix that first hop.
+
+Before public activation choose and test either a private mobile APN/VPN, or device-supported TLS with certificate validation. `nginx-stream.conf.example` is an uninstalled TLS termination candidate, not a claimed working certificate/device configuration. Do not enable obsolete TLS or disable verification. TLS encrypts the path but does not by itself add client authentication; evaluate device certificates/private connectivity for stronger identity. Device firmware 04.02.00 Rev:602 must be checked physically for the available TLS/security controls.
+
+Traccar `server.delayAcknowledgement=true` delays replies through handling. Upstream 6.16 still completes the callback on database-storage error; it is **not an absolute no-loss guarantee during a receiver DB outage**. The durable bridge protects data once the receiver transaction commits. Monitor storage errors/disk/DB, test failure handling before broad rollout, and stop ingress if storage is unhealthy. This residual receiver limitation must not be hidden behind an “exactly once” claim.
+
+## Teltonika Configurator (candidate pilot profile, not yet live)
+
+| Setting | Value |
+|---|---|
+| GPRS/APN | `bredband.tre.se` |
+| APN user/password | empty, unless Tre specifies otherwise |
+| Domain | `gps.vi-hem.se` (no `https://`, no path) |
+| Port | `5027` after verified ingress/security setup |
+| Protocol | TCP |
+| AVL codec | Codec 8 Extended |
+| Records sorting | Oldest first, if exposed by this firmware |
+| Home / Moving: min period | 10 s |
+| Home / Moving: min distance | 100 m |
+| Home / Moving: min angle | 15° |
+| Home / Moving: send period | 30 s |
+| Home / Moving: minimum saved records | 1 |
+| Home / Stop: min period / send period | 60 s / 60 s |
+| Home / Stop: minimum saved records | 1 |
+| Ignition/movement | OBD RPM/vehicle-appropriate source + accelerometer; verify in Townstar rather than assuming voltage always detects engine state |
+| I/O | Ignition, movement, external voltage, GSM signal, RPM, supported OBD/OEM odometer/fuel; unsupported values stay unavailable |
+| Sleep | Keep reporting enabled for the pilot so ignition-off/stop can be tested; then choose a battery-safe profile using the actual vehicle |
+
+Apply Home settings; permit data in Unknown operator mode with the same conservative profile if Tre's detected operator requires it. Do not enable roaming without checking SIM terms. Save to device, reconnect and read back settings. These are chosen pilot acquisition values, not factory-default claims. [Teltonika first start](https://wiki.teltonika-gps.com/view/FMC003_First_Start), [Data acquisition](https://wiki.teltonika-gps.com/view/FMC003_Data_acquisition_settings).
+
+FMC003 OEM AVL **389 is km**, not metres. The bridge handles Traccar's `obdOdometer` metres plus FMC003-family raw `io389` kilometres; never interprets GPS-derived odometer as measured. Raw OEM fuel litres are not converted to percent without known tank capacity. OBD support depends on vehicle/PID, even if GPS works. [Teltonika OEM parameters](https://wiki.teltonika-gps.com/view/FMB003_Teltonika_Data_Sending_Parameters_ID).
+
+## Trips, meters and privacy
+
+Start at valid fix + speed ≥5 km/h, unless ignition explicitly off. Stop after three minutes stationary; a >15-minute reporting gap closes the previous trip with review required. Distance is GPS-derived, limited for implausible jumps, preserving sub-100m precision. Large gaps are never silently drawn as continuous driving. Delayed samples are retained in history without rewinding live state; nearby trips are marked for review. Entirely late trips that arrive behind a newer processed trip are **not automatically reconstructed** in this version; review their position history. This is a remaining acceptance item for long offline/buffered journeys.
+
+New trips are `unknown`, never automatically business. Business classification requires driver and purpose. Addresses/notes and manual start/end kilometre readings can be completed; manual meters are labelled in export. GPS-derived distance and missing OBD readings are explicit. Measured OBD only updates service mileage monotonically, with a sanity bound and conversion to the asset's km/mil setting. Compare the first OBD value with the dashboard before relying on service calculations.
+
+CSV/Excel include times in Europe/Stockholm, start/end places, distance/time/idle, type, driver, purpose, notes and meter data; CSV protects formula injection. Both use the shared native save/share helper. Physical iOS/Android file sharing and complete downloadable browser file verification remain acceptance items. This is not a certification of tax compliance; add annual opening/closing odometer, visited customer and fueling data where applicable. [Skatteverket](https://www.skatteverket.se/foretag/arbetsgivare/lonochersattning/formaner/bilforman/korjournal.4.3016b5d91791bf546791a00.html).
+
+Organisation settings: positions default 90 days, journal 730 days, configurable 7–3650. Maintenance marks stale devices offline, closes incomplete trips for review and purges bounded batches; relay runs it each minute. Traccar/acknowledged queue have a separate configured retention (default 90 days); pending error/quarantine records are not silently deleted. Backup retention is separate and must be included in the policy. Stop/remove devices via Fleet; for an immediate physical tracking stop disconnect the unit until registry disable is confirmed. Explain purpose, legal basis, recipients, retention and private-use handling to employees before live tracking; do not use it for undisclosed performance surveillance. [IMY](https://www.imy.se/verksamhet/dataskydd/dataskydd-pa-olika-omraden/arbetsliv/kontroll-och-overvakning-av-anstallda/).
+
+## Acceptance / operations
+
+- Add another Teltonika in Fleet: select correct organisation/vehicle, pair 15-digit IMEI, model and SIM. Pairing is transactional. Registry sync registers it in Traccar within about one minute, no program change. Configure it with the verified profile. No unknown devices auto-register. Unpair before moving it; wait for disable, then pair to the next vehicle. Histories stay with the old assignment. Cross-organisation transfers require separate reviewed provisioning, not an editable organisation field.
+- Physical FMC003 acceptance: plug in WAF21M, verify IMEI match and first fix; compare map, actual speed/RPM/ignition/odometer, engine-off, drive/stop, offline buffer/reconnect and timestamps. Confirm SIM costs/sleep power. Verify device expiry/disable, no data for tenant/other org, and admin-only journal.
+- Check relay logs/error counts, oldest pending/attempts, Traccar storage warnings, disk, backups and SSL expiry. Do not print payloads/tokens. An HTTP 401 suggests secret mismatch; 422 means inactive/unassigned/unknown device; 503 means backend unavailable/rejected. Repair and retry queued rows; never discard unacknowledged data to silence an alarm.
+- Back up both the dedicated Traccar DB (including queue), VI-HEM DB and encrypted private config. Include the new DB in the existing server/offsite job and run a restore. Do not assume the old postgres-only dump covers it.
+- Rollback: keep ingress private/stop relay, retain dedicated DB/queue, restore previous code as appropriate, and reconcile pending deliveries using dedupe before retrying. Never drop business data/history or undo privacy guards automatically.

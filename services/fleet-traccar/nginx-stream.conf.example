@@ -1,0 +1,12 @@
+# OPTIONAL, NOT INSTALLED. Requires ngx_stream_ssl_module, a real certificate and device TLS verification.
+# Include inside nginx's stream{} context, never inside http{}.
+# Keep Traccar loopback-only. Never weaken TLS versions to make an unsupported device connect.
+server {
+    listen 172.16.100.20:5027 ssl;
+    proxy_pass 127.0.0.1:5027;
+    ssl_certificate /etc/letsencrypt/live/gps.vi-hem.se/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/gps.vi-hem.se/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    proxy_connect_timeout 10s;
+    proxy_timeout 30m;
+}

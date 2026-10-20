@@ -1,0 +1,38 @@
+name: vihem-gps
+services:
+  traccar:
+    image: traccar/traccar:6.16.0-alpine@sha256:03ebb7ed2b219d4f25c326873bd022f5062f80bcae622a9d9422846b51951eda
+    restart: unless-stopped
+    ports:
+      # Keep loopback until DNS, NAT/firewall and employee information are approved.
+      - "${GPS_BIND_IP:-127.0.0.1}:${GPS_TCP_PORT:-5027}:5027/tcp"
+      - "127.0.0.1:${GPS_ADMIN_PORT:-18082}:8082/tcp"
+    volumes:
+      - ./traccar.xml:/opt/traccar/conf/traccar.xml:ro
+      - traccar-logs:/opt/traccar/logs
+    networks: [database]
+    mem_limit: 512m
+    environment:
+      JAVA_TOOL_OPTIONS: -Xms128m -Xmx384m -Duser.timezone=UTC
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  relay:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    networks: [database]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+networks:
+  database:
+    external: true
+    name: ${GPS_DOCKER_NETWORK:-supabase_default}
+volumes:
+  traccar-logs:

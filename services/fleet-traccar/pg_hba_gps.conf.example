@@ -1,0 +1,7 @@
+# PREPEND, never append after broad allow rules. Merge/review with the current shared HBA first.
+# New GPS roles may authenticate ONLY to their dedicated database, not other apps/Supabase.
+host vihem_traccar vihem_traccar,vihem_traccar_relay 0.0.0.0/0 scram-sha-256
+host vihem_traccar vihem_traccar,vihem_traccar_relay ::/0 scram-sha-256
+host all vihem_traccar,vihem_traccar_relay 0.0.0.0/0 reject
+host all vihem_traccar,vihem_traccar_relay ::/0 reject
+local all vihem_traccar,vihem_traccar_relay reject

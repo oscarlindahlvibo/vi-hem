@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">
+<properties>
+  <entry key="config.default">./conf/default.xml</entry>
+  <entry key="protocols.enable">teltonika</entry>
+  <entry key="server.delayAcknowledgement">true</entry>
+  <entry key="teltonika.port">5027</entry>
+  <entry key="database.driver">org.postgresql.Driver</entry>
+  <entry key="database.url">jdbc:postgresql://supabase-db:5432/vihem_traccar</entry>
+  <entry key="database.user">vihem_traccar</entry>
+  <entry key="database.password">REPLACE_WITH_DATABASE_PASSWORD</entry>
+  <entry key="database.registerUnknown">false</entry>
+  <entry key="web.port">8082</entry>
+  <entry key="web.address">0.0.0.0</entry>
+  <entry key="web.disableRegistration">true</entry>
+  <entry key="geocoder.enable">false</entry>
+  <entry key="geolocation.enable">false</entry>
+  <entry key="server.statistics"></entry>
+  <entry key="logger.level">warning</entry>
+</properties>
