@@ -53,9 +53,10 @@ Deno.serve(async (req: Request) => {
     if (body.action === "registry") {
       const { data: devices, error } = await db
         .from("vihem_fleet_telematics_devices")
-        .select("imei,device_model,organisation_id,expires_at")
+        .select("imei,device_model,organisation_id,expires_at,provisioned_at")
         .eq("active", true)
         .eq("provider", "teltonika")
+        .not("provisioned_at", "is", null)
         .not("vehicle_id", "is", null);
       const { data: modules, error: moduleError } = await db
         .from("vihem_organisation_modules")

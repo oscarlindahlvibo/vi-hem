@@ -16,9 +16,15 @@ UPDATE f SET d=public.vihem_fleet_pair_device(v,'990000000000099','FMC003','QA')
 SELECT pg_temp.expect('pair retry is idempotent',public.vihem_fleet_pair_device(v,'990000000000099','FMC003','QA')=d) FROM f;
 SELECT pg_temp.reject('cross organisation vehicle denied',format('SELECT public.vihem_fleet_pair_device(%L,%L,%L,%L)',v2,'990000000000099','FMC003','QA')) FROM f;
 SELECT pg_temp.reject('API key not exposed','SELECT api_key FROM public.vihem_fleet_telematics_devices');
+SELECT pg_temp.reject('organisation admin cannot self-provision',format('SELECT public.vihem_fleet_provision_device(%L,%L,%L,%L,%L)',d,o,v,'990000000000099','Synthetic device verification')) FROM f;
 SELECT pg_temp.reject('authenticated cannot ingest',format('SELECT public.vihem_fleet_ingest_position(%L::jsonb)','{}'));
 RESET ROLE;
 UPDATE public.vihem_fleet_telematics_device_assignments SET assigned_at=(SELECT stamp-interval '1 hour' FROM f) WHERE device_id=(SELECT d FROM f);
+SET LOCAL ROLE service_role;
+SELECT pg_temp.reject('unprovisioned device cannot ingest',format('SELECT public.vihem_fleet_ingest_position(%L::jsonb)',jsonb_build_object('imei','990000000000099','message_id','not-provisioned','recorded_at',stamp,'received_at',now(),'gps_valid',true,'latitude',57.317,'longitude',15.583,'speed_kmh',30))) FROM f;
+SELECT pg_temp.reject('operator must match verified organisation',format('SELECT public.vihem_fleet_provision_device(%L,%L,%L,%L,%L)',d,o2,v,'990000000000099','Synthetic hardware evidence')) FROM f;
+SELECT public.vihem_fleet_provision_device(d,o,v,'990000000000099','Synthetic hardware and SIM ownership verified in isolated QA') FROM f;
+RESET ROLE;
 CREATE FUNCTION pg_temp.point(seq integer,seconds integer,lat numeric,speed numeric,ignition boolean) RETURNS jsonb LANGUAGE sql AS $$ SELECT jsonb_build_object('imei','990000000000099','message_id','qa:'||seq,'recorded_at',stamp+make_interval(secs=>seconds),'received_at',now(),'gps_valid',true,'latitude',lat,'longitude',15.583,'speed_kmh',speed,'heading',180,'ignition',ignition,'odometer',22140+seconds/100.0,'odometer_source','obd_measured') FROM f $$;
 SET LOCAL ROLE service_role;
 SELECT pg_temp.expect('first valid position stored',public.vihem_fleet_ingest_position(pg_temp.point(1,0,57.317,30,true))='stored');

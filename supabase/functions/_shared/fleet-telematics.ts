@@ -48,7 +48,7 @@ export function normalizeTraccar(input: Record<string, unknown>) {
   const estimated = num(attributes.odometer, 0, 1e10);
   return {
     imei: String(device.uniqueId),
-    message_id: `traccar:${position.id}`,
+    message_id: `traccar:${position.id}:${time(position.fixTime)}`,
     recorded_at: time(position.fixTime),
     received_at: time(position.serverTime),
     gps_valid: valid,

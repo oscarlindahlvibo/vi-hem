@@ -2430,6 +2430,7 @@ export interface FleetTelematicsDevice {
   status: FleetTelematicsStatus;
   last_contact_at: string | null;
   last_position_at?: string | null;
+  provisioned_at?: string | null;
   active: boolean;
   created_by: string | null;
   created_at: string;

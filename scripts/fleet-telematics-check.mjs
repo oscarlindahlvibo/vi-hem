@@ -16,3 +16,5 @@ assert.equal(Date.parse(model.stockholmBoundary('2026-10-26'))-Date.parse(model.
 assert(model.trackingOnline('2026-10-20T07:00:00Z',Date.parse('2026-10-20T07:04:59Z')));assert(!model.trackingOnline('2026-10-20T07:00:00Z',Date.parse('2026-10-20T07:05:00Z')));
 assert(model.csvJournal([['=HYPERLINK("bad")',0]]).includes("'=HYPERLINK"));assert(model.csvJournal([['a;b\nc',0]]).includes('"a;b\nc"'));
 console.log('PASS telemetry normalization: knots/metres/OEM kilometres, missing/sentinel data, invalid fix/IMEI/time, Swedish DST, stale status, spreadsheet formula safety.');
+
+assert.notEqual(normalizeTraccar(sample).message_id,change({fixTime:'2026-10-20T07:00:02Z'}).message_id,'A restored Traccar sequence must not discard a new timestamp with the same row id');

@@ -759,7 +759,7 @@ function VehicleDetail({ onEdit, vehicle, isAdmin, userId, organisationId, compa
       supabase.from('vihem_fleet_meter_readings').select('*').eq('vehicle_id', vehicle.id).order('recorded_at', { ascending: false }).limit(100),
       supabase.from('vihem_fleet_tires').select('*').eq('vehicle_id', vehicle.id).order('created_at', { ascending: false }),
       isAdmin ? supabase.from('vihem_fleet_costs').select('*').eq('vehicle_id', vehicle.id).order('cost_date', { ascending: false }) : Promise.resolve({ data: [] }),
-      supabase.from('vihem_fleet_telematics_devices').select('id,organisation_id,vehicle_id,provider,device_model,imei,sim_number,status,last_contact_at,last_position_at,active,created_by,created_at,updated_at').eq('vehicle_id', vehicle.id).eq('active', true).maybeSingle(),
+      supabase.from('vihem_fleet_telematics_devices').select('id,organisation_id,vehicle_id,provider,device_model,imei,sim_number,status,last_contact_at,last_position_at,provisioned_at,active,created_by,created_at,updated_at').eq('vehicle_id', vehicle.id).eq('active', true).maybeSingle(),
       supabase.from('vihem_fleet_events').select('*').eq('vehicle_id', vehicle.id).order('created_at', { ascending: false }).limit(60),
       supabase.from('vihem_fleet_checklist_templates').select('*, items:vihem_fleet_checklist_template_items(*)').eq('organisation_id', organisationId).eq('active', true).order('name'),
       supabase.from('vihem_fleet_checklist_runs').select('*, items:vihem_fleet_checklist_run_items(*)').eq('vehicle_id', vehicle.id).order('performed_at', { ascending: false }).limit(30),
@@ -2138,6 +2138,7 @@ function TelematicsTab({ vehicle, device, isAdmin, onChanged, profiles }: {
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
             <div><dt className="text-xs text-slate-500">Leverantör</dt><dd className="font-medium">{device.provider}</dd></div>
             <div><dt className="text-xs text-slate-500">Modell</dt><dd className="font-medium">{device.device_model || '-'}</dd></div>
+            <div><dt className="text-xs text-slate-500">GPS-anslutning</dt><dd className="font-medium">{device.provisioned_at ? 'Ägarskap verifierat' : 'Väntar på verifiering av driftansvarig'}</dd></div>
             <div><dt className="text-xs text-slate-500">IMEI</dt><dd className="font-medium">{device.imei}</dd></div>
             <div><dt className="text-xs text-slate-500">SIM</dt><dd className="font-medium">{device.sim_number || '-'}</dd></div>
             <div><dt className="text-xs text-slate-500">Status</dt><dd><Badge className={device.status === 'online' ? 'bg-emerald-100 text-emerald-700' : device.status === 'offline' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}>{device.status === 'online' ? 'Online' : device.status === 'offline' ? 'Offline' : 'Okänd'}</Badge></dd></div>
