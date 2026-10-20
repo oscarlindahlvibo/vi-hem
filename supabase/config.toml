@@ -537,3 +537,8 @@ verify_jwt = false
 
 [functions.vihem-fleet-ingest]
 verify_jwt = false
+
+# AI-tolkning för andra system (JK m.fl.): maskinanrop autentiseras i funktionen med en nyckel per kund (X-Vihem-Ai-Key),
+# aldrig med Supabase-JWT. Måste driftsättas med --no-verify-jwt (eller motsvarande flagga) där config.toml inte läses.
+[functions.vihem-ai-interpret-document]
+verify_jwt = false
