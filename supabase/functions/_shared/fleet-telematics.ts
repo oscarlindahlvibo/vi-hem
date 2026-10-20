@@ -40,11 +40,13 @@ export function normalizeTraccar(input: Record<string, unknown>) {
     throw Error("INVALID_COORDINATES");
   const model = String(device.model || "").toUpperCase();
   // FMC003 OEM AVL 389 is kilometres; Traccar 6.16 only maps it automatically for FMB003.
+  // Live FMC003 packets can contain an uninitialised OEM total of zero.
+  // Conservatively require a positive total before treating it as measured mileage.
   const oemKm = /^(FMC003|FMB003|FMM003)$/.test(model)
-    ? num(attributes.io389, 0, 1e7)
+    ? num(attributes.io389, 0.001, 1e7)
     : null;
   const measured =
-    oemKm !== null ? oemKm * 1000 : num(attributes.obdOdometer, 0, 1e10);
+    oemKm !== null ? oemKm * 1000 : num(attributes.obdOdometer, 0.001, 1e10);
   const estimated = num(attributes.odometer, 0, 1e10);
   return {
     imei: String(device.uniqueId),

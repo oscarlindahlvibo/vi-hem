@@ -9,6 +9,11 @@ assert.equal(change({attributes:{}}).odometer,null);assert.equal(change({attribu
 assert.equal(change({valid:false,latitude:0,longitude:0}).latitude,null);assert.equal(change({valid:false}).speed_kmh,null);
 assert.throws(()=>change({valid:true,latitude:0,longitude:0}));assert.throws(()=>change({fixTime:'2026-10-20 07:00:00'}));assert.throws(()=>normalizeTraccar({...sample,device:{uniqueId:'other'}}));
 assert.equal(change({attributes:{io389:22146}}).odometer,22146);assert.equal(change({attributes:{io389:4294967295}}).odometer,null);
+assert.equal(change({attributes:{io389:0}}).odometer,null,'Uninitialised OEM zero must not be labelled as measured mileage');
+assert.equal(change({attributes:{obdOdometer:0}}).odometer_source,null);
+assert.equal(change({attributes:{io389:0,odometer:2656}}).odometer_source,'gps_estimated');
+assert.equal(change({attributes:{io389:0,odometer:2656}}).odometer,2.656);
+assert.equal(change({attributes:{io389:0,obdOdometer:22146000}}).odometer,22146,'Valid measured fallback must win over an uninitialised OEM field');
 assert.equal(change({attributes:{odometer:22146000}}).odometer_source,'gps_estimated');
 assert.equal(model.stockholmBoundary('2026-01-15'),'2026-01-14T23:00:00.000Z');assert.equal(model.stockholmBoundary('2026-07-15'),'2026-07-14T22:00:00.000Z');
 assert.equal(Date.parse(model.stockholmBoundary('2026-03-30'))-Date.parse(model.stockholmBoundary('2026-03-29')),23*3600000);
