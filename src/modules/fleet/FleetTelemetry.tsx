@@ -14,6 +14,7 @@ import {
 } from "../../components/ui";
 import type { FleetTelematicsDevice, FleetVehicle } from "../../types";
 import { FleetGpsMap } from "./FleetGpsMap";
+import { FleetGpsOdometer } from "./FleetGpsOdometer";
 import {
   csvJournal,
   journalHeaders,
@@ -145,6 +146,8 @@ export function FleetTelemetry({
     [revision, setRevision] = useState(0);
   const [contact, setContact] = useState(device?.last_contact_at);
   const [online, setOnline] = useState(false);
+  const [manualMeterKm, setManualMeterKm] = useState<number | null>(null);
+  useEffect(() => setManualMeterKm(null), [vehicle.id]);
   const [settings, setSettings] = useState({
       position_retention_days: 90,
       trip_retention_days: 730,
@@ -447,13 +450,14 @@ export function FleetTelemetry({
             Fordonsmätare · serviceunderlag
           </p>
           <p className="text-xl font-semibold">
-            {number(vehicle.current_odometer, vehicle.odometer_unit)}
+            {number(manualMeterKm === null ? vehicle.current_odometer : vehicle.odometer_unit === "mil" ? manualMeterKm / 10 : manualMeterKm, vehicle.odometer_unit)}
           </p>
           <p className="text-xs text-slate-500">
-            Uppdateras endast av rimlig uppmätt OBD-mätare.
+            Avläst manuellt eller rimlig uppmätt OBD-mätare.
           </p>
         </Card>
       </div>
+      <FleetGpsOdometer key={vehicle.id} vehicleId={vehicle.id} onCalibrated={setManualMeterKm} />
       {latest ? (
         <dl className="grid grid-cols-2 gap-4 border-y border-slate-200 py-4 text-sm md:grid-cols-4">
           {[
