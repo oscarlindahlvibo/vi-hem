@@ -1,0 +1,18 @@
+import fs from 'node:fs';import ts from 'typescript';import assert from 'node:assert/strict';
+const load=async(path)=>import('data:text/javascript;base64,'+Buffer.from(ts.transpileModule(fs.readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64'));
+const {normalizeTraccar}=await load('supabase/functions/_shared/fleet-telematics.ts');
+const model=await load('src/modules/fleet/telematics.ts');
+const sample={device:{uniqueId:'990000000000001',model:'FMC003'},position:{id:1,protocol:'teltonika',fixTime:'2026-10-20T07:00:00Z',serverTime:'2026-10-20T07:00:01Z',valid:true,latitude:57.317,longitude:15.583,speed:10,course:180,attributes:{ignition:true,obdOdometer:22146000,rpm:1500,fuelLevel:55,power:13.8,rssi:4}}};
+assert.equal(normalizeTraccar(sample).speed_kmh,18.52);assert.equal(normalizeTraccar(sample).odometer,22146);assert.equal(normalizeTraccar(sample).battery_voltage,13.8);
+const change=(p)=>normalizeTraccar({...sample,position:{...sample.position,...p}});
+assert.equal(change({attributes:{}}).odometer,null);assert.equal(change({attributes:{fuelLevel:255,rpm:65535}}).engine_rpm,null);assert.equal(change({attributes:{fuelLevel:255}}).fuel_level_pct,null);
+assert.equal(change({valid:false,latitude:0,longitude:0}).latitude,null);assert.equal(change({valid:false}).speed_kmh,null);
+assert.throws(()=>change({valid:true,latitude:0,longitude:0}));assert.throws(()=>change({fixTime:'2026-10-20 07:00:00'}));assert.throws(()=>normalizeTraccar({...sample,device:{uniqueId:'other'}}));
+assert.equal(change({attributes:{io389:22146}}).odometer,22146);assert.equal(change({attributes:{io389:4294967295}}).odometer,null);
+assert.equal(change({attributes:{odometer:22146000}}).odometer_source,'gps_estimated');
+assert.equal(model.stockholmBoundary('2026-01-15'),'2026-01-14T23:00:00.000Z');assert.equal(model.stockholmBoundary('2026-07-15'),'2026-07-14T22:00:00.000Z');
+assert.equal(Date.parse(model.stockholmBoundary('2026-03-30'))-Date.parse(model.stockholmBoundary('2026-03-29')),23*3600000);
+assert.equal(Date.parse(model.stockholmBoundary('2026-10-26'))-Date.parse(model.stockholmBoundary('2026-10-25')),25*3600000);
+assert(model.trackingOnline('2026-10-20T07:00:00Z',Date.parse('2026-10-20T07:04:59Z')));assert(!model.trackingOnline('2026-10-20T07:00:00Z',Date.parse('2026-10-20T07:05:00Z')));
+assert(model.csvJournal([['=HYPERLINK("bad")',0]]).includes("'=HYPERLINK"));assert(model.csvJournal([['a;b\nc',0]]).includes('"a;b\nc"'));
+console.log('PASS telemetry normalization: knots/metres/OEM kilometres, missing/sentinel data, invalid fix/IMEI/time, Swedish DST, stale status, spreadsheet formula safety.');

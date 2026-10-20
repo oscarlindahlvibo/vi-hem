@@ -1,3 +1,4 @@
+import { FleetLiveOverview, FleetTelemetry } from "../modules/fleet/FleetTelemetry";
 import { betaExternalRestricted, betaLegacyFileNotice } from '../lib/betaCapabilities';
 // Fleet Manager: register över fordon/maskiner/släp, med skador,
 // service, besiktningar, mätarhistorik, däck, dokument, kostnader,
@@ -113,7 +114,7 @@ export function FleetPage({ onNavigate, initialVehicleId }: { onNavigate: (page:
       supabase.from('vihem_fleet_vehicles').select('*').eq('organisation_id', user.organisation_id).eq('active', true).order('name'),
       supabase.from('vihem_companies').select('id,name').eq('organisation_id', user.organisation_id).order('name'),
       supabase.from('vihem_properties').select('id,name').eq('organisation_id', user.organisation_id).order('name'),
-      supabase.from('vihem_profiles').select('id,name').eq('organisation_id', user.organisation_id).eq('active', true).order('name'),
+      supabase.from('vihem_profiles').select('id,name').eq('organisation_id', user.organisation_id).eq('active', true).in('role', ['staff','admin','superadmin']).order('name'),
       supabase.from('vihem_fleet_damage_reports').select('*').eq('organisation_id', user.organisation_id).order('created_at', { ascending: false }),
       supabase.from('vihem_fleet_service_schedules').select('*').eq('organisation_id', user.organisation_id).eq('active', true),
       supabase.from('vihem_fleet_inspections').select('*').eq('organisation_id', user.organisation_id).eq('active', true),
@@ -229,6 +230,7 @@ export function FleetPage({ onNavigate, initialVehicleId }: { onNavigate: (page:
         }
       />
 
+      {view === 'dashboard' && isAdmin && <FleetLiveOverview vehicles={vehicles} onOpenVehicle={openVehicle} />}
       {view === 'dashboard' && <FleetDashboard stats={stats} onFilter={goToList} vehicles={vehicles} inspections={inspections} serviceSchedules={serviceSchedules} damageReports={damageReports} onOpenVehicle={openVehicle} />}
       {view === 'list' && (
         <FleetList
@@ -757,7 +759,7 @@ function VehicleDetail({ onEdit, vehicle, isAdmin, userId, organisationId, compa
       supabase.from('vihem_fleet_meter_readings').select('*').eq('vehicle_id', vehicle.id).order('recorded_at', { ascending: false }).limit(100),
       supabase.from('vihem_fleet_tires').select('*').eq('vehicle_id', vehicle.id).order('created_at', { ascending: false }),
       isAdmin ? supabase.from('vihem_fleet_costs').select('*').eq('vehicle_id', vehicle.id).order('cost_date', { ascending: false }) : Promise.resolve({ data: [] }),
-      supabase.from('vihem_fleet_telematics_devices').select('*').eq('vehicle_id', vehicle.id).eq('active', true).maybeSingle(),
+      supabase.from('vihem_fleet_telematics_devices').select('id,organisation_id,vehicle_id,provider,device_model,imei,sim_number,status,last_contact_at,last_position_at,active,created_by,created_at,updated_at').eq('vehicle_id', vehicle.id).eq('active', true).maybeSingle(),
       supabase.from('vihem_fleet_events').select('*').eq('vehicle_id', vehicle.id).order('created_at', { ascending: false }).limit(60),
       supabase.from('vihem_fleet_checklist_templates').select('*, items:vihem_fleet_checklist_template_items(*)').eq('organisation_id', organisationId).eq('active', true).order('name'),
       supabase.from('vihem_fleet_checklist_runs').select('*, items:vihem_fleet_checklist_run_items(*)').eq('vehicle_id', vehicle.id).order('performed_at', { ascending: false }).limit(30),
@@ -862,7 +864,7 @@ function VehicleDetail({ onEdit, vehicle, isAdmin, userId, organisationId, compa
       {tab === 'tires' && <TiresTab vehicle={vehicle} tires={tires} organisationId={organisationId} userId={userId} onChanged={reload} />}
       {tab === 'documents' && <DocumentsTab vehicle={vehicle} organisationId={organisationId} userId={userId} onChanged={reload} />}
       {tab === 'costs' && isAdmin && <CostsTab vehicle={vehicle} costs={costs} organisationId={organisationId} userId={userId} onChanged={reload} />}
-      {tab === 'telematics' && <TelematicsTab vehicle={vehicle} device={telematicsDevice} isAdmin={isAdmin} organisationId={organisationId} userId={userId} onChanged={reload} />}
+      {tab === 'telematics' && <TelematicsTab vehicle={vehicle} device={telematicsDevice} isAdmin={isAdmin} organisationId={organisationId} userId={userId} onChanged={reload} profiles={profiles} />}
       {tab === 'history' && <HistoryTab events={events} profilesById={profilesById} />}
 
       <DamageReportModal open={reportModal} onClose={() => setReportModal(false)} vehicle={vehicle} organisationId={organisationId} userId={userId} onSaved={() => { setReportModal(false); reload(); }} />
@@ -2091,28 +2093,26 @@ function CostsTab({ vehicle, costs, organisationId, userId, onChanged }: { vehic
 
 // ── Telematik ──────────────────────────────────────────────────────────
 
-function TelematicsTab({ vehicle, device, isAdmin, organisationId, userId, onChanged }: {
-  vehicle: FleetVehicle; device: FleetTelematicsDevice | null; isAdmin: boolean; organisationId: string; userId: string; onChanged: () => void;
+function TelematicsTab({ vehicle, device, isAdmin, onChanged, profiles }: {
+  vehicle: FleetVehicle; device: FleetTelematicsDevice | null; isAdmin: boolean; organisationId: string; userId: string; onChanged: () => void; profiles: {id:string;name:string}[];
 }) {
   const [modal, setModal] = useState(false);
-  const [provider, setProvider] = useState('teltonika');
-  const [deviceModel, setDeviceModel] = useState('');
+  const [confirmUnpair,setConfirmUnpair] = useState(false);
+
+  const [deviceModel, setDeviceModel] = useState('FMC003');
   const [imei, setImei] = useState('');
   const [simNumber, setSimNumber] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const pair = async () => {
-    if (!imei.trim()) { setError('Ange IMEI.'); return; }
+    if (saving) return;
+    if (!/^\d{15}$/.test(imei.trim())) { setError('Ange IMEI.'); return; }
     setSaving(true); setError('');
     try {
-      const { data, error: err } = await supabase.from('vihem_fleet_telematics_devices').insert({
-        organisation_id: organisationId, vehicle_id: vehicle.id, provider, device_model: deviceModel.trim(), imei: imei.trim(), sim_number: simNumber.trim(), created_by: userId,
-      }).select('id').single();
+      const { error: err } = await supabase.rpc('vihem_fleet_pair_device', {p_vehicle:vehicle.id,p_imei:imei.trim(),p_model:deviceModel.trim(),p_sim:simNumber.trim()});
       if (err) throw err;
-      await supabase.from('vihem_fleet_telematics_device_assignments').insert({ device_id: data.id, vehicle_id: vehicle.id, created_by: userId });
-      await supabase.from('vihem_fleet_events').insert({ organisation_id: organisationId, vehicle_id: vehicle.id, event_type: 'device_assigned', summary: `Telematikenhet kopplad (IMEI ${imei.trim()})`, actor_id: userId });
-      setModal(false); setDeviceModel(''); setImei(''); setSimNumber('');
+      setModal(false); setDeviceModel('FMC003'); setImei(''); setSimNumber('');
       onChanged();
     } catch (err) {
       setError(describeError(err));
@@ -2122,15 +2122,16 @@ function TelematicsTab({ vehicle, device, isAdmin, organisationId, userId, onCha
   };
 
   const unpair = async () => {
-    if (!device || !window.confirm('Koppla bort telematikenheten från fordonet? Historisk data bevaras.')) return;
-    await supabase.from('vihem_fleet_telematics_device_assignments').update({ unassigned_at: new Date().toISOString() }).eq('device_id', device.id).eq('vehicle_id', vehicle.id).is('unassigned_at', null);
-    await supabase.from('vihem_fleet_telematics_devices').update({ vehicle_id: null }).eq('id', device.id);
-    await supabase.from('vihem_fleet_events').insert({ organisation_id: organisationId, vehicle_id: vehicle.id, event_type: 'device_unassigned', summary: 'Telematikenhet frånkopplad', actor_id: userId });
-    onChanged();
+    if (!device) return;
+    if (saving) return;
+    setSaving(true); setError('');
+    try {const {error}=await supabase.rpc('vihem_fleet_unpair_device',{p_device:device.id});if(error)throw error;setConfirmUnpair(false);onChanged();}
+    catch(err){setError(describeError(err));}finally{setSaving(false);}
+
   };
 
   return (
-    <Card className="p-5">
+    <div className="space-y-6"><FleetTelemetry vehicle={vehicle} device={device} isAdmin={isAdmin} profiles={profiles}/><Card className="p-5">
       <h3 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><Radio className="h-4 w-4" /> Telematikenhet</h3>
       {device ? (
         <div className="space-y-3">
@@ -2142,7 +2143,7 @@ function TelematicsTab({ vehicle, device, isAdmin, organisationId, userId, onCha
             <div><dt className="text-xs text-slate-500">Status</dt><dd><Badge className={device.status === 'online' ? 'bg-emerald-100 text-emerald-700' : device.status === 'offline' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}>{device.status === 'online' ? 'Online' : device.status === 'offline' ? 'Offline' : 'Okänd'}</Badge></dd></div>
             <div><dt className="text-xs text-slate-500">Senast kontakt</dt><dd className="font-medium">{fmtDateTime(device.last_contact_at)}</dd></div>
           </dl>
-          {isAdmin && <Button size="sm" variant="secondary" onClick={unpair}>Koppla bort</Button>}
+          {isAdmin && <Button size="sm" variant="secondary" onClick={()=>setConfirmUnpair(true)} disabled={saving}>Koppla bort</Button>}
         </div>
       ) : (
         <div>
@@ -2151,9 +2152,10 @@ function TelematicsTab({ vehicle, device, isAdmin, organisationId, userId, onCha
         </div>
       )}
 
-      <Modal open={modal} onClose={() => setModal(false)} title="Koppla telematikenhet">
+      {error && !modal && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      <Modal open={confirmUnpair} onClose={()=>{if(!saving)setConfirmUnpair(false);}} title="Koppla bort GPS-enheten?" footer={<><Button variant="secondary" disabled={saving} onClick={()=>setConfirmUnpair(false)}>Avbryt</Button><Button loading={saving} onClick={()=>void unpair()}>Koppla bort</Button></>}><p className="text-sm">Positioner och körjournal bevaras på sitt ursprungliga fordon. Enheten spärras i mottagarens register vid nästa synkronisering.</p>{error&&<p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}</Modal>
+      <Modal open={modal} onClose={() => {if(!saving)setModal(false);}} title="Koppla telematikenhet">
         <div className="space-y-4">
-          <Select label="Leverantör" value={provider} onChange={(e) => setProvider(e.target.value)} options={[{ value: 'teltonika', label: 'Teltonika' }, { value: 'generic_obd', label: 'Generisk OBD' }, { value: 'generic_gps', label: 'Generisk GPS' }, { value: 'other', label: 'Övrigt' }]} />
           <Input label="Modell" value={deviceModel} onChange={(e) => setDeviceModel(e.target.value)} placeholder="T.ex. FMC003" />
           <Input label="IMEI" value={imei} onChange={(e) => setImei(e.target.value)} />
           <Input label="SIM-nummer" value={simNumber} onChange={(e) => setSimNumber(e.target.value)} />
@@ -2161,7 +2163,7 @@ function TelematicsTab({ vehicle, device, isAdmin, organisationId, userId, onCha
           <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setModal(false)}>Avbryt</Button><Button onClick={pair} loading={saving}>Koppla</Button></div>
         </div>
       </Modal>
-    </Card>
+    </Card></div>
   );
 }
 

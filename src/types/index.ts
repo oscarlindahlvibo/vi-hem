@@ -2429,7 +2429,7 @@ export interface FleetTelematicsDevice {
   sim_number: string;
   status: FleetTelematicsStatus;
   last_contact_at: string | null;
-  api_key: string;
+  last_position_at?: string | null;
   active: boolean;
   created_by: string | null;
   created_at: string;
