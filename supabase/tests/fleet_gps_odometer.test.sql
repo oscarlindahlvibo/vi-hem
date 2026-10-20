@@ -88,4 +88,7 @@ SET LOCAL ROLE authenticated;
 SELECT public.vihem_fleet_calibrate_gps_odometer(v,27800,1) FROM f;
 RESET ROLE;
 SELECT pg_temp.expect('new checked reading resets estimate with revision and history',(SELECT baseline_km=27800 AND distance_km=0 AND gap_count=0 AND NOT needs_calibration AND calibration_revision=2 FROM public.vihem_fleet_gps_odometer WHERE vehicle_id=(SELECT v FROM f)) AND (SELECT count(*)=2 FROM public.vihem_fleet_meter_readings WHERE vehicle_id=(SELECT v FROM f)));
+UPDATE public.vihem_fleet_gps_odometer SET last_at=now()-interval '91 days' WHERE vehicle_id=(SELECT v FROM f);
+SELECT public.vihem_fleet_tracking_maintenance();
+SELECT pg_temp.expect('expired location anchor cleared while baseline and distance survive',(SELECT last_lat IS NULL AND last_lon IS NULL AND needs_calibration AND baseline_km=27800 AND distance_km=0 FROM public.vihem_fleet_gps_odometer WHERE vehicle_id=(SELECT v FROM f)));
 ROLLBACK;

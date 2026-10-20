@@ -92,7 +92,7 @@ export function FleetGpsOdometer({ vehicleId, onCalibrated }: {
         <p>Uppskattning, inte uppmätt OBD. GPS-summan finns kvar även när positionshistorik gallras. Enhetens egen räknare används inte.</p>
         {Date.now() - Date.parse(estimate.last_at) > 300000 && <p className="text-amber-800">Inaktuell GPS-position. Senare körsträcka kan saknas.</p>}
         {(warnings > 0 || estimate.needs_calibration) && <p role="status" className="text-sm text-amber-800">
-          {estimate.needs_calibration ? "GPS-enhetens tilldelning har ändrats. Beräkningen är pausad tills du stämmer av mot bilen." :
+          {estimate.needs_calibration ? "GPS-startpunkten behöver förnyas, exempelvis efter enhetsbyte eller gallring. Beräkningen är pausad tills du stämmer av mot bilen." :
             `Kontrollera mot bilen: ${estimate.gap_count} GPS-avbrott, ${estimate.late_samples} sena poster och ${estimate.rejected_segments} orimliga hopp. Sträcka kan saknas.`}
         </p>}
       </div>}
