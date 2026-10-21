@@ -52,6 +52,8 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   const started = Date.now();
+  // Edge-runtimens arbetare avbryts efter 60 s; avbryt själva före det så att tolkningen markeras som misslyckad (och inte debiteras).
+  const deadline = started + 52000;
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceKey) return json({ error: "Funktionen är inte konfigurerad." }, 503);
@@ -115,10 +117,10 @@ Deno.serve(async (req: Request) => {
     let ocrText = "";
     if (settings.provider === "google_vision" && settings.googleVisionKey) {
       try {
-        const parts: string[] = [];
-        for (const [index, page] of request.pages.entries()) parts.push(`--- Sida ${index + 1} ---\n${await googleVisionOcr(page, settings.googleVisionKey)}`);
-        ocrText = parts.join("\n");
+        const texts = await Promise.all(request.pages.map((page) => googleVisionOcr(page, settings.googleVisionKey, deadline)));
+        ocrText = texts.map((text, index) => `--- Sida ${index + 1} ---\n${text}`).join("\n");
         usage.ocrProvider = "google_vision";
+        console.log(`AI-tolkning: OCR klar efter ${Date.now() - started} ms, ${ocrText.length} tecken`);
         usage.costSek += request.pages.length * 0.016;
       } catch (error) {
         usage.ocrProvider = "google_vision_failed";
@@ -131,12 +133,12 @@ Deno.serve(async (req: Request) => {
     const hasText = ocrText.replace(/--- Sida \d+ ---/g, "").trim().length >= settings.minTextLength;
     if (hasText) {
       usage.method = "ocr_text";
-      const result = await callOpenAi(settings.openaiKey, settings.aiModel, buildTransportOrderPrompt(ocrText), [], usage);
+      const result = await callOpenAi(settings.openaiKey, settings.aiModel, buildTransportOrderPrompt(ocrText), [], usage, deadline);
       ({ orders, warnings } = normalizeOrders(result));
     }
     if (orders.length === 0 || (completeness(orders) < 0.45 && settings.enableVisionFallback)) {
       usage.method = hasText ? "ocr_text_plus_vision" : "vision";
-      const vision = await callOpenAi(settings.openaiKey, settings.visionModel, buildTransportOrderPrompt(ocrText), request.pages, usage);
+      const vision = await callOpenAi(settings.openaiKey, settings.visionModel, buildTransportOrderPrompt(ocrText), request.pages, usage, deadline);
       const normalized = normalizeOrders(vision);
       if (normalized.orders.length > 0) ({ orders, warnings } = normalized);
     }
@@ -191,18 +193,18 @@ async function decryptSecret(encryptedValue: string, encryptionSecret: string) {
   return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher));
 }
 
-async function googleVisionOcr(page: PageInput, apiKey: string): Promise<string> {
+async function googleVisionOcr(page: PageInput, apiKey: string, deadline: number): Promise<string> {
   const res = await fetchWithTimeout(`https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(apiKey)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ requests: [{ image: { content: page.base64 }, features: [{ type: "DOCUMENT_TEXT_DETECTION", maxResults: 1 }] }] }),
-  }, 30000);
+  }, 30000, deadline);
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error?.message || "Google Vision OCR misslyckades.");
   return data?.responses?.[0]?.fullTextAnnotation?.text || data?.responses?.[0]?.textAnnotations?.[0]?.description || "";
 }
 
-async function callOpenAi(apiKey: string, model: string, prompt: string, images: PageInput[], usage: Usage): Promise<unknown> {
+async function callOpenAi(apiKey: string, model: string, prompt: string, images: PageInput[], usage: Usage, deadline: number): Promise<unknown> {
   const userContent = images.length
     ? [{ type: "text", text: prompt }, ...images.map((page) => ({ type: "image_url", image_url: { url: `data:${page.content_type};base64,${page.base64}` } }))]
     : prompt;
@@ -215,10 +217,13 @@ async function callOpenAi(apiKey: string, model: string, prompt: string, images:
       body: JSON.stringify({
         model: candidate,
         response_format: { type: "json_schema", json_schema: { name: "transport_orders", strict: true, schema: transportOrderSchema() } },
+        // Utan detta resonerar gpt-5-modellerna i nära en minut, vilket slår i edge-runtimens tidsgräns.
+        ...(candidate.startsWith("gpt-5") ? { reasoning_effort: "minimal" } : {}),
         messages,
       }),
-    }, 55000);
+    }, 55000, deadline);
     const payload = await res.json().catch(() => ({}));
+    console.log(`AI-tolkning: ${candidate} svarade ${res.status} efter ${Date.now() - (deadline - 52000)} ms (${images.length} bilder)`);
     if (!res.ok) {
       lastError = payload?.error?.message || `OpenAI svarade ${res.status}.`;
       continue;
@@ -235,11 +240,16 @@ async function callOpenAi(apiKey: string, model: string, prompt: string, images:
   throw new Error(lastError || "OpenAI-tolkningen misslyckades.");
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit, ms: number) {
+async function fetchWithTimeout(url: string, init: RequestInit, ms: number, deadline: number) {
+  const budget = Math.min(ms, deadline - Date.now());
+  if (budget < 3000) throw new Error("Tolkningen tog för lång tid. Försök igen, gärna med färre sidor.");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
+  const timer = setTimeout(() => controller.abort(), budget);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw new Error("Tolkningen tog för lång tid. Försök igen, gärna med färre sidor.");
+    throw error;
   } finally {
     clearTimeout(timer);
   }
