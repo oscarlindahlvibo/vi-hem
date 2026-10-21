@@ -94,7 +94,9 @@ export function buildTransportOrderPrompt(ocrText: string): string {
     "- documentNumber är dokumentets eget nummer (t.ex. LTC-nummer). orderRef är kundens ordernummer på godsraden.",
     "- sender* är avsändare/lastplats, recipient* är mottagare/kontakt vid leverans, delivery* är leveransadress (adress, postnummer, ort).",
     "- Kopiera telefonnummer och e-post exakt som de står. Ange null för det som saknas.",
-    "- Lägg varje godsrad som ett objekt i items.",
+    "- Lägg varje godsrad som ett objekt i items. En godsrad är en fysisk rad i tabellen (antal, typ, mått, vikt, godsmärke), inte en tabellrubrik.",
+    "- Tabellrubriker (Antal, Typ, Order, Längd, Bredd, Höjd, Vikt, Godsmärke, Koordinat, Mobil nr, Postnr, Adress) är aldrig värden. Texten under 'Tillägg leveransvillkor' är fritext och hör till godsraden i deliveryTermsAddition.",
+    "- OCR-texten kan ha kolumnerna i fel ordning. Går texten och bilden inte ihop, lita på bilden.",
     ocrText.trim() ? `\nOCR-text (kan innehålla fel):\n${ocrText.slice(0, 24000)}` : "\nDokumentets sidor bifogas som bilder.",
   ].join("\n");
 }
@@ -154,6 +156,15 @@ export function isUsableOrder(order: InterpretedOrder): boolean {
 }
 
 // Hur komplett resultatet är (0–1): används för att avgöra om bildtolkning (dyrare modell) behövs som komplement.
+const TABLE_HEADINGS = new Set(["antal", "typ", "order", "längd", "bredd", "höjd", "vikt", "godsmärke", "koordinat", "mobil nr", "postnr", "adress", "nr.", "nr"]);
+
+// Sant om någon godsrad innehåller en tabellrubrik som värde, vilket tyder på att OCR-texten läsmässigt blandat kolumnerna.
+export function looksGarbled(orders: InterpretedOrder[]): boolean {
+  return orders.some((order) =>
+    order.items.some((item) => [item.typeName, item.goodsMark, item.deliveryTermsAddition, item.orderRef].some((value) => value !== null && TABLE_HEADINGS.has(value.trim().toLowerCase()))),
+  );
+}
+
 export function completeness(orders: InterpretedOrder[]): number {
   if (orders.length === 0) return 0;
   const fields = ["documentNumber", "loadingDate", "deliveryDate", "deliveryAddress", "deliveryCity", "recipientCompany"] as const;

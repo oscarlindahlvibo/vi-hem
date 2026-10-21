@@ -1,13 +1,20 @@
 // Enhetskontroll av AI-tolkningens rena logik (supabase/functions/_shared/ai-interpret-core.ts). Kör utan nätverk.
 import assert from "node:assert/strict";
 import {
-  buildTransportOrderPrompt, completeness, estimateOpenAiCostSek, isUsableOrder, normalizeOrders, safeJsonParse, sha256Hex,
+  buildTransportOrderPrompt, completeness, estimateOpenAiCostSek, isUsableOrder, looksGarbled, normalizeOrders, safeJsonParse, sha256Hex,
   statusForDbError, transportOrderSchema, validateInterpretRequest,
 } from "../supabase/functions/_shared/ai-interpret-core.ts";
 
 let passed = 0;
 const check = (name, fn) => { fn(); passed += 1; console.log(`PASS ${name}`); };
 const png = Buffer.from("x".repeat(3000)).toString("base64");
+
+check("tabellrubriker som godsrader upptäcks", () => {
+  const bad = normalizeOrders({ orders: [{ documentNumber: "L1", items: [{ typeName: "Godsmärke" }, { typeName: "Koordinat" }] }] }).orders;
+  const good = normalizeOrders({ orders: [{ documentNumber: "L1", items: [{ typeName: "2 dörrar", goodsMark: "H-1" }] }] }).orders;
+  assert.equal(looksGarbled(bad), true);
+  assert.equal(looksGarbled(good), false);
+});
 
 check("schemat är strikt och kräver alla fält", () => {
   const schema = transportOrderSchema();

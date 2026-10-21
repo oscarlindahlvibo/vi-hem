@@ -120,7 +120,6 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     { label: 'Fastigheter & boende', icon: <Building2 className="w-5 h-5" />, items: [
       { label: 'Felanmälan', icon: <Wrench className="w-5 h-5" />, page: 'maintenance', roles: ['tenant', 'staff', 'admin'] },
       { label: 'Vibogruppens portal', icon: <Globe className="w-5 h-5" />, page: 'vibogruppen-website', roles: ['admin'] },
-      { label: 'Fakturering & AI', icon: <Landmark className="w-5 h-5" />, page: 'vibogruppen-billing', roles: ['admin'] },
       { label: 'Vibo hemsida', icon: <Globe className="w-5 h-5" />, page: 'vibofast-website', roles: ['admin'] },
       { label: 'Ekängens hemsida', icon: <Globe className="w-5 h-5" />, page: 'ekangen-website', roles: ['admin'] },
       { label: 'Gräv & Allservice hemsida', icon: <Globe className="w-5 h-5" />, page: 'grav-website', roles: ['admin'] },
@@ -173,6 +172,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Skatteverket', icon: <Landmark className="w-5 h-5" />, page: 'skatteverket', roles: ['staff', 'admin'], module: 'skatteverket' },
       { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['staff', 'admin'], module: 'payroll' },
       { label: 'E-post & underlag', icon: <Mail className="w-5 h-5" />, page: 'mail-search', roles: ['staff', 'admin'] },
+      { label: 'Fakturering & AI', icon: <Landmark className="w-5 h-5" />, page: 'vibogruppen-billing', roles: ['admin'] },
     ] },
     { label: 'Kommunikation', icon: <Users className="w-5 h-5" />, items: [
       { label: 'Personal', icon: <Settings className="w-5 h-5" />, page: 'admin-staff', roles: ['admin'] },

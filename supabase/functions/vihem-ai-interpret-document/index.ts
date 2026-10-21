@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
-  buildTransportOrderPrompt, completeness, estimateOpenAiCostSek, normalizeOrders, safeJsonParse, sha256Hex, statusForDbError,
+  buildTransportOrderPrompt, completeness, estimateOpenAiCostSek, looksGarbled, normalizeOrders, safeJsonParse, sha256Hex, statusForDbError,
   SYSTEM_PROMPT, transportOrderSchema, validateInterpretRequest, type InterpretedOrder, type PageInput,
 } from "../_shared/ai-interpret-core.ts";
 
@@ -136,11 +136,11 @@ Deno.serve(async (req: Request) => {
       const result = await callOpenAi(settings.openaiKey, settings.aiModel, buildTransportOrderPrompt(ocrText), [], usage, deadline);
       ({ orders, warnings } = normalizeOrders(result));
     }
-    if (orders.length === 0 || (completeness(orders) < 0.45 && settings.enableVisionFallback)) {
+    if (orders.length === 0 || ((completeness(orders) < 0.45 || looksGarbled(orders)) && settings.enableVisionFallback)) {
       usage.method = hasText ? "ocr_text_plus_vision" : "vision";
       const vision = await callOpenAi(settings.openaiKey, settings.visionModel, buildTransportOrderPrompt(ocrText), request.pages, usage, deadline);
       const normalized = normalizeOrders(vision);
-      if (normalized.orders.length > 0) ({ orders, warnings } = normalized);
+      if (normalized.orders.length > 0 && (!looksGarbled(normalized.orders) || looksGarbled(orders))) ({ orders, warnings } = normalized);
     }
 
     if (orders.length === 0) throw new Error("Kunde inte hitta någon transportorder i dokumentet.");
