@@ -683,6 +683,8 @@ function ActionRow({
   const [downloading, setDownloading] = useState(false);
   const [resending, setResending] = useState(false);
   const [copying, setCopying] = useState(false);
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false);
+  const [copyError, setCopyError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const hasFinalPdf = Boolean(agreement.final_pdf_storage_path);
 
@@ -725,38 +727,74 @@ function ActionRow({
     }
   };
 
-  const handleCopy = async () => {
-    if (!confirm('Skapa ett nytt redigerbart utkast från det signerade avtalet? Innehåll, parter, signatärer, kopplingar och bilagor kopieras. Signaturer och historik följer inte med.')) return;
+  const handleCopy = async (copyMode: 'full' | 'content_only') => {
     setCopying(true);
+    setCopyError('');
     onError('');
     try {
-      const copy = await duplicateSignedAgreement(agreement.id);
+      const copy = await duplicateSignedAgreement(agreement.id, copyMode);
       onCopied(copy.id);
     } catch (err) {
-      onError(describeError(err));
+      const message = describeError(err);
+      setCopyError(message);
+      onError(message);
+    } finally {
       setCopying(false);
     }
   };
 
   return (
-    <div className={`grid gap-2 ${agreement.status === 'signed' ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
-      <ActionTile icon={Edit3} label="Redigera" onClick={onEdit} primary disabled={!editable} />
-      <ActionTile icon={Download} label={downloading ? 'Öppnar...' : 'Ladda ner'} onClick={handleDownload} disabled={!hasFinalPdf || downloading} />
-      {agreement.status === 'signed' && <ActionTile icon={Copy} label={copying ? 'Kopierar...' : 'Kopiera till nytt'} onClick={handleCopy} disabled={copying} />}
-      <div className="relative">
-        <ActionTile icon={MoreHorizontal} label="Mer" onClick={() => setMenuOpen((v) => !v)} disabled={!hasFinalPdf} />
-        {menuOpen && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-            <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-              <button onClick={handleResend} disabled={resending} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-                <RefreshCw className="h-3.5 w-3.5" /> {resending ? 'Skickar...' : 'Skicka igen (PDF)'}
-              </button>
-            </div>
-          </>
-        )}
+    <>
+      <div className={`grid gap-2 ${agreement.status === 'signed' ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
+        <ActionTile icon={Edit3} label="Redigera" onClick={onEdit} primary disabled={!editable} />
+        <ActionTile icon={Download} label={downloading ? 'Öppnar...' : 'Ladda ner'} onClick={handleDownload} disabled={!hasFinalPdf || downloading} />
+        {agreement.status === 'signed' && <ActionTile icon={Copy} label={copying ? 'Kopierar...' : 'Kopiera till nytt'} onClick={() => { setCopyError(''); setCopyDialogOpen(true); }} disabled={copying} />}
+        <div className="relative">
+          <ActionTile icon={MoreHorizontal} label="Mer" onClick={() => setMenuOpen((v) => !v)} disabled={!hasFinalPdf} />
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+              <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                <button onClick={handleResend} disabled={resending} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                  <RefreshCw className="h-3.5 w-3.5" /> {resending ? 'Skickar...' : 'Skicka igen (PDF)'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+      <Modal
+        open={copyDialogOpen}
+        onClose={() => { if (!copying) setCopyDialogOpen(false); }}
+        title="Hur ska avtalet kopieras?"
+        size="md"
+        footer={<Button variant="secondary" disabled={copying} onClick={() => setCopyDialogOpen(false)}>Avbryt</Button>}
+      >
+        <div className="space-y-3">
+          <button
+            type="button"
+            disabled={copying}
+            onClick={() => void handleCopy('content_only')}
+            className="w-full rounded-xl border-2 border-blue-200 bg-blue-50 p-4 text-left transition-colors hover:border-blue-400 hover:bg-blue-100 disabled:opacity-50"
+          >
+            <span className="block font-semibold text-blue-900">Endast avtalstext – börja om</span>
+            <span className="mt-1 block text-sm text-blue-800">Behåller de redigerbara textblocken men återställer kopplad lägenhet och andra objekt. Parter, signatärer och bilagor lämnas tomma.</span>
+          </button>
+          <button
+            type="button"
+            disabled={copying}
+            onClick={() => void handleCopy('full')}
+            className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <span className="block font-semibold text-slate-900">Kopiera allt</span>
+            <span className="mt-1 block text-sm text-slate-600">Kopierar innehåll, parter, väntande signatärer, objektkopplingar och egna kopior av bilagorna.</span>
+          </button>
+          <p className="text-xs text-slate-500">Signaturer, signerad PDF och historik kopieras aldrig.</p>
+          {copying && <p className="text-sm text-slate-600">Skapar nytt utkast...</p>}
+          {copyError && <p role="alert" className="text-sm text-red-700">{copyError}</p>}
+        </div>
+      </Modal>
+    </>
   );
 }
 

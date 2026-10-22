@@ -156,6 +156,9 @@ Deno.serve(async (req: Request) => {
 
       case "duplicate_signed_agreement": {
         const sourceId = String(body?.id || "");
+        const copyMode = String(body?.copy_mode || "full");
+        if (!["full", "content_only"].includes(copyMode)) return errorJson("VALIDATION_ERROR", "Ogiltigt kopieringsval.", 400);
+        const contentOnly = copyMode === "content_only";
         const agreement = await assertAgreementInOrg(sourceId, ["signed"]);
         if (agreement instanceof Response) return agreement;
 
@@ -173,12 +176,14 @@ Deno.serve(async (req: Request) => {
           if (result.error) return errorJson("INTERNAL_ERROR", result.error.message, 500);
         }
 
-        // A signed document's immutable version is the canonical source.
-        // Falling back to the draft rows only supports older signed rows
-        // that predate version freezing; signatures and version rows are
-        // never copied into the new document.
+        // A full copy uses the exact immutable content that was signed. A
+        // content-only copy deliberately starts from the editable draft
+        // blocks instead: those retain {{apartment.*}}/{{tenant.*}} tokens,
+        // so leaving entity links empty also resets their resolved values.
+        // Older documents without draft blocks fall back to the frozen
+        // version so the user's written text is never lost.
         let blocks = draftBlocksResult.data || [];
-        if (source.current_version_id) {
+        if (source.current_version_id && (!contentOnly || blocks.length === 0)) {
           const { data: version, error } = await db
             .from("vihem_agreement_versions")
             .select("blocks")
@@ -188,6 +193,7 @@ Deno.serve(async (req: Request) => {
           if (error) return errorJson("INTERNAL_ERROR", error.message, 500);
           if (Array.isArray(version?.blocks)) blocks = version.blocks;
         }
+        if (contentOnly) blocks = blocks.filter((block: any) => block.block_type !== "attachment_ref");
 
         const { data: numberData, error: numberErr } = await db.rpc("vihem_next_agreement_number", {
           p_organisation_id: source.organisation_id,
@@ -219,7 +225,7 @@ Deno.serve(async (req: Request) => {
           if (createErr || !copy) throw createErr || new Error("Det nya avtalet kunde inte skapas.");
           copyId = copy.id;
 
-          const sourceParties = partiesResult.data || [];
+          const sourceParties = contentOnly ? [] : partiesResult.data || [];
           const partyIdMap = new Map<string, string>();
           if (sourceParties.length > 0) {
             const { data: copiedParties, error } = await db.from("vihem_agreement_parties").insert(
@@ -243,7 +249,7 @@ Deno.serve(async (req: Request) => {
             }
           }
 
-          const sourceSigners = signersResult.data || [];
+          const sourceSigners = contentOnly ? [] : signersResult.data || [];
           if (sourceSigners.length > 0) {
             const { error } = await db.from("vihem_agreement_signers").insert(
               sourceSigners.map((signer: any) => ({
@@ -264,7 +270,7 @@ Deno.serve(async (req: Request) => {
             if (error) throw error;
           }
 
-          const sourceLinks = linksResult.data || [];
+          const sourceLinks = contentOnly ? [] : linksResult.data || [];
           if (sourceLinks.length > 0) {
             const { error } = await db.from("vihem_agreement_entity_links").insert(
               sourceLinks.map((link: any) => ({
@@ -278,7 +284,7 @@ Deno.serve(async (req: Request) => {
             if (error) throw error;
           }
 
-          const sourceAttachments = attachmentsResult.data || [];
+          const sourceAttachments = contentOnly ? [] : attachmentsResult.data || [];
           const attachmentIdMap = new Map<string, string>();
           for (const attachment of sourceAttachments) {
             const bucket = String(attachment.storage_bucket || "vihem-agreements");
@@ -330,6 +336,7 @@ Deno.serve(async (req: Request) => {
           await writeAudit(db, copy.id, null, "created_from_signed_agreement", "staff", auth.callerId, {
             source_agreement_id: sourceId,
             source_document_number: source.document_number,
+            copy_mode: copyMode,
           });
           return json({ data: copy });
         } catch (copyError) {
