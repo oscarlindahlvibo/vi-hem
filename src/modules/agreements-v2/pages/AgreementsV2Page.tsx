@@ -9,6 +9,7 @@ import {
   createAgreement,
   createTemplate,
   deleteAgreement,
+  duplicateSignedAgreement,
   duplicateTemplate,
   getAgreement,
   getTemplate,
@@ -58,7 +59,7 @@ import { BLOCK_CATEGORIES } from '../blocks/blockCategories';
 import { resolveBlocksForPreview } from '../blocks/dynamicFields';
 import { Modal, Button, Input, Select, SearchInput, Tabs, Card } from '../../../components/ui';
 import { useUnsavedChanges } from '../../../hooks/useUnsavedChanges';
-import { ArchiveIcon, ArrowLeft, Bell, ChevronDown, Download, Edit3, FileSignature, FileText, Fingerprint, Globe, Link2, MoreHorizontal, Paperclip, PenLine, Plus, RefreshCw, Send, Trash2, Users, XCircle } from 'lucide-react';
+import { ArchiveIcon, ArrowLeft, Bell, ChevronDown, Copy, Download, Edit3, FileSignature, FileText, Fingerprint, Globe, Link2, MoreHorizontal, Paperclip, PenLine, Plus, RefreshCw, Send, Trash2, Users, XCircle } from 'lucide-react';
 
 function describeError(err: unknown): string {
   if (err instanceof AgreementApiError) return err.message;
@@ -150,7 +151,7 @@ export function AgreementsV2Page({ initialPrefill }: { initialPrefill?: Agreemen
   if (!user?.organisation_id) return null;
 
   if (selectedAgreementId) {
-    return <AgreementEditor agreementId={selectedAgreementId} organisationId={user.organisation_id} initialStep={openStep} onBack={() => setSelectedAgreementId(null)} />;
+    return <AgreementEditor key={selectedAgreementId} agreementId={selectedAgreementId} organisationId={user.organisation_id} initialStep={openStep} onBack={() => setSelectedAgreementId(null)} onOpenAgreement={(id) => { setOpenStep('content'); setSelectedAgreementId(id); }} />;
   }
 
   if (prefillStatus === 'loading') return <p className="text-sm text-slate-500">Förbereder avtal...</p>;
@@ -362,7 +363,7 @@ function NewDocumentModal({ organisationId, onClose, onCreated, prefill }: { org
 
 type EditorStep = 'content' | 'parties' | 'signing' | 'attachments' | 'history';
 
-function AgreementEditor({ agreementId, organisationId, initialStep, onBack }: { agreementId: string; organisationId: string; initialStep?: EditorStep; onBack: () => void }) {
+function AgreementEditor({ agreementId, organisationId, initialStep, onBack, onOpenAgreement }: { agreementId: string; organisationId: string; initialStep?: EditorStep; onBack: () => void; onOpenAgreement: (id: string) => void }) {
   const [detail, setDetail] = useState<AgreementDetail | null>(null);
   const [creatingTenancy, setCreatingTenancy] = useState(false);
   const [step, setStep] = useState<EditorStep>(initialStep || 'content');
@@ -520,6 +521,7 @@ function AgreementEditor({ agreementId, organisationId, initialStep, onBack }: {
         onMessage={setMessage}
         onError={setError}
         onChanged={load}
+        onCopied={onOpenAgreement}
       />
 
       {message && <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p>}
@@ -668,6 +670,7 @@ function ActionRow({
   onMessage,
   onError,
   onChanged,
+  onCopied,
 }: {
   agreement: Agreement;
   editable: boolean;
@@ -675,9 +678,11 @@ function ActionRow({
   onMessage: (m: string) => void;
   onError: (m: string) => void;
   onChanged: () => void;
+  onCopied: (id: string) => void;
 }) {
   const [downloading, setDownloading] = useState(false);
   const [resending, setResending] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const hasFinalPdf = Boolean(agreement.final_pdf_storage_path);
 
@@ -720,10 +725,24 @@ function ActionRow({
     }
   };
 
+  const handleCopy = async () => {
+    if (!confirm('Skapa ett nytt redigerbart utkast från det signerade avtalet? Innehåll, parter, signatärer, kopplingar och bilagor kopieras. Signaturer och historik följer inte med.')) return;
+    setCopying(true);
+    onError('');
+    try {
+      const copy = await duplicateSignedAgreement(agreement.id);
+      onCopied(copy.id);
+    } catch (err) {
+      onError(describeError(err));
+      setCopying(false);
+    }
+  };
+
   return (
-    <div className="grid grid-cols-3 gap-2">
+    <div className={`grid gap-2 ${agreement.status === 'signed' ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
       <ActionTile icon={Edit3} label="Redigera" onClick={onEdit} primary disabled={!editable} />
       <ActionTile icon={Download} label={downloading ? 'Öppnar...' : 'Ladda ner'} onClick={handleDownload} disabled={!hasFinalPdf || downloading} />
+      {agreement.status === 'signed' && <ActionTile icon={Copy} label={copying ? 'Kopierar...' : 'Kopiera till nytt'} onClick={handleCopy} disabled={copying} />}
       <div className="relative">
         <ActionTile icon={MoreHorizontal} label="Mer" onClick={() => setMenuOpen((v) => !v)} disabled={!hasFinalPdf} />
         {menuOpen && (

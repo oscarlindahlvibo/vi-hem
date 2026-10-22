@@ -154,6 +154,191 @@ Deno.serve(async (req: Request) => {
         return json({ data: created });
       }
 
+      case "duplicate_signed_agreement": {
+        const sourceId = String(body?.id || "");
+        const agreement = await assertAgreementInOrg(sourceId, ["signed"]);
+        if (agreement instanceof Response) return agreement;
+
+        const [sourceResult, draftBlocksResult, partiesResult, signersResult, attachmentsResult, linksResult] = await Promise.all([
+          db.from("vihem_agreements").select("*").eq("id", sourceId).single(),
+          db.from("vihem_agreement_blocks").select("position, block_type, content").eq("agreement_id", sourceId).order("position"),
+          db.from("vihem_agreement_parties").select("*").eq("agreement_id", sourceId).order("position"),
+          db.from("vihem_agreement_signers").select("*").eq("agreement_id", sourceId).order("created_at"),
+          db.from("vihem_agreement_attachments").select("*").eq("agreement_id", sourceId).order("position"),
+          db.from("vihem_agreement_entity_links").select("*").eq("agreement_id", sourceId),
+        ]);
+        if (sourceResult.error || !sourceResult.data) return errorJson("NOT_FOUND", "Det signerade avtalet hittades inte.", 404);
+        const source = sourceResult.data;
+        for (const result of [draftBlocksResult, partiesResult, signersResult, attachmentsResult, linksResult]) {
+          if (result.error) return errorJson("INTERNAL_ERROR", result.error.message, 500);
+        }
+
+        // A signed document's immutable version is the canonical source.
+        // Falling back to the draft rows only supports older signed rows
+        // that predate version freezing; signatures and version rows are
+        // never copied into the new document.
+        let blocks = draftBlocksResult.data || [];
+        if (source.current_version_id) {
+          const { data: version, error } = await db
+            .from("vihem_agreement_versions")
+            .select("blocks")
+            .eq("id", source.current_version_id)
+            .eq("agreement_id", sourceId)
+            .maybeSingle();
+          if (error) return errorJson("INTERNAL_ERROR", error.message, 500);
+          if (Array.isArray(version?.blocks)) blocks = version.blocks;
+        }
+
+        const { data: numberData, error: numberErr } = await db.rpc("vihem_next_agreement_number", {
+          p_organisation_id: source.organisation_id,
+          p_document_type: source.document_type,
+        });
+        if (numberErr) return errorJson("INTERNAL_ERROR", `Kunde inte generera dokumentnummer: ${numberErr.message}`, 500);
+
+        let copyId = "";
+        const copiedStoragePaths: string[] = [];
+        try {
+          const { data: copy, error: createErr } = await db
+            .from("vihem_agreements")
+            .insert({
+              organisation_id: source.organisation_id,
+              document_number: numberData,
+              document_type: source.document_type,
+              category: source.category || "",
+              title: source.title || "",
+              template_id: source.template_id || null,
+              status: "draft",
+              notes: source.notes || "",
+              valid_until: null,
+              selected_package_ids: [],
+              created_by: auth.callerId,
+              updated_by: auth.callerId,
+            })
+            .select("*")
+            .single();
+          if (createErr || !copy) throw createErr || new Error("Det nya avtalet kunde inte skapas.");
+          copyId = copy.id;
+
+          const sourceParties = partiesResult.data || [];
+          const partyIdMap = new Map<string, string>();
+          if (sourceParties.length > 0) {
+            const { data: copiedParties, error } = await db.from("vihem_agreement_parties").insert(
+              sourceParties.map((party: any, position: number) => ({
+                agreement_id: copy.id,
+                position,
+                party_type: party.party_type,
+                display_name: party.display_name || "",
+                org_number: party.org_number || "",
+                email: party.email || "",
+                phone: party.phone || "",
+                address: party.address || "",
+                source_type: party.source_type || null,
+                source_id: party.source_id || null,
+              })),
+            ).select("id, position");
+            if (error) throw error;
+            for (const party of copiedParties || []) {
+              const original = sourceParties[party.position];
+              if (original?.id) partyIdMap.set(original.id, party.id);
+            }
+          }
+
+          const sourceSigners = signersResult.data || [];
+          if (sourceSigners.length > 0) {
+            const { error } = await db.from("vihem_agreement_signers").insert(
+              sourceSigners.map((signer: any) => ({
+                agreement_id: copy.id,
+                party_id: signer.party_id ? partyIdMap.get(signer.party_id) || null : null,
+                profile_id: signer.profile_id || null,
+                name: signer.name || "",
+                email: signer.email || "",
+                phone: signer.phone || "",
+                personal_number: signer.personal_number || "",
+                role_title: signer.role_title || "",
+                signing_method: signer.signing_method === "bankid" ? "bankid" : "handwritten",
+                signing_required: signer.signing_required !== false,
+                sign_order: signer.sign_order ?? null,
+                status: "pending",
+              })),
+            );
+            if (error) throw error;
+          }
+
+          const sourceLinks = linksResult.data || [];
+          if (sourceLinks.length > 0) {
+            const { error } = await db.from("vihem_agreement_entity_links").insert(
+              sourceLinks.map((link: any) => ({
+                agreement_id: copy.id,
+                entity_type: link.entity_type,
+                entity_id: link.entity_id,
+                label: link.label || "",
+                created_by: auth.callerId,
+              })),
+            );
+            if (error) throw error;
+          }
+
+          const sourceAttachments = attachmentsResult.data || [];
+          const attachmentIdMap = new Map<string, string>();
+          for (const attachment of sourceAttachments) {
+            const bucket = String(attachment.storage_bucket || "vihem-agreements");
+            if (bucket !== "vihem-agreements") throw new Error("Bilagan ligger i en oväntad lagringsyta.");
+            const safeName = String(attachment.file_name || "bilaga").replaceAll("/", "-");
+            const targetPath = `${source.organisation_id}/${copy.id}/${crypto.randomUUID()}-${safeName}`;
+            const { error: copyError } = await db.storage.from(bucket).copy(attachment.storage_path, targetPath);
+            if (copyError) throw copyError;
+            copiedStoragePaths.push(targetPath);
+            const { data: copiedAttachment, error: attachmentError } = await db.from("vihem_agreement_attachments").insert({
+                agreement_id: copy.id,
+                name: attachment.name || safeName,
+                description: attachment.description || "",
+                position: attachment.position,
+                storage_bucket: bucket,
+                storage_path: targetPath,
+                file_name: attachment.file_name || safeName,
+                content_type: attachment.content_type || "application/pdf",
+                file_size: attachment.file_size || 0,
+                content_hash: attachment.content_hash || "",
+                included_in_version_id: null,
+                uploaded_by: auth.callerId,
+              })
+              .select("id")
+              .single();
+            if (attachmentError || !copiedAttachment) throw attachmentError || new Error("Bilagan kunde inte registreras på det nya avtalet.");
+            attachmentIdMap.set(attachment.id, copiedAttachment.id);
+          }
+
+          if (blocks.length > 0) {
+            const { error } = await db.from("vihem_agreement_blocks").insert(
+              blocks.map((block: any, position: number) => {
+                const blockType = String(block.block_type || "");
+                const content = block.content || {};
+                const copiedContent = blockType === "attachment_ref" && content.attachment_id
+                  ? { ...content, attachment_id: attachmentIdMap.get(content.attachment_id) || "" }
+                  : content;
+                return {
+                  agreement_id: copy.id,
+                  position,
+                  block_type: blockType,
+                  content: copiedContent,
+                };
+              }),
+            );
+            if (error) throw error;
+          }
+
+          await writeAudit(db, copy.id, null, "created_from_signed_agreement", "staff", auth.callerId, {
+            source_agreement_id: sourceId,
+            source_document_number: source.document_number,
+          });
+          return json({ data: copy });
+        } catch (copyError) {
+          if (copiedStoragePaths.length > 0) await db.storage.from("vihem-agreements").remove(copiedStoragePaths);
+          if (copyId) await db.from("vihem_agreements").delete().eq("id", copyId);
+          return errorJson("INTERNAL_ERROR", copyError instanceof Error ? copyError.message : String(copyError), 500);
+        }
+      }
+
       case "update_agreement": {
         const agreementId = String(body?.id || "");
         const agreement = await assertAgreementInOrg(agreementId);

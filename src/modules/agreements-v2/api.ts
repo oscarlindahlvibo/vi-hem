@@ -70,6 +70,9 @@ export function getAgreement(id: string): Promise<AgreementDetail> {
 export function createAgreement(params: { document_type: AgreementDocumentType; title?: string; category?: string; template_id?: string }): Promise<Agreement> {
   return invokeAdmin('create_agreement', params);
 }
+export function duplicateSignedAgreement(id: string): Promise<Agreement> {
+  return invokeAdmin('duplicate_signed_agreement', { id });
+}
 export function updateAgreement(params: { id: string; title?: string; category?: string; notes?: string; valid_until?: string | null; status?: 'draft' | 'ready' }): Promise<Agreement> {
   return invokeAdmin('update_agreement', params);
 }
