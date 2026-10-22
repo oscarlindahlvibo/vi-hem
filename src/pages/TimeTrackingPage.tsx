@@ -2087,12 +2087,12 @@ function AdminTimeView({ user }: { user: Profile }) {
   const [staffSchedules, setStaffSchedules] = useState<StaffWorkSchedule[]>([]);
   const [adminAbsenceError, setAdminAbsenceError] = useState('');
   const absenceReviewLock = useRef(false);
+  const staffMonthRequestRef = useRef(0);
   const [reviewingAbsence, setReviewingAbsence] = useState<string | null>(null);
 
-  // Calendar for admin staff view
-  const now = new Date();
-  const [calYear, setCalYear] = useState(now.getFullYear());
-  const [calMonth, setCalMonth] = useState(now.getMonth());
+  // The month selector and calendar must always show the same period.
+  const [calYear, calMonthNumber] = monthFilter.split('-').map(Number);
+  const calMonth = calMonthNumber - 1;
 
   const { workOrders, error: workOrderOptionsError } = useTimeWorkOrders(user.organisation_id, String(adminEditModalOpen));
   useEffect(() => {
@@ -2250,14 +2250,21 @@ function AdminTimeView({ user }: { user: Profile }) {
 
   async function openStaffModal(staff: Profile) {
     setSelectedStaff(staff);
-    await loadStaffEntries(staff.id, monthFilter);
-    await loadAbsenceRequests(staff.id, monthFilter);
+    await loadStaffMonth(staff.id, monthFilter);
     await loadStaffSchedules(staff.id);
     setAdminTab('list');
     setStaffModalOpen(true);
   }
 
-  async function loadStaffEntries(staffId: string, month: string) {
+  async function loadStaffMonth(staffId: string, month: string) {
+    const requestId = ++staffMonthRequestRef.current;
+    await Promise.all([
+      loadStaffEntries(staffId, month, requestId),
+      loadAbsenceRequests(staffId, month, requestId),
+    ]);
+  }
+
+  async function loadStaffEntries(staffId: string, month: string, requestId?: number) {
     const { start, end } = monthRange(month);
     const { data } = await supabase
       .from('vihem_time_entries')
@@ -2265,10 +2272,11 @@ function AdminTimeView({ user }: { user: Profile }) {
       .eq('user_id', staffId)
       .gte('start_time', start).lt('start_time', end)
       .order('start_time', { ascending: false });
+    if (requestId !== undefined && requestId !== staffMonthRequestRef.current) return;
     setStaffEntries(data || []);
   }
 
-  async function loadAbsenceRequests(staffId: string, month: string) {
+  async function loadAbsenceRequests(staffId: string, month: string, requestId?: number) {
     const [year, monthNumber] = month.split('-').map(Number);
     const startDate = localDateKey(new Date(year, monthNumber - 1, 1));
     const endDate = localDateKey(new Date(year, monthNumber, 0));
@@ -2279,6 +2287,7 @@ function AdminTimeView({ user }: { user: Profile }) {
       .gte('end_date', startDate)
       .lte('start_date', endDate)
       .order('start_date', { ascending: false });
+    if (requestId !== undefined && requestId !== staffMonthRequestRef.current) return;
     if (error) {
       setAdminAbsenceError(absenceDbErrorMessage(error));
       setAbsenceRequests([]);
@@ -2540,9 +2549,15 @@ function AdminTimeView({ user }: { user: Profile }) {
   const todayPendingCount = todayEntries.filter(entry => entry.status === 'submitted' || entry.status === 'change_requested').length + todayAbsenceRequests.filter(request => request.status === 'submitted').length;
   const staffById: Record<string, Profile> = Object.fromEntries(staffMembers.map(staff => [staff.id, staff]));
   const totalPendingCount = pendingEntries.length + pendingAbsences.length;
+  function selectMonthFilter(month: string) {
+    if (!/^\d{4}-\d{2}$/.test(month)) return;
+    setMonthFilter(month);
+    if (staffModalOpen && selectedStaff) void loadStaffMonth(selectedStaff.id, month);
+  }
+
   function changeMonthFilter(delta: number) {
     const next = new Date(adminListYear, adminListMonthNumber - 1 + delta, 1);
-    setMonthFilter(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`);
+    selectMonthFilter(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`);
   }
 
   return (
@@ -2586,7 +2601,7 @@ function AdminTimeView({ user }: { user: Profile }) {
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </button>
-                  <Input type="month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="sm:w-44" />
+                  <Input type="month" value={monthFilter} onChange={e => selectMonthFilter(e.target.value)} className="sm:w-44" />
                   <button
                     type="button"
                     onClick={() => changeMonthFilter(1)}
@@ -3183,11 +3198,11 @@ function AdminTimeView({ user }: { user: Profile }) {
           {adminTab === 'calendar' && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <button aria-label="Föregående månad" onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); }} className="p-1.5 rounded-lg hover:bg-slate-100">
+                <button aria-label="Föregående månad" onClick={() => changeMonthFilter(-1)} className="p-1.5 rounded-lg hover:bg-slate-100">
                   <ChevronLeft className="w-4 h-4 text-slate-600" />
                 </button>
                 <span className="text-sm font-semibold text-slate-700 capitalize">{calMonthName}</span>
-                <button aria-label="Nästa månad" onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); }} className="p-1.5 rounded-lg hover:bg-slate-100">
+                <button aria-label="Nästa månad" onClick={() => changeMonthFilter(1)} className="p-1.5 rounded-lg hover:bg-slate-100">
                   <ChevronRight className="w-4 h-4 text-slate-600" />
                 </button>
               </div>
