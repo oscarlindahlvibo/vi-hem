@@ -2,18 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { Badge, Button, Card, EmptyState, Input, Modal, PageHeader, Select, Textarea } from '../../components/ui';
 import {
-  isoToLocalInput, kindLabels, localInputToIso, noticeStatus, severityLabels, validateNoticeForm,
-  type NoticeKind, type NoticeSeverity, type NoticeStatus,
+  isoToLocalInput, kindLabels, localInputToIso, noticeStatus, severityLabels, surfaceLabels, validateNoticeForm,
+  type NoticeKind, type NoticeSeverity, type NoticeStatus, type NoticeSurface,
 } from './notice-format';
 
 type Notice = {
   id: string; title: string; body: string; severity: NoticeSeverity; kind: NoticeKind; show_from: string; show_until: string;
-  event_starts_at: string | null; event_ends_at: string | null; all_customers: boolean; customer_ids: string[]; customer_names: string[]; active: boolean;
+  event_starts_at: string | null; event_ends_at: string | null; all_customers: boolean; customer_ids: string[]; customer_names: string[]; surfaces: NoticeSurface[]; active: boolean;
 };
 type CustomerOption = { id: string; name: string };
 type Form = {
   id: string; title: string; body: string; severity: NoticeSeverity; kind: NoticeKind; show_from: string; show_until: string;
-  event_starts_at: string; event_ends_at: string; all_customers: boolean; customer_ids: string[]; active: boolean;
+  event_starts_at: string; event_ends_at: string; customerMode: 'all' | 'some' | 'none'; customer_ids: string[]; surfaces: string[]; active: boolean;
 };
 
 const statusBadge: Record<NoticeStatus, { label: string; className: string }> = {
@@ -30,7 +30,7 @@ function emptyForm(): Form {
   const end = new Date(start.getTime() + 3 * 24 * 3600 * 1000);
   return {
     id: '', title: '', body: '', severity: 'warning', kind: 'maintenance', show_from: isoToLocalInput(start.toISOString()), show_until: isoToLocalInput(end.toISOString()),
-    event_starts_at: '', event_ends_at: '', all_customers: true, customer_ids: [], active: true,
+    event_starts_at: '', event_ends_at: '', customerMode: 'all', customer_ids: [], surfaces: [], active: true,
   };
 }
 
@@ -87,19 +87,21 @@ export function NoticesAdmin({ client }: { client: SupabaseClient }) {
       id: notice.id, title: notice.title, body: notice.body, severity: notice.severity, kind: notice.kind,
       show_from: isoToLocalInput(notice.show_from), show_until: isoToLocalInput(notice.show_until),
       event_starts_at: isoToLocalInput(notice.event_starts_at), event_ends_at: isoToLocalInput(notice.event_ends_at),
-      all_customers: notice.all_customers, customer_ids: notice.customer_ids, active: notice.active,
+      customerMode: notice.all_customers ? 'all' : notice.customer_ids.length > 0 ? 'some' : 'none', customer_ids: notice.customer_ids, surfaces: notice.surfaces ?? [], active: notice.active,
     });
   }
 
   async function save() {
     if (!form) return;
-    const problem = validateNoticeForm(form);
+    const allCustomers = form.customerMode === 'all';
+    const customerIds = form.customerMode === 'some' ? form.customer_ids : [];
+    const problem = validateNoticeForm({ ...form, all_customers: allCustomers, customer_ids: customerIds });
     if (problem) { setError(problem); return; }
     const payload = {
       ...(form.id ? { id: form.id } : {}), title: form.title.trim(), body: form.body, severity: form.severity, kind: form.kind,
       show_from: localInputToIso(form.show_from), show_until: localInputToIso(form.show_until),
       event_starts_at: localInputToIso(form.event_starts_at) ?? '', event_ends_at: localInputToIso(form.event_ends_at) ?? '',
-      all_customers: form.all_customers, customer_ids: form.all_customers ? [] : form.customer_ids, active: form.active,
+      all_customers: allCustomers, customer_ids: customerIds, surfaces: form.surfaces, active: form.active,
     };
     await run(async () => { await rpc('vihem_vibogruppen_notice_save', { p: payload }); setForm(null); }, 'Meddelandet är sparat.');
   }
@@ -139,7 +141,7 @@ export function NoticesAdmin({ client }: { client: SupabaseClient }) {
                 <p className="text-xs text-vihem-muted">
                   Visas {fmt(notice.show_from)} – {fmt(notice.show_until)}
                   {notice.event_starts_at && ` · Underhåll ${fmt(notice.event_starts_at)}${notice.event_ends_at ? ` – ${fmt(notice.event_ends_at)}` : ''}`}
-                  {' · '}Gäller {notice.all_customers ? 'alla kunder' : notice.customer_names.join(', ')}
+                  {' · '}Gäller {[notice.all_customers ? 'alla kundsystem' : notice.customer_names.join(', '), ...(notice.surfaces ?? []).map((s) => surfaceLabels[s] ?? s)].filter(Boolean).join(', ')}
                 </p>
               </Card>
             );
@@ -160,8 +162,19 @@ export function NoticesAdmin({ client }: { client: SupabaseClient }) {
               <Input label="Underhåll startar (valfritt)" type="datetime-local" value={form.event_starts_at} onChange={(e) => setForm({ ...form, event_starts_at: e.target.value })} />
               <Input label="Underhåll slutar (valfritt)" type="datetime-local" value={form.event_ends_at} onChange={(e) => setForm({ ...form, event_ends_at: e.target.value })} />
             </div>
-            <Select label="Mottagare" value={form.all_customers ? 'all' : 'some'} onChange={(e) => setForm({ ...form, all_customers: e.target.value === 'all' })} options={[{ value: 'all', label: 'Alla anslutna kunder' }, { value: 'some', label: 'Utvalda kunder' }]} />
-            {!form.all_customers && (
+            <fieldset className="space-y-1">
+              <legend className="text-sm font-medium">Egna appar och sajter</legend>
+              <div className="grid gap-1 sm:grid-cols-2">
+                {(Object.keys(surfaceLabels) as NoticeSurface[]).map((surface) => (
+                  <label key={surface} className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={form.surfaces.includes(surface)} onChange={(e) => setForm({ ...form, surfaces: e.target.checked ? [...form.surfaces, surface] : form.surfaces.filter((s) => s !== surface) })} />
+                    {surfaceLabels[surface]}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <Select label="Anslutna kundsystem (t.ex. JK)" value={form.customerMode} onChange={(e) => setForm({ ...form, customerMode: e.target.value as Form['customerMode'] })} options={[{ value: 'all', label: 'Alla kundsystem' }, { value: 'some', label: 'Utvalda kunder' }, { value: 'none', label: 'Inga kundsystem' }]} />
+            {form.customerMode === 'some' && (
               <fieldset className="space-y-1">
                 <legend className="text-sm font-medium">Kunder</legend>
                 {customers.map((customer) => (

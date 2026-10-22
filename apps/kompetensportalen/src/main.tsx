@@ -17,6 +17,9 @@ import { About, Business, Contact, Faq, LegalPage } from "./pages/Info";
 import { PlayerPage } from "./pages/Player";
 import { VerifyPage } from "./pages/Verify";
 import "./styles.css";
+import { startNoticeBanner } from "../../_shared/notice-banner";
+
+startNoticeBanner({ url: import.meta.env.VITE_SUPABASE_URL, key: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY, surface: "kompetensportalen" });
 
 function NotFound() { useSeo({ title: "Sidan finns inte | Kompetensportalen", noindex: true }); return <section className="section narrow"><h1>Sidan finns inte</h1><p><Link to="/utbildningar" className="text-link">Se utbildningar →</Link></p></section>; }
 

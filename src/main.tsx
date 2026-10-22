@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
 import './index.css';
+import { startNoticeBanner } from '../apps/_shared/notice-banner';
 
 // WKWebView's own top-level scroll view rubber-bands past the edges of the
 // document and, while it does, visually drags position:fixed elements
@@ -46,6 +47,10 @@ if (!rootElement) {
   // in the UI to explain why.
   import('./App.tsx')
     .then(({ default: App }) => {
+      // Driftmeddelanden (uppdateringar/serverunderhåll) på webben. Den inbyggda appen har ett eget fast skal och hoppar över dem.
+      if (!Capacitor.isNativePlatform()) {
+        void import('./lib/supabase').then(({ supabaseUrl, supabaseAnonKey }) => startNoticeBanner({ url: supabaseUrl, key: supabaseAnonKey, surface: 'vihem-app' }));
+      }
       createRoot(root).render(
         <StrictMode>
           <App />

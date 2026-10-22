@@ -4,6 +4,11 @@ export type NoticeKind = 'update' | 'maintenance' | 'incident' | 'other';
 export type NoticeStatus = 'live' | 'planned' | 'ended' | 'off';
 
 export const severityLabels: Record<NoticeSeverity, string> = { info: 'Information', warning: 'Varning', critical: 'Kritisk' };
+export type NoticeSurface = 'vihem-app' | 'vihem-site' | 'kompetensportalen' | 'vibofast' | 'vibogruppen' | 'viborent';
+export const surfaceLabels: Record<NoticeSurface, string> = {
+  'vihem-app': 'VI-HEM (appen)', 'vihem-site': 'VI-HEM (vi-hem.se)', kompetensportalen: 'Kompetensportalen', vibofast: 'Vibofast', vibogruppen: 'Vibogruppen', viborent: 'ViboRent',
+};
+
 export const kindLabels: Record<NoticeKind, string> = { update: 'Uppdatering', maintenance: 'Serverunderhåll', incident: 'Driftstörning', other: 'Övrigt' };
 
 // <input type="datetime-local"> ger lokal tid utan zon; spara alltid som absolut tidpunkt (ISO/UTC).
@@ -29,7 +34,7 @@ export function noticeStatus(notice: { active: boolean; show_from: string; show_
   return 'live';
 }
 
-export function validateNoticeForm(form: { title: string; show_from: string; show_until: string; event_starts_at: string; event_ends_at: string; all_customers: boolean; customer_ids: string[] }): string | null {
+export function validateNoticeForm(form: { title: string; show_from: string; show_until: string; event_starts_at: string; event_ends_at: string; all_customers: boolean; customer_ids: string[]; surfaces: string[] }): string | null {
   if (!form.title.trim()) return 'Ange en rubrik.';
   const from = localInputToIso(form.show_from);
   const until = localInputToIso(form.show_until);
@@ -38,6 +43,6 @@ export function validateNoticeForm(form: { title: string; show_from: string; sho
   const evStart = localInputToIso(form.event_starts_at);
   const evEnd = localInputToIso(form.event_ends_at);
   if (evStart && evEnd && new Date(evEnd) < new Date(evStart)) return 'Underhållets sluttid kan inte vara före starttiden.';
-  if (!form.all_customers && form.customer_ids.length === 0) return 'Välj minst en kund eller låt meddelandet gälla alla.';
+  if (!form.all_customers && form.customer_ids.length === 0 && form.surfaces.length === 0) return 'Välj minst en mottagare: kundsystem, app eller sajt.';
   return null;
 }

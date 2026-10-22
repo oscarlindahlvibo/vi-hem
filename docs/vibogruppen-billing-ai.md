@@ -52,3 +52,13 @@ Migration `20261022110000_vibogruppen_system_notices.sql` lägger till tabellen 
 - Admin skapar meddelanden under **Ekonomi → Driftmeddelanden**: rubrik, text, typ, allvarlighet, visa från/till, valfritt underhållsfönster och mottagare (alla kunder eller utvalda).
 - Kundsystemen hämtar aktiva meddelanden med sin API-nyckel via `vihem-ai-interpret-document` med `{"action":"notices"}` och visar dem som banner. Fungerar även om AI-tolkningen är avstängd för kunden; inaktiv kund eller återkallad nyckel nekas.
 - Meddelandet är aktivt när `active` och `show_from <= nu < show_until`. Tester: `scripts/test_billing_ai_sql.sh` (databas) och `scripts/notice-format-check.mjs` (formulärlogik).
+
+### Egna appar och sajter
+
+Migration `20261022120000_vibogruppen_notice_surfaces.sql` låter ett meddelande även riktas mot Vibogruppens egna ytor (`surfaces`): `vihem-app` (VI-HEM-appen), `vihem-site` (vi-hem.se), `kompetensportalen`, `vibofast`, `vibogruppen`, `viborent`. Mottagare väljs i admin-sidan: kundsystem (alla/utvalda/inga) och/eller ytor. Ett meddelande måste ha minst en mottagare.
+
+- Sajterna hämtar med den publika RPC:n `vihem_public_notices(p_surface)` (anon får anropa den; svaret innehåller bara bannertexten, tider och allvarlighet).
+- Gemensam kod: `apps/_shared/notice-banner.ts` (ren DOM utan beroenden, fungerar med CSP `script-src 'self'`). Varje app startar den i sin `main.tsx` med sin yta. Bannern läggs överst på sidan, uppdateras var 5:e minut och försvinner vid sluttiden. Kritiska kan inte döljas; övriga kan döljas per webbläsare.
+- VI-HEM-appen startar bannern på webben men inte i den inbyggda iOS/Android-appen (som har ett eget fast skal).
+- Ytorna byggs och driftsätts var för sig: `./deploy_vihem.sh` för appen, `./deploy_sites.sh vibofast vibogruppen viborent kompetensportalen vihem-site` för sajterna. Migrationen måste vara körd först.
+- Test: `node scripts/notice-banner-check.mjs`, `node scripts/notice-format-check.mjs` och `scripts/test_billing_ai_sql.sh`.

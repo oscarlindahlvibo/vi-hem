@@ -13,6 +13,9 @@ import { Checkout } from "./pages/Checkout";
 import { Home } from "./pages/Home";
 import { ProductPage } from "./pages/ProductPage";
 import "./styles.css";
+import { startNoticeBanner } from "../../_shared/notice-banner";
+
+startNoticeBanner({ url: import.meta.env.VITE_SUPABASE_URL, key: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY, surface: "viborent" });
 
 // Äldre adresser från tidigare versioner (/shop, /produkt/…) pekas om till nya.
 const LEGACY: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
