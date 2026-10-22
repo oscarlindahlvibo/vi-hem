@@ -173,6 +173,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['staff', 'admin'], module: 'payroll' },
       { label: 'E-post & underlag', icon: <Mail className="w-5 h-5" />, page: 'mail-search', roles: ['staff', 'admin'] },
       { label: 'Fakturering & AI', icon: <Landmark className="w-5 h-5" />, page: 'vibogruppen-billing', roles: ['admin'] },
+      { label: 'Driftmeddelanden', icon: <Bell className="w-5 h-5" />, page: 'vibogruppen-notices', roles: ['admin'] },
     ] },
     { label: 'Kommunikation', icon: <Users className="w-5 h-5" />, items: [
       { label: 'Personal', icon: <Settings className="w-5 h-5" />, page: 'admin-staff', roles: ['admin'] },

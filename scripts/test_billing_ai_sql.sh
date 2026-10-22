@@ -13,8 +13,9 @@ sleep 5
 run() { docker exec -i "$NAME" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q "$@"; }
 run -o /dev/null < "$ROOT/supabase/tests/stubs/vibogruppen_billing_prereq.sql"
 run -o /dev/null < "$ROOT/supabase/migrations/20261022100000_vibogruppen_billing_ai.sql"
+run -o /dev/null < "$ROOT/supabase/migrations/20261022110000_vibogruppen_system_notices.sql"
 echo "== migration ok"
-output="$(docker exec -i "$NAME" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < "$ROOT/supabase/tests/vibogruppen_billing_ai.test.sql" 2>&1 || true)"
+output="$(for t in vibogruppen_billing_ai vibogruppen_system_notices; do docker exec -i "$NAME" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < "$ROOT/supabase/tests/$t.test.sql" 2>&1 || true; done)"
 echo "$output" | grep -E "NOTICE:  PASS" | sed 's/.*NOTICE:  //' 
 passed="$(grep -c 'NOTICE:  PASS' <<<"$output" || true)"
 if grep -qE "ERROR|FAIL" <<<"$output"; then

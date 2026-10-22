@@ -12,6 +12,8 @@ import {
  * Nyckeln är kopplad till en kund i Vibogruppens fakturamodul. Samma OCR/AI-leverantörer och organisationsnycklar som
  * vihem-process-supplier-invoice-ocr används (Google Vision för text, OpenAI för strukturering, bildtolkning som fallback).
  *
+ * Samma nyckel hämtar även driftmeddelanden (action "notices") som visas som banner i kundsystemet.
+ *
  * Debitering: bara lyckade tolkningar, per sida. Dokumentinnehåll sparas inte; resultatet cachas högst 24 timmar så att
  * ett omförsök med samma request_id inte debiteras två gånger.
  */
@@ -68,6 +70,13 @@ Deno.serve(async (req: Request) => {
     body = await req.json();
   } catch {
     return json({ error: "Ogiltig begäran." }, 400);
+  }
+
+  // Aktiva driftmeddelanden (uppdateringar, serverunderhåll) som kundsystemet visar som banner.
+  if (body.action === "notices") {
+    const { data, error } = await service.rpc("vihem_notices_for_client", { p_key_hash: keyHash });
+    if (error) return json({ error: cleanDbMessage(error.message) }, statusForDbError(error.code));
+    return json({ ok: true, notices: data ?? [], server_time: new Date().toISOString() });
   }
 
   // Pris och gränser så att anropande system kan visa kostnaden innan något skickas.

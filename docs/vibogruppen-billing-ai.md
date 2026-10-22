@@ -44,3 +44,11 @@ Status: byggt och testat lokalt på grenen `feature/ai-interpretation-billing`. 
 ## Kända begränsningar
 - Bara bilder accepteras (JK renderar PDF-sidor i webbläsaren). Direkt PDF-inskick stöds inte.
 - Fakturan skapas inte automatiskt; underlaget exporteras som CSV och faktureras manuellt (en koppling till Accounted kan läggas till senare).
+
+## Driftmeddelanden (uppdateringar och serverunderhåll)
+
+Migration `20261022110000_vibogruppen_system_notices.sql` lägger till tabellen `system_notices` och RPC:erna `vihem_vibogruppen_notices_list`, `vihem_vibogruppen_notice_save`, `vihem_vibogruppen_notice_delete` (admin i Vibogruppen) och `vihem_notices_for_client` (service_role).
+
+- Admin skapar meddelanden under **Ekonomi → Driftmeddelanden**: rubrik, text, typ, allvarlighet, visa från/till, valfritt underhållsfönster och mottagare (alla kunder eller utvalda).
+- Kundsystemen hämtar aktiva meddelanden med sin API-nyckel via `vihem-ai-interpret-document` med `{"action":"notices"}` och visar dem som banner. Fungerar även om AI-tolkningen är avstängd för kunden; inaktiv kund eller återkallad nyckel nekas.
+- Meddelandet är aktivt när `active` och `show_from <= nu < show_until`. Tester: `scripts/test_billing_ai_sql.sh` (databas) och `scripts/notice-format-check.mjs` (formulärlogik).
