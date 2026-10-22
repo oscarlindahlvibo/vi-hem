@@ -123,10 +123,6 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     ] },
     { label: 'Fastigheter & boende', icon: <Building2 className="w-5 h-5" />, items: [
       { label: 'Felanmälan', icon: <Wrench className="w-5 h-5" />, page: 'maintenance', roles: ['tenant', 'staff', 'admin'] },
-      { label: 'Vibogruppens portal', icon: <Globe className="w-5 h-5" />, page: 'vibogruppen-website', roles: ['admin'] },
-      { label: 'Vibo hemsida', icon: <Globe className="w-5 h-5" />, page: 'vibofast-website', roles: ['admin'] },
-      { label: 'Ekängens hemsida', icon: <Globe className="w-5 h-5" />, page: 'ekangen-website', roles: ['admin'] },
-      { label: 'Gräv & Allservice hemsida', icon: <Globe className="w-5 h-5" />, page: 'grav-website', roles: ['admin'] },
       { label: 'Intresseanmälningar', icon: <Mail className="w-5 h-5" />, page: 'vibofast-interests', roles: ['admin'] },
       { label: 'Fastigheter', icon: <Building2 className="w-5 h-5" />, page: 'admin-properties', roles: ['admin'] },
       { label: 'Hyresgäster', icon: <Users className="w-5 h-5" />, page: 'admin-tenants', roles: ['admin'] },
@@ -188,6 +184,10 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Nyheter', icon: <Newspaper className="w-5 h-5" />, page: 'news', roles: ['tenant', 'staff', 'admin'] },
     ] },
     { label: 'Administration', icon: <Settings className="w-5 h-5" />, items: [
+      { label: 'Vibogruppens portal', icon: <Globe className="w-5 h-5" />, page: 'vibogruppen-website', roles: ['admin'] },
+      { label: 'Vibo hemsida', icon: <Globe className="w-5 h-5" />, page: 'vibofast-website', roles: ['admin'] },
+      { label: 'Ekängens hemsida', icon: <Globe className="w-5 h-5" />, page: 'ekangen-website', roles: ['admin'] },
+      { label: 'Gräv & Allservice hemsida', icon: <Globe className="w-5 h-5" />, page: 'grav-website', roles: ['admin'] },
       { label: 'Inställningar', icon: <SlidersHorizontal className="w-5 h-5" />, page: 'admin-settings', roles: ['admin'], systemAdminOnly: true },
       { label: 'Google Workspace', icon: <Mail className="w-5 h-5" />, page: 'admin-google-workspace', roles: ['admin'], systemAdminOnly: true },
       { label: 'Cellsynt SMS', icon: <MessageSquareText className="w-5 h-5" />, page: 'admin-cellsynth', roles: ['admin'], systemAdminOnly: true },
