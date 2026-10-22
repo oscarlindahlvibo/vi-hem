@@ -1,6 +1,7 @@
-import React, { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabase';
+import { startNoticeBanner } from '../../apps/_shared/notice-banner';
 import type { ModuleKey, Role } from '../types';
 import { AppLogo } from './AppLogo';
 import { OfflineStatus } from './OfflineStatus';
@@ -64,6 +65,9 @@ function useKeyboardOpen() {
 }
 
 export function Layout({ children, currentPage, onNavigate, notificationCount = 0, chatNotificationCount = 0, enabledModules = {}, resourcesEnabled = false }: LayoutProps) {
+  const noticeHost = useRef<HTMLDivElement>(null);
+  // Driftmeddelanden (uppdateringar/serverunderhåll) överst i innehållsytan, vid sidan av det fasta sidofältet.
+  useEffect(() => startNoticeBanner({ url: supabaseUrl, key: supabaseAnonKey, surface: 'vihem-app', host: noticeHost.current }), []);
   const { user, signOut, bankIDAvailable, refreshProfile } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const keyboardOpen = useKeyboardOpen();
@@ -362,6 +366,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
 
       {/* Main content */}
       <main className="vihem-mobile-main min-w-0 flex-1 overflow-x-hidden pb-32 pt-16 lg:ml-[17rem] lg:pb-0 lg:pt-0">
+        <div ref={noticeHost} />
         <div className="w-full min-w-0 max-w-[1560px] overflow-x-hidden p-4 lg:p-6 xl:p-8">
           {children}
         </div>

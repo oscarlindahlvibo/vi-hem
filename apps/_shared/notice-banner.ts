@@ -100,7 +100,8 @@ function render(host: HTMLElement, notices: BannerNotice[], onDismiss: (notice: 
 }
 
 // Startar bannern. Anropas en gång från appens startfil. Returnerar en funktion som stoppar den.
-export function startNoticeBanner(options: { url?: string; key?: string; surface: NoticeSurface }): () => void {
+// Utan `host` läggs bannern överst i body. Appar med fast sidofält/egen scrollyta anger ett eget element i innehållsytan.
+export function startNoticeBanner(options: { url?: string; key?: string; surface: NoticeSurface; host?: HTMLElement | null }): () => void {
   const { url, key, surface } = options;
   if (typeof document === 'undefined' || !url || !key) return () => undefined;
   const host = document.createElement('div');
@@ -108,7 +109,7 @@ export function startNoticeBanner(options: { url?: string; key?: string; surface
   host.setAttribute('role', 'region');
   host.setAttribute('aria-label', 'Driftmeddelanden');
   host.style.display = 'none';
-  document.body.prepend(host);
+  (options.host ?? document.body).prepend(host);
 
   let notices: BannerNotice[] = [];
   let dismissed = readDismissed();
