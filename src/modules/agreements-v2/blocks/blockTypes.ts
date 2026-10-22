@@ -129,7 +129,7 @@ export const BLOCK_TYPES: BlockTypeDef[] = [
       description: '',
       selected_by_default: false,
       price_form: 'fixed',
-      items: [{ description: '', quantity: '1', unit_price: '', vat_rate: 25, deduction_type: 'none' }],
+      items: [{ description: '', quantity: '1', unit_price: '', vat_rate: 25, deduction_type: 'none', selected_by_default: false }],
       rut_rate: 50,
       rot_rate: 30,
       deduction_personal_number: '',

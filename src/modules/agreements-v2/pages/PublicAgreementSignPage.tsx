@@ -11,6 +11,7 @@ import { useBankIdFlow } from '../../../hooks/useBankIdFlow';
 import { initiateBankIDAgreementSign } from '../../../lib/bankid';
 import { CheckCircle2, Download, FileText, ShieldCheck, XCircle } from 'lucide-react';
 import { Button, Input, Modal } from '../../../components/ui';
+import { normalizePackageSelectionIds } from '../blocks/priceTable';
 
 function getTokenFromUrl(): string {
   return new URLSearchParams(window.location.search).get('token') || '';
@@ -29,6 +30,9 @@ export function PublicAgreementSignPage() {
   const [declineOpen, setDeclineOpen] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [packageSelection, setPackageSelection] = useState<Record<string, boolean>>({});
+  const [packageSaving, setPackageSaving] = useState(false);
+  const packageSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  const packageSaveVersion = useRef(0);
   const [consentSelection, setConsentSelection] = useState<Record<string, boolean>>({});
   const allConsentsAccepted = (view?.version.blocks ?? []).filter(block => block.block_type === 'checkbox_consent').every(block => consentSelection[block.id]);
   const bankId = useBankIdFlow('sign', token);
@@ -47,7 +51,8 @@ export function PublicAgreementSignPage() {
         if (!active) return;
         setView(data);
         setSignatureName(data.signer.name || '');
-        setPackageSelection(Object.fromEntries(data.selected_package_ids.map((id) => [id, true])));
+        const normalizedPackageIds = normalizePackageSelectionIds(data.version.blocks, data.selected_package_ids);
+        setPackageSelection(Object.fromEntries(normalizedPackageIds.map((id) => [id, true])));
         if (data.already_signed || data.signer.status === 'signed') setMode('signed');
         else if (data.signer.status === 'declined') setMode('declined');
       })
@@ -77,13 +82,15 @@ export function PublicAgreementSignPage() {
   // click; if the save fails they'll see the error banner and can retry
   // (the checkbox itself doesn't roll back, since the next successful
   // toggle -- or signing -- reconciles it anyway).
-  const handleTogglePackage = useCallback((blockId: string, selected: boolean) => {
-    setPackageSelection((prev) => {
-      const next = { ...prev, [blockId]: selected };
-      const ids = Object.entries(next).filter(([, v]) => v).map(([id]) => id);
-      updatePackageSelection(token, ids).catch((err) => setError(err instanceof AgreementApiError && err.code !== 'EDGE_FUNCTION_ERROR' ? err.message : 'Kunde inte spara valet.'));
-      return next;
-    });
+  const handlePackageSelectionChange = useCallback((selectedIds: string[]) => {
+    setPackageSelection(Object.fromEntries(selectedIds.map((id) => [id, true])));
+    const version = ++packageSaveVersion.current;
+    setPackageSaving(true);
+    packageSaveQueue.current = packageSaveQueue.current
+      .catch(() => undefined)
+      .then(() => updatePackageSelection(token, selectedIds).then(() => undefined))
+      .catch((err) => setError(err instanceof AgreementApiError && err.code !== 'EDGE_FUNCTION_ERROR' ? err.message : 'Kunde inte spara valet.'))
+      .finally(() => { if (packageSaveVersion.current === version) setPackageSaving(false); });
   }, [token]);
 
   const checkConsent = () => {
@@ -101,6 +108,7 @@ export function PublicAgreementSignPage() {
     setSaving(true);
     setError('');
     try {
+      await packageSaveQueue.current;
       await submitSignature(token, { signature_image: signatureImage, signature_name: signatureName.trim() });
       setMode('signed');
     } catch (err) {
@@ -108,6 +116,12 @@ export function PublicAgreementSignPage() {
     } finally {
       submission.current = false; setSaving(false);
     }
+  };
+
+  const handleBankIdStart = async () => {
+    if (!checkConsent()) return;
+    await packageSaveQueue.current;
+    await bankId.start(() => initiateBankIDAgreementSign(token));
   };
 
   const handleDecline = async () => {
@@ -190,7 +204,7 @@ export function PublicAgreementSignPage() {
                     attachments={view.attachments}
                     resolveAttachmentUrl={resolveAttachmentUrl}
                     packageSelection={packageSelection}
-                    onTogglePackage={handleTogglePackage}
+                    onPackageSelectionChange={handlePackageSelectionChange}
                     consentSelection={consentSelection}
                     onToggleConsent={saving || bankIdBusy ? undefined : (id, accepted) => setConsentSelection(previous => ({ ...previous, [id]: accepted }))}
                   />
@@ -218,8 +232,8 @@ export function PublicAgreementSignPage() {
                       <Button variant="secondary" onClick={() => setDeclineOpen(true)} disabled={saving || bankIdBusy} className="shrink-0">
                         Avböj
                       </Button>
-                      <Button onClick={() => { if (checkConsent()) setMode('sign'); }} disabled={!allConsentsAccepted || saving} className="min-w-0 flex-1">
-                        Till signering
+                      <Button onClick={() => { if (checkConsent()) setMode('sign'); }} disabled={!allConsentsAccepted || saving || packageSaving} className="min-w-0 flex-1">
+                        {packageSaving ? 'Sparar val…' : 'Till signering'}
                       </Button>
                     </div>
                   </div>
@@ -247,8 +261,8 @@ export function PublicAgreementSignPage() {
                       </div>
                     ) : (
                       <button
-                        onClick={() => { if (checkConsent()) void bankId.start(() => initiateBankIDAgreementSign(token)); }}
-                        disabled={!allConsentsAccepted}
+                        onClick={() => void handleBankIdStart()}
+                        disabled={!allConsentsAccepted || packageSaving}
                         className="flex w-full items-center justify-center gap-2 rounded-xl bg-vihem-navy py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-vihem-navy/90"
                       >
                         <ShieldCheck className="h-4 w-4" /> Starta BankID
@@ -281,7 +295,7 @@ export function PublicAgreementSignPage() {
                       <Button variant="secondary" disabled={saving} onClick={() => setMode('read')} className="flex-1">
                         Tillbaka
                       </Button>
-                      <Button onClick={handleSign} loading={saving} disabled={!allConsentsAccepted} className="flex-[2]">
+                      <Button onClick={handleSign} loading={saving} disabled={!allConsentsAccepted || packageSaving} className="flex-[2]">
                         Signera dokumentet
                       </Button>
                     </div>

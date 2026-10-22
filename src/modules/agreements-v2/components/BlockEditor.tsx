@@ -262,10 +262,8 @@ function PriceTableFields({ content, onChange }: { content: Record<string, any>;
   );
 }
 
-/** A tillägg (`package_option`) is a price_table wearing a title and
- * description -- same line items, same moms/avdrag/totals, just with a
- * "vad heter det här tillvalet" header and a default-checked toggle for
- * how it should look the first time a signer sees it. */
+/** A tillägg (`package_option`) is a price_table whose individual rows can
+ * be selected independently by the recipient. */
 function PackageOptionFields({ content, onChange }: { content: Record<string, any>; onChange: (content: Record<string, any>) => void }) {
   return (
     <div className="space-y-3">
@@ -283,11 +281,8 @@ function PackageOptionFields({ content, onChange }: { content: Record<string, an
         rows={2}
         className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
       />
-      <label className="flex items-center gap-2 text-xs text-slate-600">
-        <input type="checkbox" checked={Boolean(content.selected_by_default)} onChange={(e) => onChange({ ...content, selected_by_default: e.target.checked })} />
-        Förvalt (ikryssat när mottagaren först öppnar dokumentet)
-      </label>
-      <PriceItemsEditor content={content} onChange={onChange} />
+      <p className="text-xs text-slate-500">Mottagaren väljer varje rad separat. Du kan ange vilka rader som ska vara förvalda.</p>
+      <PriceItemsEditor content={content} onChange={onChange} allowDefaultSelection />
     </div>
   );
 }
@@ -296,7 +291,7 @@ function PackageOptionFields({ content, onChange }: { content: Record<string, an
  * between the plain price_table block and package_option's tillägg --
  * both content shapes are identical price-table data, just with an extra
  * title/description wrapper in the latter's case. */
-function PriceItemsEditor({ content, onChange }: { content: Record<string, any>; onChange: (content: Record<string, any>) => void }) {
+function PriceItemsEditor({ content, onChange, allowDefaultSelection = false }: { content: Record<string, any>; onChange: (content: Record<string, any>) => void; allowDefaultSelection?: boolean }) {
   const items: PriceTableItem[] = Array.isArray(content.items) && content.items.length > 0 ? content.items : [{ description: '', quantity: '1', unit_price: '', vat_rate: DEFAULT_VAT_RATE, deduction_type: 'none' }];
   const totals = calcPriceTable({ ...content, items });
   const hasRut = items.some((it) => it.deduction_type === 'rut');
@@ -311,7 +306,7 @@ function PriceItemsEditor({ content, onChange }: { content: Record<string, any>;
     // standard 25%) rather than always 25% -- a quote that's already
     // mostly 12%/6% shouldn't make you re-pick the rate on every new row.
     const previousVatRate = items[items.length - 1]?.vat_rate ?? DEFAULT_VAT_RATE;
-    const nextItems = [...items, { description: '', quantity: '1', unit_price: '', vat_rate: previousVatRate, deduction_type: 'none' as DeductionType }];
+    const nextItems = [...items, { description: '', quantity: '1', unit_price: '', vat_rate: previousVatRate, deduction_type: 'none' as DeductionType, ...(allowDefaultSelection ? { selected_by_default: false } : {}) }];
     onChange({ ...content, items: nextItems });
     setEditingIndex(nextItems.length - 1);
   };
@@ -322,6 +317,17 @@ function PriceItemsEditor({ content, onChange }: { content: Record<string, any>;
       <div className="space-y-1.5">
         {items.map((item, i) => (
           <div key={i} className="flex items-center gap-1.5">
+            {allowDefaultSelection && (
+              <label className="flex shrink-0 items-center gap-1 text-[11px] text-slate-500" title="Förvald när mottagaren öppnar avtalet">
+                <input
+                  type="checkbox"
+                  checked={Boolean(item.selected_by_default ?? content.selected_by_default)}
+                  onChange={(event) => updateItem(i, { selected_by_default: event.target.checked })}
+                  className="h-4 w-4"
+                />
+                Förvald
+              </label>
+            )}
             <button
               type="button"
               onClick={() => setEditingIndex(i)}

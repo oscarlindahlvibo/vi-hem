@@ -24,6 +24,11 @@ export interface PriceTableItem {
    * deduction separately against only the rows that actually qualify for
    * it, never against the invoice as a whole. */
   deduction_type?: DeductionType;
+  /** Only used inside a `package_option`: whether this individual row is
+   * initially checked for the recipient. Older blocks used the block-wide
+   * `selected_by_default`; callers fall back to that value when this field
+   * is absent. */
+  selected_by_default?: boolean;
 }
 
 export interface PriceTableContent {
@@ -118,10 +123,43 @@ export function formatSek(amount: number): string {
 }
 
 export interface DocumentAddonTotal {
-  blockId: string;
+  selectionId: string;
   title: string;
   amount: number;
   selected: boolean;
+}
+
+export function packageSelectionMarkerId(blockId: string): string {
+  return `${blockId}:items`;
+}
+
+export function packageItemSelectionId(blockId: string, itemIndex: number): string {
+  return `${blockId}:item:${itemIndex}`;
+}
+
+/** Converts block-wide legacy selections and implicit defaults into the
+ * explicit per-row representation persisted by the new signer UI. The
+ * marker is important: without it an empty list would be indistinguishable
+ * from "the recipient has not made a choice yet; use defaults". */
+export function normalizePackageSelectionIds(
+  blocks: { id: string; block_type: string; content: any }[],
+  storedIds: Iterable<string>,
+): string[] {
+  const stored = new Set(storedIds);
+  const normalized: string[] = [];
+  for (const block of blocks) {
+    if (block.block_type !== 'package_option') continue;
+    const items: PriceTableItem[] = Array.isArray(block.content?.items) ? block.content.items : [];
+    const marker = packageSelectionMarkerId(block.id);
+    normalized.push(marker);
+    items.forEach((item, index) => {
+      const selected = stored.has(marker)
+        ? stored.has(packageItemSelectionId(block.id, index))
+        : stored.has(block.id) || Boolean(item.selected_by_default ?? block.content?.selected_by_default);
+      if (selected) normalized.push(packageItemSelectionId(block.id, index));
+    });
+  }
+  return normalized;
 }
 
 export interface DocumentTotals {
@@ -148,7 +186,7 @@ export interface DocumentTotals {
  * frozen at completion time) resolve "selected" completely differently. */
 export function calcDocumentTotals(
   blocks: { id: string; block_type: string; content: any }[],
-  isSelected: (blockId: string, content: any) => boolean,
+  isSelected: (blockId: string, itemIndex: number, content: any) => boolean,
 ): DocumentTotals {
   let base = 0;
   let hasPricing = false;
@@ -163,11 +201,14 @@ export function calcDocumentTotals(
       base += calcPriceTable(block.content || {}).amountToPay;
     } else if (block.block_type === 'package_option') {
       hasPricing = true;
-      addons.push({
-        blockId: block.id,
-        title: block.content?.title || 'Valbart tillägg',
-        amount: calcPriceTable(block.content || {}).amountToPay,
-        selected: isSelected(block.id, block.content),
+      const items: PriceTableItem[] = Array.isArray(block.content?.items) ? block.content.items : [];
+      items.forEach((item, itemIndex) => {
+        addons.push({
+          selectionId: packageItemSelectionId(block.id, itemIndex),
+          title: item.description || block.content?.title || 'Valbart tillägg',
+          amount: calcPriceTable({ ...block.content, items: [item] }).amountToPay,
+          selected: isSelected(block.id, itemIndex, block.content),
+        });
       });
     }
   }

@@ -108,10 +108,26 @@ Deno.serve(async (req: Request) => {
         const resolved = await resolveRequest();
         if (resolved.error) return resolved.error;
         const { request } = resolved;
-        const { data: signer } = await db.from("vihem_agreement_signers").select("status").eq("id", request.signer_id).maybeSingle();
+        const [{ data: signer }, { data: version }, { data: agreement }] = await Promise.all([
+          db.from("vihem_agreement_signers").select("status").eq("id", request.signer_id).maybeSingle(),
+          db.from("vihem_agreement_versions").select("blocks").eq("id", request.agreement_version_id).maybeSingle(),
+          db.from("vihem_agreements").select("status").eq("id", request.agreement_id).maybeSingle(),
+        ]);
         if (!signer) return errorJson("NOT_FOUND", "Signatären hittades inte.", 404);
         if (signer.status === "signed" || signer.status === "declined") return errorJson("ALREADY_SIGNED", "Dokumentet är redan avgjort och kan inte längre ändras.", 409);
-        const selectedPackageIds = Array.isArray(body?.selected_package_ids) ? body.selected_package_ids.map((v: unknown) => String(v)) : [];
+        if (["partially_signed", "signed", "accepted"].includes(String(agreement?.status || ""))) return errorJson("SELECTION_LOCKED", "Tilläggsvalen är låsta eftersom en part redan har signerat.", 409);
+        const selectedPackageIds = Array.isArray(body?.selected_package_ids) ? [...new Set(body.selected_package_ids.map((v: unknown) => String(v)))] : [];
+        const allowedIds = new Set<string>();
+        for (const block of Array.isArray(version?.blocks) ? version.blocks : []) {
+          if (block?.block_type !== "package_option" || !block?.id) continue;
+          // Keep accepting the old block-wide id so signing links opened in
+          // an already cached frontend remain compatible during rollout.
+          allowedIds.add(String(block.id));
+          allowedIds.add(`${block.id}:items`);
+          const items = Array.isArray(block?.content?.items) ? block.content.items : [];
+          items.forEach((_: unknown, index: number) => allowedIds.add(`${block.id}:item:${index}`));
+        }
+        if (selectedPackageIds.some((id) => !allowedIds.has(id))) return errorJson("VALIDATION_ERROR", "Valet innehåller ett okänt tillägg.", 400);
         const { error: updateErr } = await db.from("vihem_agreements").update({ selected_package_ids: selectedPackageIds }).eq("id", request.agreement_id);
         if (updateErr) return errorJson("INTERNAL_ERROR", `Kunde inte spara valet: ${updateErr.message}`, 500);
         return json({ data: { ok: true, selected_package_ids: selectedPackageIds } });

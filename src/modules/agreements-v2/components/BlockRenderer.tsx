@@ -4,7 +4,7 @@
 // to drift out of sync.
 import { useEffect, useState } from 'react';
 import type { AgreementAttachment, AgreementBlock, AgreementParty, AgreementSigner } from '../types';
-import { calcDocumentTotals, calcPriceTable, formatSek, type PriceTableContent, type PriceTableItem } from '../blocks/priceTable';
+import { calcDocumentTotals, calcPriceTable, formatSek, normalizePackageSelectionIds, packageItemSelectionId, type PriceTableContent, type PriceTableItem } from '../blocks/priceTable';
 
 type RendererAttachment = Pick<AgreementAttachment, 'id' | 'name' | 'content_type'>;
 
@@ -21,7 +21,7 @@ export function BlockRenderer({
   attachments = [],
   resolveAttachmentUrl,
   packageSelection,
-  onTogglePackage,
+  onPackageSelectionChange,
   consentSelection,
   onToggleConsent,
 }: {
@@ -34,33 +34,37 @@ export function BlockRenderer({
   attachments?: RendererAttachment[];
   resolveAttachmentUrl?: (attachmentId: string) => Promise<string>;
   /** Which `package_option` blocks are currently checked, keyed by block
-   * id. Optional and controlled: pass both this and `onTogglePackage` when
+   * id. Optional and controlled: pass both this and
+   * `onPackageSelectionChange` when
    * the selection needs to be persisted somewhere (the public signing
    * page does, against `vihem_agreements.selected_package_ids`); omit both
    * and the renderer just tracks its own local toggle state, seeded from
    * each package's `selected_by_default` -- fine for a staff preview,
    * where nothing needs to survive a re-render. */
   packageSelection?: Record<string, boolean>;
-  onTogglePackage?: (blockId: string, selected: boolean) => void;
+  onPackageSelectionChange?: (selectedIds: string[]) => void;
   consentSelection?: Record<string, boolean>;
   onToggleConsent?: (blockId: string, accepted: boolean) => void;
 }) {
   const [internalSelection, setInternalSelection] = useState<Record<string, boolean>>({});
 
-  const isSelected = (block: AgreementBlock) => {
-    if (packageSelection && block.id in packageSelection) return packageSelection[block.id];
-    if (block.id in internalSelection) return internalSelection[block.id];
-    return Boolean(block.content?.selected_by_default);
-  };
-  const toggle = (block: AgreementBlock) => {
-    const next = !isSelected(block);
-    if (onTogglePackage) onTogglePackage(block.id, next);
-    else setInternalSelection((prev) => ({ ...prev, [block.id]: next }));
+  const activeSelection = packageSelection ?? internalSelection;
+  const normalizedSelectionIds = normalizePackageSelectionIds(blocks, Object.entries(activeSelection).filter(([, selected]) => selected).map(([id]) => id));
+  const normalizedSelection = new Set(normalizedSelectionIds);
+  const isSelected = (block: AgreementBlock, itemIndex: number) => normalizedSelection.has(packageItemSelectionId(block.id, itemIndex));
+  const toggle = (block: AgreementBlock, itemIndex: number) => {
+    const itemId = packageItemSelectionId(block.id, itemIndex);
+    const nextIds = new Set(normalizedSelectionIds);
+    if (nextIds.has(itemId)) nextIds.delete(itemId);
+    else nextIds.add(itemId);
+    const ids = [...nextIds];
+    if (onPackageSelectionChange) onPackageSelectionChange(ids);
+    else setInternalSelection(Object.fromEntries(ids.map((id) => [id, true])));
   };
 
-  const totals = calcDocumentTotals(blocks, (blockId) => {
+  const totals = calcDocumentTotals(blocks, (blockId, itemIndex) => {
     const block = blocks.find((b) => b.id === blockId);
-    return block ? isSelected(block) : false;
+    return block ? isSelected(block, itemIndex) : false;
   });
 
   return (
@@ -73,8 +77,8 @@ export function BlockRenderer({
           signers={signers}
           attachments={attachments}
           resolveAttachmentUrl={resolveAttachmentUrl}
-          packageSelected={block.block_type === 'package_option' ? isSelected(block) : false}
-          onTogglePackage={() => toggle(block)}
+          packageItemSelection={block.block_type === 'package_option' && Array.isArray(block.content?.items) ? block.content.items.map((_: unknown, index: number) => isSelected(block, index)) : []}
+          onTogglePackageItem={(itemIndex) => toggle(block, itemIndex)}
           consentAccepted={Boolean(consentSelection?.[block.id])}
           onToggleConsent={onToggleConsent ? (accepted) => onToggleConsent(block.id, accepted) : undefined}
         />
@@ -96,7 +100,7 @@ function DocumentTotalsFooter({ totals }: { totals: ReturnType<typeof calcDocume
       <div className="space-y-1">
         <div className="flex justify-between text-slate-600"><span>Grundkostnad</span><span>{formatSek(totals.base)}</span></div>
         {selectedAddons.map((a) => (
-          <div key={a.blockId} className="flex justify-between text-slate-600"><span>{a.title}</span><span>{formatSek(a.amount)}</span></div>
+          <div key={a.selectionId} className="flex justify-between text-slate-600"><span>{a.title}</span><span>{formatSek(a.amount)}</span></div>
         ))}
         <div className="flex justify-between border-t border-slate-200 pt-1 text-base font-semibold text-slate-900"><span>Totalt</span><span>{formatSek(totals.grandTotal)}</span></div>
       </div>
@@ -110,8 +114,8 @@ function BlockView({
   signers,
   attachments,
   resolveAttachmentUrl,
-  packageSelected,
-  onTogglePackage,
+  packageItemSelection,
+  onTogglePackageItem,
   consentAccepted,
   onToggleConsent,
 }: {
@@ -120,8 +124,8 @@ function BlockView({
   signers: Pick<AgreementSigner, 'name' | 'role_title'>[];
   attachments: RendererAttachment[];
   resolveAttachmentUrl?: (attachmentId: string) => Promise<string>;
-  packageSelected: boolean;
-  onTogglePackage: () => void;
+  packageItemSelection: boolean[];
+  onTogglePackageItem: (itemIndex: number) => void;
   consentAccepted: boolean;
   onToggleConsent?: (accepted: boolean) => void;
 }) {
@@ -174,23 +178,14 @@ function BlockView({
         </div>
       );
     case 'package_option': {
-      const totals = calcPriceTable(c as Partial<PriceTableContent>);
+      const anySelected = packageItemSelection.some(Boolean);
       return (
-        <div className={`rounded-xl border-2 p-4 transition-colors ${packageSelected ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200 bg-white'}`}>
-          <div className="flex items-start gap-3">
-            {/* The checkbox is the only toggle control -- deliberately NOT
-                a <label> wrapping the whole card, so clicking the price
-                breakdown below doesn't also flip the selection. */}
-            <input type="checkbox" checked={packageSelected} onChange={onTogglePackage} className="mt-1 h-4 w-4 shrink-0 cursor-pointer" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-start justify-between gap-3">
-                <button type="button" onClick={onTogglePackage} className="min-w-0 break-words text-left font-semibold text-slate-900">{c.title || 'Valbart tillägg'}</button>
-                <span className="shrink-0 whitespace-nowrap font-semibold text-slate-900">{formatSek(totals.amountToPay)}</span>
-              </div>
-              {c.description && <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-600">{c.description}</p>}
-              <div className="mt-3">
-                <PriceTableBody content={c} compact />
-              </div>
+        <div className={`rounded-xl border-2 p-4 transition-colors ${anySelected ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200 bg-white'}`}>
+          <div className="min-w-0">
+            <p className="break-words font-semibold text-slate-900">{c.title || 'Valbara tillägg'}</p>
+            {c.description && <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-600">{c.description}</p>}
+            <div className="mt-3">
+              <PriceTableBody content={c} compact itemSelection={packageItemSelection} onToggleItem={onTogglePackageItem} />
             </div>
           </div>
         </div>
@@ -298,11 +293,12 @@ function BlockView({
  * description/checkbox wrapped around this. `compact` drops the
  * "Prisform"-pill header row, which reads oddly repeated across several
  * tillägg cards in the same document. */
-function PriceTableBody({ content: c, compact = false }: { content: Record<string, any>; compact?: boolean }) {
+function PriceTableBody({ content: c, compact = false, itemSelection, onToggleItem }: { content: Record<string, any>; compact?: boolean; itemSelection?: boolean[]; onToggleItem?: (itemIndex: number) => void }) {
   const items: PriceTableItem[] = Array.isArray(c.items) ? c.items : [];
-  const totals = calcPriceTable(c as Partial<PriceTableContent>);
-  const hasRut = items.some((it) => it.deduction_type === 'rut');
-  const hasRot = items.some((it) => it.deduction_type === 'rot');
+  const selectedItems = itemSelection ? items.filter((_, index) => itemSelection[index]) : items;
+  const totals = calcPriceTable({ ...c, items: selectedItems } as Partial<PriceTableContent>);
+  const hasRut = selectedItems.some((it) => it.deduction_type === 'rut');
+  const hasRot = selectedItems.some((it) => it.deduction_type === 'rot');
   const badgeLabel: Record<string, string> = { rut: 'RUT', rot: 'ROT' };
   return (
     <div>
@@ -317,7 +313,8 @@ function PriceTableBody({ content: c, compact = false }: { content: Record<strin
       )}
       <div className={`space-y-2 ${compact ? '' : 'mt-3'}`}>
         {items.map((item, i) => (
-          <div key={i} className="flex items-start justify-between gap-3 text-sm">
+          <label key={i} className={`flex items-start justify-between gap-3 rounded-lg text-sm ${itemSelection ? 'cursor-pointer border border-slate-200 bg-white p-3' : ''}`}>
+            {itemSelection && <input type="checkbox" checked={Boolean(itemSelection[i])} onChange={() => onToggleItem?.(i)} className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer" />}
             <span className="min-w-0 flex-1 break-words text-slate-700">
               {item.description || '—'}
               {item.deduction_type && item.deduction_type !== 'none' && (
@@ -325,16 +322,16 @@ function PriceTableBody({ content: c, compact = false }: { content: Record<strin
               )}
             </span>
             <span className="shrink-0 whitespace-nowrap text-slate-500">
-              {item.quantity} × {item.unit_price} kr <span className="text-xs text-slate-400">(moms {item.vat_rate}%)</span>
+              {formatSek(calcPriceTable({ ...c, items: [item] }).amountToPay)} <span className="block text-right text-xs text-slate-400">{item.quantity} × {item.unit_price} kr, moms {item.vat_rate}%</span>
             </span>
-          </div>
+          </label>
         ))}
       </div>
       <div className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-sm">
         <div className="flex justify-between text-slate-500"><span>Netto</span><span>{formatSek(totals.netto)}</span></div>
         <div className="flex justify-between text-slate-500"><span>Moms</span><span>{formatSek(totals.moms)}</span></div>
         {!compact && <div className="flex justify-between text-slate-500"><span>Öresavrundning</span><span>{formatSek(totals.roundOff)}</span></div>}
-        <div className="flex justify-between border-t border-slate-100 pt-1 font-semibold text-slate-900"><span>Total inkl. moms</span><span>{formatSek(totals.total)}</span></div>
+        <div className="flex justify-between border-t border-slate-100 pt-1 font-semibold text-slate-900"><span>{itemSelection ? 'Valda tillägg' : 'Total inkl. moms'}</span><span>{formatSek(itemSelection ? totals.amountToPay : totals.total)}</span></div>
         {hasRut && (
           <div className="flex justify-between text-green-700">
             <span>Rutavdrag{c.deduction_personal_number ? ` (${c.deduction_personal_number})` : ''}</span>

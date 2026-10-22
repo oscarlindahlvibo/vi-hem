@@ -126,7 +126,14 @@ function charsForSize(size: number): number {
   return Math.max(20, Math.floor(((PAGE_WIDTH - MARGIN * 2) / (size * 0.52))));
 }
 
-interface PriceTableItem { description?: string; quantity?: string; unit_price?: string; vat_rate?: number; deduction_type?: string }
+interface PriceTableItem { description?: string; quantity?: string; unit_price?: string; vat_rate?: number; deduction_type?: string; selected_by_default?: boolean }
+
+function packageItemSelected(block: AgreementBlock, item: PriceTableItem, itemIndex: number, selectedIds: Set<string>): boolean {
+  const marker = `${block.id}:items`;
+  if (selectedIds.has(marker)) return selectedIds.has(`${block.id}:item:${itemIndex}`);
+  if (selectedIds.has(block.id)) return true; // Legacy block-wide selection.
+  return Boolean(item.selected_by_default ?? (block.content as Record<string, unknown> | undefined)?.selected_by_default);
+}
 
 /** Mirrors calcPriceTable() in src/modules/agreements-v2/blocks/priceTable.ts
  * -- duplicated rather than shared across the browser/edge-function
@@ -152,10 +159,12 @@ function priceTableCalc(c: Record<string, unknown>) {
   return { items, netto, moms, total, hasRut, hasRot, rutAmount, rotAmount, amountToPay, toNumber, itemVatRate };
 }
 
-function priceTableLines(c: Record<string, unknown>): TextLine[] {
+function priceTableLines(c: Record<string, unknown>, itemSelection?: boolean[]): TextLine[] {
   const text = (v: unknown) => (v === undefined || v === null ? "" : String(v));
-  const calc = priceTableCalc(c);
-  const { items, netto, moms, total, hasRut, hasRot, rutAmount, rotAmount, amountToPay, toNumber, itemVatRate } = calc;
+  const allItems: PriceTableItem[] = Array.isArray(c.items) ? c.items as PriceTableItem[] : [];
+  const includedItems = itemSelection ? allItems.filter((_, index) => itemSelection[index]) : allItems;
+  const calc = priceTableCalc({ ...c, items: includedItems });
+  const { netto, moms, total, hasRut, hasRot, rutAmount, rotAmount, amountToPay, toNumber, itemVatRate } = calc;
   const badges: string[] = [];
   if (hasRut) badges.push(`Rutavdrag ${toNumber(c.rut_rate)}%`);
   if (hasRot) badges.push(`Rotavdrag ${toNumber(c.rot_rate)}%`);
@@ -163,9 +172,10 @@ function priceTableLines(c: Record<string, unknown>): TextLine[] {
     text: `Prisform: ${c.price_form === "recurring" ? "Löpande räkning" : "Fast pris"}` + (badges.length ? `   ${badges.join("   ")}` : ""),
     font: "F2", size: 10, gapAfter: 3,
   }];
-  for (const item of items) {
+  for (const [index, item] of allItems.entries()) {
     const marker = item.deduction_type === "rut" ? " (RUT)" : item.deduction_type === "rot" ? " (ROT)" : "";
-    lines.push({ text: `${text(item.description)}${marker}   ${text(item.quantity)} x ${text(item.unit_price)} kr (moms ${itemVatRate(item)}%)`, font: "F1", size: 9 });
+    const choice = itemSelection ? `${itemSelection[index] ? "[x] VALT" : "[ ] EJ VALT"}  ` : "";
+    lines.push({ text: `${choice}${text(item.description)}${marker}   ${text(item.quantity)} x ${text(item.unit_price)} kr (moms ${itemVatRate(item)}%)`, font: "F1", size: 9 });
   }
   lines.push({ text: `Netto: ${netto.toFixed(2)} kr   Moms: ${moms.toFixed(2)} kr   Total inkl. moms: ${total.toFixed(2)} kr`, font: "F2", size: 9, gapAfter: hasRut || hasRot ? 2 : 4 });
   const pnr = text(c.deduction_personal_number);
@@ -210,13 +220,14 @@ function blockToLines(block: AgreementBlock, selectedPackageIds: Set<string>): T
       // an immutable record of what was OFFERED, so an unselected add-on
       // still lists its price for transparency, just clearly marked as not
       // included (and excluded from documentTotalsLines()'s total).
-      const selected = selectedPackageIds.has(block.id);
+      const items: PriceTableItem[] = Array.isArray(c.items) ? c.items as PriceTableItem[] : [];
+      const itemSelection = items.map((item, index) => packageItemSelected(block, item, index, selectedPackageIds));
       const lines: TextLine[] = [{
-        text: `Tillägg: ${text(c.title) || "Valbart tillägg"} -- ${selected ? "VALT (ingår i totalsumman)" : "EJ VALT (ingår ej i totalsumman)"}`,
+        text: `Valbara tillägg: ${text(c.title) || "Tillägg"} -- ${itemSelection.filter(Boolean).length} av ${items.length} valda`,
         font: "F2", size: 10, gapAfter: 2,
       }];
       if (text(c.description)) lines.push(...wrapLine(text(c.description), charsForSize(9)).map((t) => ({ text: t, font: "F1" as const, size: 9, gapAfter: 2 })));
-      lines.push(...priceTableLines(c));
+      lines.push(...priceTableLines(c, itemSelection));
       return lines;
     }
     case "table": {
@@ -336,7 +347,12 @@ function documentTotalsLines(blocks: AgreementBlock[], selectedPackageIds: Set<s
       base += priceTableCalc(c).amountToPay;
     } else if (block.block_type === "package_option") {
       hasPricing = true;
-      addons.push({ title: String((c as Record<string, unknown>).title || "Valbart tillägg"), amount: priceTableCalc(c).amountToPay, selected: selectedPackageIds.has(block.id) });
+      const items: PriceTableItem[] = Array.isArray(c.items) ? c.items as PriceTableItem[] : [];
+      items.forEach((item, itemIndex) => addons.push({
+        title: String(item.description || (c as Record<string, unknown>).title || "Valbart tillägg"),
+        amount: priceTableCalc({ ...c, items: [item] }).amountToPay,
+        selected: packageItemSelected(block, item, itemIndex, selectedPackageIds),
+      }));
     }
   }
   if (!hasPricing || addons.length === 0) return [];

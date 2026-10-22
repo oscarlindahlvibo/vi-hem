@@ -972,8 +972,9 @@ En ny blocktyp, **"Valbart tillägg"** (egen kategori "Tillval" i
 blockeditorns sidopanel), för sådant mottagaren själv väljer att lägga
 till utöver grundkostnaden — t.ex. tvättmaskin & torktumlare, internet.
 Innehållet är strukturellt en `price_table` (samma rader,
-moms-per-rad, RUT/ROT-per-rad — se avsnitt 4) plus `title`,
-`description` och `selected_by_default`; redigeringens rad-UI
+moms-per-rad, RUT/ROT-per-rad — se avsnitt 4) plus `title` och
+`description`. Varje prisrad har ett eget val samt valfri
+`selected_by_default`; redigeringens rad-UI
 (`PriceItemsEditor` i `BlockEditor.tsx`) och renderarens prisdel
 (`PriceTableBody` i `BlockRenderer.tsx`) är därför extraherade som delade
 komponenter mellan `price_table` och `package_option` istället för att
@@ -984,16 +985,16 @@ hyresgäst väljer tvättmaskin eller internet en gång — det är ett villkor
 i det gemensamma avtalet, inte en individuell preferens per undertecknare
 (även om flera ska signera samma dokument). Valet lagras därför på
 `vihem_agreements.selected_package_ids` (ny `jsonb`-kolumn, migration
-`20260824100000_agreements_v2_package_selection.sql`), en array av
-`package_option`-blockens `id`. Block-id:n är stabila över både
-utkastredigering och den frysta versionssnapshotten (tilldelas en gång
-via `crypto.randomUUID()` när blocket skapas), så en direkt
-id-referens räcker — ingen versionsmedvetenhet behövs.
+`20260824100000_agreements_v2_package_selection.sql`). Varje val lagras
+som `<block-id>:item:<radindex>` tillsammans med markören
+`<block-id>:items`. Markören skiljer "inga rader valda" från äldre avtal
+som saknar explicit radval och därför ska använda sina förval. Det gamla
+block-id-formatet stöds fortsatt och tolkas som att samtliga rader valts.
 
 **Live-summering** (`calcDocumentTotals()` i `blocks/priceTable.ts`,
 delad mellan redigerarens förhandsgranskning och `BlockRenderer`): går
 igenom hela blocklistan en gång, summerar `price`/`price_table`-block som
-grundkostnad och `package_option`-block som valbara tillägg, och
+grundkostnad och varje rad i `package_option` som ett valbart tillägg, och
 returnerar `{hasPricing, base, addons, addonsTotal, grandTotal}`.
 `BlockRenderer` visar en "Sammanställning"-kort längst ner
 (Grundkostnad + varje VALT tillägg = Totalt) — men bara när det faktiskt
@@ -1002,7 +1003,7 @@ sin egen totalsumma inline, ingen anledning att duplicera den i en tom
 sammanställning).
 
 **Interaktivitet på signeringssidan.** `BlockRenderer` accepterar valfria
-`packageSelection`/`onTogglePackage`-props (samma mönster som
+`packageSelection`/`onPackageSelectionChange`-props (samma mönster som
 `resolveAttachmentUrl`) — ges de inte, sköter komponenten sitt eget
 `useState` internt (används av redigerarens förhandsgranskning, där val
 bara är en lokal demo). `PublicAgreementSignPage.tsx` äger valet på
@@ -1010,21 +1011,17 @@ riktigt: laddar `selected_package_ids` från `getSignView()`, och
 persisterar varje togglening optimistiskt (flippar kryssrutan direkt,
 sparar i bakgrunden) mot en ny public-action,
 `update_package_selection` i `vihem-agreements-public/index.ts`. Den
-actionen avvisar ändringar med `ALREADY_SIGNED` om den ANROPANDE
-signatärens egen status redan är `signed`/`declined` — **öppen fråga,
-inte åtgärdad**: i ett fleragentsdokument kontrolleras bara den
-anropande signatärens status, inte hela avtalets, så en ännu inte
-signerande part skulle i teorin kunna ändra valet efter att en annan
-part redan signerat utifrån en då annorlunda totalsumma. Låg risk
-(kräver flera signatärer + ett aktivt försök) men bör hårdnas innan
-skarp drift med fleragentsavtal där detta är vanligt.
+actionen validerar att alla id:n tillhör den frysta versionen. Den avvisar
+också ändringar om den anropande signatären redan har avgjort dokumentet
+eller om avtalet är `partially_signed`/`signed`/`accepted`; radvalen kan
+alltså inte ändras efter den första signaturen i ett flerpartsavtal.
 
 **Slutlig PDF.** `_shared/agreement-pdf.ts` (samma duplicerings-motivering
 som `price_table`s aritmetik, se avsnitt 4) fick en spegling av
 `calcDocumentTotals()` (`documentTotalsLines()`) och en ny
 `package_option`-case i blockrenderingen: ett offererat men EJ valt
 tillägg listas ändå med sitt pris (transparens om vad som erbjöds) men
-märks tydligt `EJ VALT (ingår ej i totalsumman)` och utesluts ur både
+varje rad märks tydligt `VALT` eller `EJ VALT` och ovalda rader utesluts ur både
 sammanställningen och grundkostnaden. `generateAndDeliverFinalPdf()` i
 `agreement-completion.ts` läser `agreement.selected_package_ids` och
 skickar med som `selectedPackageIds` till `buildAgreementPdf()` — valet
