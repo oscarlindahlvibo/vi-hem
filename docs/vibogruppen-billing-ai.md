@@ -62,3 +62,7 @@ Migration `20261022120000_vibogruppen_notice_surfaces.sql` låter ett meddelande
 - VI-HEM-appen startar bannern på webben men inte i den inbyggda iOS/Android-appen (som har ett eget fast skal).
 - Ytorna byggs och driftsätts var för sig: `./deploy_vihem.sh` för appen, `./deploy_sites.sh vibofast vibogruppen viborent kompetensportalen vihem-site` för sajterna. Migrationen måste vara körd först.
 - Test: `node scripts/notice-banner-check.mjs`, `node scripts/notice-format-check.mjs` och `scripts/test_billing_ai_sql.sh`.
+
+## AI-tolkning i högkvalitetsläge och dubblettsammanslagning
+
+`vihem-ai-interpret-document` tar valfritt fältet `accuracy: "high"`. Då hoppar funktionen över textmodellen och låter bildmodellen läsa sidorna direkt (OCR-texten följer med som stöd); misslyckas bildtolkningen används textmodellen som reserv. Läget används när användaren själv valt AI-tolkning för ett dokument som har läsbar text. Resultatet normaliseras: ordrar med samma dokumentnummer och leveransadress slås ihop (komplettering av tomma fält, godsrader med samma typ slås ihop) och mått över 30 m tolkas som centimeter/millimeter. Faktureringen är oförändrad (per skickad sida, bara lyckade).

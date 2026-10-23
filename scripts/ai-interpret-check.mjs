@@ -1,13 +1,35 @@
 // Enhetskontroll av AI-tolkningens rena logik (supabase/functions/_shared/ai-interpret-core.ts). Kör utan nätverk.
 import assert from "node:assert/strict";
 import {
-  buildTransportOrderPrompt, completeness, estimateOpenAiCostSek, isUsableOrder, looksGarbled, normalizeOrders, safeJsonParse, sha256Hex,
+  buildTransportOrderPrompt, completeness, estimateOpenAiCostSek, isUsableOrder, looksGarbled, mergeDuplicateOrders, normalizeOrders, safeJsonParse, sha256Hex,
   statusForDbError, transportOrderSchema, validateInterpretRequest,
 } from "../supabase/functions/_shared/ai-interpret-core.ts";
 
 let passed = 0;
 const check = (name, fn) => { fn(); passed += 1; console.log(`PASS ${name}`); };
 const png = Buffer.from("x".repeat(3000)).toString("base64");
+
+check("mått i centimeter och millimeter görs om till meter", () => {
+  const { orders, warnings } = normalizeOrders({ orders: [{ documentNumber: "1", items: [{ typeName: "Modul", length_m: 6.35, width_m: 395, height_m: 3400, weight_ton: 0.5 }] }] });
+  assert.equal(orders[0].items[0].length_m, 6.35);
+  assert.equal(orders[0].items[0].width_m, 3.95);
+  assert.equal(orders[0].items[0].height_m, 3.4);
+  assert.ok(warnings.length > 0);
+});
+
+check("kopior av samma fraktsedel slås ihop till en order med kompletta godsrader", () => {
+  const copy = (items) => ({ documentNumber: "58806", deliveryAddress: "Väsby 34", recipientPhone: null, items });
+  const { orders } = normalizeOrders({ orders: [
+    copy([{ typeName: "Modul 14", quantity: 1, length_m: 6.35, width_m: 3.95, height_m: 3.4, weight_ton: 0 }, { typeName: "Modul 5", quantity: 1 }]),
+    { ...copy([{ typeName: "modul 14", weight_ton: 8.2 }, { typeName: "Modul 5", length_m: 6.65, width_m: 3.35, height_m: 3.4 }]), recipientPhone: "073-0675742" },
+  ] });
+  assert.equal(orders.length, 1);
+  assert.equal(orders[0].recipientPhone, "073-0675742");
+  assert.equal(orders[0].items.length, 2);
+  assert.equal(orders[0].items[0].weight_ton, 8.2);
+  assert.equal(orders[0].items[1].length_m, 6.65);
+  assert.equal(mergeDuplicateOrders([{ ...orders[0], documentNumber: null }, { ...orders[0], documentNumber: null }]).length, 2);
+});
 
 check("tabellrubriker som godsrader upptäcks", () => {
   const bad = normalizeOrders({ orders: [{ documentNumber: "L1", items: [{ typeName: "Godsmärke" }, { typeName: "Koordinat" }] }] }).orders;

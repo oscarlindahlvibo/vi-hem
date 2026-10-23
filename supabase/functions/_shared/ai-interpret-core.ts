@@ -90,10 +90,11 @@ export function buildTransportOrderPrompt(ocrText: string): string {
     "Extrahera varje transportorder/leverans i dokumentet till ett objekt i listan 'orders'. Ett dokument kan innehålla flera leveranser (t.ex. en uppdragslista).",
     "Regler:",
     "- Datum anges som YYYY-MM-DD.",
-    "- Mått anges i meter och vikt i ton (omvandla kilo till ton; 157 kg = 0,157 ton).",
+    "- Mått anges i meter och vikt i ton (omvandla kilo till ton; 157 kg = 0,157 ton). Mått som uppenbart är centimeter eller millimeter (t.ex. 395 eller 3400 för en bredd) omvandlas till meter.",
     "- documentNumber är dokumentets eget nummer (t.ex. LTC-nummer). orderRef är kundens ordernummer på godsraden.",
     "- sender* är avsändare/lastplats, recipient* är mottagare/kontakt vid leverans, delivery* är leveransadress (adress, postnummer, ort).",
     "- Kopiera telefonnummer och e-post exakt som de står. Ange null för det som saknas.",
+    "- Samma fraktsedel kan förekomma i flera kopior i dokumentet (t.ex. blad för avsändare, mottagare och transportör) eller på flera sidor. Redovisa varje order och varje godsrad bara en gång.",
     "- Lägg varje godsrad som ett objekt i items. En godsrad är en fysisk rad i tabellen (antal, typ, mått, vikt, godsmärke), inte en tabellrubrik.",
     "- Tabellrubriker (Antal, Typ, Order, Längd, Bredd, Höjd, Vikt, Godsmärke, Koordinat, Mobil nr, Postnr, Adress) är aldrig värden. Texten under 'Tillägg leveransvillkor' är fritext och hör till godsraden i deliveryTermsAddition.",
     "- OCR-texten kan ha kolumnerna i fel ordning. Går texten och bilden inte ihop, lita på bilden.",
@@ -138,6 +139,14 @@ export function normalizeOrders(raw: unknown): { orders: InterpretedOrder[]; war
         const out = {} as InterpretedItem;
         for (const field of ITEM_STRING_FIELDS) (out as Record<string, unknown>)[field] = cleanString(item[field]);
         for (const field of ITEM_NUMBER_FIELDS) (out as Record<string, unknown>)[field] = cleanNumber(item[field], field === "quantity" ? 100000 : 100000);
+        for (const dim of ["length_m", "width_m", "height_m"] as const) {
+          const value = out[dim];
+          // Centimeter eller millimeter som angetts som meter: över 30 m är orimligt för gods på lastbil.
+          if (value !== null && value > 30) {
+            out[dim] = Math.round((value <= 1000 ? value / 100 : value / 1000) * 100) / 100;
+            warnings.push("Ett mått var orimligt stort och tolkades som centimeter eller millimeter.");
+          }
+        }
         // Vikt i kilo som felaktigt angetts som ton: över 200 ton är orimligt för en godsrad.
         if (out.weight_ton !== null && out.weight_ton > 200) {
           out.weight_ton = Math.round((out.weight_ton / 1000) * 100) / 100;
@@ -147,7 +156,32 @@ export function normalizeOrders(raw: unknown): { orders: InterpretedOrder[]; war
       });
     if (isUsableOrder(order)) orders.push(order);
   }
-  return { orders, warnings: [...new Set(warnings)] };
+  return { orders: mergeDuplicateOrders(orders), warnings: [...new Set(warnings)] };
+}
+
+const isFilled = (value: string | number | null) => value !== null && value !== 0 && value !== "";
+
+// Samma fraktsedel i flera kopior ger flera likadana ordrar: slå ihop ordrar med samma dokumentnummer och leveransadress,
+// komplettera tomma fält och slå ihop godsrader med samma typ.
+export function mergeDuplicateOrders(orders: InterpretedOrder[]): InterpretedOrder[] {
+  const merged: InterpretedOrder[] = [];
+  const key = (order: InterpretedOrder) => (order.documentNumber ? `${order.documentNumber.toLowerCase()}|${(order.deliveryAddress ?? "").toLowerCase().replace(/\s+/g, " ").trim()}` : null);
+  for (const order of orders) {
+    const k = key(order);
+    const target = k ? merged.find((m) => key(m) === k) : undefined;
+    if (!target) { merged.push({ ...order, items: order.items.map((item) => ({ ...item })) }); continue; }
+    for (const field of STRING_FIELDS) if (target[field] === null && order[field] !== null) (target as Record<string, unknown>)[field] = order[field];
+    target.loadingDate = target.loadingDate ?? order.loadingDate;
+    target.deliveryDate = target.deliveryDate ?? order.deliveryDate;
+    for (const item of order.items) {
+      const same = target.items.find((t) => t.typeName !== null && item.typeName !== null && t.typeName.toLowerCase() === item.typeName.toLowerCase());
+      if (!same) { target.items.push({ ...item }); continue; }
+      for (const field of [...ITEM_STRING_FIELDS, ...ITEM_NUMBER_FIELDS]) {
+        if (!isFilled(same[field] as string | number | null) && isFilled(item[field] as string | number | null)) (same as Record<string, unknown>)[field] = item[field];
+      }
+    }
+  }
+  return merged;
 }
 
 // En order räknas som användbar om den innehåller något som identifierar leveransen.
@@ -178,7 +212,7 @@ export function completeness(orders: InterpretedOrder[]): number {
 export type PageInput = { content_type: string; base64: string };
 
 export type ValidatedRequest =
-  | { ok: true; pages: PageInput[]; requestId: string; fileName: string; fileSha256: string; userRef: string; source: string }
+  | { ok: true; pages: PageInput[]; requestId: string; fileName: string; fileSha256: string; userRef: string; source: string; accuracy: "standard" | "high" }
   | { ok: false; status: number; error: string };
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -210,6 +244,8 @@ export function validateInterpretRequest(body: unknown, maxPages: number): Valid
     fileSha256: sha,
     userRef: typeof b.user_ref === "string" ? b.user_ref.slice(0, 200) : "",
     source: typeof b.source === "string" ? b.source.slice(0, 100) : "",
+    // "high": läs bilderna direkt med bildmodellen (när användaren själv valt AI eller vill ha en om-tolkning).
+    accuracy: b.accuracy === "high" ? "high" : "standard",
   };
 }
 

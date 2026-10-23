@@ -140,16 +140,24 @@ Deno.serve(async (req: Request) => {
     let orders: InterpretedOrder[] = [];
     let warnings: string[] = [];
     const hasText = ocrText.replace(/--- Sida \d+ ---/g, "").trim().length >= settings.minTextLength;
-    if (hasText) {
+    const high = request.accuracy === "high" && settings.enableVisionFallback;
+    if (hasText && !high) {
       usage.method = "ocr_text";
       const result = await callOpenAi(settings.openaiKey, settings.aiModel, buildTransportOrderPrompt(ocrText), [], usage, deadline);
       ({ orders, warnings } = normalizeOrders(result));
     }
-    if (orders.length === 0 || ((completeness(orders) < 0.45 || looksGarbled(orders)) && settings.enableVisionFallback)) {
+    if (high || orders.length === 0 || ((completeness(orders) < 0.45 || looksGarbled(orders)) && settings.enableVisionFallback)) {
       usage.method = hasText ? "ocr_text_plus_vision" : "vision";
-      const vision = await callOpenAi(settings.openaiKey, settings.visionModel, buildTransportOrderPrompt(ocrText), request.pages, usage, deadline);
-      const normalized = normalizeOrders(vision);
-      if (normalized.orders.length > 0 && (!looksGarbled(normalized.orders) || looksGarbled(orders))) ({ orders, warnings } = normalized);
+      try {
+        const vision = await callOpenAi(settings.openaiKey, settings.visionModel, buildTransportOrderPrompt(ocrText), request.pages, usage, deadline);
+        const normalized = normalizeOrders(vision);
+        if (normalized.orders.length > 0 && (!looksGarbled(normalized.orders) || looksGarbled(orders))) ({ orders, warnings } = normalized);
+      } catch (error) {
+        // I högkvalitetsläget har textmodellen inte körts än: använd den som reserv om bildtolkningen misslyckas.
+        if (!(high && hasText)) throw error;
+        usage.method = "ocr_text";
+        ({ orders, warnings } = normalizeOrders(await callOpenAi(settings.openaiKey, settings.aiModel, buildTransportOrderPrompt(ocrText), [], usage, deadline)));
+      }
     }
 
     if (orders.length === 0) throw new Error("Kunde inte hitta någon transportorder i dokumentet.");
