@@ -31,6 +31,16 @@ check("kopior av samma fraktsedel slås ihop till en order med kompletta godsrad
   assert.equal(mergeDuplicateOrders([{ ...orders[0], documentNumber: null }, { ...orders[0], documentNumber: null }]).length, 2);
 });
 
+check("leveranstid normaliseras till HH:MM", () => {
+  const time = (value) => normalizeOrders({ orders: [{ documentNumber: "1", deliveryTime: value, items: [] }] }).orders[0].deliveryTime;
+  assert.equal(time("06.45"), "06:45");
+  assert.equal(time("VB 6:45"), "06:45");
+  assert.equal(time("0645"), "06:45");
+  assert.equal(time("25.99"), null);
+  assert.equal(time("sen"), null);
+  assert.equal(time(null), null);
+});
+
 check("tabellrubriker som godsrader upptäcks", () => {
   const bad = normalizeOrders({ orders: [{ documentNumber: "L1", items: [{ typeName: "Godsmärke" }, { typeName: "Koordinat" }] }] }).orders;
   const good = normalizeOrders({ orders: [{ documentNumber: "L1", items: [{ typeName: "2 dörrar", goodsMark: "H-1" }] }] }).orders;

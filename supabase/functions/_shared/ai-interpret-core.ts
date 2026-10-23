@@ -42,6 +42,8 @@ export type InterpretedOrder = {
   deliveryCity: string | null;
   deliveryCountry: string | null;
   deliveryTerms: string | null;
+  // Planerad lossningstid (HH:MM) när en tid anges i leveransanvisningen.
+  deliveryTime: string | null;
   items: InterpretedItem[];
 };
 
@@ -49,7 +51,7 @@ const STRING_FIELDS: (keyof Omit<InterpretedOrder, "items">)[] = [
   "documentNumber", "senderCompany", "senderAddress", "senderPostnr", "senderCity", "senderCountry", "loadingCompany",
   "customerContact", "customerPhone", "loadingDate", "deliveryDate", "recipientCompany", "recipientContact", "recipientPhone",
   "recipientMobile", "recipientEmail", "deliveryCoordinateN", "deliveryCoordinateE", "deliveryCompany", "deliveryAddress",
-  "deliveryPostnr", "deliveryCity", "deliveryCountry", "deliveryTerms",
+  "deliveryPostnr", "deliveryCity", "deliveryCountry", "deliveryTerms", "deliveryTime",
 ];
 const ITEM_STRING_FIELDS: (keyof InterpretedItem)[] = ["typeName", "orderRef", "goodsMark", "deliveryTermsAddition"];
 const ITEM_NUMBER_FIELDS: (keyof InterpretedItem)[] = ["quantity", "length_m", "width_m", "height_m", "weight_ton"];
@@ -95,6 +97,7 @@ export function buildTransportOrderPrompt(ocrText: string): string {
     "- sender* är avsändare/lastplats, recipient* är mottagare/kontakt vid leverans, delivery* är leveransadress (adress, postnummer, ort).",
     "- Kopiera telefonnummer och e-post exakt som de står. Ange null för det som saknas.",
     "- Kontakt vid lossning (recipientContact och recipientPhone/recipientMobile) är den person och det nummer som anges för mottagaren eller leveransen, t.ex. under 'Leveransanvisning', 'Aviseras', 'Kontaktperson' eller bredvid mottagaren. Står det t.ex. 'Ulf 073-0675742 Byggledare' är recipientContact 'Ulf (byggledare)' och recipientPhone '073-0675742'. Anta att namn och nummer i sådana fält är kontakten vid lossning.",
+    "- Leveransanvisning/Aviseras kan även innehålla en tid, t.ex. 'VB 06.45'. Ange då deliveryTime som HH:MM (06:45). Lägg även hela anvisningen ordagrant i deliveryTerms (utom namn och nummer som redan är kontakten), så att inget som står där går förlorat, även förkortningar du inte är säker på.",
     "- recipientCompany är mottagarens namn eller företag. Anges mottagaren bara med adress (gatuadress, postnummer och ort) sätts recipientCompany till null och adressen läggs i delivery*.",
     "- Samma fraktsedel kan förekomma i flera kopior i dokumentet (t.ex. blad för avsändare, mottagare och transportör) eller på flera sidor. Redovisa varje order och varje godsrad bara en gång.",
     "- Lägg varje godsrad som ett objekt i items. En godsrad är en fysisk rad i tabellen (antal, typ, mått, vikt, godsmärke), inte en tabellrubrik.",
@@ -115,6 +118,16 @@ function cleanNumber(value: unknown, max = 1_000_000): number | null {
   return Number.isFinite(n) && n >= 0 && n <= max ? n : null;
 }
 
+// "06.45", "6:45" och "0645" blir "06:45". Ogiltiga tider blir null.
+function cleanTime(value: unknown): string | null {
+  const text = cleanString(value, 20);
+  const match = text ? /(\d{1,2})\s*[.:]?\s*(\d{2})\b/.exec(text) : null;
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  return hours <= 23 && minutes <= 59 ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}` : null;
+}
+
 function cleanDate(value: unknown): string | null {
   const text = cleanString(value, 40);
   const match = text ? /(\d{4})-(\d{2})-(\d{2})/.exec(text) : null;
@@ -133,6 +146,7 @@ export function normalizeOrders(raw: unknown): { orders: InterpretedOrder[]; war
     const order = {} as InterpretedOrder;
     for (const field of STRING_FIELDS) (order as Record<string, unknown>)[field] = cleanString(source[field]);
     order.loadingDate = cleanDate(source.loadingDate);
+    order.deliveryTime = cleanTime(source.deliveryTime);
     order.deliveryDate = cleanDate(source.deliveryDate);
     const items = Array.isArray(source.items) ? source.items.slice(0, 100) : [];
     order.items = items
@@ -175,6 +189,7 @@ export function mergeDuplicateOrders(orders: InterpretedOrder[]): InterpretedOrd
     for (const field of STRING_FIELDS) if (target[field] === null && order[field] !== null) (target as Record<string, unknown>)[field] = order[field];
     target.loadingDate = target.loadingDate ?? order.loadingDate;
     target.deliveryDate = target.deliveryDate ?? order.deliveryDate;
+    target.deliveryTime = target.deliveryTime ?? order.deliveryTime;
     for (const item of order.items) {
       const same = target.items.find((t) => t.typeName !== null && item.typeName !== null && t.typeName.toLowerCase() === item.typeName.toLowerCase());
       if (!same) { target.items.push({ ...item }); continue; }
