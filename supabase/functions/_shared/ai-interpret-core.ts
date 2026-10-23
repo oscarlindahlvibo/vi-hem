@@ -94,6 +94,8 @@ export function buildTransportOrderPrompt(ocrText: string): string {
     "- documentNumber är dokumentets eget nummer (t.ex. LTC-nummer). orderRef är kundens ordernummer på godsraden.",
     "- sender* är avsändare/lastplats, recipient* är mottagare/kontakt vid leverans, delivery* är leveransadress (adress, postnummer, ort).",
     "- Kopiera telefonnummer och e-post exakt som de står. Ange null för det som saknas.",
+    "- Kontakt vid lossning (recipientContact och recipientPhone/recipientMobile) är den person och det nummer som anges för mottagaren eller leveransen, t.ex. under 'Leveransanvisning', 'Aviseras', 'Kontaktperson' eller bredvid mottagaren. Står det t.ex. 'Ulf 073-0675742 Byggledare' är recipientContact 'Ulf (byggledare)' och recipientPhone '073-0675742'. Anta att namn och nummer i sådana fält är kontakten vid lossning.",
+    "- recipientCompany är mottagarens namn eller företag. Anges mottagaren bara med adress (gatuadress, postnummer och ort) sätts recipientCompany till null och adressen läggs i delivery*.",
     "- Samma fraktsedel kan förekomma i flera kopior i dokumentet (t.ex. blad för avsändare, mottagare och transportör) eller på flera sidor. Redovisa varje order och varje godsrad bara en gång.",
     "- Lägg varje godsrad som ett objekt i items. En godsrad är en fysisk rad i tabellen (antal, typ, mått, vikt, godsmärke), inte en tabellrubrik.",
     "- Tabellrubriker (Antal, Typ, Order, Längd, Bredd, Höjd, Vikt, Godsmärke, Koordinat, Mobil nr, Postnr, Adress) är aldrig värden. Texten under 'Tillägg leveransvillkor' är fritext och hör till godsraden i deliveryTermsAddition.",
