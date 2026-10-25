@@ -59,6 +59,7 @@ async function route(db: any, me: Profile, action: string, b: any): Promise<Reco
     case "prefs_save": return prefsSave(ctx, b);
     case "admin_overview": return adminOverview(ctx);
     case "admin_account_update": return adminAccountUpdate(ctx, b);
+    case "admin_account_create": return adminAccountCreate(ctx, b);
     case "admin_grant": return adminGrant(ctx, b);
     case "admin_audit": return adminAudit(ctx, b);
     case "templates_list": return templatesList(ctx);
@@ -380,6 +381,34 @@ async function adminAccountUpdate({ db, me }: Ctx, b: any) {
   const { error } = await db.from("vihem_mail_accounts").update(patch).eq("id", a.id); if (error) throw error;
   await audit(db, me, a as Account, "mailbox_settings_changed", { kind, access_mode: patch.access_mode ?? a.access_mode, client_enabled: patch.client_enabled ?? a.client_enabled, owner: owner });
   return {};
+}
+async function adminAccountCreate({ db, me }: Ctx, b: any) {
+  requireOrgAdmin(me);
+  const email = String(b.email || "").trim().toLowerCase();
+  if (!/^[^@\s<>,"]+@[^@\s<>,"]+\.[^@\s<>,"]+$/.test(email)) fail(400, "E_INVALID", "Ange en giltig Workspace-adress.");
+  const kind = b.kind === "personal" ? "personal" : "shared";
+  let owner: string | null = null;
+  if (kind === "personal") {
+    owner = String(b.owner_user_id || "");
+    const { data: o } = await db.from("vihem_profiles").select("id").eq("id", owner).eq("organisation_id", me.organisation_id).eq("active", true).in("role", ["admin", "staff"]).maybeSingle();
+    if (!o) fail(400, "E_INVALID", "Välj ägare för den personliga brevlådan.");
+  }
+  const { data: existing } = await db.from("vihem_mail_accounts").select("id").eq("organisation_id", me.organisation_id).ilike("email", email).maybeSingle();
+  if (existing) fail(409, "E_CONFLICT", "Brevlådan finns redan.");
+  // Verifiera att tjänstekontot faktiskt kommer åt brevlådan innan den läggs till (ingen mejlläsning – bara profilen)
+  const probe = { id: "probe", organisation_id: me.organisation_id, email, display_name: "", description: "", active: true, kind, owner_user_id: owner, access_mode: "restricted", client_enabled: true } as Account;
+  try { await (await gmailFor(db, probe)).profile(); }
+  catch (e) { await audit(db, me, null, "mailbox_settings_changed", { op: "create_failed", email }, undefined, "failed"); fail(400, "E_UNREACHABLE", e instanceof GmailApiError ? friendlyGoogle(e) : `Kunde inte nå brevlådan: ${(e as Error).message}. Kontrollera att adressen finns i Workspace och att delegeringen gäller.`); }
+  const { data, error } = await db.from("vihem_mail_accounts").insert({ organisation_id: me.organisation_id, email, display_name: String(b.display_name || "").trim().slice(0, 120), description: "", active: true, kind, owner_user_id: owner, access_mode: "restricted", client_enabled: true,
+    search_general: true, search_invoices: kind === "shared", created_by: me.id, updated_by: me.id }).select("id").single();
+  if (error) throw error;
+  const reason = String(b.reason || "").trim() || "Brevlåda tillagd";
+  // Delad brevlåda: skaparen får full behörighet. Personlig: ägaren får full behörighet – skaparen får ingen automatiskt (se adminGrant).
+  const target = kind === "shared" ? me.id : owner!;
+  const { error: gerr } = await db.rpc("vihem_mail_grant", { p_actor: me.id, p_account: data.id, p_user: target, p_read: true, p_send: true, p_manage: true, p_admin: true, p_reason: kind === "personal" ? "Ägare" : reason });
+  if (gerr) throw gerr;
+  await audit(db, me, { ...probe, id: data.id }, "mailbox_settings_changed", { op: "created", kind, owner });
+  return { id: data.id, creator_has_access: kind === "shared" || owner === me.id };
 }
 async function adminGrant({ db, me }: Ctx, b: any) {
   requireOrgAdmin(me);
