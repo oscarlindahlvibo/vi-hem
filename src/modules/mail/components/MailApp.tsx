@@ -9,6 +9,7 @@ import { base64UrlToBlob, mailApi, MailApiError } from '../lib/api';
 import { forwardHtml, quoteHtml, replyRecipients } from '../lib/compose';
 import { sanitizeComposerHtml } from '../lib/sanitize';
 import { nextMonday, nextMorning, toLocalInput } from '../lib/format';
+import { scrollAppTo } from '../../../lib/utils';
 import { clearListCache, useThreadList, type Folder } from '../hooks/useThreadList';
 import { ToastProvider, useToasts } from '../hooks/useToasts';
 import type { GmailLabel, MailAccount, MailAddress, MailPrefs, ParsedMessage, SendAsIdentity, ThreadSummary } from '../lib/types';
@@ -36,6 +37,11 @@ function MailShell({ onNavigate }: { onNavigate: (page: string) => void }) {
   const [selected, setSelected] = useState<ThreadSummary | null>(null); const [checked, setChecked] = useState<Set<string>>(new Set()); const [focusKey, setFocusKey] = useState<string | null>(null);
   const [panel, setPanel] = useState<'mail' | 'settings' | 'admin'>('mail'); const [drawer, setDrawer] = useState(false); const [side, setSide] = useState(false); const [helpOpen, setHelpOpen] = useState(false);
   const [compose, setCompose] = useState<{ key: number; account: MailAccount; seed: ComposeSeed } | null>(null); const [snoozeFor, setSnoozeFor] = useState<ThreadSummary[] | null>(null); const [reloadKey, setReloadKey] = useState(0);
+  // E-postytan fyller skärmen och scrollar internt: lås sidans egen scroll så man inte råkar dra hela sidan (särskilt på mobil).
+  useEffect(() => {
+    scrollAppTo(0); const root = document.getElementById('root'); const prev = [document.body.style.overflow, root?.style.overflow ?? '']; document.body.style.overflow = 'hidden'; if (root) root.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev[0]; if (root) root.style.overflow = prev[1]; };
+  }, []);
   const composeKey = useRef(1); const searchRef = useRef<HTMLInputElement>(null); const loadedThread = useRef<LoadedThread | null>(null);
 
   const loadBoot = useCallback(async () => {
