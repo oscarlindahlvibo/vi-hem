@@ -19,8 +19,8 @@ const AdminMailboxes = lazy(() => import('./AdminMailboxes'));
 interface Boot { user: { id: string; name: string; role: string; organisation_id: string }; accounts: MailAccount[]; prefs: MailPrefs; is_org_admin: boolean }
 interface Ctx { labels: GmailLabel[]; identities: SendAsIdentity[]; error?: string }
 const INVERSE: Record<string, string> = { archive: 'unarchive', trash: 'untrash', untrash: 'trash', spam: 'unspam', read: 'unread', unread: 'read', star: 'unstar', unstar: 'star' };
-const reSubject = (s: string) => (/^(re|sv|aw)\s*:/i.test(s.trim()) ? s.trim() : `Re: ${s.trim()}`);
-const fwSubject = (s: string) => (/^(fwd?|vb)\s*:/i.test(s.trim()) ? s.trim() : `Fwd: ${s.trim()}`);
+const reSubject = (s = '') => (/^(re|sv|aw)\s*:/i.test(s.trim()) ? s.trim() : `Re: ${s.trim()}`.trim());
+const fwSubject = (s = '') => (/^(fwd?|vb)\s*:/i.test(s.trim()) ? s.trim() : `Fwd: ${s.trim()}`.trim());
 const FOLDER_TITLES: Record<string, string> = { inbox: 'Inkorg', starred: 'Stjärnmärkta', snoozed: 'Snoozade', sent: 'Skickade', drafts: 'Utkast', scheduled: 'Schemalagda', archive: 'Arkiv', all: 'All e-post', spam: 'Skräppost', trash: 'Papperskorg', search: 'Sökresultat', label: 'Etikett' };
 
 export default function MailApp({ onNavigate }: { onNavigate: (page: string) => void }) {

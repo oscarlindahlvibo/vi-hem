@@ -25,7 +25,7 @@ export function ThreadView({ account, threadId, ownEmails, remoteImages, organis
     setError('');
     try {
       const r = await mailApi<{ thread: LoadedThread }>('thread_get', { account_id: account.id, thread_id: threadId });
-      const msgs = r.thread.messages; setThread(r.thread); onLoaded?.(r.thread);
+      const msgs = r.thread.messages; const loaded = { ...r.thread, subject: r.thread.subject || msgs.find((m) => m.subject)?.subject || '' }; setThread(loaded); onLoaded?.(loaded);
       const unreadIds = msgs.filter((m) => m.unread).map((m) => m.id);
       setOpen(new Set(msgs.length ? [msgs[msgs.length - 1].id, ...unreadIds] : []));
       if (msgs.some((m) => m.unread) && canManage) void mailApi('thread_modify', { account_id: account.id, thread_ids: [threadId], op: 'read' }).catch(() => {});

@@ -42,7 +42,7 @@ export function Composer({ account, identities, seed, lastSender, suggestions, t
   const [atts, setAtts] = useState<Att[]>(() => (seed.attachments ?? []).map((a) => ({ id: uuid(), ...a }))); const [busy, setBusy] = useState(false); const [saving, setSaving] = useState<'' | 'saving' | 'saved' | 'error'>(''); const [full, setFull] = useState(false);
   const [menu, setMenu] = useState<'' | 'schedule' | 'templates'>(''); const [scheduleAt, setScheduleAt] = useState(toLocalInput(nextMorning(1, 8)));
   const [quote, setQuote] = useState(seed.quoteHtml ?? ''); const [showQuote, setShowQuote] = useState(false);
-  const draftId = useRef<string | undefined>(seed.draftId); const dirty = useRef(false); const sentRef = useRef(false); const timer = useRef<number>(); const pendingSend = useRef<number>(); const requestId = useRef(uuid());
+  const draftId = useRef<string | undefined>(seed.draftId); const dirty = useRef(false); const touched = useRef(Boolean(seed.draftId)); const sentRef = useRef(false); const timer = useRef<number>(); const pendingSend = useRef<number>(); const requestId = useRef(uuid());
   const fileInput = useRef<HTMLInputElement>(null); const imageInput = useRef<HTMLInputElement>(null);
 
   // Signatur: eget block utanför Tiptap (Tiptap tar bort okända noder). Byte av avsändare byter blocket om användaren inte ändrat det.
@@ -56,11 +56,12 @@ export function Composer({ account, identities, seed, lastSender, suggestions, t
   const editor = useEditor({
     extensions: [StarterKit.configure({ heading: false, codeBlock: false }), Underline, Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { rel: 'noopener noreferrer', target: '_blank' } }), Image.configure({ inline: true, allowBase64: true }), Placeholder.configure({ placeholder: 'Skriv ditt meddelande …' })],
     content: startBody, editorProps: { attributes: { class: 'prose prose-sm max-w-none min-h-[10rem] px-1 py-2 text-[15px] leading-relaxed focus:outline-none', 'aria-label': 'Meddelande' } },
-    onUpdate: () => { dirty.current = true; schedule(); },
+    onUpdate: ({ editor: ed }) => { if (ed.getHTML() === startBody || (ed.isEmpty && !startBody)) return; dirty.current = true; touched.current = true; schedule(); },
   });
 
   const bodyHtml = () => editor?.getHTML() ?? '';
-  const empty = () => !editor || (editor.isEmpty && !atts.length && !quote);
+  const empty = () => !editor || (editor.isEmpty && !atts.length && !to.length && !cc.length && !bcc.length && !subject.trim() && !sigEdited);
+  // Ett svar/vidarebefordran utan egen text, mottagare eller bilagor (bara citatet) räknas som tomt och sparas inte som utkast.
   const fullHtml = useCallback(() => {
     const s = sig.trim() ? wrapSignature(sig, from) .replace(/data-vihem-sig-hash="[^"]*"/, `data-vihem-sig-hash="${sigOrig.current}"`) : '';
     return `${bodyHtml()}${s}${quote}`; // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -70,16 +71,17 @@ export function Composer({ account, identities, seed, lastSender, suggestions, t
 
   // Autosparar utkast i Gmail (syns i Gmails Utkast). Sparar inte tomma meddelanden.
   const saveDraft = useCallback(async () => {
-    if (sentRef.current || !dirty.current || empty()) return;
+    if (sentRef.current || !dirty.current || !touched.current || empty()) return;
     dirty.current = false; setSaving('saving');
     try { const r = await mailApi<{ draft_id: string }>('draft_save', { ...payload(), draft_id: draftId.current }); draftId.current = r.draft_id; setSaving('saved'); }
     catch (e) { dirty.current = true; setSaving('error'); if (e instanceof MailApiError && e.code === 'E_FORBIDDEN') toast.show('Du saknar behörighet att spara utkast i den här brevlådan.', { kind: 'error' }); }
   }, [payload]); // eslint-disable-line react-hooks/exhaustive-deps
   const saveRef = useRef(saveDraft); saveRef.current = saveDraft;
   function schedule() { window.clearTimeout(timer.current); timer.current = window.setTimeout(() => saveRef.current(), 3000); }
-  useEffect(() => { dirty.current = true; if (!empty()) schedule(); }, [to, cc, bcc, subject, from, sig, atts.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    const snapshot = JSON.stringify([to, cc, bcc, subject, from, sig, atts.length]); const initialSnapshot = useRef(snapshot);
+  useEffect(() => { if (snapshot === initialSnapshot.current) return; dirty.current = true; touched.current = true; if (!empty()) schedule(); }, [snapshot]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { window.clearTimeout(timer.current); }, []);
-  useEffect(() => { const h = (e: BeforeUnloadEvent) => { if (!sentRef.current && dirty.current && !empty()) { e.preventDefault(); e.returnValue = ''; } }; window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h); }); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const h = (e: BeforeUnloadEvent) => { if (!sentRef.current && dirty.current && touched.current && !empty()) { e.preventDefault(); e.returnValue = ''; } }; window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h); }); // eslint-disable-line react-hooks/exhaustive-deps
 
   function changeFrom(email: string) {
     const prevOrig = sigOrig.current; setFrom(email); dirty.current = true;

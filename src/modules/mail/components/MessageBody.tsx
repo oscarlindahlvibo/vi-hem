@@ -19,7 +19,7 @@ interface Props { message: ParsedMessage; accountId: string; allowRemoteImages: 
 
 /** Visar ett mejl i en sandboxad iframe (inga skript, strikt CSP). Externa bilder blockeras tills användaren tillåter dem; inline-bilder (cid:) hämtas och bäddas in. */
 export function MessageBody({ message, accountId, allowRemoteImages, onBlocked }: Props) {
-  const [cidMap, setCidMap] = useState<Record<string, string>>({}); const [height, setHeight] = useState(80); const ref = useRef<HTMLIFrameElement>(null);
+  const [cidMap, setCidMap] = useState<Record<string, string>>({}); const [height, setHeight] = useState(0); const ref = useRef<HTMLIFrameElement>(null);
   useEffect(() => {
     let alive = true; const inline = message.attachments.filter((a) => a.inline && a.contentId && a.size < 1_500_000).slice(0, 12); if (!inline.length || !/cid:/i.test(message.html)) return;
     void Promise.all(inline.map(async (a) => { try { const r = await mailApi<{ data: string }>('attachment_get', { account_id: accountId, message_id: message.id, attachment_id: a.id }); return [a.contentId!, URL.createObjectURL(base64UrlToBlob(r.data, a.mimeType))] as const; } catch { return null; } })).then((pairs) => { if (alive) setCidMap(Object.fromEntries(pairs.filter(Boolean) as [string, string][])); });
@@ -34,6 +34,7 @@ export function MessageBody({ message, accountId, allowRemoteImages, onBlocked }
   }, [message.id, message.html, message.text, allowRemoteImages, cidMap]);
   useEffect(() => { onBlocked?.(blocked); }, [blocked]); // eslint-disable-line react-hooks/exhaustive-deps
   const fit = () => { const d = ref.current?.contentDocument; if (!d) return; const h = Math.max(d.documentElement.scrollHeight, d.body?.scrollHeight ?? 0); setHeight(Math.min(Math.max(h + 2, 40), 20000)); };
-  useEffect(() => { const d = ref.current?.contentDocument; if (!d) return; const t = window.setInterval(fit, 700); const stop = window.setTimeout(() => window.clearInterval(t), 6000); d.addEventListener('toggle', fit, true); return () => { window.clearInterval(t); window.clearTimeout(stop); }; }, [srcDoc]);
-  return <iframe ref={ref} title={`Meddelande: ${message.subject}`} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerPolicy="no-referrer" srcDoc={srcDoc} onLoad={() => { fit(); const d = ref.current?.contentDocument; const el = ref.current; if (d && el) d.addEventListener('keydown', (e) => { if (e.metaKey || e.ctrlKey || e.altKey) return; el.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, shiftKey: e.shiftKey, bubbles: true, cancelable: true })); }); }} style={{ height }} className="block w-full border-0 bg-white" />;
+  const observer = useRef<ResizeObserver | null>(null);
+  useEffect(() => () => observer.current?.disconnect(), []);
+  return <iframe ref={ref} title={`Meddelande: ${message.subject}`} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerPolicy="no-referrer" srcDoc={srcDoc} onLoad={() => { fit(); observer.current?.disconnect(); const body = ref.current?.contentDocument?.body; if (body && 'ResizeObserver' in window) { observer.current = new ResizeObserver(() => fit()); observer.current.observe(body); observer.current.observe(ref.current!.contentDocument!.documentElement); } const d = ref.current?.contentDocument; const el = ref.current; if (d && el) d.addEventListener('keydown', (e) => { if (e.metaKey || e.ctrlKey || e.altKey) return; el.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, shiftKey: e.shiftKey, bubbles: true, cancelable: true })); }); }} style={{ height: height || 1, visibility: height ? 'visible' : 'hidden' }} className="block w-full border-0 bg-white" />;
 }
