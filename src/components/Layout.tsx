@@ -17,6 +17,7 @@ import {
   BedDouble, CalendarDays, Landmark, MessageSquareText, Monitor, ScanLine, SlidersHorizontal,
   Truck, Package, FileSpreadsheet, Mail, FileSignature, ShieldCheck, ShieldAlert, Car, Sparkles, BookOpen, ReceiptText,
   GraduationCap, Snowflake,
+  Inbox,
 } from 'lucide-react';
 
 interface NavItem {
@@ -171,6 +172,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Avbetalningsplaner', icon: <ReceiptText className="w-5 h-5" />, page: 'installment-plans', roles: ['staff', 'admin'], module: 'finance' },
       { label: 'Skatteverket', icon: <Landmark className="w-5 h-5" />, page: 'skatteverket', roles: ['staff', 'admin'], module: 'skatteverket' },
       { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['staff', 'admin'], module: 'payroll' },
+      { label: 'E-post', icon: <Inbox className="w-5 h-5" />, page: 'mail', roles: ['staff', 'admin'] },
       { label: 'E-post & underlag', icon: <Mail className="w-5 h-5" />, page: 'mail-search', roles: ['staff', 'admin'] },
       { label: 'Fakturering & AI', icon: <Landmark className="w-5 h-5" />, page: 'vibogruppen-billing', roles: ['admin'] },
       { label: 'Driftmeddelanden', icon: <Bell className="w-5 h-5" />, page: 'vibogruppen-notices', roles: ['admin'] },

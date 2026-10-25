@@ -16,7 +16,7 @@ const Row = memo(function Row({ t, selected, checked, focused, showAccount, acco
   const who = t.draft ? 'Utkast' : (folder === 'sent' ? `Till: ${displayName(t.participants.find((p) => !mine.includes(p.email)) ?? t.from)}` : displayName(t.from));
   const unreadCls = t.unread ? 'font-bold text-slate-950' : 'font-medium text-slate-700';
   return (
-    <div className="relative h-full overflow-hidden" style={{ height: ROW }}>
+    <div className="relative h-full overflow-hidden" style={{ height: ROW }} data-thread-key={`${t.account_id}:${t.id}`}>
       <div className="absolute inset-0 flex items-center justify-between px-5 text-white" aria-hidden="true">
         <span className="flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2">{t.unread ? <MailOpen className="h-5 w-5" /> : <Mail className="h-5 w-5" />}</span>
         <span className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2"><Archive className="h-5 w-5" /></span>

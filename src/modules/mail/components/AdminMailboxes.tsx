@@ -1,0 +1,68 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ArrowLeft, Loader2, Lock, ShieldCheck, Users, X } from 'lucide-react';
+import { mailApi, MailApiError } from '../lib/api';
+import { fullDate } from '../lib/format';
+import { useToasts } from '../hooks/useToasts';
+
+interface Acc { id: string; email: string; display_name: string; description: string; active: boolean; kind: 'personal' | 'shared'; owner_user_id: string | null; access_mode: 'org_shared' | 'restricted'; client_enabled: boolean; last_test_status: string | null }
+interface Perm { id: string; mail_account_id: string; user_id: string; can_read: boolean; can_send: boolean; can_manage: boolean; can_admin: boolean; reason: string; created_at: string }
+interface User { id: string; name: string; email: string; role: string }
+interface Sync { mail_account_id: string; last_sync_at: string | null; status: string; last_error: string | null }
+interface Ev { id: string; user_id: string | null; action: string; mail_account_id: string | null; result: string; error_code?: string; metadata: Record<string, unknown>; created_at: string }
+const ACTION_LABEL: Record<string, string> = { permission_granted: 'Behörighet tilldelad', permission_revoked: 'Behörighet återkallad', mailbox_settings_changed: 'Brevlåda ändrad', access_denied: 'Åtkomst nekad', mail_sent: 'Meddelande skickat', mail_send_unknown: 'Osäkert utskick', thread_read: 'Tråd öppnad', attachment_downloaded: 'Bilaga hämtad', thread_modified: 'Tråd ändrad', draft_saved: 'Utkast sparat', comment_added: 'Kommentar', thread_assigned: 'Tilldelad', link_created: 'Koppling skapad' };
+
+/** Administration: brevlådor, åtkomstläge (delad/begränsad), behörigheter per användare och granskningslogg. Organisationsadmin läser inte automatiskt någons personliga brevlåda. */
+export default function AdminMailboxes({ onClose, currentUserId }: { onClose: () => void; currentUserId: string }) {
+  const toast = useToasts(); const [data, setData] = useState<{ accounts: Acc[]; permissions: Perm[]; users: User[]; sync: Sync[]; recent: Ev[] } | null>(null); const [err, setErr] = useState('');
+  const [open, setOpen] = useState<string | null>(null); const [grant, setGrant] = useState<{ user_id: string; read: boolean; send: boolean; manage: boolean; admin: boolean; reason: string }>({ user_id: '', read: true, send: false, manage: false, admin: false, reason: '' });
+  const [audit, setAudit] = useState<Ev[] | null>(null); const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => { try { setData(await mailApi('admin_overview')); setErr(''); } catch (e) { setErr(e instanceof MailApiError ? e.message : 'Kunde inte läsa brevlådor.'); } }, []);
+  useEffect(() => { void load(); }, [load]);
+  const users = useMemo(() => new Map((data?.users ?? []).map((u) => [u.id, u])), [data]);
+  const acc = data?.accounts.find((a) => a.id === open) ?? null; const perms = data?.permissions.filter((p) => p.mail_account_id === open) ?? [];
+
+  const run = async (fn: () => Promise<unknown>, ok: string) => { setBusy(true); try { await fn(); toast.show(ok, { kind: 'success' }); await load(); } catch (e) { toast.show((e as Error).message, { kind: 'error', ms: 8000 }); } finally { setBusy(false); } };
+  const saveAccount = (patch: Record<string, unknown>) => run(() => mailApi('admin_account_update', { account_id: open, ...patch }), 'Brevlådan uppdaterades.');
+  const doGrant = (g: typeof grant) => run(async () => { await mailApi('admin_grant', { account_id: open, ...g }); setGrant({ user_id: '', read: true, send: false, manage: false, admin: false, reason: '' }); }, g.read ? 'Behörigheten sparades.' : 'Behörigheten återkallades.');
+  const showAudit = async (id?: string) => { try { setAudit((await mailApi<{ events: Ev[] }>('admin_audit', { account_id: id, limit: 150 })).events); } catch (e) { toast.show((e as Error).message, { kind: 'error' }); } };
+  const personalOther = acc?.kind === 'personal' && grant.user_id && grant.user_id !== acc.owner_user_id;
+
+  return (
+    <section className="flex min-w-0 flex-1 flex-col overflow-hidden" aria-label="Brevlådor och behörigheter">
+      <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3"><button type="button" onClick={() => (open ? setOpen(null) : onClose())} className="rounded-lg p-1.5 hover:bg-slate-100" aria-label="Tillbaka"><ArrowLeft className="h-5 w-5" /></button><h1 className="flex-1 text-base font-bold">{acc ? acc.display_name || acc.email : 'Brevlådor och behörigheter'}</h1>{!open && <button type="button" onClick={() => void showAudit()} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold hover:bg-slate-50">Granskningslogg</button>}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {err && <div className="flex items-center gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-800"><AlertTriangle className="h-4 w-4" />{err}</div>}
+        {!data && !err && <div className="flex justify-center p-10"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>}
+        {data && !open && <div className="mx-auto max-w-3xl space-y-3">
+          <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">Behörigheter kontrolleras i servern vid varje anrop och återkallas direkt. Administratörsrollen i VI-HEM ger <b>inte</b> automatiskt läsrätt i personliga brevlådor – åtkomst kräver uttryckligt beslut och motivering, och ägaren notifieras.</p>
+          <ul className="space-y-2">{data.accounts.map((a) => { const n = data.permissions.filter((p) => p.mail_account_id === a.id).length; const s = data.sync.find((x) => x.mail_account_id === a.id);
+            return <li key={a.id}><button type="button" onClick={() => setOpen(a.id)} className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-blue-300">
+              {a.kind === 'personal' ? <Lock className="h-5 w-5 shrink-0 text-slate-400" /> : <Users className="h-5 w-5 shrink-0 text-slate-400" />}
+              <span className="min-w-0 flex-1"><span className="block truncate font-bold">{a.display_name || a.email}</span><span className="block truncate text-xs text-slate-500">{a.email} · {a.kind === 'personal' ? `Personlig (${users.get(a.owner_user_id ?? '')?.name ?? 'okänd ägare'})` : a.access_mode === 'restricted' ? 'Delad, begränsad' : 'Delad, hela organisationen (äldre läge)'}</span></span>
+              <span className="text-right text-xs text-slate-500"><span className="block font-semibold text-slate-700">{n} med åtkomst</span>{!a.client_enabled ? <span className="text-amber-700">Mejlklient av</span> : s?.status === 'error' ? <span className="text-red-600">Synkfel</span> : a.last_test_status === 'ok' ? <span className="text-emerald-700">Ansluten</span> : null}</span></button></li>; })}</ul>
+        </div>}
+        {data && acc && <div className="mx-auto max-w-3xl space-y-6">
+          <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4"><h2 className="text-sm font-bold">Inställningar</h2>
+            <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-0.5 rounded" checked={acc.client_enabled} disabled={busy} onChange={(e) => void saveAccount({ client_enabled: e.target.checked })} /><span><b>Visa i VI-HEM Mail</b><span className="block text-xs text-slate-500">Av = brevlådan syns inte i e-postklienten (sök och bevakningar fortsätter fungera).</span></span></label>
+            {acc.kind === 'shared' && <label className="block text-sm"><span className="font-semibold">Åtkomstläge</span><select className="mt-1 w-full rounded-lg border-slate-300 text-sm" disabled={busy} value={acc.access_mode} onChange={(e) => { if (e.target.value === 'org_shared' || window.confirm('Endast personer med tilldelad behörighet får se brevlådan, även i äldre sök- och bevakningsfunktioner. Fortsätta?')) void saveAccount({ access_mode: e.target.value }); }}><option value="restricted">Begränsad – bara tilldelade personer</option><option value="org_shared">Hela personalen (äldre läge, endast läsning)</option></select></label>}
+          </section>
+          <section className="rounded-xl border border-slate-200 bg-white p-4"><h2 className="mb-3 flex items-center gap-2 text-sm font-bold"><ShieldCheck className="h-4 w-4" />Behörigheter</h2>
+            {perms.length === 0 ? <p className="text-sm text-slate-500">Ingen har tilldelad åtkomst.</p> : <ul className="divide-y divide-slate-100">{perms.map((p) => <li key={p.id} className="flex items-center gap-3 py-2 text-sm"><span className="min-w-0 flex-1"><span className="block truncate font-semibold">{users.get(p.user_id)?.name ?? 'Okänd'}{p.user_id === currentUserId ? ' (du)' : ''}</span><span className="block text-xs text-slate-500">{[p.can_read && 'Läsa', p.can_send && 'Skicka', p.can_manage && 'Hantera', p.can_admin && 'Administrera'].filter(Boolean).join(' · ')}{p.reason ? ` — ${p.reason}` : ''}</span></span>
+              <button type="button" disabled={busy} onClick={() => { if (window.confirm(`Återkalla ${users.get(p.user_id)?.name ?? 'användarens'} åtkomst direkt?`)) void doGrant({ user_id: p.user_id, read: false, send: false, manage: false, admin: false, reason: '' }); }} className="rounded-lg px-2.5 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50">Återkalla</button>
+              <button type="button" disabled={busy} onClick={() => setGrant({ user_id: p.user_id, read: p.can_read, send: p.can_send, manage: p.can_manage, admin: p.can_admin, reason: p.reason })} className="rounded-lg px-2.5 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-50">Ändra</button></li>)}</ul>}
+            <div className="mt-4 space-y-3 border-t border-slate-100 pt-4"><h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Ge eller ändra behörighet</h3>
+              <select value={grant.user_id} onChange={(e) => setGrant({ ...grant, user_id: e.target.value })} aria-label="Användare" className="w-full rounded-lg border-slate-300 text-sm"><option value="">Välj person …</option>{data.users.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.role === 'admin' ? 'admin' : 'personal'})</option>)}</select>
+              <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">{([['read', 'Läsa'], ['send', 'Skicka'], ['manage', 'Hantera (arkivera, etiketter, ärenden)'], ['admin', 'Administrera brevlådan']] as const).map(([k, l]) => <label key={k} className="flex items-center gap-2"><input type="checkbox" className="rounded" checked={grant[k]} disabled={k !== 'read' && !grant.read} onChange={(e) => setGrant({ ...grant, [k]: e.target.checked, ...(k === 'read' && !e.target.checked ? { send: false, manage: false, admin: false } : {}) })} />{l}</label>)}</div>
+              {(personalOther || acc.kind === 'personal') && <label className="block text-sm"><span className="font-semibold">Orsak (krävs för personlig brevlåda)</span><input value={grant.reason} onChange={(e) => setGrant({ ...grant, reason: e.target.value })} placeholder="T.ex. vikariat under semester" className="mt-1 w-full rounded-lg border-slate-300 text-sm" /><span className="mt-1 block text-xs text-amber-700">Ägaren notifieras och åtgärden loggas. Du kan inte ge dig själv åtkomst till någon annans personliga brevlåda.</span></label>}
+              <button type="button" disabled={busy || !grant.user_id} onClick={() => void doGrant(grant)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">Spara behörighet</button></div>
+          </section>
+          <button type="button" onClick={() => void showAudit(acc.id)} className="text-sm font-semibold text-blue-700 underline">Visa granskningslogg för brevlådan</button>
+        </div>}
+        {data && !open && data.recent.length > 0 && <div className="mx-auto mt-6 max-w-3xl"><h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Senaste händelser</h2><ul className="space-y-1 text-sm">{data.recent.slice(0, 10).map((e) => <li key={e.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-1.5"><span>{ACTION_LABEL[e.action] ?? e.action}{e.user_id ? ` · ${users.get(e.user_id)?.name ?? ''}` : ''}</span><span className="shrink-0 text-xs text-slate-500">{fullDate(e.created_at)}</span></li>)}</ul></div>}
+      </div>
+      {audit && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setAudit(null)}><div role="dialog" aria-label="Granskningslogg" className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center border-b border-slate-200 px-4 py-3"><h2 className="flex-1 font-bold">Granskningslogg</h2><button onClick={() => setAudit(null)} aria-label="Stäng" className="rounded p-1 hover:bg-slate-100"><X className="h-4 w-4" /></button></div>
+        <ul className="divide-y divide-slate-100 overflow-auto text-sm">{audit.length === 0 && <li className="p-4 text-slate-500">Inga händelser.</li>}{audit.map((e) => <li key={e.id} className="flex gap-3 px-4 py-2"><span className="min-w-0 flex-1"><b>{ACTION_LABEL[e.action] ?? e.action}</b> · {users.get(e.user_id ?? '')?.name ?? '—'}{e.result !== 'ok' && <span className="ml-1 text-red-600">({e.result}{e.error_code ? `: ${e.error_code}` : ''})</span>}</span><span className="shrink-0 text-xs text-slate-500">{fullDate(e.created_at)}</span></li>)}</ul></div></div>}
+    </section>
+  );
+}

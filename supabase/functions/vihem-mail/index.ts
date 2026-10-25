@@ -157,7 +157,7 @@ async function bootstrap(ctx: Ctx) {
     .map((x: any) => ({ id: x.a.id, email: x.a.email, display_name: x.a.display_name, description: x.a.description, kind: x.a.kind, is_owner: x.a.owner_user_id === me.id, levels: { read: x.p.can_read, send: x.p.can_read && x.p.can_send, manage: x.p.can_read && x.p.can_manage, admin: x.p.can_read && x.p.can_admin } }))
     .sort((a: any, b: any) => (b.is_owner ? 1 : 0) - (a.is_owner ? 1 : 0) || a.email.localeCompare(b.email));
   const { data: prefs } = await db.from("vihem_mail_user_prefs").select("last_sender,notify_mode,notify_show_sender,load_remote_images,important_senders,default_account_id,notify_account_ids").eq("user_id", me.id).maybeSingle();
-  return { user: { id: me.id, name: me.name, role: me.role }, accounts, prefs: prefs ?? { last_sender: {}, notify_mode: "none", notify_show_sender: false, load_remote_images: "ask", important_senders: [], default_account_id: null, notify_account_ids: null }, is_org_admin: me.role === "admin" };
+  return { user: { id: me.id, name: me.name, role: me.role, organisation_id: me.organisation_id }, accounts, prefs: prefs ?? { last_sender: {}, notify_mode: "none", notify_show_sender: false, load_remote_images: "ask", important_senders: [], default_account_id: null, notify_account_ids: null }, is_org_admin: me.role === "admin" };
 }
 async function prefsSave({ db, me }: Ctx, b: any) {
   const patch: Record<string, unknown> = { user_id: me.id, organisation_id: me.organisation_id, updated_at: new Date().toISOString() };
@@ -295,7 +295,11 @@ async function metaGet(ctx: Ctx, account: Account, threadId: string) {
     db.from("vihem_mail_thread_links").select("id,object_type,object_id,label,created_at").eq("mail_account_id", account.id).eq("thread_id", threadId).order("created_at"),
     db.from("vihem_mail_presence").select("user_id,mode,expires_at,user:vihem_profiles(name)").eq("mail_account_id", account.id).eq("thread_id", threadId).gt("expires_at", new Date().toISOString()).neq("user_id", ctx.me.id),
   ]);
-  return { meta: meta ?? { assigned_to: null, status: "open", priority: "normal" }, comments: comments ?? [], links: links ?? [], presence: (presence ?? []).map((p: any) => ({ user_id: p.user_id, mode: p.mode, name: (Array.isArray(p.user) ? p.user[0] : p.user)?.name ?? "" })) };
+  // Tilldelningsbara: personer med aktiv läsrätt (kontrolleras med samma funktion som övriga anrop)
+  const { data: perm } = await db.from("vihem_mail_permissions").select("user_id,user:vihem_profiles(id,name)").eq("mail_account_id", account.id).eq("can_read", true).is("revoked_at", null).limit(100);
+  const assignable: { id: string; name: string }[] = [];
+  for (const p of perm ?? []) { const u = Array.isArray(p.user) ? p.user[0] : p.user; if (u && (await db.rpc("vihem_mail_authorize", { p_user: u.id, p_account: account.id, p_level: "read" })).data === true) assignable.push({ id: u.id, name: u.name }); }
+  return { assignable, meta: meta ?? { assigned_to: null, status: "open", priority: "normal" }, comments: comments ?? [], links: links ?? [], presence: (presence ?? []).map((p: any) => ({ user_id: p.user_id, mode: p.mode, name: (Array.isArray(p.user) ? p.user[0] : p.user)?.name ?? "" })) };
 }
 async function metaSet(ctx: Ctx, account: Account, b: any) {
   const threadId = String(b.thread_id || ""); if (!threadId) fail(400, "E_INVALID", "Tråd krävs.");

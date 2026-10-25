@@ -18,7 +18,7 @@ import type { MailAccount, MailAddress, SendAsIdentity } from '../lib/types';
 
 export interface ComposeSeed {
   to?: MailAddress[]; cc?: MailAddress[]; bcc?: MailAddress[]; subject?: string; bodyHtml?: string; quoteHtml?: string; threadId?: string; inReplyTo?: string; references?: string; deliveredTo?: string[];
-  draftId?: string; senderHint?: { deliveredTo: string[]; to: string[]; cc: string[] } | null; title?: string;
+  attachments?: { name: string; type: string; size: number; base64: string }[]; draftId?: string; senderHint?: { deliveredTo: string[]; to: string[]; cc: string[] } | null; title?: string;
 }
 export interface TemplateRow { id: string; name: string; subject: string; body: string; shared?: boolean }
 interface Att { id: string; name: string; type: string; size: number; base64: string }
@@ -39,7 +39,7 @@ export function Composer({ account, identities, seed, lastSender, suggestions, t
   const [to, setTo] = useState<MailAddress[]>(seed.to ?? []); const [cc, setCc] = useState<MailAddress[]>(seed.cc ?? []); const [bcc, setBcc] = useState<MailAddress[]>(seed.bcc ?? []);
   const [showCc, setShowCc] = useState(Boolean(seed.cc?.length)); const [showBcc, setShowBcc] = useState(Boolean(seed.bcc?.length)); const [showReplyTo, setShowReplyTo] = useState(false); const [replyTo, setReplyTo] = useState('');
   const [subject, setSubject] = useState(seed.subject ?? '');
-  const [atts, setAtts] = useState<Att[]>([]); const [busy, setBusy] = useState(false); const [saving, setSaving] = useState<'' | 'saving' | 'saved' | 'error'>(''); const [full, setFull] = useState(false);
+  const [atts, setAtts] = useState<Att[]>(() => (seed.attachments ?? []).map((a) => ({ id: uuid(), ...a }))); const [busy, setBusy] = useState(false); const [saving, setSaving] = useState<'' | 'saving' | 'saved' | 'error'>(''); const [full, setFull] = useState(false);
   const [menu, setMenu] = useState<'' | 'schedule' | 'templates'>(''); const [scheduleAt, setScheduleAt] = useState(toLocalInput(nextMorning(1, 8)));
   const [quote, setQuote] = useState(seed.quoteHtml ?? ''); const [showQuote, setShowQuote] = useState(false);
   const draftId = useRef<string | undefined>(seed.draftId); const dirty = useRef(false); const sentRef = useRef(false); const timer = useRef<number>(); const pendingSend = useRef<number>(); const requestId = useRef(uuid());

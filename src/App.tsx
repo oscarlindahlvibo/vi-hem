@@ -116,6 +116,7 @@ class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasErr
   }
 }
 
+const LazyMailApp=React.lazy(()=>import('./modules/mail/components/MailApp'));
 const LazySnowPage=React.lazy(()=>import('./modules/snow/SnowPage').then(module=>({default:module.SnowPage})));
 function SnowPage(props:{onNavigate?:(page:string)=>void}) { return <React.Suspense fallback={<LoadingPage/>}><LazySnowPage {...props}/></React.Suspense>; }
 
@@ -510,6 +511,10 @@ function AppInner() {
       return <FleetPage onNavigate={navigate} initialVehicleId={currentPage.split('/')[1]} />;
     }
 
+    if (currentPage.startsWith('workorder-from-mail/')) {
+      if (!isStaff) return renderDashboard();
+      return <WorkOrdersPage resourcesEnabled={resourcesEnabled} onNavigate={navigate} sourceMailKey={currentPage.split('/')[1]} />;
+    }
     if (currentPage.startsWith('workorder-new/')) {
       if (!isStaff) return renderDashboard();
       return <WorkOrdersPage resourcesEnabled={resourcesEnabled} onNavigate={navigate} sourceChatMessageId={currentPage.split('/')[1]} />;
@@ -553,6 +558,10 @@ function AppInner() {
 
       case 'documents':
         return <DocumentsPage onNavigate={navigate} />;
+
+      case 'mail':
+        if (!isStaff) return renderDashboard();
+        return <React.Suspense fallback={null}><LazyMailApp onNavigate={navigate} /></React.Suspense>;
 
       case 'mail-search':
         if (!isStaff) return renderDashboard();
