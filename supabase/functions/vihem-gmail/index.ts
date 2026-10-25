@@ -6,7 +6,7 @@ const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 
 type Profile = { id: string; role: string; organisation_id: string | null };
-type MailAccount = { id: string; organisation_id: string; email: string; display_name: string; description: string; active: boolean; search_general: boolean; search_invoices: boolean; last_tested_at: string | null; last_test_status: string; last_test_error_code: string };
+type MailAccount = { access_mode?: string; id: string; organisation_id: string; email: string; display_name: string; description: string; active: boolean; search_general: boolean; search_invoices: boolean; last_tested_at: string | null; last_test_status: string; last_test_error_code: string };
 type WatchRule = { id: string; organisation_id: string; name: string; keywords: string[]; match_mode: "any" | "all"; enabled: boolean; account_ids: string[]; last_run_at: string | null };
 
 Deno.serve(async (req) => {
@@ -35,7 +35,8 @@ Deno.serve(async (req) => {
       return out({ ok: true, ...(await runWatchers(db)) });
     }
     if (!profile?.organisation_id) return out({ error: "Organisation saknas.", code: "FORBIDDEN" }, 403);
-    const accounts = await loadAccounts(db, profile.organisation_id);
+    // Brevlådor med access_mode = restricted (införs av VI-HEM Mail) kräver uttrycklig läsbehörighet även här; org_shared fungerar som förut.
+    const accounts = await visibleAccounts(db, userId, await loadAccounts(db, profile.organisation_id));
     if (action === "status") return out({ ok: true, configured: Boolean(await credentials(db, profile.organisation_id)), scope: GMAIL_SCOPE, accounts, drive: await loadDriveSettings(db, profile.organisation_id) });
     if (action === "list_accounts") return out({ ok: true, accounts });
     if (action === "update_watch_hit") {
@@ -136,6 +137,7 @@ Deno.serve(async (req) => {
       return out({ ok: true, query, mode, sort, date_from: dateFrom || null, date_to: dateTo || null, results });
     }
     const account = await allowedAccount(db, profile.organisation_id, String(body.account_id || ""));
+    if (account && account.access_mode === "restricted" && !(await db.rpc("vihem_mail_authorize", { p_user: userId, p_account: account.id, p_level: "read" })).data) return out({ error: "Mailboxen hittades inte.", code: "ACCOUNT_NOT_FOUND" }, 404);
     if (!account) return out({ error: "Mailboxen hittades inte.", code: "ACCOUNT_NOT_FOUND" }, 404);
     if (action === "message") { const message = await gmail(db, profile.organisation_id, account.email, `/messages/${encodeURIComponent(String(body.message_id || ""))}?format=full`); await audit(db, profile, "message_read", account.id, "ok", {}); return out({ ok: true, message: normalizeMessage(message) }); }
     if (action === "attachment") { const attachment = await getAttachment(db, profile.organisation_id, account.email, String(body.message_id || ""), String(body.attachment_id || "")); await audit(db, profile, "attachment_downloaded", account.id, "ok", {}); return out({ ok: true, filename: String(body.filename || "bilaga"), mime_type: String(body.mime_type || "application/octet-stream"), data_base64: attachment }); }
@@ -311,7 +313,14 @@ function pem(s: string) { const b = atob(s.replace(/-----BEGIN PRIVATE KEY-----|
 async function decryptSecret(value: string, secret: string) { const decoder = new TextDecoder(); const encoder = new TextEncoder(); const bytes = Uint8Array.from(atob(value), c => c.charCodeAt(0)); const iv = bytes.slice(0, 12); const cipher = bytes.slice(12); const hash = await crypto.subtle.digest("SHA-256", encoder.encode(secret)); const key = await crypto.subtle.importKey("raw", hash, "AES-GCM", false, ["decrypt"]); return decoder.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher)); }
 function getEncryptionSecret() { return Deno.env.get("VIHEM_GOOGLE_WORKSPACE_SECRET_KEY") || Deno.env.get("VIHEM_OCR_SECRET_KEY") || Deno.env.get("VIHEM_ACCOUNTING_SECRET_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""; }
 function b64url(bytes: Uint8Array) { let s = ""; for (const b of bytes) s += String.fromCharCode(b); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
-async function loadAccounts(db: any, org: string) { const { data } = await db.from("vihem_mail_accounts").select("id,organisation_id,email,display_name,description,active,search_general,search_invoices,last_tested_at,last_test_status,last_test_error_code").eq("organisation_id", org).order("email"); return data || []; }
+async function loadAccounts(db: any, org: string) { const { data } = await db.from("vihem_mail_accounts").select("id,organisation_id,email,display_name,description,active,search_general,search_invoices,last_tested_at,last_test_status,last_test_error_code,access_mode").eq("organisation_id", org).order("email"); return data || []; }
+async function visibleAccounts(db: any, userId: string, accounts: any[]) {
+  const restricted = accounts.filter((a) => a.access_mode === "restricted");
+  if (!restricted.length) return accounts;
+  const allowed = new Set<string>();
+  await Promise.all(restricted.map(async (a) => { const { data } = await db.rpc("vihem_mail_authorize", { p_user: userId, p_account: a.id, p_level: "read" }); if (data === true) allowed.add(a.id); }));
+  return accounts.filter((a) => a.access_mode !== "restricted" || allowed.has(a.id));
+}
 async function allowedAccount(db: any, org: string, id: string) { const { data } = await db.from("vihem_mail_accounts").select("*").eq("organisation_id", org).eq("id", id).maybeSingle(); return data as MailAccount | null; }
 async function updateTest(db: any, id: string, status: string, code: string) { await db.from("vihem_mail_accounts").update({ last_tested_at: new Date().toISOString(), last_test_status: status, last_test_error_code: code }).eq("id", id); }
 async function audit(db: any, p: Profile, action: string, account: string | null, result: string, metadata: unknown) { await db.from("vihem_mail_audit_events").insert({ organisation_id: p.organisation_id, user_id: p.id, action, mail_account_id: account || null, result, error_code: typeof metadata === "string" ? metadata : "", metadata: typeof metadata === "object" ? metadata : {} }); }

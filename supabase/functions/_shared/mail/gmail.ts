@@ -70,6 +70,7 @@ export function createGmail(request: GmailRequest) {
       return { id: String(t.id), historyId: String(t.historyId ?? ''), messages: (t.messages ?? []).map(parseMessage) };
     },
     async getMessage(id: string): Promise<ParsedMessage> { return parseMessage(await request('GET', `/messages/${encodeURIComponent(id)}?format=full`)); },
+    async getMessageMetadata(id: string): Promise<ParsedMessage> { return parseMessage(await request('GET', `/messages/${encodeURIComponent(id)}${qs({ format: 'metadata', metadataHeaders: META_HEADERS })}`)); },
     async getAttachment(messageId: string, attachmentId: string): Promise<{ data: string; size: number }> {
       const r = await request('GET', `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`);
       return { data: String(r.data ?? ''), size: Number(r.size ?? 0) };
