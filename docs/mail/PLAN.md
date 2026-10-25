@@ -7,7 +7,7 @@ Slutredovisningen (vad som är klart/delvis/kvar) står i `docs/mail/RAPPORT.md`
 
 | Kontroll | Resultat |
 |---|---|
-| Granskad version | `8c170b8` (2026-10-24), grundat klonad grund i scratchpad, ingen kod körd |
+| Granskad version | `8c170b8` (2026-10-24), klonad i temporär katalog, ingen kod körd |
 | Licens | **MIT**, Copyright (c) 2025 Zero Email (`LICENSE`, kopia i `docs/mail/ZERO-LICENSE.txt`) |
 | Annan licens i repot | Ingen träff på AGPL/GPL/SPDX-markeringar i `apps/`, `packages/`, `docs/` |
 | Inbox Zero-kod | Ingen referens eller kod funnen. Ingen sådan kod används |
