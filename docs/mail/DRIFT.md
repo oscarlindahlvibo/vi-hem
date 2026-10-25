@@ -30,3 +30,9 @@ För skriv- och skickfunktioner (arkivera, läst/oläst, stjärna, etiketter, pa
 - Gmail Pub/Sub-push: ej uppsatt (kräver Google Cloud-projekt och ev. kostnad). Ändringar hämtas via History API var 30:e sekund.
 - Personliga Gmail-konton utanför Workspace (OAuth): kräver Googles verifiering/säkerhetsgranskning – inte byggt.
 - Inga nya API-abonnemang har skapats.
+
+## Utfört 2026-10-25 (godkänt av användaren)
+- Databasbackup: `/home/vibo/db-backups/pre-mail-20261025T162504Z.sql.gz`.
+- Migrationerna `20261101100000` och `20261101110000` tillämpade i produktion och införda i `applied-migrations.tsv`. Verifierat: 17 tabeller `vihem_mail_*`, cron-jobbet finns, 10 befintliga brevlådor står kvar som `org_shared`.
+- Edge functions kopierade till `volumes/functions` (`_shared/mail`, `vihem-mail`, `vihem-mail-worker`, `vihem-gmail`) och runtime omstartad. Röktest utan inloggning: `vihem-mail` 401 (kräver JWT), `vihem-mail-worker` 403 (kräver hemlighet), `vihem-gmail` 401.
+- `/home/vibo/vi-hem`-utcheckningen är orörd. Ännu ej gjort: worker-inställning (`mail_worker`), scope `gmail.modify`, frontend-merge/deploy.
