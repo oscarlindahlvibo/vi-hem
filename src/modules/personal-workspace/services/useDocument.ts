@@ -115,6 +115,7 @@ export function useDocument(owner: string, id: string, onSaved: () => void) {
   readOnlyRef.current = readOnly || !permission;
   useEffect(() => {
     const g = ++generation.current;
+    setPermission(false);
     setNote(null);
     setStrokes([]);
     setConflict(false);
