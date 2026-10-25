@@ -1,6 +1,6 @@
 # Min arbetsyta – implementation och granskning, 2026-10-25
 
-Status: en sammanhängande implementation med verklig databas och testade huvudflöden. Hela beställningens acceptanslista är **inte** färdig. Ingen produktionsmigration, merge, push eller driftsättning ingår. Utgångspunkt: origin/main 95c37d6, branch codex/personal-workspace.
+Status: en sammanhängande implementation med verklig databas och testade huvudflöden. Hela beställningens acceptanslista är **inte** färdig. Driftsättning och push till main beställdes separat av användaren 2026-10-25; ursprunglig granskning var utan publicering. Utgångspunkt: origin/main 95c37d6, branch codex/personal-workspace.
 
 ## Implementerat
 
@@ -31,7 +31,9 @@ Migrationerna körs i ordning:
 3. `20261025102000_personal_workspace_push_retries.sql`: begränsade pushåterförsök via befintlig infrastruktur.
 4. `20261025103000_personal_workspace_routing.sql`: privata, verifierade påminnelser får inte filtreras bort av organisationens allmänna notistilldelning. Övrig befintlig routing bevaras.
 
-Tabeller med prefix `vihem_personal_`: collections, notes, revisions, mutations, ink_strokes, tags, note_tags, attachments, object_links, reminders, reminder_deliveries. Alla personliga tabeller har ägar-RLS plus restriktiv kontroll av aktiv personalroll. Organisationstillhörighet ger ingen läsbehörighet. Sammansatta ägar-FK:n skyddar korsreferenser. Anteckningar/pennstreck/påminnelser skrivs genom ägarkontrollerade RPC:er med revisionskontroll. Privilegierade funktioner har explicit search_path, återkallad publik exekvering och snäva grants.
+5. `20261025110000_personal_workspace_sharing.sql`: uttrycklig delning av anteckningar och mappträd, read/edit, medlemskap och återkallad åtkomst.
+
+Tabeller med prefix `vihem_personal_`: collections, notes, revisions, mutations, ink_strokes, tags, note_tags, attachments, object_links, reminders, reminder_deliveries, shares. Alla personliga tabeller har ägar-RLS plus restriktiv kontroll av aktiv personalroll. Organisationstillhörighet ger ingen läsbehörighet i sig. Uttryckliga delningar kan ge läs-/redigeringsrätt inom samma organisation; personliga påminnelser, etiketter och historik delas aldrig. Sammansatta ägar-FK:n skyddar privata korsreferenser. Anteckningens mappreferens är enkel FK för att medlemmar ska kunna skapa egna anteckningar i delade mappar; RPC:n verifierar mappens redigeringsbehörighet vid skapande/flytt. Anteckningar/pennstreck/påminnelser skrivs genom ägarkontrollerade RPC:er med revisionskontroll. Privilegierade funktioner har explicit search_path, återkallad publik exekvering och snäva grants.
 
 Privat bucket `vihem-personal`, sökväg `ägare/anteckning/fil`. Restriktiv policy skyddar även om andra moduler har breda permissiva Storage-policyer. 20 MB, explicit MIME-lista. Inga service role-nycklar i frontend. Lagringen är privat enligt API/RLS, inte end-to-end-krypterad gentemot databasens driftadministratör.
 
@@ -129,7 +131,7 @@ docker run -d --name vihem-personal-rest --label vihem.task=personal-workspace \
   -e PGRST_DB_URI=postgres://authenticator:workspace-local-test-only@vihem-personal-qa-test:5432/postgres \
   -e PGRST_DB_ANON_ROLE=anon -e PGRST_DB_SCHEMAS=public \
   -e PGRST_JWT_SECRET=workspace-local-test-secret-at-least-32-characters \
-  postgrest/postgrest:v14.12
+  public.ecr.aws/supabase/postgrest:v14.12
 npm run workspace:qa
 # I annan terminal:
 node scripts/personal-workspace/push-test.mjs
@@ -140,3 +142,15 @@ node scripts/personal-workspace/push-test.mjs
 ## Slutkontroll på leveransrevisionen
 
 2026-10-25: `test:workspace`, färsk isolerad databaskörning inklusive små ACK-kvitton, REST/pushguard/pagination, riktad ESLint (0 fel, 0 varningar), typecheck och Vite-build PASS. Regressionerna chat/snow/resources PASS. Bygget varnar för stora JS-chunkar (arbetsytan cirka 539 kB/172 kB gzip, lazy-laddad) samt att en dynamisk import också används statiskt. Dessa är inte byggfel men ska följas vid prestandaprovet på iPad. Full lint stoppas av de sju tidigare nämnda befintliga felen i orörda filer. Remote main hämtades och var fortfarande 95c37d6; ingen merge har gjorts.
+
+## Delning och installationsprov, 2026-10-25
+
+Ägaren öppnar **Dela** vid anteckningen eller mappen/anteckningsboken och väljer aktiv kollega i samma organisation samt **Kan läsa** eller **Kan redigera**. Mappdelning gäller rekursivt och för nya anteckningar. Redigerare får skapa egna anteckningar i en skrivbar mapp; författaren äger anteckningen, medan mappens delning ger övriga medlemmar åtkomst. Flytt av en egen anteckning till en delad mapp innebär därför uttrycklig delning. Bara anteckningsägaren organiserar/raderar dokumentet och laddar upp/tar bort dess bilagor. En direkt delning visar inte föräldramappar eller syskon. `Delat med mig` visar mottagna anteckningar.
+
+Backend kontrollerar rättigheten vid varje läsning/skrivning, även ett idempotent återförsök. Mottagna dokument kräver nätverk för att öppna och redigera. Öppen vy kontrollerar åtkomst var tredje sekund; borttagen åtkomst döljer dokumentet och rensar dess lokala cache. Offline stoppar redigeringen. Redan visat/nedladdat innehåll kan inte göras oläst, och signerade länkar kan vara giltiga till sin utgång (bilder upp till 15 minuter). Delning ska därför användas för avsedda mottagare; den är ingen DRM-lösning. Vid samtidig textredigering finns revisionskonflikt och konfliktkopia, inte realtidsmerge.
+
+Delning testad mot riktig isolerad PostgreSQL: läs/edit, privata syskon, privata påminnelser och historia, skydd mot självförhöjning av ACL, arv till barn/nya anteckningar, skapande av medlemsägd anteckning, vektorändringar, bilagor, återkallad rättighet och organisationsbyte. Browserprov av mapp-/anteckningsdialogens sparning och borttagning av åtkomst PASS. Mobil 390×844 och liggande surfplatta 1024×768 visuellt granskade.
+
+Färsk serverbackup återlästes i separat, nätverksisolerad PostgreSQL 15.8-container med samma image som produktion och avstängda cronjobb. Ägare och ACL återställdes; endast en befintlig GraphQL-ACL för en saknad extensionsfunktion uteslöts från återläsningslistan. Den berör inte arbetsytan och produktionens GraphQL har inte ändrats. Alla fem arbetsytemigrationer installerades därefter i klonen. Ett transaktionellt prov med riktiga profil-/organisationsstrukturer verifierade privat åtkomst, läs/edit/återkallande och privat historik och rullades tillbaka.
+
+Routingmigrationen behöver köras med `supabase_admin`, eftersom den ersätter en befintlig funktion som ägs av den rollen. Övriga migrationer körs med ordinarie `postgres`. Använd befintligt privat driftlösenord utan att skriva det i kod, logg eller frontend. Efter installation registreras filernas SHA256 i ordinarie applied-migrations.tsv, och bara de två ändrade Edge-filerna synkas med backup. Använd sedan befintlig lösenordsfri deploy_vihem.sh och verifiera HTTPS-version och assethashar.

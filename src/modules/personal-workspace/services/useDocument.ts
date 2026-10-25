@@ -1,3 +1,4 @@
+import { supabase } from "../../../lib/supabase";
 import { useUnsavedChanges } from "../../../hooks/useUnsavedChanges";
 import { messageOf } from "./errors";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -8,6 +9,7 @@ import {
   saveDraft,
   saveInk,
   syncWorkspace,
+  purgeSharedNote,
 } from "./repository";
 export function useDocument(owner: string, id: string, onSaved: () => void) {
   const [note, setNote] = useState<Note | null>(null),
@@ -16,6 +18,7 @@ export function useDocument(owner: string, id: string, onSaved: () => void) {
     [error, setError] = useState(""),
     [conflict, setConflict] = useState(false),
     [readOnly, setReadOnly] = useState(true),
+    [permission, setPermission] = useState(false),
     [hasLocalRisk, setHasLocalRisk] = useState(false);
   useUnsavedChanges(hasLocalRisk, true, false);
   useEffect(() => {
@@ -53,6 +56,52 @@ export function useDocument(owner: string, id: string, onSaved: () => void) {
       release();
     };
   }, [owner, id]);
+  const documentOwner = note?.owner_id;
+  useEffect(() => {
+    let alive = true;
+    async function check() {
+      if (!documentOwner) return;
+      if (documentOwner === owner) {
+        setPermission(true);
+        return;
+      }
+      try {
+        const { data: read, error } = await supabase.rpc(
+          "vihem_personal_note_access",
+          { p_id: id, p_write: false },
+        );
+        if (error) throw error;
+        if (!read) {
+          await purgeSharedNote(owner, id);
+          if (alive) {
+            setNote(null);
+            current.current = null;
+            setStrokes([]);
+            setError("Åtkomsten till den delade anteckningen har tagits bort.");
+            setPermission(false);
+          }
+          return;
+        }
+        const { data: write, error: writeError } = await supabase.rpc(
+          "vihem_personal_note_access",
+          { p_id: id, p_write: true },
+        );
+        if (writeError) throw writeError;
+        if (alive) setPermission(!!write && navigator.onLine);
+      } catch {
+        if (alive) setPermission(false);
+      }
+    }
+    void check();
+    const timer = setInterval(() => void check(), 3000);
+    const offline = () => setPermission(false);
+    window.addEventListener("offline", offline);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      window.removeEventListener("offline", offline);
+    };
+  }, [id, owner, documentOwner]);
   const current = useRef<Note | null>(null),
     ink = useRef<Stroke[]>([]),
     writes = useRef<Promise<void>>(Promise.resolve()),
@@ -63,7 +112,7 @@ export function useDocument(owner: string, id: string, onSaved: () => void) {
     notify = useRef(onSaved);
   notify.current = onSaved;
   const readOnlyRef = useRef(readOnly);
-  readOnlyRef.current = readOnly;
+  readOnlyRef.current = readOnly || !permission;
   useEffect(() => {
     const g = ++generation.current;
     setNote(null);
@@ -144,10 +193,10 @@ export function useDocument(owner: string, id: string, onSaved: () => void) {
       current.current = n;
       setNote(n);
       queue(async () => {
-        await saveDraft(n);
+        await saveDraft(n, owner);
       });
     },
-    [queue],
+    [queue, owner],
   );
   const changeInk = useCallback(
     (changes: Stroke[]) => {
@@ -246,7 +295,7 @@ export function useDocument(owner: string, id: string, onSaved: () => void) {
     status,
     error,
     conflict,
-    readOnly,
+    readOnly: readOnly || !permission,
     update,
     changeInk,
   };

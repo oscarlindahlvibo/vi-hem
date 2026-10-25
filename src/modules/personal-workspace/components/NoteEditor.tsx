@@ -26,6 +26,7 @@ import { InkContext } from "../handwriting/InkPaper";
 import { saveDraft, saveInk } from "../services/repository";
 import { records, removeLocal } from "../services/local";
 import { ReminderForm } from "../reminders/Reminders";
+import { SharingDialog } from "./SharingDialog";
 import { Attachments } from "./Attachments";
 export function NoteEditor({
   owner,
@@ -56,6 +57,7 @@ export function NoteEditor({
     update,
     changeInk,
   } = useDocument(owner, id, onSaved);
+  const [sharing, setSharing] = useState(false);
   const [full, setFull] = useState(false),
     [reminder, setReminder] = useState<{
       title: string;
@@ -118,6 +120,8 @@ export function NoteEditor({
         ...newNote(owner),
         ...note,
         id: crypto.randomUUID(),
+        owner_id: owner,
+        collection_id: null,
         revision: 0,
         title: (note.title || "Anteckning") + " – konfliktkopia",
         deleted_at: null,
@@ -160,8 +164,16 @@ export function NoteEditor({
           {status}
         </span>
         <div className="pw-editor-actions">
+          {note.owner_id === owner && (
+            <button
+              onClick={() => setSharing(true)}
+              aria-label="Dela anteckning"
+            >
+              Dela
+            </button>
+          )}
           <button
-            disabled={readOnly}
+            disabled={readOnly || note.owner_id !== owner}
             aria-label="Favorit"
             aria-pressed={note.favorite}
             onClick={() => update({ favorite: !note.favorite })}
@@ -169,7 +181,7 @@ export function NoteEditor({
             <Star size={18} fill={note.favorite ? "currentColor" : "none"} />
           </button>
           <button
-            disabled={readOnly}
+            disabled={readOnly || note.owner_id !== owner}
             aria-label="Fäst anteckning"
             aria-pressed={note.pinned}
             onClick={() => update({ pinned: !note.pinned })}
@@ -177,12 +189,17 @@ export function NoteEditor({
             <Pin size={18} />
           </button>
           <button
+            disabled={note.owner_id !== owner}
             aria-label="Skapa påminnelse"
             onClick={() => setReminder({ title: note.title })}
           >
             <BellPlus size={18} />
           </button>
-          <button aria-label="Versionshistorik" onClick={() => void history()}>
+          <button
+            disabled={note.owner_id !== owner}
+            aria-label="Versionshistorik"
+            onClick={() => void history()}
+          >
             <History size={18} />
           </button>
           <button
@@ -222,11 +239,15 @@ export function NoteEditor({
               >
                 <Link size={16} /> Kopiera länk
               </button>
-              <button onClick={() => update({ archived: !note.archived })}>
+              <button
+                disabled={note.owner_id !== owner || readOnly}
+                onClick={() => update({ archived: !note.archived })}
+              >
                 <Archive size={16} />
                 {note.archived ? "Avarkivera" : "Arkivera"}
               </button>
               <button
+                disabled={note.owner_id !== owner || readOnly}
                 onClick={() => {
                   if (
                     note.deleted_at ||
@@ -258,8 +279,8 @@ export function NoteEditor({
       )}
       {readOnly && (
         <p className="pw-info" role="status">
-          Anteckningen redigeras i en annan flik. Stäng den andra fliken och
-          öppna anteckningen igen för att redigera här.
+          Skrivskyddad vy. Du kan ha läsbehörighet, sakna anslutning eller ha
+          dokumentet öppet i en annan flik.
         </p>
       )}
       {conflict && (
@@ -277,10 +298,23 @@ export function NoteEditor({
           </button>
         </div>
       )}
+      {sharing && (
+        <SharingDialog
+          noteId={id}
+          title={note.title}
+          onClose={() => setSharing(false)}
+        />
+      )}
+      {note.owner_id !== owner && (
+        <p className="pw-info">
+          Delad med dig · text och handskrift kan redigeras med rätt behörighet
+          och anslutning. Organisering och bilagor hanteras av ägaren.
+        </p>
+      )}
       <div className="pw-document-scroll">
         <div className="pw-document-meta">
           <select
-            disabled={readOnly}
+            disabled={readOnly || note.owner_id !== owner}
             aria-label="Flytta till mapp"
             value={note.collection_id || ""}
             onChange={(e) => update({ collection_id: e.target.value || null })}
@@ -329,7 +363,9 @@ export function NoteEditor({
           {tags.map((t) => (
             <button
               key={t.id}
-              disabled={note.revision === 0 || readOnly}
+              disabled={
+                note.revision === 0 || readOnly || note.owner_id !== owner
+              }
               aria-pressed={noteTags.includes(t.id)}
               onClick={() => void toggleTag(t.id)}
             >
@@ -360,7 +396,13 @@ export function NoteEditor({
                     : {}),
                 })
               }
-              onRemind={(title, blockId) => setReminder({ title, blockId })}
+              onRemind={(title, blockId) =>
+                note.owner_id === owner
+                  ? setReminder({ title, blockId })
+                  : setMessage(
+                      "Skapa din personliga påminnelse i fliken Påminnelser. Ägarens påminnelser delas inte.",
+                    )
+              }
               initialBlock={initialBlock}
               editorRef={editor}
             />
@@ -370,7 +412,7 @@ export function NoteEditor({
           key={id}
           owner={owner}
           noteId={id}
-          ready={note.revision > 0 && !readOnly}
+          ready={note.revision > 0 && !readOnly && note.owner_id === owner}
           onImage={(attachmentId, name) =>
             editor.current
               ?.chain()

@@ -10,7 +10,7 @@ import type {
   Summary,
   Tag,
 } from "../types";
-import { records, store, updateLocal } from "./local";
+import { records, store, updateLocal, removeLocal } from "./local";
 export const summaries =
   "id,owner_id,collection_id,title,plain_text:preview,mode,favorite,pinned,archived,deleted_at,revision,updated_at,created_at";
 export async function requireSession(owner: string) {
@@ -37,6 +37,9 @@ export async function listNotes(
           ? ",vihem_personal_object_links!inner(object_id,object_type)"
           : ""),
     );
+  if (view === "shared") q = q.neq("owner_id", owner);
+  if (["trash", "archive", "favorites", "quick"].includes(view))
+    q = q.eq("owner_id", owner);
   q =
     view === "trash"
       ? q.not("deleted_at", "is", null)
@@ -67,6 +70,16 @@ export async function loadNote(owner: string, id: string): Promise<Note> {
   const local = (await records<Draft>("notes", owner)).find(
     (x) => x.note.id === id,
   );
+  if (local && local.note.owner_id !== owner) {
+    const { data, error } = await supabase.rpc("vihem_personal_note_access", {
+      p_id: id,
+      p_write: false,
+    });
+    if (error || !data) {
+      await purgeSharedNote(owner, id);
+      throw Error("Delad anteckning kräver anslutning och aktuell åtkomst.");
+    }
+  }
   if (local?.dirty) return local.note;
   const { data, error } = await supabase
     .from("vihem_personal_notes")
@@ -74,7 +87,12 @@ export async function loadNote(owner: string, id: string): Promise<Note> {
     .eq("id", id)
     .single();
   if (error) {
-    if (local) return local.note;
+    if (
+      local &&
+      local.note.owner_id === owner &&
+      !["PGRST116", "42501"].includes(error.code)
+    )
+      return local.note;
     throw error;
   }
   const note = data as Note;
@@ -94,11 +112,11 @@ export async function loadNote(owner: string, id: string): Promise<Note> {
   );
   return cached?.note || note;
 }
-export async function saveDraft(note: Note) {
-  const key = note.owner_id + ":" + note.id;
+export async function saveDraft(note: Note, actor = note.owner_id) {
+  const key = actor + ":" + note.id;
   return updateLocal<Draft>("notes", key, (existing) => ({
     key,
-    owner: note.owner_id,
+    owner: actor,
     note: {
       ...note,
       revision: Math.max(note.revision, existing?.note.revision || 0),
@@ -300,4 +318,10 @@ export async function saveReminder(r: Reminder) {
     p_data: r,
   });
   if (error) throw error;
+}
+
+export async function purgeSharedNote(actor: string, id: string) {
+  await removeLocal("notes", actor + ":" + id);
+  for (const ink of await records<InkDraft>("ink", actor))
+    if (ink.value.note_id === id) await removeLocal("ink", ink.key);
 }

@@ -120,3 +120,45 @@ scale=sql("BEGIN; SET LOCAL ROLE authenticated; SELECT set_config('request.jwt.c
 assert '\n1200\n' in scale
 print('Scale SQL smoke seconds:',round(time.monotonic()-scale_start,2))
 print('PASS: real PostgreSQL migration, RLS A/B/admin/tenant, owner FKs, hierarchy, search, revisions, CAS, note/ink retries, reminder atomicity/dedup/retry/recurrence/trash, private Storage')
+# Explicit sharing never opens the rest of an owner's library or reminders.
+sql("UPDATE vihem_profiles SET organisation_id='20000000-0000-0000-0000-000000000001' WHERE id='%s'"%B)
+shared_note=str(uuid.uuid4());private_note=str(uuid.uuid4());root_folder=str(uuid.uuid4());child_folder=str(uuid.uuid4())
+as_user(A,"INSERT INTO vihem_personal_collections(id,title,kind) VALUES('%s','Delat','folder'); INSERT INTO vihem_personal_collections(id,title,kind,parent_id) VALUES('%s','Barn','folder','%s')"%(root_folder,child_folder,root_folder))
+shared_data={**d,'collection_id':child_folder,'archived':False,'favorite':False,'pinned':False,'deleted_at':None,'mode':'text'}
+save(A,shared_note,0,shared_data);save(A,private_note,0,d)
+assert '\n0\n' in as_user(B,"SELECT count(*) FROM vihem_personal_notes WHERE id='%s'"%shared_note)
+as_user(A,"SELECT vihem_personal_set_share('%s','read',null,'%s')"%(B,root_folder))
+assert '\n1\n' in as_user(B,"SELECT count(*) FROM vihem_personal_notes WHERE id='%s'"%shared_note)
+assert '\n0\n' in as_user(B,"SELECT count(*) FROM vihem_personal_notes WHERE id='%s'"%private_note)
+expect_fail(B,"SELECT vihem_personal_save_note('%s',1,gen_random_uuid(),'%s')"%(shared_note,json.dumps(shared_data)))
+expect_fail(B,"SELECT vihem_personal_set_share('%s','edit','%s',null)"%(A,shared_note))
+as_user(A,"SELECT vihem_personal_set_share('%s','edit',null,'%s')"%(B,root_folder))
+save(B,shared_note,1,{**shared_data,'title':'Samarbete'})
+assert sql("SELECT owner_id='%s' FROM vihem_personal_notes WHERE id='%s'"%(A,shared_note)).strip()=='t'
+assert '\n0\n' in as_user(B,"SELECT count(*) FROM vihem_personal_revisions WHERE note_id='%s'"%shared_note)
+assert '\n0\n' in as_user(B,"SELECT count(*) FROM vihem_personal_reminders WHERE owner_id='%s'"%A)
+expect_fail(B,"SELECT vihem_personal_save_note('%s',2,gen_random_uuid(),'%s')"%(shared_note,json.dumps({**shared_data,'collection_id':None})))
+ink_id=str(uuid.uuid4());ink_page=str(uuid.uuid4())
+as_user(B,"SELECT vihem_personal_save_stroke('%s','%s','%s',0,'{\"points\":[{\"x\":2,\"y\":3,\"p\":0.5}],\"tool\":\"pen\",\"color\":\"#172b49\",\"width\":3}',false)"%(ink_id,shared_note,ink_page))
+# A note created later in the child automatically inherits the folder membership.
+new_shared=str(uuid.uuid4());save(A,new_shared,0,shared_data)
+assert '\n1\n' in as_user(B,"SELECT count(*) FROM vihem_personal_notes WHERE id='%s'"%new_shared)
+# A collaborator can author a new document in an editable shared folder; ownership stays with its creator.
+authored=str(uuid.uuid4());save(B,authored,0,shared_data)
+assert '\n1\n' in as_user(A,"SELECT count(*) FROM vihem_personal_notes WHERE id='%s'"%authored)
+assert sql("SELECT owner_id='%s' FROM vihem_personal_notes WHERE id='%s'"%(B,authored)).strip()=='t'
+# Shared attachment read is explicit; broad Storage policy must not leak other notes.
+aid=str(uuid.uuid4());shared_path=A+'/'+shared_note+'/'+aid
+as_user(A,"INSERT INTO vihem_personal_attachments(id,note_id,name,storage_path,mime,bytes) VALUES('%s','%s','Prov.pdf','%s','application/pdf',100); INSERT INTO storage.objects(bucket_id,name) VALUES('vihem-personal','%s')"%(aid,shared_note,shared_path,shared_path))
+assert '\n1\n' in as_user(B,"SELECT count(*) FROM storage.objects WHERE name='%s'"%shared_path)
+as_user(A,"SELECT vihem_personal_set_share('%s',null,null,'%s')"%(B,root_folder))
+assert '\n0\n' in as_user(B,"SELECT count(*) FROM vihem_personal_notes WHERE id='%s'"%shared_note)
+assert '\n0\n' in as_user(B,"SELECT count(*) FROM storage.objects WHERE name='%s'"%shared_path)
+expect_fail(B,"SELECT vihem_personal_save_note('%s',2,gen_random_uuid(),'%s')"%(shared_note,json.dumps(shared_data)))
+# Direct note read does not reveal parent collection or sibling notes.
+as_user(A,"SELECT vihem_personal_set_share('%s','read','%s',null)"%(B,shared_note))
+assert '\n0\n' in as_user(B,"SELECT count(*) FROM vihem_personal_collections WHERE id='%s'"%root_folder)
+sql("UPDATE vihem_profiles SET organisation_id='20000000-0000-0000-0000-000000000002' WHERE id='%s'"%B)
+assert '\n0\n' in as_user(B,"SELECT count(*) FROM vihem_personal_notes WHERE id='%s'"%shared_note)
+expect_fail(A,"SELECT vihem_personal_set_share('%s','edit','%s',null)"%(B,shared_note))
+print('PASS: shared folder inheritance/new notes, direct note read/edit, private siblings/history/reminders, owner-only ACL/organising, vector writes, attachments, revoke and organisation change')

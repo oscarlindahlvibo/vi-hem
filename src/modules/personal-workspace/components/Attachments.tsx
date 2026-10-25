@@ -168,7 +168,7 @@ export function Attachments({
             <small>{Math.ceil(a.bytes / 1024)} kB</small>
           </button>
           <button
-            disabled={busy}
+            disabled={busy || !ready}
             aria-label={"Ta bort " + a.name}
             onClick={() => void remove(a)}
           >

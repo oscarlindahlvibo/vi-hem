@@ -33,6 +33,7 @@ import type { Collection, Draft, Summary, Tag } from "./types";
 import { newNote } from "./types";
 import { PanelResize } from "./components/PanelResize";
 import { NoteEditor } from "./components/NoteEditor";
+import { SharingDialog } from "./components/SharingDialog";
 import { CollectionDialog } from "./components/CollectionDialog";
 import { Reminders } from "./reminders/Reminders";
 import "./workspace.css";
@@ -66,6 +67,7 @@ export function WorkspacePage({
     [hasMore, setHasMore] = useState(false),
     [showNav, setShowNav] = useState(false),
     [offset, setOffset] = useState(0);
+  const [sharing, setSharing] = useState<Collection | null>(null);
   const [collectionForm, setCollectionForm] = useState<{
       kind: "notebook" | "folder";
       existing?: Collection;
@@ -93,6 +95,8 @@ export function WorkspacePage({
         const local = (await records<Draft>("notes", owner)).filter(
           (d) =>
             d.dirty &&
+            d.note.owner_id === owner &&
+            view !== "shared" &&
             (!collection || d.note.collection_id === collection) &&
             (!query ||
               (d.note.title + " " + d.note.plain_text)
@@ -133,6 +137,7 @@ export function WorkspacePage({
             ? []
             : local
                 .map((x) => x.note)
+                .filter((n) => n.owner_id === owner)
                 .filter(
                   (n) =>
                     (view === "trash"
@@ -208,6 +213,19 @@ export function WorkspacePage({
   }, [path]);
   const create = useCallback(async () => {
     try {
+      if (
+        collection &&
+        books.find((c) => c.id === collection)?.owner_id !== owner
+      ) {
+        const { data, error } = await supabase.rpc(
+          "vihem_personal_collection_access",
+          { p_id: collection, p_write: true },
+        );
+        if (error || !data)
+          throw Error(
+            "Du behöver anslutning och redigeringsrätt för att skapa i den delade mappen.",
+          );
+      }
       const n = newNote(owner, collection);
       await saveDraft(n);
       setView("all");
@@ -217,7 +235,7 @@ export function WorkspacePage({
     } catch (e) {
       setError(messageOf(e));
     }
-  }, [owner, collection, onNavigate, refresh]);
+  }, [owner, collection, books, onNavigate, refresh]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
@@ -245,6 +263,14 @@ export function WorkspacePage({
   async function move(id: string, target: string) {
     try {
       const n = await loadNote(owner, id);
+      if (n.owner_id !== owner)
+        throw Error("Bara ägaren får flytta anteckningen.");
+      const { data: allowed, error: accessError } = await supabase.rpc(
+        "vihem_personal_collection_access",
+        { p_id: target, p_write: true },
+      );
+      if (accessError || !allowed)
+        throw Error("Mappen kräver redigeringsrätt och anslutning.");
       await saveDraft({ ...n, collection_id: target });
       await syncWorkspace(owner);
       refresh();
@@ -255,7 +281,13 @@ export function WorkspacePage({
   function tree(parent: string | null, depth = 0): React.ReactNode {
     if (depth > 30) return null;
     return books
-      .filter((x) => x.parent_id === parent)
+      .filter(
+        (x) =>
+          x.parent_id === parent ||
+          (parent === null &&
+            x.parent_id &&
+            !books.some((b) => b.id === x.parent_id)),
+      )
       .map((c) => (
         <div key={c.id}>
           <div
@@ -300,7 +332,16 @@ export function WorkspacePage({
               )}
               <span>{c.title}</span>
             </button>
+            {c.owner_id === owner && (
+              <button
+                aria-label={"Dela " + c.title}
+                onClick={() => setSharing(c)}
+              >
+                Dela
+              </button>
+            )}
             <button
+              disabled={c.owner_id !== owner}
               aria-label={"Redigera " + c.title}
               onClick={() => setCollectionForm({ kind: c.kind, existing: c })}
             >
@@ -313,6 +354,7 @@ export function WorkspacePage({
   }
   const views: [string, string, React.ReactNode][] = [
     ["all", "Alla anteckningar", <FileText size={17} />],
+    ["shared", "Delat med mig", <Folder size={17} />],
     ["quick", "Snabbanteckningar", <StickyNote size={17} />],
     ["favorites", "Favoriter", <Star size={17} />],
     ["recent", "Senaste", <Clock size={17} />],
@@ -414,7 +456,9 @@ export function WorkspacePage({
                 {t.title}
               </button>
             ))}
-            <p className="pw-private">Privat · bara du har åtkomst</p>
+            <p className="pw-private">
+              Privat som standard · delning väljs av ägaren
+            </p>
             <PanelResize panel="sidebar" />
           </aside>
           <section className="pw-note-list" aria-label="Anteckningslista">
@@ -551,10 +595,17 @@ export function WorkspacePage({
           )}
         </div>
       )}
+      {sharing && (
+        <SharingDialog
+          collectionId={sharing.id}
+          title={sharing.title}
+          onClose={() => setSharing(null)}
+        />
+      )}
       {collectionForm && (
         <CollectionDialog
           owner={owner}
-          items={books}
+          items={books.filter((c) => c.owner_id === owner)}
           {...collectionForm}
           onClose={() => setCollectionForm(null)}
           onSaved={() => void loadStructure()}
