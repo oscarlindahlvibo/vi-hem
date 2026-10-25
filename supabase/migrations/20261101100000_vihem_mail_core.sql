@@ -210,7 +210,28 @@ create table if not exists public.vihem_mail_user_prefs (
   load_remote_images text not null default 'ask' check (load_remote_images in ('never', 'ask', 'always')),
   important_senders text[] not null default '{}',
   default_account_id uuid references public.vihem_mail_accounts(id) on delete set null,
+  notify_account_ids uuid[],                                -- null = alla tillgängliga brevlådor
   updated_at timestamptz not null default now()
+);
+create table if not exists public.vihem_mail_snoozes (
+  id uuid primary key default gen_random_uuid(),
+  organisation_id uuid not null references public.vihem_organisations(id) on delete cascade,
+  mail_account_id uuid not null references public.vihem_mail_accounts(id) on delete cascade,
+  thread_id text not null,
+  user_id uuid not null references public.vihem_profiles(id) on delete cascade,
+  wake_at timestamptz not null,
+  label_id text,
+  woken_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists vihem_mail_snoozes_due_idx on public.vihem_mail_snoozes (wake_at) where woken_at is null;
+-- Notisregister: förhindrar dubbla notiser för samma mejl och mottagare
+create table if not exists public.vihem_mail_notified (
+  mail_account_id uuid not null references public.vihem_mail_accounts(id) on delete cascade,
+  gmail_message_id text not null,
+  user_id uuid not null references public.vihem_profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (mail_account_id, gmail_message_id, user_id)
 );
 
 -- RLS: aktiveras utan policies = ingen åtkomst för klienter. Edge function använder servicenyckeln och gör egen behörighetskontroll.
@@ -223,7 +244,9 @@ alter table public.vihem_mail_presence enable row level security;
 alter table public.vihem_mail_thread_links enable row level security;
 alter table public.vihem_mail_templates enable row level security;
 alter table public.vihem_mail_user_prefs enable row level security;
+alter table public.vihem_mail_snoozes enable row level security;
+alter table public.vihem_mail_notified enable row level security;
 revoke all on public.vihem_mail_permissions, public.vihem_mail_send_ledger, public.vihem_mail_sync_state, public.vihem_mail_thread_meta, public.vihem_mail_thread_comments,
-  public.vihem_mail_presence, public.vihem_mail_thread_links, public.vihem_mail_templates, public.vihem_mail_user_prefs from anon, authenticated;
+  public.vihem_mail_presence, public.vihem_mail_thread_links, public.vihem_mail_templates, public.vihem_mail_user_prefs, public.vihem_mail_snoozes, public.vihem_mail_notified from anon, authenticated;
 
 commit;
