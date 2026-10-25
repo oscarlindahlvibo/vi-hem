@@ -542,3 +542,7 @@ verify_jwt = false
 # aldrig med Supabase-JWT. Måste driftsättas med --no-verify-jwt (eller motsvarande flagga) där config.toml inte läses.
 [functions.vihem-ai-interpret-document]
 verify_jwt = false
+
+# VI-HEM Mail: schemalagd arbetare anropas av pg_cron/pg_net med hemlig header (x-vihem-mail-worker-secret), aldrig med Supabase-JWT.
+[functions.vihem-mail-worker]
+verify_jwt = false

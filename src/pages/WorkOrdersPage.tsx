@@ -280,7 +280,7 @@ function WorkOrderCategoryManagerModal({ open, onClose, organisationId, userId }
   );
 }
 
-export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, sourceChatMessageId, resourcesEnabled=false }: { resourcesEnabled?: boolean; onNavigate: (page: string) => void; initialWorkOrderId?: string; sourceChatMessageId?: string }) {
+export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, sourceChatMessageId, sourceMailKey, resourcesEnabled=false }: { resourcesEnabled?: boolean; onNavigate: (page: string) => void; initialWorkOrderId?: string; sourceChatMessageId?: string; sourceMailKey?: string }) {
   const { user, loading: authLoading } = useAuth();
   const { categories: timeCategories } = useTimeCategories();
   const { categories: woCategories } = useWorkOrderCategories();
@@ -447,6 +447,19 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
     });
     return () => { live = false; };
   }, [sourceChatMessageId, user?.id, isStaff]);
+
+  // Arbetsorder från e-post: VI-HEM Mail lägger ämne/text i sessionStorage och navigerar hit. Tråden kopplas efter att arbetsordern sparats.
+  const mailSource = useRef<{ accountId: string; threadId: string; label: string } | null>(null);
+  useEffect(() => {
+    if (!sourceMailKey || !isStaff) return;
+    try {
+      const raw = sessionStorage.getItem(`vihem-mail-wo:${sourceMailKey}`); if (!raw) return;
+      const d = JSON.parse(raw) as { title: string; description: string; accountId: string; threadId: string };
+      mailSource.current = { accountId: d.accountId, threadId: d.threadId, label: d.title };
+      setCreateForm({ ...defaultCreateForm, title: String(d.title || '').slice(0, 100), description: String(d.description || '').slice(0, 4000) });
+      setShowCreateModal(true);
+    } catch { /* ingen förifylld data */ }
+  }, [sourceMailKey, isStaff]);
 
   // Fetch comments when detail modal opens
   useEffect(() => {
@@ -651,6 +664,11 @@ export function WorkOrdersPage({ onNavigate: _onNavigate, initialWorkOrderId, so
       if (error) throw error;
       if(includeChatFile&&chatSourceFile){createdFromChat.current=workOrderId;const {error:copyError}=await supabase.functions.invoke('vihem-chat-to-workorder',{body:{work_order_id:workOrderId,message_id:chatSourceFile.id}});if(copyError)throw new Error('Arbetsordern är skapad, men bilagan kunde inte kopieras. Tryck på Skapa igen för att försöka kopiera bilagan utan att skapa en ny arbetsorder.');}
       createdFromChat.current=null;setChatSourceFile(null);
+      if (mailSource.current) {
+        const src = mailSource.current; mailSource.current = null; if (sourceMailKey) { try { sessionStorage.removeItem(`vihem-mail-wo:${sourceMailKey}`); } catch { /* ignoreras */ } }
+        try { const { mailApi } = await import('../modules/mail/lib/api'); await mailApi('link_create', { account_id: src.accountId, thread_id: src.threadId, object_type: 'work_order', object_id: workOrderId, label: src.label }); }
+        catch { toast.show('Arbetsordern är skapad men kunde inte kopplas till e-posttråden.'); }
+      }
       setCreateForm(defaultCreateForm);
       setShowCreateModal(false);
       toast.show('Arbetsordern är skapad');

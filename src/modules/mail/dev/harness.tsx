@@ -1,0 +1,34 @@
+// LOKAL TESTSELE – MOCKDATA. Ersätter bara supabase.functions.invoke i webbläsaren så att gränssnittet kan granskas utan inloggning. Ingen riktig Gmail används. Ska inte committas.
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import '../../../index.css';
+import { supabase } from '../../../lib/supabase';
+import MailApp from '../components/MailApp';
+
+const ACC = [
+  { id: '11111111-1111-4111-8111-111111111111', email: 'oscar@example.test', display_name: 'Oscar (MOCK)', description: '', kind: 'personal', is_owner: true, levels: { read: true, send: true, manage: true, admin: true } },
+  { id: '22222222-2222-4222-8222-222222222222', email: 'info@example.test', display_name: 'Info (MOCK, delad)', description: '', kind: 'shared', is_owner: false, levels: { read: true, send: true, manage: true, admin: false } },
+];
+const names = ['Anna Svensson', 'Erik Lindqvist', 'Hyresgäst 1001', 'Elnät AB', 'Bygg & Montage', 'Skatteverket', 'Maria Holm', 'Leverantör X'];
+const threads = Array.from({ length: 60 }, (_, i) => ({ id: `t${i}`, subject: i % 7 === 0 ? 'Fuktskada i lägenhet 1001 – åtgärd önskas' : `Ärende ${i}: ${['Faktura', 'Offert', 'Nyckelbeställning', 'Avisering'][i % 4]}`, snippet: 'Hej! Jag skriver angående det vi pratade om i förra veckan, kan ni återkomma …', participants: [{ name: names[i % 8], email: `p${i % 8}@example.test` }], from: { name: names[i % 8], email: `p${i % 8}@example.test` }, lastDate: Date.now() - i * 3600_000 * 5, messageCount: 1 + (i % 3), unread: i % 3 === 0, starred: i % 11 === 0, hasAttachments: i % 4 === 1, labelIds: ['INBOX'], draft: false, important: false }));
+const html = `<div style="font-family:Arial"><p>Hej,</p><p>Vi har upptäckt fukt vid badrumsväggen. <b>Kan ni skicka någon?</b></p><img src="https://tracker.example.test/pixel.png" width="200" height="40" alt="extern bild"><p>Mvh<br>Anna</p><div class="gmail_quote"><blockquote>Tidigare mejl …</blockquote></div><script>alert('xss')</script><img src=x onerror="alert(1)"></div>`;
+const msg = (id: string, n: number) => ({ id: `${id}-m${n}`, threadId: id, labelIds: ['INBOX'], internalDate: Date.now() - (3 - n) * 86400000, snippet: 'Hej, vi har upptäckt fukt …', from: { name: names[0], email: 'p0@example.test' }, to: [{ name: '', email: 'info@example.test' }], cc: [{ name: 'Kollega', email: 'kollega@example.test' }], bcc: [], replyTo: null, subject: 'Fuktskada i lägenhet 1001', date: new Date().toISOString(), messageIdHeader: `<${id}-${n}@example.test>`, inReplyTo: '', references: '', html: n === 0 ? html : '', text: n === 0 ? '' : 'Tack, vi återkommer under dagen.\n\nVänligen,\nAnna', attachments: n === 0 ? [{ id: 'a1', messageId: `${id}-m0`, filename: 'bild-fukt.jpg', mimeType: 'image/jpeg', size: 204800, contentId: null, inline: false }] : [], unread: n === 1, starred: false, isDraft: false, listUnsubscribe: '', deliveredTo: ['info@example.test'] });
+const log: unknown[] = ((window as any).__calls = []);
+const mockInvoke = async (_n: string, { body }: { body: any }) => {
+  log.push(body); await new Promise((r) => setTimeout(r, 150)); const a = body.action;
+  const ok = (x: object) => ({ data: { ok: true, ...x }, error: null });
+  if (a === 'bootstrap') return ok({ user: { id: 'u1', name: 'Oscar (MOCK)', role: 'admin', organisation_id: 'o1' }, accounts: ACC, prefs: { last_sender: {}, notify_mode: 'none', notify_show_sender: false, load_remote_images: 'ask', important_senders: [], default_account_id: null, notify_account_ids: null }, is_org_admin: true });
+  if (a === 'templates_list') return ok({ templates: [{ id: 't1', scope: 'organisation', name: 'Kvittens felanmälan', subject: 'Din felanmälan {{arendenummer}}', body_html: 'Hej {{mottagare}},<br>Vi har tagit emot din felanmälan avseende {{fastighet}}.<br>Mvh {{avsandare}}' }] });
+  if (a === 'account_context') return ok({ labels: [{ id: 'INBOX', name: 'INBOX', type: 'system', threadsUnread: 14 }, { id: 'Label_1', name: 'Hyresgäster', type: 'user' }, { id: 'Label_2', name: 'Leverantörer', type: 'user' }], identities: [{ email: body.account_id.startsWith('1') ? 'oscar@example.test' : 'info@example.test', name: 'Oscar', replyTo: '', signature: '<b>Oscar Lindahl</b><br>VI-HEM (MOCK-signatur)', isPrimary: true, isDefault: true, verified: true, treatAsAlias: false }, { email: 'bokning@example.test', name: 'Bokning', replyTo: '', signature: '<i>Bokningsteamet</i>', isPrimary: false, isDefault: false, verified: true, treatAsAlias: true }] });
+  if (a === 'threads_list') return ok({ threads: threads.slice(0, 40), next_page_token: null, estimate: 40, history_id: '1' });
+  if (a === 'search') return ok({ threads: threads.filter((t) => t.subject.toLowerCase().includes(String(body.q).toLowerCase().replace(/^\w+:/, ''))).map((t) => ({ ...t, account_id: body.account_ids[0] })), errors: [], more: {}, denied: [] });
+  if (a === 'thread_get') return ok({ thread: { id: body.thread_id, subject: 'Fuktskada i lägenhet 1001 – åtgärd önskas', messages: [msg(body.thread_id, 0), msg(body.thread_id, 1)] } });
+  if (a === 'meta_get') return ok({ assignable: [{ id: 'u1', name: 'Oscar (MOCK)' }, { id: 'u2', name: 'Kollega (MOCK)' }], meta: { assigned_to: null, status: 'open', priority: 'normal' }, comments: [{ id: 'c1', body: 'Ringde hyresgästen – åker dit imorgon.', created_at: new Date().toISOString(), author: { id: 'u2', name: 'Kollega (MOCK)' } }], links: [{ id: 'l1', object_type: 'work_order', object_id: 'w1', label: 'Fukt badrum 1001' }], presence: [{ user_id: 'u2', mode: 'replying', name: 'Kollega (MOCK)' }] });
+  if (a === 'admin_overview') return ok({ accounts: ACC.map((x, i) => ({ ...x, active: true, owner_user_id: i === 0 ? 'u1' : null, access_mode: 'restricted', client_enabled: true, last_test_status: 'ok' })), permissions: [{ id: 'p1', mail_account_id: ACC[1].id, user_id: 'u2', can_read: true, can_send: true, can_manage: true, can_admin: false, reason: '', created_at: new Date().toISOString() }], users: [{ id: 'u1', name: 'Oscar (MOCK)', email: 'o@example.test', role: 'admin' }, { id: 'u2', name: 'Kollega (MOCK)', email: 'k@example.test', role: 'staff' }], sync: [], recent: [] });
+  if (a === 'send') return ok({ status: 'sent', ledger_id: 'L1', thread_id: 'tx', message_id: 'mx' });
+  if (a === 'draft_save') return ok({ draft_id: 'd1', thread_id: null });
+  if (a === 'changes') return ok({ changedThreadIds: [], historyId: '1', expired: false });
+  return ok({});
+};
+Object.defineProperty(supabase, 'functions', { value: { invoke: mockInvoke }, configurable: true });
+ReactDOM.createRoot(document.getElementById('root')!).render(<div className="mx-auto max-w-[1560px] p-4 lg:p-6"><div className="mb-2 rounded bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">TESTSELE – MOCKDATA. Ingen riktig Gmail.</div><MailApp onNavigate={(p) => console.log('navigate', p)} /></div>);
