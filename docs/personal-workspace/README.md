@@ -57,10 +57,10 @@ Befintlig delad pushfunktion och dess per-enhetsledger återanvänds. Ny helper 
 
 Återförsök använder befintlig pushkonfiguration, högst fem försök med exponentiellt intervall. Leveranser med okänt eller pågående providerresultat upprepas inte blint, eftersom det kan skapa dubbletter; in-app-påminnelsen finns kvar. Sådana fall behöver driftgranskning. Databasens atomiska del kan återförsökas nästa minut.
 
-### Förberedda driftsättningssteg – inte utförda
+### Driftsättningsordning
 
 1. Ta och återläs en aktuell produktionsbackup i separat miljö. Kör migrationerna mot fullständig klon av verkligt schema; här användes isolerat testschema och faktisk befintlig routingmigration.
-2. Installera fyra migrationer ovan med etablerad migreringsprocess. Kontrollera befintliga cron/pg_net/pushförutsättningar och att inga andra cronjobb redan kallar samma funktioner.
+2. Installera fem migrationer ovan med etablerad migreringsprocess. Kontrollera befintliga cron/pg_net/pushförutsättningar och att inga andra cronjobb redan kallar samma funktioner.
 3. Driftsätt ändrad `vihem-send-push` tillsammans med delad helper. Använd befintliga serverhemligheter och delade pushinställningar, inga nya frontendhemligheter.
 4. Aktivera först efter separat beställning följande jobb, exempel på SQL för driftansvarig:
 
@@ -154,3 +154,11 @@ Delning testad mot riktig isolerad PostgreSQL: läs/edit, privata syskon, privat
 Färsk serverbackup återlästes i separat, nätverksisolerad PostgreSQL 15.8-container med samma image som produktion och avstängda cronjobb. Ägare och ACL återställdes; endast en befintlig GraphQL-ACL för en saknad extensionsfunktion uteslöts från återläsningslistan. Den berör inte arbetsytan och produktionens GraphQL har inte ändrats. Alla fem arbetsytemigrationer installerades därefter i klonen. Ett transaktionellt prov med riktiga profil-/organisationsstrukturer verifierade privat åtkomst, läs/edit/återkallande och privat historik och rullades tillbaka.
 
 Routingmigrationen behöver köras med `supabase_admin`, eftersom den ersätter en befintlig funktion som ägs av den rollen. Övriga migrationer körs med ordinarie `postgres`. Använd befintligt privat driftlösenord utan att skriva det i kod, logg eller frontend. Efter installation registreras filernas SHA256 i ordinarie applied-migrations.tsv, och bara de två ändrade Edge-filerna synkas med backup. Använd sedan befintlig lösenordsfri deploy_vihem.sh och verifiera HTTPS-version och assethashar.
+
+## Produktionsinstallation
+
+2026-10-25, separat beställd publicering: implementation och delning pushade till main. Fem migrationer och båda ändrade Edge-filer installerade; tre cronjobb aktiverade. Dispatch och push-retry har körts med status `succeeded`; dagligt underhåll är schemalagt. Befintlig pushkonfiguration och trigger verifierades aktiva utan att några nycklar loggades.
+
+Färsk backup och tidigare Edge/ledger finns i `/home/vibo/workspace-release-20261025/install-20261025T162603Z`. Webbpubliceringen via `deploy_vihem.sh` verifierade revision ab930de och HTTP-hashar, med frontendbackup i `/mnt/md0/supabase-backups/shared/vihem-frontend/release-20261025T162636-903caccd`. Ett motsvarande behörighetsprov kördes i produktion inom transaktion och rullades tillbaka: privat/read/edit/revoke/historik PASS.
+
+Den verkliga webbappen öppnades som inloggad admin; arbetsytan, tomläge, navigation och privata API-anrop fungerade. Slutprovet hittade en äldre auth-init som skrev över initial hash-länk med startsidan. Denna korrigeras i efterföljande huvudrevision med regressionsprov av direktlänk och rollgräns; slutlig publicerad revision finns i sajtens `beta-version.json`. Fysisk Pencil, fysisk push och andra tidigare redovisade acceptansgap är fortfarande inte verifierade/färdiga.

@@ -1,3 +1,4 @@
+import { workspacePath, workspaceStart } from './modules/personal-workspace/services/routes';
 import { StaffResourcesPage } from "./pages/StaffResourcesPage";
 import { PortalAdmin } from './modules/vibogruppen/PortalAdmin';
 import { BillingAdmin } from './modules/vibogruppen/BillingAdmin';
@@ -196,7 +197,7 @@ function AppInner() {
   const isGuestLaundryPath = isGuestLaundryRoute();
   const isAgreementSignPath = isAgreementSignRoute();
   const isAgreementVerifyPath = isAgreementVerifyRoute();
-  const [currentPage, setCurrentPage] = useState(()=>{const link=window.location.hash.replace(/^#\/?/,'');return /^personal-workspace(?:\/(?:notes|reminders)(?:\/[0-9a-f-]{36}(?:\/[0-9a-f-]{36})?)?)?$/.test(link)?link:'dashboard';});
+  const [currentPage, setCurrentPage] = useState(()=>workspacePath(window.location.hash)||'dashboard');
   const [pendingPage,setPendingPage]=useState<string|null>(null);
   const navigate=useCallback((page:string)=>{if(hasUnsavedForms()){setPendingPage(page);return;}setCurrentPage(page);if(page==='notifications')setNotificationCount(0);scrollAppTo(0);},[]);
   const [notificationCount, setNotificationCount] = useState(0);
@@ -308,11 +309,13 @@ function AppInner() {
       return;
     }
 
-    setCurrentPage(user.role === 'superadmin' ? 'admin-organisations' : 'dashboard');
+    setCurrentPage(workspaceStart(window.location.hash,user.role));
     setNotificationCount(0);
     setChatNotificationCount(0);
     requestAnimationFrame(() => scrollAppTo(0));
   }, [user?.id, user?.role]);
+
+  useEffect(()=>{if(!user || !['staff','admin','superadmin'].includes(user.role))return;const open=()=>{const path=workspacePath(window.location.hash);if(path)navigate(path);};window.addEventListener('hashchange',open);return()=>window.removeEventListener('hashchange',open);},[user?.id,user?.role,navigate]);
 
   useEffect(() => {
     requestAnimationFrame(() => scrollAppTo(0));

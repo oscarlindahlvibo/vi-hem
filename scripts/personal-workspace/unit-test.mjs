@@ -17,6 +17,21 @@ try {
     });
     return import(pathToFileURL(out).href);
   };
+  const { workspacePath, workspaceStart } = await compile(
+    "routes",
+    "src/modules/personal-workspace/services/routes.ts",
+  );
+  const note = "personal-workspace/notes/10000000-0000-0000-0000-000000000001";
+  assert.equal(workspaceStart("#" + note, "admin"), note);
+  assert.equal(workspaceStart("#/" + note, "staff"), note);
+  assert.equal(workspaceStart("#" + note, "tenant"), "dashboard");
+  assert.equal(workspaceStart("#" + note, "snow"), "dashboard");
+  assert.equal(
+    workspaceStart("#personal-workspace", "superadmin"),
+    "personal-workspace",
+  );
+  assert.equal(workspacePath("#personal-workspace/notes/not-a-uuid"), null);
+  assert.equal(workspacePath("#personal-workspace/notes/../../admin"), null);
   const { fromLocal, localInput, parseQuick, snoozeAt } = await compile(
     "time",
     "src/modules/personal-workspace/reminders/time.ts",
