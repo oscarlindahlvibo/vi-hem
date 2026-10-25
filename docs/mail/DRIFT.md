@@ -36,3 +36,6 @@ För skriv- och skickfunktioner (arkivera, läst/oläst, stjärna, etiketter, pa
 - Migrationerna `20261101100000` och `20261101110000` tillämpade i produktion och införda i `applied-migrations.tsv`. Verifierat: 17 tabeller `vihem_mail_*`, cron-jobbet finns, 10 befintliga brevlådor står kvar som `org_shared`.
 - Edge functions kopierade till `volumes/functions` (`_shared/mail`, `vihem-mail`, `vihem-mail-worker`, `vihem-gmail`) och runtime omstartad. Röktest utan inloggning: `vihem-mail` 401 (kräver JWT), `vihem-mail-worker` 403 (kräver hemlighet), `vihem-gmail` 401.
 - `/home/vibo/vi-hem`-utcheckningen är orörd. Ännu ej gjort: worker-inställning (`mail_worker`), scope `gmail.modify`, frontend-merge/deploy.
+
+## Merge och frontend-deploy 2026-10-25
+Branchen mergades till `main` (Tiptap enhetligt på v3 efter konflikt med Min arbetsyta) och `~/deploy_vihem.sh` kördes: revision `6897989`. Frontend publicerad och HTTP-hashar verifierade. Worker-inställningen (`mail_worker`) är fortfarande inte gjord, så schemalagda utskick och snooze-väckning körs inte ännu.
