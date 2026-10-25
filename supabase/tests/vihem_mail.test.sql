@@ -54,9 +54,11 @@ begin
   select count(*) into v_n from public.vihem_mail_audit_events where mail_account_id = v_shared and action = 'permission_revoked';
   perform pg_temp.expect('återkallning loggas', v_n = 1);
 
-  -- Admin: personlig brevlåda kräver orsak; självtilldelning blockeras; annan admin kan tilldela
+  -- Admin: personlig brevlåda kräver orsak; självtilldelning tillåts med orsak och loggas
   perform pg_temp.expect_error('åtkomst till annans personliga brevlåda kräver orsak', format('select public.vihem_mail_grant(%L, %L, %L, true, false, false, false, %L)', admin1, v_priv_anna, admin2, ''), 'E_INVALID');
-  perform pg_temp.expect_error('admin kan inte ge sig själv åtkomst till annans personliga brevlåda', format('select public.vihem_mail_grant(%L, %L, %L, true, false, false, false, %L)', admin1, v_priv_anna, admin1, 'Behöver läsa vid semester'), 'E_FORBIDDEN');
+  perform pg_temp.expect_error('självtilldelning på annans personliga brevlåda kräver också orsak', format('select public.vihem_mail_grant(%L, %L, %L, true, false, false, false, %L)', admin1, v_priv_anna, admin1, ''), 'E_INVALID');
+  perform public.vihem_mail_grant(admin1, v_priv_anna, admin1, true, false, false, false, 'Behöver läsa vid semester');
+  perform pg_temp.expect('admin kan ge sig själv åtkomst med orsak (loggas)', public.vihem_mail_authorize(admin1, v_priv_anna, 'read') and exists (select 1 from public.vihem_mail_audit_events where user_id = admin1 and action = 'permission_granted' and metadata ->> 'reason' = 'Behöver läsa vid semester'));
   perform public.vihem_mail_grant(admin2, v_priv_anna, admin1, true, false, false, false, 'Vikarie under semester, godkänt av ägaren');
   perform pg_temp.expect('annan admin kan ge uttryckligt läsrätt med orsak', public.vihem_mail_authorize(admin1, v_priv_anna, 'read') and not public.vihem_mail_authorize(admin1, v_priv_anna, 'send'));
   perform pg_temp.expect('orsaken sparas på tilldelningen', (select reason from public.vihem_mail_permissions where mail_account_id = v_priv_anna and user_id = admin1 and revoked_at is null) like 'Vikarie%');
