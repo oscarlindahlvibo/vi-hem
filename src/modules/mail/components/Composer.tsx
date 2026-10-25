@@ -160,9 +160,9 @@ export function Composer({ account, identities, seed, lastSender, suggestions, t
         <button type="button" onClick={() => void closeKeep()} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200" aria-label="Spara och stäng"><X className="h-5 w-5" /></button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4">
-        <div className="flex items-center gap-2 border-b border-slate-200 py-2 text-sm"><span className="w-8 shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-400">Från</span>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-200 py-2 text-sm"><span className="w-8 shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-400">Från</span>
           {verified.length > 1 ? <select value={from} onChange={(e) => changeFrom(e.target.value)} aria-label="Avsändare" className="min-w-0 flex-1 rounded-lg border-0 bg-transparent py-1 text-sm font-medium focus:ring-0">{verified.map((i) => <option key={i.email} value={i.email}>{i.name ? `${i.name} <${i.email}>` : i.email}</option>)}</select> : <span className="truncate font-medium">{from}</span>}
-          <span className="ml-auto flex shrink-0 gap-2 text-xs font-semibold text-blue-700">{!showCc && <button type="button" onClick={() => setShowCc(true)}>Kopia</button>}{!showBcc && <button type="button" onClick={() => setShowBcc(true)}>Hemlig kopia</button>}{!showReplyTo && <button type="button" onClick={() => setShowReplyTo(true)}>Svarsadress</button>}</span></div>
+          <span className="flex w-full shrink-0 gap-3 pl-10 text-xs font-semibold text-blue-700 sm:ml-auto sm:w-auto sm:pl-0">{!showCc && <button type="button" onClick={() => setShowCc(true)}>Kopia</button>}{!showBcc && <button type="button" onClick={() => setShowBcc(true)}>Hemlig kopia</button>}{!showReplyTo && <button type="button" onClick={() => setShowReplyTo(true)}>Svarsadress</button>}</span></div>
         <RecipientField label="Till" value={to} onChange={setTo} suggestions={suggestions} autoFocus={!to.length} />
         {showCc && <RecipientField label="Kopia" value={cc} onChange={setCc} suggestions={suggestions} />}
         {showBcc && <RecipientField label="Dold" value={bcc} onChange={setBcc} suggestions={suggestions} />}

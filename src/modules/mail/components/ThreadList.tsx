@@ -17,12 +17,12 @@ const Row = memo(function Row({ t, selected, checked, focused, showAccount, acco
   const unreadCls = t.unread ? 'font-bold text-slate-950' : 'font-medium text-slate-700';
   return (
     <div className="relative h-full overflow-hidden" style={{ height: ROW }} data-thread-key={`${t.account_id}:${t.id}`}>
-      <div className="absolute inset-0 flex items-center justify-between px-5 text-white" aria-hidden="true">
+      {dx !== 0 && <div className="absolute inset-0 flex items-center justify-between px-5 text-white" aria-hidden="true">
         <span className="flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2">{t.unread ? <MailOpen className="h-5 w-5" /> : <Mail className="h-5 w-5" />}</span>
         <span className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2"><Archive className="h-5 w-5" /></span>
-      </div>
+      </div>}
       <div role="option" aria-selected={selected} tabIndex={-1} data-thread-row onClick={onOpen} onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
-        className={`group relative flex h-full cursor-pointer items-start gap-3 border-b border-slate-100 px-3 py-2.5 transition-colors duration-150 ${selected ? 'bg-blue-50' : t.unread ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/60 hover:bg-slate-100/70'} ${focused ? 'ring-2 ring-inset ring-blue-400' : ''}`}
+        className={`group relative flex h-full cursor-pointer items-start gap-3 border-b border-slate-100 px-3 py-2.5 transition-colors duration-150 ${selected ? 'bg-blue-50' : t.unread ? 'bg-white hover:bg-slate-50' : 'bg-slate-50 hover:bg-slate-100'} ${focused ? 'ring-2 ring-inset ring-blue-400' : ''}`}
         style={{ transform: `translateX(${dx}px)`, transition: dx === 0 ? 'transform .2s ease' : 'none' }}>
         {t.unread && <span className="absolute left-0 top-0 h-full w-1 bg-blue-600" aria-hidden="true" />}
         <button type="button" aria-label={checked ? 'Avmarkera' : 'Markera'} onClick={(e) => { e.stopPropagation(); onCheck(); }} className="relative mt-1 h-9 w-9 shrink-0">
