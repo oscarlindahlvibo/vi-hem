@@ -116,6 +116,7 @@ class AppErrorBoundary extends React.Component<React.PropsWithChildren, { hasErr
   }
 }
 
+const LazyWorkspacePage=React.lazy(()=>import('./modules/personal-workspace/WorkspacePage').then(module=>({default:module.WorkspacePage})));
 const LazySnowPage=React.lazy(()=>import('./modules/snow/SnowPage').then(module=>({default:module.SnowPage})));
 function SnowPage(props:{onNavigate?:(page:string)=>void}) { return <React.Suspense fallback={<LoadingPage/>}><LazySnowPage {...props}/></React.Suspense>; }
 
@@ -195,7 +196,7 @@ function AppInner() {
   const isGuestLaundryPath = isGuestLaundryRoute();
   const isAgreementSignPath = isAgreementSignRoute();
   const isAgreementVerifyPath = isAgreementVerifyRoute();
-  const [currentPage, setCurrentPage] = useState('dashboard');
+  const [currentPage, setCurrentPage] = useState(()=>{const link=window.location.hash.replace(/^#\/?/,'');return /^personal-workspace(?:\/(?:notes|reminders)(?:\/[0-9a-f-]{36}(?:\/[0-9a-f-]{36})?)?)?$/.test(link)?link:'dashboard';});
   const [pendingPage,setPendingPage]=useState<string|null>(null);
   const navigate=useCallback((page:string)=>{if(hasUnsavedForms()){setPendingPage(page);return;}setCurrentPage(page);if(page==='notifications')setNotificationCount(0);scrollAppTo(0);},[]);
   const [notificationCount, setNotificationCount] = useState(0);
@@ -481,6 +482,7 @@ function AppInner() {
 
   function renderPage() {
     if (currentPage === 'profile') return <ProfilePage />;
+    if ((currentPage === 'personal-workspace' || currentPage.startsWith('personal-workspace/')) && ['admin','staff','superadmin'].includes(user!.role)) return <React.Suspense fallback={<div role="status">Öppnar Min arbetsyta…</div>}><LazyWorkspacePage key={user!.id} path={currentPage} onNavigate={navigate}/></React.Suspense>;
     // Superadmin sees only the organisations page
     if (isSuperadmin) {
       return <AdminOrganisationsPage onNavigate={navigate} />;

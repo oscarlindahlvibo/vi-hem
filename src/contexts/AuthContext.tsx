@@ -81,6 +81,8 @@ function readLocalUsers(): LocalTestUser[] {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<Profile | null>(null);
+  const workspaceCacheOwner = useRef<string|null>(null);
+  if(user)workspaceCacheOwner.current=user.id;
   const [loading, setLoading] = useState(true);
   const authGeneration = useRef(0);
   const signingOut = useRef(false);
@@ -182,6 +184,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         })();
       } else if (event === 'SIGNED_OUT') {
+        const cacheOwner=workspaceCacheOwner.current;workspaceCacheOwner.current=null;
+        if(cacheOwner)void import('../modules/personal-workspace/services/local').then(module=>module.purgeCleanCache(cacheOwner)).catch(()=>console.warn('Kunde inte rensa arbetsytans lokala cache.'));
         authGeneration.current++;
         void supabase.removeAllChannels();
         for(const key of Object.keys(localStorage))if(key.startsWith('vihem-chat:'))localStorage.removeItem(key);

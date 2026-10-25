@@ -13,6 +13,7 @@
 // rather than having to remember to call this from every insert call site.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { personalReminderPush } from "../_shared/personal-reminder-push.ts";
 import { parseFcmConfig, sendFcmPush } from "../_shared/fcm.ts";
 import { sendApnsPush, type ApnsConfig } from "../_shared/apns.ts";
 
@@ -69,6 +70,16 @@ Deno.serve(async (request) => {
     .maybeSingle();
   if (notificationError) return json({ error: notificationError.message }, 500);
   if (!notification) return json({ error: "Notis hittades inte." }, 404);
+
+  // A reminder cancelled, completed, snoozed or trashed after scheduling
+  // must not be sent by a delayed/retried transport request.
+  try {
+    const personal = await personalReminderPush(supabase, notification);
+    if (personal?.skip) return json({ ok:true, sent:0, reason:"personal_reminder_no_longer_due" });
+    if (personal) notification.message = personal.message;
+  } catch {
+    return json({ error:"PERSONAL_REMINDER_VALIDATION_FAILED" }, 503);
+  }
 
   const { data: tokens, error: tokensError } = await supabase
     .from("vihem_push_tokens")

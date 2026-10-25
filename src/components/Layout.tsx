@@ -9,6 +9,7 @@ import { Avatar, Button, Input, Modal } from './ui';
 import { useBankIdFlow } from '../hooks/useBankIdFlow';
 import { initiateBankIDLink, formatPersonalNumber } from '../lib/bankid';
 import { isMobileBrowser } from '../lib/utils';
+import { QuickCapture } from '../modules/personal-workspace/components/QuickCapture';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import {
   Home, Wrench, ClipboardList, Clock, WashingMachine, FileText,
@@ -114,6 +115,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
     { label: 'Arbete & projekt', icon: <Wrench className="w-5 h-5" />, items: [
       { label: 'Arbetsordrar', icon: <ClipboardList className="w-5 h-5" />, page: 'workorders', roles: ['staff', 'admin'] },
       { label: 'Tidrapportering', icon: <Clock className="w-5 h-5" />, page: 'timetracking', roles: ['staff', 'admin'] },
+      { label: 'Min arbetsyta', icon: <BookOpen className="w-5 h-5" />, page: 'personal-workspace', roles: ['staff', 'admin'] },
       { label: 'Kalender', icon: <CalendarDays className="w-5 h-5" />, page: 'calendar', roles: ['staff', 'admin'] },
       { label: 'Kundprojekt', icon: <Briefcase className="w-5 h-5" />, page: 'customer-projects', roles: ['staff', 'admin'], module: 'customer_projects' },
       { label: 'Årsplanering', icon: <CalendarDays className="w-5 h-5" />, page: 'year-planning', roles: ['staff', 'admin'], module: 'year_planning' },
@@ -316,6 +318,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
               <Avatar name={user?.name} userId={user?.id} src={user?.avatar_url} />
               <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-vihem-ink">{user?.name}</span><span className="block text-xs text-vihem-muted">{roleLabel} · Profil & inställningar</span></span>
             </button>
+            {user && ['staff','admin'].includes(user.role) && <QuickCapture key={user.id} owner={user.id} page={currentPage} onNavigate={navigate}/>}
             <button type="button" onClick={() => navigate('notifications')} className="vihem-icon-button relative" aria-label="Öppna aviseringar" title="Aviseringar">
               <Bell className="h-5 w-5" />
               {notificationCount > 0 && <span className="absolute right-0 top-0 flex min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-semibold text-white">{notificationCount > 99 ? '99+' : notificationCount}</span>}
@@ -334,7 +337,8 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
           <span className="text-sm font-black text-slate-950">VI-HEM</span>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => navigate('notifications')} className="relative rounded-full p-2 hover:bg-slate-100" aria-label="Öppna aviseringar" title="Öppna aviseringar">
+          {user && ['staff','admin'].includes(user.role) && <QuickCapture key={user.id} owner={user.id} page={currentPage} onNavigate={navigate}/>}
+            <button type="button" onClick={() => navigate('notifications')} className="relative rounded-full p-2 hover:bg-slate-100" aria-label="Öppna aviseringar" title="Öppna aviseringar">
             <Bell className="w-5 h-5 text-slate-500" />
             {notificationCount > 0 && <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-vihem-danger px-1 text-[10px] font-bold text-white">{notificationCount > 9 ? '9+' : notificationCount}</span>}
           </button>
