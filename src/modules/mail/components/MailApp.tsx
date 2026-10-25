@@ -186,7 +186,7 @@ function MailShell({ onNavigate }: { onNavigate: (page: string) => void }) {
         </section>
       </>}
       {compose && <Composer key={compose.key} account={compose.account} identities={ctxs[compose.account.id]?.identities ?? []} seed={compose.seed} lastSender={boot.prefs.last_sender} templates={templates} suggestions={suggestionsFrom(visible)}
-        onClose={() => setCompose(null)} onSent={() => { setCompose(null); clearListCache(); window.setTimeout(() => void list.refresh(), 1500); setReloadKey((k) => k + 1); }} onSenderUsed={(email) => void mailApi('prefs_save', { last_sender: { [compose.account.id]: email } }).catch(() => {})} templateVars={{}} />}
+        onClose={() => setCompose(null)} onSent={() => { setCompose((c) => (c?.key === compose.key ? null : c)); clearListCache(); window.setTimeout(() => void list.refresh(), 1500); setReloadKey((k) => k + 1); }} onSenderUsed={(email) => void mailApi('prefs_save', { last_sender: { [compose.account.id]: email } }).catch(() => {})} templateVars={{}} />}
       {snoozeFor && <SnoozeDialog onClose={() => setSnoozeFor(null)} onPick={(d) => void doSnooze(snoozeFor, d)} />}
       {helpOpen && <HelpDialog onClose={() => setHelpOpen(false)} />}
     </div>
