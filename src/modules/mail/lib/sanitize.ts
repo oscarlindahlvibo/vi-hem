@@ -25,8 +25,11 @@ export function sanitizeEmailHtml(html: string, opts: { allowRemoteImages: boole
   install(); allowRemote = opts.allowRemoteImages; blocked = 0;
   let source = html;
   if (opts.cidMap) source = source.replace(/cid:([^"'\s>)]+)/gi, (m, cid: string) => opts.cidMap![cid] ?? opts.cidMap![decodeURIComponent(cid)] ?? m);
-  const clean = DOMPurify.sanitize(source, { USE_PROFILES: { html: true }, FORBID_TAGS: ['style', 'form', 'iframe', 'object', 'embed', 'meta', 'link', 'base', 'svg', 'math', 'video', 'audio'], FORBID_ATTR: ['formaction', 'srcdoc'], ALLOW_DATA_ATTR: false, ADD_ATTR: ['target'] });
-  return { html: clean as unknown as string, blockedImages: blocked };
+  const clean = DOMPurify.sanitize(source, { USE_PROFILES: { html: true }, FORBID_TAGS: ['form', 'iframe', 'object', 'embed', 'meta', 'link', 'base', 'svg', 'math', 'video', 'audio'], FORBID_ATTR: ['formaction', 'srcdoc'], ALLOW_DATA_ATTR: false, ADD_ATTR: ['target'], FORCE_BODY: true });
+  // <style> behålls så att mejlets egen responsiva design (media queries) fungerar som i Gmail. Allt som kan hämta något utifrån tas bort:
+  // @import och url() mot nätet. Iframens CSP (default-src 'none', img/font bara data:) är andra spärren, och iframen är sandboxad.
+  const cleaned = (clean as unknown as string).replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gi, (_m, css: string) => `<style>${css.replace(/@import[^;]*;?/gi, '').replace(/expression\s*\([^)]*\)/gi, '').replace(/behavior\s*:[^;}]*/gi, '').replace(/url\(\s*(['"]?)(?!data:image\/)[^)]*\1\s*\)/gi, allowRemote ? '$&' : 'none')}</style>`);
+  return { html: cleaned, blockedImages: blocked };
 }
 /** Sanering av innehåll som användaren själv skriver/klistrar in (och citerad text) innan det skickas. */
 export function sanitizeComposerHtml(html: string): string { return sanitizeEmailHtml(html, { allowRemoteImages: true }).html; }
