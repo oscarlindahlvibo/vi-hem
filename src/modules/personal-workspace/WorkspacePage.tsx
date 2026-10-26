@@ -36,6 +36,7 @@ import { NoteEditor } from "./components/NoteEditor";
 import { SharingDialog } from "./components/SharingDialog";
 import { CollectionDialog } from "./components/CollectionDialog";
 import { Reminders } from "./reminders/Reminders";
+import { useWorkspaceViewport } from "./hooks/useWorkspaceViewport";
 import "./workspace.css";
 export function WorkspacePage({
   path,
@@ -44,6 +45,7 @@ export function WorkspacePage({
   path: string;
   onNavigate: (page: string) => void;
 }) {
+  const viewport = useWorkspaceViewport();
   const { user } = useAuth();
   const owner = user!.id;
   const parts = path.split("/");
@@ -362,7 +364,7 @@ export function WorkspacePage({
     ["trash", "Papperskorg", <Trash2 size={17} />],
   ];
   return (
-    <div className="pw-root">
+    <div ref={viewport} className="pw-root" data-viewport-bound="true">
       <div className="pw-top">
         <div>
           <span className="pw-eyebrow">DITT EGET UTRYMME</span>

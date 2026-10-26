@@ -1301,3 +1301,49 @@ html[data-workspace-writing] .vihem-floating-nav {
   width: 20px;
   height: 20px;
 }
+
+/* No second page scrollbar while the workspace is mounted (web and native). */
+html[data-workspace-viewport],
+html[data-workspace-viewport] body,
+html[data-workspace-viewport] #root {
+  overflow: clip;
+}
+html[data-workspace-viewport],
+html[data-workspace-viewport] body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+html[data-workspace-viewport] #root {
+  height: 100%;
+}
+html[data-workspace-viewport] .vihem-mobile-main {
+  overflow: hidden;
+}
+.pw-root[data-viewport-bound] {
+  display: flex;
+  flex-direction: column;
+  height: var(--pw-available-height, calc(100dvh - 220px));
+  min-height: 0;
+}
+.pw-root[data-viewport-bound] > .pw-top {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+}
+.pw-root[data-viewport-bound] > .pw-panels,
+.pw-root[data-viewport-bound] > .pw-reminders {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+.pw-root[data-viewport-bound] > .pw-panels {
+  overflow: clip;
+}
+.pw-root[data-viewport-bound] > .pw-reminders {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.pw-root[data-viewport-bound] .pw-editor-header {
+  flex-shrink: 0;
+}

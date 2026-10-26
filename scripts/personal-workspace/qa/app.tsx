@@ -14,7 +14,13 @@ export function WorkspaceQA() {
     return <p>QA-session saknas. Kontrollera den isolerade testdatabasen.</p>;
   return (
     <Layout currentPage={path} onNavigate={setPath}>
-      <WorkspacePage path={path} onNavigate={setPath} />
+      {path.startsWith("personal-workspace") ? (
+        <WorkspacePage path={path} onNavigate={setPath} />
+      ) : (
+        <button onClick={() => setPath("personal-workspace")}>
+          Återgå till arbetsytan (lokalt navigationsprov)
+        </button>
+      )}
     </Layout>
   );
 }
