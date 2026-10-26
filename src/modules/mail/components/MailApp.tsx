@@ -163,7 +163,7 @@ function MailShell({ onNavigate }: { onNavigate: (page: string) => void }) {
     onCompose={() => openCompose(undefined)} onSettings={() => setPanel('settings')} onAdmin={boot.is_org_admin ? () => setPanel('admin') : undefined} onNavigate={() => setDrawer(false)} />;
 
   return (
-    <div className="relative flex h-[calc(100dvh-13.5rem)] min-h-[26rem] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:h-[calc(100dvh-3.5rem)]">
+    <div className="relative -mx-4 -mt-3 flex h-[calc(100dvh-10.25rem)] min-h-[26rem] overflow-hidden rounded-none border-y border-slate-200 bg-white shadow-sm sm:mx-0 sm:mt-0 sm:rounded-2xl sm:border lg:h-[calc(100dvh-3.5rem)]">
       <div className="hidden w-60 shrink-0 border-r border-slate-200 bg-slate-50/50 lg:block">{sidebar}</div>
       {drawer && <div className="fixed inset-0 z-[90] lg:hidden"><button aria-label="Stäng meny" className="absolute inset-0 bg-black/40" onClick={() => setDrawer(false)} /><div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-white pt-[env(safe-area-inset-top)] shadow-2xl">{sidebar}</div></div>}
       {panel === 'settings' && <Suspense fallback={<Loading />}><MailSettings prefs={boot.prefs} accounts={accounts} templates={templates} isAdmin={boot.is_org_admin} onClose={() => setPanel('mail')} onPrefs={(p) => setBoot({ ...boot, prefs: { ...boot.prefs, ...p } })} onTemplates={setTemplates} /></Suspense>}
