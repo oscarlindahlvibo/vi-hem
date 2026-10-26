@@ -7,6 +7,8 @@ import {
   History,
   Link,
   Maximize2,
+  Menu,
+  X,
   Minimize2,
   Star,
   Trash2,
@@ -58,6 +60,7 @@ export function NoteEditor({
     changeInk,
   } = useDocument(owner, id, onSaved);
   const [sharing, setSharing] = useState(false);
+  const [focusMenu, setFocusMenu] = useState(false);
   const [full, setFull] = useState(false),
     [reminder, setReminder] = useState<{
       title: string;
@@ -165,10 +168,22 @@ export function NoteEditor({
       className={
         "pw-editor" +
         (full ? " pw-editor-full" : "") +
+        (full && !focusMenu ? " pw-focus-minimal" : "") +
         (note.mode === "ink" ? " pw-writing" : "")
       }
       aria-label="Anteckningseditor"
     >
+      {full && (
+        <button
+          type="button"
+          className="pw-focus-toggle"
+          aria-label={focusMenu ? "Dölj anteckningsverktyg" : "Visa anteckningsverktyg"}
+          aria-expanded={focusMenu}
+          onClick={() => setFocusMenu((open) => !open)}
+        >
+          {focusMenu ? <X size={19} /> : <Menu size={19} />}
+        </button>
+      )}
       <header className="pw-editor-header">
         <button
           aria-label={full ? "Lämna skrivläget" : "Till anteckningslistan"}
@@ -226,7 +241,7 @@ export function NoteEditor({
           <button
             data-exit-writing="true"
             aria-label={full ? "Lämna helskärm" : "Helskärm"}
-            onClick={() => setFull(!full)}
+            onClick={() => { setFocusMenu(false); setFull(!full); }}
           >
             {full ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
           </button>
@@ -403,6 +418,7 @@ export function NoteEditor({
             change: changeInk,
             readOnly,
             preferencesKey: owner,
+            fullScreen: full,
           }}
         >
           <div ref={article}>

@@ -2,6 +2,7 @@ import { messageOf } from "./services/errors";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Archive,
+  ArrowLeft,
   Bell,
   BookOpen,
   ChevronLeft,
@@ -366,9 +367,17 @@ export function WorkspacePage({
   return (
     <div ref={viewport} className="pw-root" data-viewport-bound="true">
       <div className="pw-top">
-        <div>
-          <span className="pw-eyebrow">DITT EGET UTRYMME</span>
-          <h1>Min arbetsyta</h1>
+        <div className="pw-workspace-heading">
+          <button className="pw-shell-button" aria-label="Tillbaka till VI-HEM" onClick={() => onNavigate("dashboard")}>
+            <ArrowLeft size={20} />
+          </button>
+          <div className="pw-workspace-title">
+            <span className="pw-eyebrow">DITT EGET UTRYMME</span>
+            <h1>Min arbetsyta</h1>
+          </div>
+          <button className="pw-shell-button" aria-label="Öppna huvudmenyn" onClick={() => window.dispatchEvent(new Event("vihem-open-main-menu"))}>
+            <Menu size={20} />
+          </button>
         </div>
         <div className="pw-tabs">
           <button

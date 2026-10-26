@@ -27,6 +27,7 @@ export const InkContext = createContext<{
   change: (strokes: Stroke[]) => void;
   readOnly?: boolean;
   preferencesKey?: string;
+  fullScreen?: boolean;
 }>({ noteId: "", strokes: [], change: () => {} });
 const RenderedStroke = React.memo(function RenderedStroke({
   value,
@@ -86,6 +87,7 @@ export function InkPaper({
     change,
     readOnly,
     preferencesKey,
+    fullScreen,
   } = useContext(InkContext);
   const { paper, spacing, lineColor, lineOpacity } = paperSettings(input || {});
   const settings = useMemo(
@@ -201,6 +203,12 @@ export function InkPaper({
     resize();
     return () => observer.disconnect();
   }, []);
+  useEffect(() => {
+    if (!fullScreen || !viewport.current) return;
+    cancelRef.current();
+    const el = viewport.current;
+    view(fitCamera(el.clientWidth, el.clientHeight));
+  }, [fullScreen]);
   useEffect(() => {
     const el = viewport.current;
     if (!el) return;

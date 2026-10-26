@@ -1347,3 +1347,102 @@ html[data-workspace-viewport] .vihem-mobile-main {
 .pw-root[data-viewport-bound] .pw-editor-header {
   flex-shrink: 0;
 }
+
+/* The workspace has its own compact mobile navigation, like Mail. */
+@media (max-width: 1023px) {
+  html[data-workspace-viewport] .vihem-floating-nav {
+    display: none;
+  }
+  .pw-root[data-viewport-bound] {
+    margin: -12px -16px 0;
+    width: calc(100% + 32px);
+  }
+  .pw-root[data-viewport-bound] > .pw-top {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .pw-workspace-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+  }
+  .pw-workspace-title {
+    flex: 1;
+    min-width: 0;
+  }
+  .pw-workspace-heading .pw-eyebrow {
+    display: none;
+  }
+  .pw-workspace-heading h1 {
+    font-size: 18px;
+    letter-spacing: -0.4px;
+    margin: 0;
+  }
+  .pw-root .pw-shell-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .pw-top .pw-tabs {
+    width: auto;
+    margin: 0 8px;
+  }
+  .pw-root[data-viewport-bound] > .pw-panels {
+    border-radius: 0;
+    border-inline: 0;
+  }
+}
+.pw-shell-button {
+  display: none;
+}
+.pw-focus-toggle {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 8px);
+  right: calc(env(safe-area-inset-right) + 8px);
+  z-index: 35;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--pw-line);
+  background: var(--pw-bg);
+  color: var(--pw-muted);
+  box-shadow: var(--vihem-shadow-card);
+}
+.pw-editor-full .pw-editor-header {
+  padding-right: 62px;
+}
+.pw-focus-minimal .pw-editor-header,
+.pw-focus-minimal .pw-document-meta,
+.pw-focus-minimal .pw-title,
+.pw-focus-minimal .pw-tags,
+.pw-focus-minimal .pw-attachments,
+.pw-focus-minimal .pw-text-tools,
+.pw-focus-minimal .pw-return-text,
+.pw-focus-minimal .pw-ink-controls,
+.pw-focus-minimal .pw-hint {
+  display: none;
+}
+.pw-editor-full.pw-focus-minimal .pw-document-scroll {
+  padding: 20px;
+}
+.pw-editor-full.pw-focus-minimal.pw-writing .pw-document-scroll {
+  padding: 0;
+}
+.pw-editor-full.pw-focus-minimal.pw-writing .pw-ink {
+  height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  padding: 0;
+  border: 0;
+}
+.pw-editor-full.pw-focus-minimal.pw-writing .pw-ink-viewport {
+  border: 0;
+  border-radius: 0;
+}
+.pw-editor-full.pw-focus-minimal:not(.pw-writing) .pw-document-scroll {
+  padding-top: 60px;
+}
