@@ -72,6 +72,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
   useEffect(() => startNoticeBanner({ url: supabaseUrl, key: supabaseAnonKey, surface: 'vihem-app', host: noticeHost.current }), []);
   const { user, signOut, bankIDAvailable, refreshProfile } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  useEffect(() => { const open = () => setMobileMenuOpen(true); window.addEventListener('vihem-open-main-menu', open); return () => window.removeEventListener('vihem-open-main-menu', open); }, []);
   const keyboardOpen = useKeyboardOpen();
   const [chatFocused, setChatFocused] = useState(false);
   useLayoutEffect(() => {

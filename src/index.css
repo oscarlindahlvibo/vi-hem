@@ -185,6 +185,7 @@
 
 /* Flytande bottennavigationen får aldrig ligga över en öppen modal/panel eller dess knappar. */
 .vihem-floating-nav { transition: transform 0.22s ease, opacity 0.2s ease; }
+@media (max-width: 1023px) { html[data-mail-fullscreen] .vihem-floating-nav { display: none; } }
 html[data-overlay-open] .vihem-floating-nav { transform: translateY(130%); opacity: 0; pointer-events: none; }
 
 /* Chat follows the existing VI-HEM tokens; a mobile thread owns its viewport. */
