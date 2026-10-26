@@ -68,6 +68,15 @@ export function NoteEditor({
     >(null),
     [message, setMessage] = useState(""),
     [noteTags, setNoteTags] = useState<string[]>([]);
+  const modeRef = useRef(note?.mode);
+  modeRef.current = note?.mode;
+  useEffect(() => {
+    if (full && note?.mode === "ink")
+      document.documentElement.dataset.workspaceWriting = "true";
+    return () => {
+      delete document.documentElement.dataset.workspaceWriting;
+    };
+  }, [full, note?.mode]);
   const editor = useRef<Editor | null>(null),
     article = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -153,13 +162,25 @@ export function NoteEditor({
     );
   return (
     <section
-      className={"pw-editor" + (full ? " pw-editor-full" : "")}
+      className={
+        "pw-editor" +
+        (full ? " pw-editor-full" : "") +
+        (note.mode === "ink" ? " pw-writing" : "")
+      }
       aria-label="Anteckningseditor"
     >
       <header className="pw-editor-header">
-        <button aria-label="Till anteckningslistan" onClick={onBack}>
+        <button
+          aria-label={full ? "Lämna skrivläget" : "Till anteckningslistan"}
+          onClick={() => (full ? setFull(false) : onBack())}
+        >
           <ArrowLeft size={19} />
         </button>
+        {full && note.mode === "ink" && (
+          <strong className="pw-writing-title">
+            {note.title || "Utan titel"}
+          </strong>
+        )}
         <span role="status" className="pw-save">
           {status}
         </span>
@@ -203,6 +224,7 @@ export function NoteEditor({
             <History size={18} />
           </button>
           <button
+            data-exit-writing="true"
             aria-label={full ? "Lämna helskärm" : "Helskärm"}
             onClick={() => setFull(!full)}
           >
@@ -336,6 +358,7 @@ export function NoteEditor({
               const hasInk = note.content.content?.some(
                 (n) => n.type === "ink",
               );
+              modeRef.current = mode;
               update({ mode });
               if (mode !== "text" && !hasInk)
                 if (editor.current)
@@ -374,7 +397,13 @@ export function NoteEditor({
           ))}
         </div>
         <InkContext.Provider
-          value={{ noteId: id, strokes, change: changeInk, readOnly }}
+          value={{
+            noteId: id,
+            strokes,
+            change: changeInk,
+            readOnly,
+            preferencesKey: owner,
+          }}
         >
           <div ref={article}>
             <RichEditor
@@ -386,7 +415,7 @@ export function NoteEditor({
                 update({
                   content,
                   plain_text,
-                  ...(note.mode === "text" &&
+                  ...(modeRef.current === "text" &&
                   content.content?.some((n) => n.type === "ink")
                     ? {
                         mode: plain_text.trim()

@@ -9,12 +9,12 @@ export function insertInk(editor: Editor, at?: number) {
       : editor.state.doc.content.size);
   editor
     .chain()
-    .focus()
     .insertContentAt(position, [
       { type: "ink", attrs: { pageId, paper: "lined" } },
       { type: "paragraph" },
     ])
     .run();
+  editor.commands.blur();
   requestAnimationFrame(() => {
     editor.view.dom
       .querySelector('[data-ink-page="' + pageId + '"]')

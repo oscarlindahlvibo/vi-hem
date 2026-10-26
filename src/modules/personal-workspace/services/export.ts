@@ -33,20 +33,9 @@ export function printNote(title: string, element: HTMLElement) {
   win.document.title = title || "Anteckning";
   const style = win.document.createElement("style");
   style.textContent =
-    "@page{size:A4;margin:16mm}body{font:12pt system-ui;color:#172b49}h1{font-size:24pt}h2{font-size:20pt}h3{font-size:16pt}svg{display:block;width:auto;height:auto;max-width:100%;max-height:205mm;break-inside:avoid;margin:12px 0}.pw-ink-node{break-inside:avoid}p{orphans:2;widows:2}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px}.pw-ink-tools,.pw-hint{display:none}blockquote{border-left:3px solid #ccc;padding-left:16px}ul[data-type=taskList]{list-style:none}pre{white-space:pre-wrap}img{max-width:100%}.pw-paper-scroll{overflow:visible}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}";
+    "@page{size:A4;margin:16mm}body{font:12pt system-ui;color:#172b49}h1{font-size:24pt}h2{font-size:20pt}h3{font-size:16pt}svg{display:block;width:auto;height:auto;max-width:100%;max-height:205mm;break-inside:avoid;margin:12px 0}.pw-ink-node{break-inside:avoid}p{orphans:2;widows:2}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px}.pw-ink-tools,.pw-hint{display:none}blockquote{border-left:3px solid #ccc;padding-left:16px}ul[data-type=taskList]{list-style:none}pre{white-space:pre-wrap}img{max-width:100%}.pw-paper-scroll,.pw-ink-viewport{overflow:visible;height:auto}.pw-rich-document,.pw-ink-slot,.pw-ink{position:static!important;height:auto!important;display:block}.pw-prose{min-height:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}";
   win.document.head.append(style);
-  const copy = element.cloneNode(true) as HTMLElement;
-  copy
-    .querySelectorAll(
-      ".pw-text-tools,.pw-ink-tools,.pw-hint,.ProseMirror-gapcursor",
-    )
-    .forEach((item) => item.remove());
-  copy
-    .querySelectorAll(".pw-paper")
-    .forEach((item) => item.removeAttribute("style"));
-  copy
-    .querySelectorAll("[contenteditable]")
-    .forEach((item) => item.removeAttribute("contenteditable"));
+  const copy = printableNote(element);
   win.document.body.append(heading, copy);
   const files = element.parentElement?.querySelectorAll(".pw-file");
   if (files?.length) {
@@ -70,4 +59,39 @@ export function printNote(title: string, element: HTMLElement) {
     win.focus();
     win.print();
   });
+}
+
+/** Restore visual document order and unzoom paper without altering stored vectors. */
+export function printableNote(element: HTMLElement): HTMLElement {
+  const copy = element.cloneNode(true) as HTMLElement;
+  copy.querySelectorAll<HTMLElement>("[data-ink-slot]").forEach((slot) => {
+    const overlay = Array.from(
+      copy.querySelectorAll<HTMLElement>("[data-ink-overlay]"),
+    ).find((x) => x.dataset.inkOverlay === slot.dataset.inkSlot);
+    if (overlay) {
+      slot.append(...Array.from(overlay.childNodes));
+      slot.style.height = "auto";
+    }
+  });
+  copy
+    .querySelectorAll(
+      ".pw-ink-portal-host,.pw-text-tools,.pw-ink-controls,.pw-hint,.ProseMirror-gapcursor",
+    )
+    .forEach((x) => x.remove());
+  copy.querySelectorAll<SVGSVGElement>("svg.pw-paper").forEach((svg) => {
+    svg.removeAttribute("style");
+    svg.setAttribute("viewBox", "0 0 794 1123");
+    svg.setAttribute("width", "794");
+    svg.setAttribute("height", "1123");
+  });
+  copy
+    .querySelectorAll("[data-ink-camera]")
+    .forEach((g) => g.removeAttribute("transform"));
+  copy
+    .querySelectorAll<HTMLElement>(".pw-ink-viewport,.pw-rich-document,.pw-ink")
+    .forEach((x) => x.removeAttribute("style"));
+  copy
+    .querySelectorAll("[contenteditable]")
+    .forEach((x) => x.removeAttribute("contenteditable"));
+  return copy;
 }
