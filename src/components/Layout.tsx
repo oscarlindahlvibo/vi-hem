@@ -114,6 +114,9 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Min lägenhet', icon: <Building2 className="w-5 h-5" />, page: 'apartment', roles: ['tenant'] },
       { label: 'Mina fakturor', icon: <Landmark className="w-5 h-5" />, page: 'tenant-invoices', roles: ['tenant'], module: 'finance' },
     ] },
+    { label: 'E-post', icon: <Inbox className="w-5 h-5" />, items: [
+      { label: 'E-post', icon: <Inbox className="w-5 h-5" />, page: 'mail', roles: ['staff', 'admin'] },
+    ] },
     { label: 'Arbete & projekt', icon: <Wrench className="w-5 h-5" />, items: [
       { label: 'Arbetsordrar', icon: <ClipboardList className="w-5 h-5" />, page: 'workorders', roles: ['staff', 'admin'] },
       { label: 'Tidrapportering', icon: <Clock className="w-5 h-5" />, page: 'timetracking', roles: ['staff', 'admin'] },
@@ -175,7 +178,6 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       { label: 'Avbetalningsplaner', icon: <ReceiptText className="w-5 h-5" />, page: 'installment-plans', roles: ['staff', 'admin'], module: 'finance' },
       { label: 'Skatteverket', icon: <Landmark className="w-5 h-5" />, page: 'skatteverket', roles: ['staff', 'admin'], module: 'skatteverket' },
       { label: 'Löneunderlag', icon: <BarChart3 className="w-5 h-5" />, page: 'admin-payroll', roles: ['staff', 'admin'], module: 'payroll' },
-      { label: 'E-post', icon: <Inbox className="w-5 h-5" />, page: 'mail', roles: ['staff', 'admin'] },
       { label: 'E-post & underlag', icon: <Mail className="w-5 h-5" />, page: 'mail-search', roles: ['staff', 'admin'] },
       { label: 'Fakturering & AI', icon: <Landmark className="w-5 h-5" />, page: 'vibogruppen-billing', roles: ['admin'] },
       { label: 'Driftmeddelanden', icon: <Bell className="w-5 h-5" />, page: 'vibogruppen-notices', roles: ['admin'] },
