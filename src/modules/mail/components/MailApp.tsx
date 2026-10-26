@@ -42,6 +42,9 @@ function MailShell({ onNavigate }: { onNavigate: (page: string) => void }) {
     scrollAppTo(0); const root = document.getElementById('root'); const prev = [document.body.style.overflow, root?.style.overflow ?? '']; document.body.style.overflow = 'hidden'; if (root) root.style.overflow = 'hidden';
     return () => { document.body.style.overflow = prev[0]; if (root) root.style.overflow = prev[1]; };
   }, []);
+  // Dölj flytande bottenmenyn när något ligger över sidan (meny, skrivruta, dialoger) så den inte täcker knappar.
+  const overlayOpen = drawer || Boolean(compose) || Boolean(snoozeFor) || helpOpen || side;
+  useEffect(() => { if (!overlayOpen) return; document.documentElement.setAttribute('data-overlay-open', 'true'); return () => document.documentElement.removeAttribute('data-overlay-open'); }, [overlayOpen]);
   const composeKey = useRef(1); const searchRef = useRef<HTMLInputElement>(null); const loadedThread = useRef<LoadedThread | null>(null);
 
   const loadBoot = useCallback(async () => {
@@ -160,9 +163,9 @@ function MailShell({ onNavigate }: { onNavigate: (page: string) => void }) {
     onCompose={() => openCompose(undefined)} onSettings={() => setPanel('settings')} onAdmin={boot.is_org_admin ? () => setPanel('admin') : undefined} onNavigate={() => setDrawer(false)} />;
 
   return (
-    <div className="relative flex h-[calc(100dvh-8.5rem)] min-h-[30rem] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:h-[calc(100dvh-3.5rem)]">
+    <div className="relative flex h-[calc(100dvh-13.5rem)] min-h-[26rem] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:h-[calc(100dvh-3.5rem)]">
       <div className="hidden w-60 shrink-0 border-r border-slate-200 bg-slate-50/50 lg:block">{sidebar}</div>
-      {drawer && <div className="fixed inset-0 z-50 lg:hidden"><button aria-label="Stäng meny" className="absolute inset-0 bg-black/40" onClick={() => setDrawer(false)} /><div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-white shadow-2xl">{sidebar}</div></div>}
+      {drawer && <div className="fixed inset-0 z-[90] lg:hidden"><button aria-label="Stäng meny" className="absolute inset-0 bg-black/40" onClick={() => setDrawer(false)} /><div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-white pt-[env(safe-area-inset-top)] shadow-2xl">{sidebar}</div></div>}
       {panel === 'settings' && <Suspense fallback={<Loading />}><MailSettings prefs={boot.prefs} accounts={accounts} templates={templates} isAdmin={boot.is_org_admin} onClose={() => setPanel('mail')} onPrefs={(p) => setBoot({ ...boot, prefs: { ...boot.prefs, ...p } })} onTemplates={setTemplates} /></Suspense>}
       {panel === 'admin' && <Suspense fallback={<Loading />}><AdminMailboxes onClose={() => { setPanel('mail'); void loadBoot(); clearListCache(); }} currentUserId={boot.user.id} /></Suspense>}
       {panel === 'mail' && <>
