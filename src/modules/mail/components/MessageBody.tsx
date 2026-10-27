@@ -3,6 +3,8 @@ import { base64UrlToBlob, mailApi } from '../lib/api';
 import { sanitizeEmailHtml } from '../lib/sanitize';
 import type { ParsedMessage } from '../lib/types';
 
+// DOMPurify tar bort blob:-adresser, så inline-bilder bäddas in som data:-URL.
+const blobToDataUrl = (blob: Blob) => new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = () => reject(r.error); r.readAsDataURL(blob); });
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const linkify = (s: string) => s.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');
 const textToHtml = (t: string) => `<div style="white-space:pre-wrap;font-family:inherit">${linkify(esc(t))}</div>`;
@@ -21,8 +23,8 @@ interface Props { message: ParsedMessage; accountId: string; allowRemoteImages: 
 export function MessageBody({ message, accountId, allowRemoteImages, onBlocked }: Props) {
   const [cidMap, setCidMap] = useState<Record<string, string>>({}); const [height, setHeight] = useState(0); const ref = useRef<HTMLIFrameElement>(null);
   useEffect(() => {
-    let alive = true; const inline = message.attachments.filter((a) => a.inline && a.contentId && a.size < 1_500_000).slice(0, 12); if (!inline.length || !/cid:/i.test(message.html)) return;
-    void Promise.all(inline.map(async (a) => { try { const r = await mailApi<{ data: string }>('attachment_get', { account_id: accountId, message_id: message.id, attachment_id: a.id }); return [a.contentId!, URL.createObjectURL(base64UrlToBlob(r.data, a.mimeType))] as const; } catch { return null; } })).then((pairs) => { if (alive) setCidMap(Object.fromEntries(pairs.filter(Boolean) as [string, string][])); });
+    let alive = true; const html = message.html || ''; const inline = message.attachments.filter((a) => a.contentId && a.mimeType.startsWith('image/') && (a.inline || html.toLowerCase().includes(`cid:${a.contentId!.toLowerCase()}`)) && a.size < 1_500_000).slice(0, 12); if (!inline.length || !/cid:/i.test(message.html)) return;
+    void Promise.all(inline.map(async (a) => { try { const r = await mailApi<{ data: string }>('attachment_get', { account_id: accountId, message_id: message.id, attachment_id: a.id }); return [a.contentId!, await blobToDataUrl(base64UrlToBlob(r.data, a.mimeType))] as const; } catch { return null; } })).then((pairs) => { if (alive) setCidMap(Object.fromEntries(pairs.filter(Boolean) as [string, string][])); });
     return () => { alive = false; };
   }, [message.id, accountId]); // eslint-disable-line react-hooks/exhaustive-deps
   const { srcDoc, blocked } = useMemo(() => {
