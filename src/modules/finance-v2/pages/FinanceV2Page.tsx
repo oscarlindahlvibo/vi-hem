@@ -379,10 +379,17 @@ function RentBillingTab({ companyId, companyLink }: { companyId: string; company
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
+  const [adjustments, setAdjustments] = useState<BillingAdjustment[]>([]);
   const loadItems = useCallback(async (runId: string) => {
-    const data = await listRentBillingItems(runId);
+    const [data, adj] = await Promise.all([listRentBillingItems(runId), listBillingAdjustments(companyId).catch(() => [] as BillingAdjustment[])]);
     setItems(data);
-  }, []);
+    setAdjustments(adj);
+  }, [companyId]);
+  // Samma urval som vid fakturaskapandet (listEligibleAdjustments): avdrag/tillägg läggs på som egna rader utöver grundhyran.
+  const extraFor = (item: RentBillingItem) => adjustments
+    .filter((a) => a.target_type === 'tenancy' && a.target_id === item.tenancy_id && a.status === 'active' && a.start_period <= item.rent_period
+      && (!a.end_period || a.end_period >= item.rent_period) && (a.max_occurrences == null || a.applied_count < a.max_occurrences) && a.last_applied_period !== item.rent_period)
+    .reduce((sum, a) => sum + Number(a.amount) * (1 + Number(a.vat_rate) / 100), 0);
 
   const handleCreateRun = async () => {
     setLoadingRun(true);
@@ -516,8 +523,8 @@ function RentBillingTab({ companyId, companyLink }: { companyId: string; company
                       <tr key={item.id} className="border-b border-slate-100">
                         <td className="py-2 pr-4">{item.tenant?.name ?? '–'}</td>
                         <td className="py-2 pr-4">{formatCurrency(item.base_rent_amount)}</td>
-                        <td className="py-2 pr-4">{item.adjustment_amount !== 0 ? formatCurrency(item.adjustment_amount) : '–'}</td>
-                        <td className="py-2 pr-4 font-medium">{formatCurrency(item.total_amount)}</td>
+                        <td className="py-2 pr-4">{item.adjustment_amount + extraFor(item) !== 0 ? formatCurrency(item.adjustment_amount + extraFor(item)) : '–'}</td>
+                        <td className="py-2 pr-4 font-medium">{formatCurrency(item.total_amount + extraFor(item))}</td>
                         <td className="py-2 pr-4">
                           <Badge text={RENT_ITEM_STATUS_LABELS[item.status] ?? item.status} />
                         </td>
