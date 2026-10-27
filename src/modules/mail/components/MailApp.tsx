@@ -24,11 +24,12 @@ const reSubject = (s = '') => (/^(re|sv|aw)\s*:/i.test(s.trim()) ? s.trim() : `R
 const fwSubject = (s = '') => (/^(fwd?|vb)\s*:/i.test(s.trim()) ? s.trim() : `Fwd: ${s.trim()}`.trim());
 const FOLDER_TITLES: Record<string, string> = { inbox: 'Inkorg', starred: 'Stjärnmärkta', snoozed: 'Snoozade', sent: 'Skickade', drafts: 'Utkast', scheduled: 'Schemalagda', archive: 'Arkiv', all: 'All e-post', spam: 'Skräppost', trash: 'Papperskorg', search: 'Sökresultat', label: 'Etikett' };
 
-export default function MailApp({ onNavigate }: { onNavigate: (page: string) => void }) {
-  return <ToastProvider><MailShell onNavigate={onNavigate} /></ToastProvider>;
+type OpenThread = { accountId: string; threadId: string };
+export default function MailApp({ onNavigate, openThread }: { onNavigate: (page: string) => void; openThread?: OpenThread }) {
+  return <ToastProvider><MailShell onNavigate={onNavigate} openThread={openThread} /></ToastProvider>;
 }
 
-function MailShell({ onNavigate }: { onNavigate: (page: string) => void }) {
+function MailShell({ onNavigate, openThread }: { onNavigate: (page: string) => void; openThread?: OpenThread }) {
   const toast = useToasts();
   const [boot, setBoot] = useState<Boot | null>(null); const [bootError, setBootError] = useState('');
   const [ctxs, setCtxs] = useState<Record<string, Ctx>>({}); const [templates, setTemplates] = useState<TemplateRow[]>([]);
@@ -70,6 +71,14 @@ function MailShell({ onNavigate }: { onNavigate: (page: string) => void }) {
     } catch (e) { setBootError(e instanceof MailApiError ? e.message : 'Kunde inte starta e-post.'); }
   }, []);
   useEffect(() => { void loadBoot(); }, [loadBoot]);
+  // Djuplänk från pushnotis (mail/<brevlåda>/<tråd>): öppnar tråden så fort behörigheterna är laddade.
+  const openedLink = useRef(false);
+  useEffect(() => {
+    if (!openThread || !boot || openedLink.current) return; openedLink.current = true;
+    const account = boot.accounts.find((a) => a.id === openThread.accountId); if (!account) return;
+    setScope(account.id);
+    setSelected({ id: openThread.threadId, subject: '', snippet: '', participants: [], from: { name: '', email: '' }, lastDate: Date.now(), messageCount: 1, unread: false, starred: false, hasAttachments: false, labelIds: [], draft: false, important: false, account_id: account.id, account_email: account.email } as ThreadSummary);
+  }, [boot, openThread]);
 
   const accounts = useMemo(() => boot?.accounts ?? [], [boot]);
   const effective = useMemo(() => (scope === 'all' ? accounts : accounts.filter((a) => a.id === scope)), [scope, accounts]);

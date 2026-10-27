@@ -85,7 +85,7 @@ export function ThreadView({ account, threadId, ownEmails, remoteImages, organis
               </li>;
             })}
           </ol>
-          {canSend && last && <div className="mt-5 flex flex-wrap gap-2 pb-24 lg:pb-6">
+          {canSend && last && <div className="sticky bottom-0 z-10 -mx-4 mt-5 flex flex-wrap gap-2 border-t border-slate-100 bg-white/95 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur sm:-mx-6 sm:px-6 lg:pb-6">
             <button type="button" onClick={() => onReply('reply', thread, last)} className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-800 hover:bg-slate-50"><Reply className="h-4 w-4" />Svara</button>
             {(last.to.length + last.cc.length > 1 || msgs.some((m) => m.cc.length)) && <button type="button" onClick={() => onReply('replyAll', thread, last)} className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-800 hover:bg-slate-50"><ReplyAll className="h-4 w-4" />Svara alla</button>}
             <button type="button" onClick={() => onReply('forward', thread, last)} className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-800 hover:bg-slate-50"><Forward className="h-4 w-4" />Vidarebefordra</button>
