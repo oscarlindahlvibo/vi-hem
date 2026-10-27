@@ -33,6 +33,8 @@ export function ThreadView({ account, threadId, ownEmails, remoteImages, organis
   }, [account.id, threadId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setThread(null); void load(); }, [load, reloadKey]);
   useEffect(() => { topRef.current?.scrollTo({ top: 0 }); }, [threadId]);
+  // Långa konversationer: scrolla till det senaste (öppna) meddelandet så man inte hamnar bland de äldre.
+  useEffect(() => { if (!thread || thread.messages.length < 4) return; const t = window.setTimeout(() => topRef.current?.querySelector('[data-last="true"]')?.scrollIntoView({ block: 'start' }), 120); return () => window.clearTimeout(t); }, [thread?.id, thread?.messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error) return <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center"><AlertTriangle className="h-8 w-8 text-amber-500" /><p className="max-w-sm text-sm text-slate-600">{error}</p><div className="flex gap-2"><button onClick={() => void load()} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white">Försök igen</button><button onClick={onBack} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">Tillbaka</button></div></div>;
   if (!thread) return <div className="flex flex-1 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>;
@@ -44,7 +46,7 @@ export function ThreadView({ account, threadId, ownEmails, remoteImages, organis
   const allowImages = (id: string) => setAllowed((s) => new Set(s).add(id));
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-white">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
       <div className="flex items-center gap-1 border-b border-slate-200 px-2 py-1.5 sm:px-3">
         <button type="button" onClick={onBack} className={`${iconBtn} lg:hidden`} aria-label="Tillbaka till listan"><ArrowLeft className="h-5 w-5" /></button>
         <button type="button" disabled={!canManage} onClick={() => act('archive')} className={iconBtn} title="Arkivera (e)" aria-label="Arkivera"><Archive className="h-[18px] w-[18px]" /></button>
@@ -57,15 +59,15 @@ export function ThreadView({ account, threadId, ownEmails, remoteImages, organis
         <div className="flex-1" />
         {onToggleSide && <button type="button" onClick={onToggleSide} className={`${iconBtn} ${sideOpen ? 'bg-blue-50 !text-blue-700' : ''}`} title="Ärende och kopplingar" aria-label="Visa ärende och kopplingar" aria-pressed={sideOpen}><PanelRight className="h-[18px] w-[18px]" /></button>}
       </div>
-      <div ref={topRef} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6">
+      <div ref={topRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="mx-auto w-full min-w-0 max-w-3xl px-4 py-5 sm:px-6">
           <h1 className="text-xl font-bold leading-snug text-slate-900 sm:text-2xl">{thread.subject || '(inget ämne)'}</h1>
           <p className="mt-1 text-xs text-slate-500">{msgs.length} {msgs.length === 1 ? 'meddelande' : 'meddelanden'} · {account.email}</p>
           <ol className="mt-5 space-y-3">
             {msgs.map((m, idx) => {
               const isOpen = open.has(m.id); const mine = own.has(m.from.email.toLowerCase()); const toggle = () => setOpen((s) => { const n = new Set(s); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); return n; });
               const files = m.attachments.filter((a) => !a.inline || !a.contentId || !/cid:/i.test(m.html));
-              return <li key={m.id} className={`overflow-hidden rounded-2xl border ${m.unread ? 'border-blue-200 bg-blue-50/30' : 'border-slate-200'}`}>
+              return <li key={m.id} data-last={idx === msgs.length - 1 ? 'true' : undefined} className={`min-w-0 overflow-hidden rounded-2xl border ${m.unread ? 'border-blue-200 bg-blue-50/30' : 'border-slate-200'}`}>
                 <button type="button" onClick={toggle} aria-expanded={isOpen} className="flex w-full items-start gap-3 px-4 py-3 text-left">
                   <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: avatarColor(m.from.email) }} aria-hidden>{initials(m.from.name, m.from.email)}</span>
                   <span className="min-w-0 flex-1"><span className="flex items-baseline gap-2"><span className="truncate text-sm font-bold text-slate-900">{mine ? 'Du' : <Person a={m.from} />}</span>{m.isDraft && <span className="rounded bg-red-100 px-1.5 text-[11px] font-bold text-red-700">Utkast</span>}<span className="ml-auto shrink-0 text-xs text-slate-500">{fullDate(m.internalDate || m.date)}</span></span>
