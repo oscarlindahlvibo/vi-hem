@@ -80,6 +80,10 @@ function decodeBody(data: string | undefined, contentType: string): string {
   if (!data) return '';
   const charset = /charset="?([^";\s]+)"?/i.exec(contentType)?.[1] ?? 'utf-8';
   const bytes = decodeBase64Url(data);
+  // Felmärkta mejl (t.ex. UTF-8-innehåll deklarerat som iso-8859-1/windows-1252) ger "Ã¥" i stället för "å": giltig UTF-8 med flerbytestecken vinner över deklarationen.
+  if (/^(iso-8859-1|latin1|us-ascii|ascii|windows-1252|cp1252)$/i.test(charset) && bytes.some((b) => b >= 0x80)) {
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { /* inte UTF-8, använd deklarationen */ }
+  }
   try { return new TextDecoder(charset).decode(bytes); } catch { return new TextDecoder('utf-8').decode(bytes); }
 }
 

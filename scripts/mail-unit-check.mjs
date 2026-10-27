@@ -35,6 +35,8 @@ const raw = {
 const pm = m.parse.parseMessage(raw);
 assert.equal(pm.subject, 'Offert Öster'); assert.equal(pm.from.name, 'Anna Åberg'); assert.equal(pm.to.length, 2); assert.equal(pm.cc[0].email, 'kopia@example.se'); ok('rubriker tolkas');
 assert.equal(pm.text, 'Håll'); ok('textdel avkodas med rätt teckenuppsättning (iso-8859-1)');
+const mislabeled = m.parse.parseMessage({ id: 'm9', threadId: 't9', labelIds: ['INBOX'], internalDate: '1760000000000', payload: { mimeType: 'text/plain', headers: [{ name: 'Content-Type', value: 'text/plain; charset=iso-8859-1' }], body: { data: Buffer.from('Från Björn', 'utf8').toString('base64url') } } });
+assert.equal(mislabeled.text, 'Från Björn'); ok('UTF-8-innehåll märkt iso-8859-1 visas rätt (inga Ã¥-tecken)');
 assert.match(pm.html, /cid:logo1/); assert.equal(pm.attachments.length, 2); assert.equal(pm.attachments.find((a) => a.contentId === 'logo1').inline, true); assert.equal(pm.attachments.find((a) => a.filename.startsWith('Offert Ö')).inline, false); ok('inline-bild och bilaga skiljs åt');
 assert.equal(pm.unread, true); assert.equal(pm.starred, true); assert.equal(pm.snippet, 'Hej & välkommen'); assert.deepEqual(pm.deliveredTo, ['info@vibogruppen.se']); ok('läst/stjärna/snippet/Delivered-To');
 const sum = m.parse.summarizeThread({ id: 't1', messages: [raw, { ...raw, id: 'm2', labelIds: ['INBOX', 'SENT'], internalDate: '1760000100000', payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'oscar@vibogruppen.se' }, { name: 'Subject', value: 'Sv: Offert' }, { name: 'Content-Type', value: 'text/plain' }] } }] }, ['oscar@vibogruppen.se']);
