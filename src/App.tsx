@@ -516,6 +516,11 @@ function AppInner() {
       return <FleetPage onNavigate={navigate} initialVehicleId={currentPage.split('/')[1]} />;
     }
 
+    if (currentPage.startsWith('mail/')) {
+      if (!isStaff) return renderDashboard();
+      const [, accountId, threadId] = currentPage.split('/');
+      return <React.Suspense fallback={null}><LazyMailApp key={currentPage} onNavigate={navigate} openThread={accountId && threadId ? { accountId, threadId } : undefined} /></React.Suspense>;
+    }
     if (currentPage.startsWith('workorder-from-mail/')) {
       if (!isStaff) return renderDashboard();
       return <WorkOrdersPage resourcesEnabled={resourcesEnabled} onNavigate={navigate} sourceMailKey={currentPage.split('/')[1]} />;

@@ -28,6 +28,8 @@ Deno.serve(async (req) => {
     await sendScheduled(db, gmailFor, summary);
     await wakeSnoozes(db, gmailFor, summary);
     await notifyNewMail(db, gmailFor, summary);
+    // Mejlnotiser är bara push: raderna finns för att push-triggern ska ha något att skicka och städas bort här.
+    await db.from("vihem_notifications").delete().eq("category", "mail_push").lt("created_at", new Date(Date.now() - 10 * 60_000).toISOString());
     return json({ ok: true, ...summary });
   } catch (e) { console.error("vihem-mail-worker", e); return json({ ok: false, error: e instanceof Error ? e.message : "fel", ...summary }, 500); }
 });
@@ -106,7 +108,8 @@ async function notifyNewMail(db: any, gmailFor: (a: any) => Promise<GmailClient>
           if (dupe) continue; // redan notifierad
           // Integritet: personliga brevlådor och standardläge visar aldrig avsändare/ämne (låsskärm) – bara om användaren uttryckligen valt det
           const showDetails = p.notify_show_sender && parsed;
-          await db.rpc("create_notification", { recipient_id: p.user_id, org_uuid: account.organisation_id, notification_title: `Nytt mejl i ${account.display_name || account.email}`, notification_message: showDetails ? `${parsed!.from.name || parsed!.from.email}: ${parsed!.subject}`.slice(0, 160) : "Du har fått ett nytt mejl.", notification_type: "info", notification_link: "mail", setting_key: null });
+          // Push-only: skapas som redan läst och med kategorin mail_push så att den aldrig räknas som oläst eller visas i aviseringslistan. Länken öppnar mejlet direkt.
+          await db.from("vihem_notifications").insert({ user_id: p.user_id, organisation_id: account.organisation_id, title: `Nytt mejl i ${account.display_name || account.email}`, message: showDetails ? `${parsed!.from.name || parsed!.from.email}: ${parsed!.subject}`.slice(0, 160) : "Du har fått ett nytt mejl.", type: "info", link: `mail/${account.id}/${msg.threadId}`, category: "mail_push", read_at: new Date().toISOString() });
           summary.notifications++;
         }
       }

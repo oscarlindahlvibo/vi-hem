@@ -73,6 +73,20 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
   const { user, signOut, bankIDAvailable, refreshProfile } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   useEffect(() => { const open = () => setMobileMenuOpen(true); window.addEventListener('vihem-open-main-menu', open); return () => window.removeEventListener('vihem-open-main-menu', open); }, []);
+  // E-post i bottenmenyn visas bara för den som har minst en aktiverad brevlåda (bootstrap läser bara behörigheter, inte Gmail).
+  const [hasMail, setHasMail] = useState(false);
+  const mailUserId = user && (user.role === 'staff' || user.role === 'admin') ? user.id : null;
+  useEffect(() => {
+    if (!mailUserId) { setHasMail(false); return; }
+    const key = `vihem-has-mail:${mailUserId}`; let alive = true;
+    try { if (localStorage.getItem(key) === '1') setHasMail(true); } catch { /* ingen lagring */ }
+    void supabase.functions.invoke('vihem-mail', { body: { action: 'bootstrap' } }).then(({ data, error }) => {
+      if (!alive || error || data?.ok === false) return;
+      const has = Array.isArray(data?.accounts) && data.accounts.length > 0; setHasMail(has);
+      try { localStorage.setItem(key, has ? '1' : '0'); } catch { /* ingen lagring */ }
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [mailUserId]);
   const keyboardOpen = useKeyboardOpen();
   const [chatFocused, setChatFocused] = useState(false);
   useLayoutEffect(() => {
@@ -234,6 +248,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
       action: () => navigate(user.role === 'tenant' ? 'laundry' : 'timetracking'),
       active: currentPage === (user.role === 'tenant' ? 'laundry' : 'timetracking'),
     },
+    ...(hasMail ? [{ label: 'E-post', icon: <Inbox className="h-5 w-5" />, action: () => navigate('mail'), active: currentPage === 'mail' || currentPage.startsWith('mail/') }] : []),
     { label: 'Mer', icon: <Menu className="h-5 w-5" />, action: () => setMobileMenuOpen(true), active: false },
   ] : [];
 
@@ -383,7 +398,7 @@ export function Layout({ children, currentPage, onNavigate, notificationCount = 
 
       {user?.role !== 'superadmin' && !keyboardOpen && !chatFocused && (
         <nav aria-label="Huvudnavigering" className="vihem-floating-nav pointer-events-none fixed inset-x-0 bottom-0 z-20 px-3 pb-[max(env(safe-area-inset-bottom),0.5rem)] lg:hidden">
-          <div className="pointer-events-auto mx-auto grid max-w-md grid-cols-5 gap-0.5 rounded-full border border-slate-200/70 bg-white/95 p-1.5 shadow-float backdrop-blur-xl">
+          <div className={`pointer-events-auto mx-auto grid max-w-md ${bottomItems.length > 5 ? 'grid-cols-6' : 'grid-cols-5'} gap-0.5 rounded-full border border-slate-200/70 bg-white/95 p-1.5 shadow-float backdrop-blur-xl`}>
             {bottomItems.map((item) => (
               <button
                 key={item.label}
