@@ -42,7 +42,7 @@ export function Composer({ account, identities, seed, lastSender, suggestions, t
   const [atts, setAtts] = useState<Att[]>(() => (seed.attachments ?? []).map((a) => ({ id: uuid(), ...a }))); const [busy, setBusy] = useState(false); const [saving, setSaving] = useState<'' | 'saving' | 'saved' | 'error'>(''); const [full, setFull] = useState(false);
   const [menu, setMenu] = useState<'' | 'schedule' | 'templates'>(''); const [scheduleAt, setScheduleAt] = useState(toLocalInput(nextMorning(1, 8)));
   const [quote, setQuote] = useState(seed.quoteHtml ?? ''); const [showQuote, setShowQuote] = useState(false);
-  const draftId = useRef<string | undefined>(seed.draftId); const dirty = useRef(false); const touched = useRef(Boolean(seed.draftId)); const sentRef = useRef(false); const timer = useRef<number>(); const pendingSend = useRef<number>(); const requestId = useRef(uuid());
+  const draftId = useRef<string | undefined>(seed.draftId); const dirty = useRef(false); const touched = useRef(Boolean(seed.draftId)); const sentRef = useRef(false); const timer = useRef<number>(); const saving_ = useRef<Promise<void> | null>(null); const pendingSend = useRef<number>(); const requestId = useRef(uuid());
   const fileInput = useRef<HTMLInputElement>(null); const imageInput = useRef<HTMLInputElement>(null);
 
   // Signatur: eget block utanför Tiptap (Tiptap tar bort okända noder). Byte av avsändare byter blocket om användaren inte ändrat det.
@@ -73,8 +73,11 @@ export function Composer({ account, identities, seed, lastSender, suggestions, t
   const saveDraft = useCallback(async () => {
     if (sentRef.current || !dirty.current || !touched.current || empty()) return;
     dirty.current = false; setSaving('saving');
-    try { const r = await mailApi<{ draft_id: string }>('draft_save', { ...payload(), draft_id: draftId.current }); draftId.current = r.draft_id; setSaving('saved'); }
-    catch (e) { dirty.current = true; setSaving('error'); if (e instanceof MailApiError && e.code === 'E_FORBIDDEN') toast.show('Du saknar behörighet att spara utkast i den här brevlådan.', { kind: 'error' }); }
+    const run = (async () => {
+      try { const r = await mailApi<{ draft_id: string }>('draft_save', { ...payload(), draft_id: draftId.current }); draftId.current = r.draft_id; setSaving('saved'); }
+      catch (e) { dirty.current = true; setSaving('error'); if (e instanceof MailApiError && e.code === 'E_FORBIDDEN') toast.show('Du saknar behörighet att spara utkast i den här brevlådan.', { kind: 'error' }); }
+    })();
+    saving_.current = run; await run; if (saving_.current === run) saving_.current = null;
   }, [payload]); // eslint-disable-line react-hooks/exhaustive-deps
   const saveRef = useRef(saveDraft); saveRef.current = saveDraft;
   function schedule() { window.clearTimeout(timer.current); timer.current = window.setTimeout(() => saveRef.current(), 3000); }
@@ -110,10 +113,13 @@ export function Composer({ account, identities, seed, lastSender, suggestions, t
 
   async function doSend(at?: Date) {
     const p = problems(); if (p) { if (p !== 'cancel') toast.show(p, { kind: 'error' }); return; }
-    window.clearTimeout(timer.current); setMenu(''); setBusy(true); sentRef.current = true; const body = { ...payload(), client_request_id: requestId.current, draft_id: draftId.current, schedule_at: at ? at.toISOString() : undefined };
+    window.clearTimeout(timer.current); setMenu(''); setBusy(true); sentRef.current = true;
+    // Ett pågående autospar kan skapa utkastet först nu; vänta in det så att utkast-id följer med och utkastet raderas efter utskick.
+    try { await saving_.current; } catch { /* hanteras i saveDraft */ }
+    const body = { ...payload(), client_request_id: requestId.current, schedule_at: at ? at.toISOString() : undefined };
     const fire = async () => {
       try {
-        const r = await mailApi<{ status: string; thread_id: string | null; ledger_id: string }>('send', body);
+        const r = await mailApi<{ status: string; thread_id: string | null; ledger_id: string }>('send', { ...body, draft_id: draftId.current });
         onSenderUsed?.(from);
         if (r.status === 'unknown') toast.show('Osäkert om meddelandet skickades. Kontrollera Skickat innan du försöker igen – ett nytt försök kontrollerar först och skickar inte dubbelt.', { kind: 'error', ms: 12000 });
         else if (at) toast.show(`Schemalagt till ${at.toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' })}.`, { kind: 'success', actionLabel: 'Ångra', onAction: () => mailApi('send_cancel', { account_id: account.id, ledger_id: r.ledger_id }).then(() => toast.show('Utskicket avbröts. Meddelandet finns kvar som utkast.')).catch((e) => toast.show(e.message, { kind: 'error' })) });
