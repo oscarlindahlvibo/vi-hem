@@ -63,7 +63,7 @@ export function ThreadView({ account, threadId, ownEmails, remoteImages, organis
         <div className="mx-auto w-full min-w-0 max-w-3xl px-4 py-5 sm:px-6">
           <h1 className="text-xl font-bold leading-snug text-slate-900 sm:text-2xl">{thread.subject || '(inget ämne)'}</h1>
           <p className="mt-1 text-xs text-slate-500">{msgs.length} {msgs.length === 1 ? 'meddelande' : 'meddelanden'} · {account.email}</p>
-          <ol className="mt-5 space-y-3 pb-24 lg:pb-0">
+          <ol className="mt-5 space-y-3">
             {msgs.map((m, idx) => {
               const isOpen = open.has(m.id); const mine = own.has(m.from.email.toLowerCase()); const toggle = () => setOpen((s) => { const n = new Set(s); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); return n; });
               const files = m.attachments.filter((a) => !a.inline || !a.contentId || !/cid:/i.test(m.html));
@@ -85,7 +85,7 @@ export function ThreadView({ account, threadId, ownEmails, remoteImages, organis
               </li>;
             })}
           </ol>
-          {canSend && last && <div className="pointer-events-none fixed inset-x-0 bottom-[calc(4.75rem+max(env(safe-area-inset-bottom),0.5rem))] z-30 flex justify-center gap-2 px-3 lg:pointer-events-auto lg:static lg:mt-5 lg:justify-start lg:px-0 lg:pb-6 [&>button]:pointer-events-auto [&>button]:bg-white [&>button]:shadow-md lg:[&>button]:shadow-none">
+          {canSend && last && <div className="sticky bottom-0 z-10 -mx-4 mt-5 flex flex-wrap gap-2 border-t border-slate-100 bg-white/95 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur sm:-mx-6 sm:px-6 lg:pb-6">
             <button type="button" onClick={() => onReply('reply', thread, last)} className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-800 hover:bg-slate-50"><Reply className="h-4 w-4" />Svara</button>
             {(last.to.length + last.cc.length > 1 || msgs.some((m) => m.cc.length)) && <button type="button" onClick={() => onReply('replyAll', thread, last)} className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-800 hover:bg-slate-50"><ReplyAll className="h-4 w-4" />Svara alla</button>}
             <button type="button" onClick={() => onReply('forward', thread, last)} className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-800 hover:bg-slate-50"><Forward className="h-4 w-4" />Vidarebefordra</button>
