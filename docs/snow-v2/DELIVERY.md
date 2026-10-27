@@ -31,7 +31,7 @@ Om inget utkast kan hittas efter osäker POST behövs manuell avstämning innan 
 
 ## Databas och säkerhet
 
-Åtta additiva migrationer: `20261027100000` grund/kompetens/tillgänglighet/planering; `101000` kommandon/utkallning/dispatch; `102000` tidsgranskning; `103000` pris/RUT/fakturaunderlag; `104000` scoped läsmodell/API-allowlist/native token; `105000` Accounted-utkast; `110000` privata foton och pushkontroll; `112000` kalenderprojektion.
+Nio additiva migrationer: `20261027100000` grund/kompetens/tillgänglighet/planering; `101000` kommandon/utkallning/dispatch; `102000` tidsgranskning; `103000` pris/RUT/fakturaunderlag; `104000` scoped läsmodell/API-allowlist/native token; `105000` Accounted-utkast; `110000` privata foton och pushkontroll; `112000` kalenderprojektion; `113000` hantering av avstängda aviseringar.
 
 Nya tabeller omfattar settings/resources/competencies/patterns/week_confirmations/duties/invitations/events/operations/notices/time_audit/reviews/prices/work_items/valuations/customer_tax/invoice_batches/invoice_entries/photos med prefix `vihem_snow_`. Ägarskap/organisation och admin/egen läsning upprätthålls med RLS. Direkta klientskrivningar ersätts av validerade RPC; interna helpers är inte klientanropbara. Organisationens tillgänglighetslås används även av gamla datumeditorn. Maskinlås och reservationsnycklar skyddar mot samtidighet. Ingen service role key i frontend.
 
@@ -42,7 +42,7 @@ Personnummer lämnas inte till förarens läsmodell eller lokala kommandolagring
 ## Tester och deras faktiska omfattning
 
 - `npm run test:snow` – befintlig geometri/roller/tillgänglighet/DST samt nya återkommande intervall, veckobekräftelse och datumundantag.
-- `npm run test:snow:db` – färsk märkt PostgreSQL 15-container. Läser samtliga åtta verkliga V1-snömigrationer plus åtta nya. Sju förare, tre maskiner, samtidiga accepteranden/reservationer, avböjning/timeout/reserv, faktisk ordinarie klocka, auto-/manuell granskning, historiska priser, privatkund och ofullständiga fakturauppgifter, materialåterförsök efter utstämpling, RUT endast arbete, avlösning, skyddade foton trots bred gammal Storage-policy, stale-push, tidszonfingerprint, veckopåminnelse, avslutad eskalering, låst extern payload, faktisk utkastskvittens samt spårbar återöppning före överföring.
+- `npm run test:snow:db` – färsk märkt PostgreSQL 15-container. Läser samtliga åtta verkliga V1-snömigrationer plus nio nya. Sju förare, tre maskiner, samtidiga accepteranden/reservationer, avböjning/timeout/reserv, faktisk ordinarie klocka, auto-/manuell granskning, historiska priser, privatkund och ofullständiga fakturauppgifter, materialåterförsök efter utstämpling, RUT endast arbete, avlösning, skyddade foton trots bred gammal Storage-policy, stale-push, tidszonfingerprint, veckopåminnelse, avslutad eskalering, låst extern payload, faktisk utkastskvittens samt spårbar återöppning före överföring.
 - `npm run test:snow:payload` – verklig Accounted-mappning, RUT-arbetsrad/timmar, saknade och felaktiga värden.
 - `python3 scripts/snow-v2/http-test.py` mot lokal PostgREST – verklig JWT/API-grind för snöroll, ekonomidata/adminskrivning nekas, egen native push-token tillåts, annans nekas.
 - TypeScript, riktad ESLint, Deno check för nya Accounted-funktionen och ändrade pushfunktionen samt Vite-build.

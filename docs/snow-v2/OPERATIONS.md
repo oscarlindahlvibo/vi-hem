@@ -1,7 +1,7 @@
-# Installation och drift – ej utfört i produktion
+# Installation och drift
 
 1. Granska feature-diffen och senaste main. Ta aktuell verifierad backup och repetera på återläst full schema. Kontraktstesterna ersätter inte detta.
-2. Installera de åtta migrationerna med projektets etablerade migrationsprocess i tidsordning. Förväntar befintlig snow V1, Finance/Fleet/Accounted/push/Storage. Migrationerna stannar hellre än tar bort okända Accounted-constraints. Adminpilot och tidigare externa åtkomstgrindar behålls.
+2. Installera de nio migrationerna med projektets etablerade migrationsprocess i tidsordning. Förväntar befintlig snow V1, Finance/Fleet/Accounted/push/Storage. Migrationerna stannar hellre än tar bort okända Accounted-constraints. Adminpilot och tidigare externa åtkomstgrindar behålls.
 3. Driftsätt `vihem-snow-accounted` (JWT-verifiering + egen autentisering/bolagskontroll), uppdaterad `vihem-send-push` och deras `_shared`-beroenden. Befintliga Accounted-nycklar används endast serverbaserat.
 4. Bygg och publicera webbappen enligt ordinarie manuell deployprocess först efter separat tillstånd. Native-flödet återanvänder befintlig pushregistrering; inga kritiska native-entitlements tillkommer automatiskt.
 5. Skapa resurser från Fleet, kompetenser, juridiska kundkopplingar, fakturerande bolag, prisversioner och tillgänglighet i administratörens vy. Inga sju personer, tre maskiner, orter eller exempelpriser seedas i produktion. Provkör först med administratör.

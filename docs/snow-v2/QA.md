@@ -6,7 +6,7 @@ Samtliga data nedan är syntetiska i en isolerad Docker-databas. Ingen faktisk u
 | --- | --- |
 | Befintliga snow unit/availability-tester | PASS, inklusive äldre geometri/roller och svenska DST/datumgränser |
 | Nya återkommande kalender-/undantagstester | PASS |
-| Åtta verkliga äldre snow-migrationer + åtta nya, färsk PostgreSQL15 | PASS på kontraktschema; full produktionsschema-repetition återstår |
+| Åtta verkliga äldre snow-migrationer + nio nya, färsk PostgreSQL15 | PASS på kontraktschema; full produktionsschema-repetition återstår |
 | Sju förare/tre maskiner, behörighet, vecka, avböjning, timeout, reserv | PASS |
 | Samtidiga kvittenser och samtidiga fakturareservationer | PASS; bara en får platsen respektive reservationen |
 | Ordinarie klocka/exakt återförsök och automatisk granskning | PASS |
@@ -35,3 +35,7 @@ Lokala skärmbilder och kontrolloggar sparas utanför Git i `som/outputs/snow-v2
 ## Inte verifierat
 
 Full aktuell produktionsschema, verklig Accounted-konfiguration och eventuell öresavrundning, skarpt RUT-svar, faktisk Storage-transport, fysisk Safari/iPhone/Android/Capacitor, APNs/FCM-ljud/Fokus/kallstart, voice/critical alerts. Inga garantier om larm som väcker föraren. Dessa prov och aktivering kräver separat kontrollerad driftsättning; se OPERATIONS.md och DELIVERY.md.
+
+## Godkänt återläsningsprov inför driftsättning
+
+2026-10-27: färsk full backup från den riktiga VI-HEM-databasen återläst i identisk Supabase/PostgreSQL-image med network=none och avstängd cron. Roller, ägarskap och ACL återställda; Supabases extensionstyrda GraphQL-wrapper återskapades från källans definition före dess ACL. Nya migrationer körda med samma administratörsroll som befintliga snötabeller kräver. Autentiserat faktisk-schema-prov av kund/uppdrag/resurs/kompetens/ordinarie klocka/autoapproval/pris/snapshot/frisläppning PASS; alla provskrivningar rullades tillbaka. Befintlig adminpilot bevaras. Privata backup- och installationsloggar finns under /home/vibo/snow-release-20261027.

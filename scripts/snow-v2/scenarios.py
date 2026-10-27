@@ -186,3 +186,11 @@ assert scalar(f"SELECT state FROM vihem_snow_invoice_batches WHERE id='{bill2}'"
 assert scalar(f"SELECT count(*) FROM vihem_snow_invoice_entries WHERE entry_id='{op2}'")=='0'
 expect_fail(A,'invoice_release',{'batch_id':batch,'reason':'Kan inte återöppna externt utkast'})
 print('PASS: idempotent traceable release before transfer, preserved snapshot, external drafts remain locked')
+# Existing notification preferences can suppress an INSERT; it must not starve dispatch forever.
+sql("CREATE FUNCTION suppress_snow_test() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN IF NEW.link='snow' THEN RETURN NULL;END IF;RETURN NEW;END$$;CREATE TRIGGER suppress_snow_test BEFORE INSERT ON vihem_notifications FOR EACH ROW EXECUTE FUNCTION suppress_snow_test()")
+sql(f"SELECT vihem_snow_notice('{O}','{A}','suppression-test','week',NULL,'Prov','Prov')")
+sql('SELECT vihem_snow_dispatch()')
+assert scalar("SELECT closed_at IS NOT NULL AND notification_id IS NULL FROM vihem_snow_notices WHERE dedupe='suppression-test'")=='t'
+n=scalar("SELECT count(*) FROM vihem_snow_events WHERE kind='notification_suppressed'");sql('SELECT vihem_snow_dispatch()');assert scalar("SELECT count(*) FROM vihem_snow_events WHERE kind='notification_suppressed'")==n
+sql('DROP TRIGGER suppress_snow_test ON vihem_notifications;DROP FUNCTION suppress_snow_test()')
+print('PASS: existing notification suppression closes/logs once and cannot starve the dispatch queue')
