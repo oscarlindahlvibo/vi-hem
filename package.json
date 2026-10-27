@@ -41,7 +41,10 @@
     "test:workspace:db": "python3 scripts/personal-workspace/database-test.py --fresh-test",
     "workspace:qa": "vite --config scripts/personal-workspace/qa/vite.config.ts",
     "test:mail": "node scripts/mail-unit-check.mjs",
-    "test:mail:sql": "bash scripts/test_mail_sql.sh"
+    "test:mail:sql": "bash scripts/test_mail_sql.sh",
+    "test:snow:db": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/snow-v2/database-test.py --fresh-test",
+    "test:snow:payload": "node scripts/snow-v2/payload-test.mjs",
+    "snow:qa": "bash scripts/snow-v2/qa-start.sh"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

@@ -13,6 +13,7 @@
 // rather than having to remember to call this from every insert call site.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { snowCalloutPushAllowed } from "../_shared/snow-callout-push.ts";
 import { personalReminderPush } from "../_shared/personal-reminder-push.ts";
 import { parseFcmConfig, sendFcmPush } from "../_shared/fcm.ts";
 import { sendApnsPush, type ApnsConfig } from "../_shared/apns.ts";
@@ -70,6 +71,7 @@ Deno.serve(async (request) => {
     .maybeSingle();
   if (notificationError) return json({ error: notificationError.message }, 500);
   if (!notification) return json({ error: "Notis hittades inte." }, 404);
+  if (!await snowCalloutPushAllowed(supabase, notification)) return json({ skipped: true, reason: "SNOW_CALLOUT_NO_LONGER_OPEN" });
 
   // A reminder cancelled, completed, snoozed or trashed after scheduling
   // must not be sent by a delayed/retried transport request.

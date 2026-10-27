@@ -24,6 +24,9 @@ import {
 import type { TimeEntry } from "../../types";
 import { JourPage } from "../../pages/JourPage";
 import { SnowDriverHome } from "./SnowDriverHome";
+import { WorkDetails } from "./operations/WorkDetails";
+import { SnowOperations } from "./operations/Operations";
+import type { Board, Duty } from "./operations/types";
 import { SnowAvailability } from "./SnowAvailability";
 import { SnowMap } from "./SnowMap";
 import {
@@ -119,6 +122,7 @@ type SnowTime = TimeEntry & {
   snow_client_id: string | null;
   snow_route_id: string | null;
   snow_method: SnowMethod | null;
+  snow_resource_id: string | null;
 };
 const describe = (e: unknown) =>
   e instanceof Error
@@ -134,7 +138,7 @@ function SnowWorkspace({
 }) {
   const { user } = useAuth();
   const admin = user?.role === "admin" || user?.role === "superadmin";
-  const [tab, setTab] = useState(user?.role === "snow" ? "home" : "work"),
+  const [tab, setTab] = useState("overview"),
     [clients, setClients] = useState<SnowClient[]>([]),
     [routes, setRoutes] = useState<SnowRoute[]>([]),
     [entries, setEntries] = useState<SnowTime[]>([]);
@@ -145,6 +149,8 @@ function SnowWorkspace({
     [notice, setNotice] = useState(""),
     [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false);
+  const [operationsBoard, setOperationsBoard] = useState<Board | null>(null);
+  const [resource, setResource] = useState("");
   const [method, setMethod] = useState<SnowMethod>("machine"),
     [selected, setSelected] = useState(""),
     [filter, setFilter] = useState(""),
@@ -283,6 +289,7 @@ function SnowWorkspace({
     client: SnowClient | null,
     activity: SnowActivity | null,
     action?: ClockAction,
+    extraJob: Record<string, unknown> = {},
   ) {
     if (!user?.organisation_id || lock.current) return;
     setError("");
@@ -295,7 +302,9 @@ function SnowWorkspace({
       !action &&
       current?.snow_client_id === client?.id &&
       current?.category === activity &&
-      current?.snow_method === method &&
+      current?.snow_method === (extraJob.snow_method || method) &&
+      current?.snow_resource_id ===
+        (extraJob.snow_resource_id || resource || null) &&
       current?.snow_route_id ===
         (selectedRoute?.client_id === client?.id ? selected : null)
     ) {
@@ -329,8 +338,11 @@ function SnowWorkspace({
               selectedRoute?.client_id === client.id ? selectedRoute.id : null,
             snow_method: method,
             completion_status: "submitted",
+            snow_v2: true,
+            snow_resource_id: resource || null,
+            ...extraJob,
           }
-        : { completion_status: "submitted" },
+        : { completion_status: "submitted", snow_v2: true },
     };
     lock.current = true;
     setBusy(true);
@@ -373,6 +385,9 @@ function SnowWorkspace({
       setBusy(false);
     }
   }
+  useEffect(() => {
+    setResource(current?.snow_resource_id || "");
+  }, [current?.id, current?.snow_resource_id]);
   function edit(route?: SnowRoute) {
     setEditor({
       kind: "route",
@@ -448,6 +463,23 @@ function SnowWorkspace({
       setBusy(false);
     }
   }
+  function startDuty(duty: Duty) {
+    const client = clients.find((c) => c.id === duty.client_id);
+    if (!client) return;
+    setResource(duty.resource_id);
+    setMethod(
+      operationsBoard?.resources.find((r) => r.id === duty.resource_id)
+        ?.method || "machine",
+    );
+    setTab("work");
+    void clock(client, duty.activity as SnowActivity, undefined, {
+      snow_duty_id: duty.id,
+      snow_resource_id: duty.resource_id,
+      snow_method:
+        operationsBoard?.resources.find((r) => r.id === duty.resource_id)
+          ?.method || "machine",
+    });
+  }
   const duration = current
     ? Math.max(
         0,
@@ -467,21 +499,53 @@ function SnowWorkspace({
       />
       <Tabs
         tabs={[
-          ...(user?.role === "snow"
-            ? [{ key: "home", label: "Översikt" }]
-            : []),
+          { key: "overview", label: "Översikt" },
+          ...(admin ? [{ key: "staffing", label: "Bemanning" }] : []),
+          { key: "callouts", label: "Utkallning" },
           { key: "work", label: "Körpass" },
           { key: "map", label: "Karta & prioritet" },
           { key: "jour", label: "Snöjour" },
           { key: "availability", label: "Tillgänglighet" },
           { key: "history", label: "Min tid" },
-          ...(admin ? [{ key: "admin", label: "Planering" }] : []),
+          ...(admin
+            ? [{ key: "administration", label: "Administration" }]
+            : [
+                { key: "customers", label: "Extrauppdrag" },
+                { key: "pricing", label: "Priser" },
+              ]),
         ]}
-        active={tab}
+        active={
+          admin &&
+          ["customers", "pricing", "billing", "admin", "settings"].includes(tab)
+            ? "administration"
+            : tab
+        }
         onChange={(key) => {
-          setTab(key);
+          setTab(key === "administration" ? "customers" : key);
           setFilter("");
         }}
+      />
+      {admin &&
+        ["customers", "pricing", "billing", "admin", "settings"].includes(
+          tab,
+        ) && (
+          <Tabs
+            tabs={[
+              { key: "customers", label: "Kunder & extrauppdrag" },
+              { key: "pricing", label: "Prislistor" },
+              { key: "billing", label: "Fakturering" },
+              { key: "admin", label: "Rutter & uppdrag" },
+              { key: "settings", label: "Inställningar" },
+            ]}
+            active={tab}
+            onChange={setTab}
+          />
+        )}
+      <SnowOperations
+        active={tab}
+        onNavigate={setTab}
+        onStart={startDuty}
+        onBoard={setOperationsBoard}
       />
       {error && (
         <div
@@ -547,13 +611,16 @@ function SnowWorkspace({
                 <h2 className="mt-1 text-xl font-bold">
                   {current
                     ? `${current.customer_name || "Pågående arbete"} · ${activityLabel(current.category)}`
-                    : "Välj uppdragsgivare och arbete"}
+                    : "Välj uppdrag och arbete"}
                 </h2>
                 {current && (
                   <p className="mt-1 text-sm text-slate-300">
-                    {current.snow_method
-                      ? methodLabel(current.snow_method)
-                      : "Vanliga stämpelklockan"}{" "}
+                    {operationsBoard?.resources.find(
+                      (r) => r.id === current.snow_resource_id,
+                    )?.name ||
+                      (current.snow_method
+                        ? methodLabel(current.snow_method)
+                        : "Vanliga stämpelklockan")}{" "}
                     · {Math.floor(duration / 60)} h {duration % 60} min ·{" "}
                     {routes.find((r) => r.id === current.snow_route_id)?.name ||
                       "Utan vald rutt"}
@@ -616,6 +683,34 @@ function SnowWorkspace({
               </div>
             )}
           </section>
+          {current?.snow_client_id && current.entry_type === "work" && (
+            <WorkDetails
+              key={current.id}
+              entryId={current.id}
+              category={current.category}
+              board={operationsBoard}
+            />
+          )}
+          <Select
+            label="Maskin / resurs (krävs för komplett maskinpass)"
+            value={resource}
+            onChange={(e) => setResource(e.target.value)}
+            options={[
+              { value: "", label: "Ingen vald" },
+              ...(operationsBoard?.resources
+                .filter(
+                  (r) =>
+                    r.active &&
+                    operationsBoard.competencies.some(
+                      (c) =>
+                        c.resource_id === r.id &&
+                        c.user_id === user?.id &&
+                        c.active,
+                    ),
+                )
+                .map((r) => ({ value: r.id, label: r.name })) || []),
+            ]}
+          />
           <div className="flex flex-wrap gap-2">
             {(["machine", "hand"] as const).map((m) => (
               <Button
@@ -646,11 +741,11 @@ function SnowWorkspace({
           {tab === "work" ? (
             <>
               <p className="text-sm text-slate-500">
-                Tryck på arbetet under rätt uppdragsgivare för att starta eller
-                växla. Tiden sparas i den vanliga stämpelklockan.
+                Tryck på arbetet under rätt uppdrag för att starta eller växla.
+                Tiden sparas i den vanliga stämpelklockan.
               </p>
               <Input
-                label="Sök uppdragsgivare"
+                label="Sök uppdrag"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
               />
@@ -691,7 +786,7 @@ function SnowWorkspace({
               {!loading && !clients.some((c) => c.active) && (
                 <EmptyState
                   icon={Snowflake}
-                  title="Lägg upp era uppdragsgivare"
+                  title="Lägg upp era uppdrag"
                   description="Administratören lägger till Svevia och privata bolag under Planering."
                 />
               )}
@@ -705,11 +800,11 @@ function SnowWorkspace({
                   onChange={(e) => setFilter(e.target.value)}
                 />
                 <Select
-                  label="Uppdragsgivare"
+                  label="Uppdrag"
                   value={clientFilter}
                   onChange={(e) => setClientFilter(e.target.value)}
                   options={[
-                    { value: "", label: "Alla uppdragsgivare" },
+                    { value: "", label: "Alla uppdrag" },
                     ...clients
                       .filter((c) => c.active)
                       .map((c) => ({ value: c.id, label: c.name })),
@@ -809,7 +904,16 @@ function SnowWorkspace({
         </>
       )}
       {tab === "availability" && (
-        <SnowAvailability key={`${user?.id}:${user?.organisation_id}`} />
+        <SnowAvailability
+          refreshKey={JSON.stringify([
+            operationsBoard?.pattern_revisions,
+            operationsBoard?.confirmations,
+          ])}
+          requiredDrivers={
+            operationsBoard?.resources.filter((r) => r.active).length || 0
+          }
+          key={`${user?.id}:${user?.organisation_id}`}
+        />
       )}
       {tab === "jour" &&
         (user?.role === "snow" ? <SnowDutyOnly /> : <JourPage snowOnly />)}
@@ -846,9 +950,20 @@ function SnowWorkspace({
                         ` · ${routes.find((r) => r.id === e.snow_route_id)?.name || "Arkiverat område"}`}
                     </p>
                   </div>
-                  <span className="tabular-nums">
-                    {e.end_time ? `${e.total_minutes} min` : "Pågår"}
-                  </span>
+                  <div className="text-right">
+                    <span className="tabular-nums">
+                      {e.end_time ? `${e.total_minutes} min` : "Pågår"}
+                    </span>
+                    {e.end_time && (
+                      <p
+                        className={`text-sm ${e.status === "approved" ? "text-emerald-700" : "text-amber-800"}`}
+                      >
+                        {e.status === "approved"
+                          ? "Godkänt"
+                          : "Registrerat · kräver granskning"}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ))}
           </div>
@@ -869,7 +984,7 @@ function SnowWorkspace({
               }}
             >
               <Plus className="h-4 w-4" />
-              Uppdragsgivare
+              Uppdrag
             </Button>
             <Button
               variant="secondary"
@@ -887,7 +1002,7 @@ function SnowWorkspace({
           </p>
           <div className="grid gap-5 lg:grid-cols-2">
             <section className="rounded-2xl border bg-white p-4">
-              <h2 className="mb-3 font-bold">Uppdragsgivare</h2>
+              <h2 className="mb-3 font-bold">Uppdrag</h2>
               {clients.map((c) => (
                 <button
                   className="flex w-full justify-between border-t py-3 text-left"
@@ -935,7 +1050,7 @@ function SnowWorkspace({
         open={!!editor}
         size={editor?.kind === "route" ? "xxl" : "md"}
         onClose={closeEditor}
-        title={editor?.kind === "client" ? "Uppdragsgivare" : "Rutt / område"}
+        title={editor?.kind === "client" ? "Uppdrag" : "Rutt / område"}
         mobileFullscreen
         footer={
           <div className="flex justify-end gap-2">
@@ -982,7 +1097,7 @@ function SnowWorkspace({
                   />
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <Select
-                      label="Uppdragsgivare"
+                      label="Uppdrag"
                       value={form.client_id}
                       onChange={(e) =>
                         setForm({ ...form, client_id: e.target.value })
@@ -1079,8 +1194,7 @@ function SnowWorkspace({
                   )}
                   <p className="w-full text-sm text-slate-600">
                     Lägg till sträckor och områden i samma rutt. Varje markering
-                    ritas separat och delar ruttens uppdragsgivare och
-                    prioritet.
+                    ritas separat och delar ruttens uppdrag och prioritet.
                   </p>
                 </div>
               }

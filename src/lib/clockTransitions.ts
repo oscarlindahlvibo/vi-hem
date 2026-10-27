@@ -17,7 +17,7 @@ async function clockRpc(name: string, args: Record<string, unknown>) {
 export async function executeClockOperation(user: string, org: string, operation: ClockOperation) {
   // Keep the exact UUID, event time, expected state and comment after an uncertain response.
   if (!navigator.onLine) throw Error('Stämplingen väntar på synkronisering. Händelsetiden är sparad lokalt. Försök igen när anslutningen är tillbaka.');
-  const { data, error } = await clockRpc('vihem_clock_transition', operation);
+  const { data, error } = await clockRpc(operation.p_job.snow_v2 === true ? 'vihem_snow_clock' : 'vihem_clock_transition', operation);
   if (error) throw Error(error.message.includes('CLOCK_STATE_CONFLICT') || error.message.includes('OPEN_ENTRY_CONFLICT') ? 'Stämplingsläget har ändrats. Kontrollera serverstatus innan du fortsätter.' : 'Stämplingen kunde inte bekräftas. Åtgärden finns kvar för återförsök.');
   localStorage.removeItem(key(user, org)); return data;
 }

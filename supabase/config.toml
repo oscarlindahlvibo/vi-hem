@@ -546,3 +546,7 @@ verify_jwt = false
 # VI-HEM Mail: schemalagd arbetare anropas av pg_cron/pg_net med hemlig header (x-vihem-mail-worker-secret), aldrig med Supabase-JWT.
 [functions.vihem-mail-worker]
 verify_jwt = false
+
+# Snow: authenticated admin endpoint; explicit organisation and seller access inside the function.
+[functions.vihem-snow-accounted]
+verify_jwt = true

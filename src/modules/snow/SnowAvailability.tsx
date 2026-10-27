@@ -18,6 +18,8 @@ import {
 } from "../../components/ui";
 import { useUnsavedChanges } from "../../hooks/useUnsavedChanges";
 import {
+  availabilityRow,
+  confirmedAvailability,
   addDays,
   calendarDay,
   capacitySegments,
@@ -54,7 +56,13 @@ const styles: Record<AvailabilityStatus, string> = {
   unavailable: "bg-red-50 text-red-800",
   unknown: "bg-slate-50 text-slate-500",
 };
-export function SnowAvailability() {
+export function SnowAvailability({
+  refreshKey = "",
+  requiredDrivers = 0,
+}: {
+  refreshKey?: string;
+  requiredDrivers?: number;
+}) {
   const { user } = useAuth();
   const selfOnly = user?.role === "snow";
   const [view, setView] = useState<"week" | "month">(
@@ -152,7 +160,7 @@ export function SnowAvailability() {
       invalidate();
       clearInterval(timer);
     };
-  }, [load, invalidate]);
+  }, [load, invalidate, refreshKey]);
   function changeWeek(by: number) {
     const next =
       view === "month"
@@ -313,18 +321,25 @@ export function SnowAvailability() {
     [days, data, from, to],
   );
   const rowFor = (person: string, date: string) =>
-    data.days.find((d) => d.user_id === person && d.work_date === date);
+    availabilityRow(data, date, person);
   const absent = (person: string, date: string) =>
     data.absences.some(
       (a) => a.user_id === person && a.start_date <= date && a.end_date >= date,
     );
   const labelFor = (person: string, date: string) => {
     const entry = rowFor(person, date);
-    return entry?.status === "partial"
-      ? entry.slots
-          .map(([a, b]) => `${minuteLabel(a)}–${minuteLabel(b)}`)
-          .join(", ")
-      : statusLabels[entry?.status || "unknown"];
+    const suffix =
+      data.base_patterns !== undefined &&
+      !confirmedAvailability(data, date, person)
+        ? " · ej veckobekräftat"
+        : "";
+    return (
+      (entry?.status === "partial"
+        ? entry.slots
+            .map(([a, b]) => `${minuteLabel(a)}–${minuteLabel(b)}`)
+            .join(", ")
+        : statusLabels[entry?.status || "unknown"]) + suffix
+    );
   };
   const dayJour = data.people.filter(
     (p) => dutySlots(data, selected, p.id).length > 0,
@@ -336,7 +351,7 @@ export function SnowAvailability() {
         subtitle={
           selfOnly
             ? "Ange när du kan köra. Välj en dag eller flera dagar samtidigt."
-            : "Planera tre chaufförer samtidigt. Jouransvarig visas grönt och räknas högst en gång."
+            : "Grundveckan visas tillsammans med datumundantag. Endast aktuell veckobekräftelse räknas som möjlig kapacitet."
         }
         icon={Users}
       />
@@ -456,9 +471,10 @@ export function SnowAvailability() {
             Fyll flera dagar
           </Button>
           <p className="w-full text-sm text-slate-500">
-            Tillgänglighet är ett besked om när man kan köra. Jourpass tilldelas
-            som vanligt under Snöjour. Ett tomt svar räknas inte som
-            tillgängligt, förutom under tilldelad jour.
+            Tillgänglighet är ett frivilligt besked, inte ett accepterat
+            arbetspass. Grundvecka och datumundantag behöver aktuell
+            veckobekräftelse. Jouransvar räknas inte som accepterad
+            maskinbemanning.
           </p>
         </div>
       )}
@@ -549,7 +565,9 @@ export function SnowAvailability() {
                       )}
                       {!selfOnly && (
                         <span className="mt-1 block text-[10px] text-slate-500 sm:text-xs">
-                          {windowError ? "–" : `${dailyCapacity[day]}/3`}
+                          {windowError
+                            ? "–"
+                            : `${dailyCapacity[day]}/${requiredDrivers}`}
                         </span>
                       )}
                     </button>
@@ -590,7 +608,7 @@ export function SnowAvailability() {
                       {dateLabel(day)}
                     </span>
                     <strong
-                      className={`block text-lg ${count >= 3 ? "text-emerald-700" : "text-amber-800"}`}
+                      className={`block text-lg ${count >= requiredDrivers && requiredDrivers > 0 ? "text-emerald-700" : "text-amber-800"}`}
                     >
                       {selfOnly
                         ? rowFor(target, day)?.status === "partial"
@@ -602,7 +620,7 @@ export function SnowAvailability() {
                               : "Ej svar"
                         : windowError
                           ? "–"
-                          : `${count}/3`}
+                          : `${count}/${requiredDrivers}`}
                     </strong>
                     <span className="text-xs text-slate-600">
                       {selfOnly
@@ -620,7 +638,9 @@ export function SnowAvailability() {
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
               <section className="overflow-hidden rounded-2xl border bg-white">
                 <div className="border-b p-4">
-                  <h2 className="font-bold">Bemanning {dateLabel(selected)}</h2>
+                  <h2 className="font-bold">
+                    Möjlig kapacitet {dateLabel(selected)}
+                  </h2>
                   <div className="mt-3 grid grid-cols-2 gap-3">
                     <Input
                       label="Kontrollera från"
@@ -642,9 +662,9 @@ export function SnowAvailability() {
                     </p>
                   ) : (
                     <p className="mt-3 text-sm">
-                      {min >= 3
-                        ? "Minst tre chaufförer täcker hela det valda intervallet."
-                        : `Som lägst ${min} av 3 chaufförer under det valda intervallet.`}
+                      {min >= requiredDrivers && requiredDrivers > 0
+                        ? `Minst ${requiredDrivers} frivilligt tillgängliga förare täcker intervallet. Detta är inte accepterade pass.`
+                        : `Som lägst ${min} av ${requiredDrivers} chaufförer under det valda intervallet.`}
                     </p>
                   )}
                 </div>
@@ -658,9 +678,9 @@ export function SnowAvailability() {
                         {minuteLabel(part.start)}–{minuteLabel(part.end)}
                       </strong>
                       <span
-                        className={`rounded px-2 py-0.5 text-sm font-semibold ${part.people.length >= 3 ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}
+                        className={`rounded px-2 py-0.5 text-sm font-semibold ${part.people.length >= requiredDrivers && requiredDrivers > 0 ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}
                       >
-                        {part.people.length}/3
+                        {part.people.length}/{requiredDrivers}
                       </span>
                       <span className="min-w-0 flex-1 text-sm text-slate-600">
                         {part.people.map((p) => p.name).join(", ") ||

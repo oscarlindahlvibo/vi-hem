@@ -69,7 +69,7 @@ export interface AccountedInvoiceLink {
   id: string;
   organisation_id: string;
   company_link_id: string;
-  source_type: AccountedInvoiceSourceType;
+  source_type: AccountedInvoiceSourceType | 'snow_billing';
   source_id: string;
   accounted_invoice_id: string;
   accounted_invoice_number: string | null;

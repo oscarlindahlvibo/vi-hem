@@ -128,3 +128,12 @@ assert.equal(
 console.log(
   "PASS snow availability: simultaneous coverage/gaps, no jour double-count, unavailable/absence conflicts, Swedish dates/year boundary/DST and interval validation",
 );
+const v2 = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+const offered={people:[{id:'a',name:'A'}],days:[],shifts:[],absences:[],base_patterns:[{user_id:'a',weekday:5,slots:[[240,600],[960,1380]]}],confirmed_weeks:[]};
+assert.deepEqual(v2.effectiveSlots(offered,'2026-10-16','a'),[]);
+assert.equal(v2.availabilityRow(offered,'2026-10-16','a').slots.length,2);
+offered.confirmed_weeks.push({user_id:'a',week_start:'2026-10-12',available:true,current:true});
+assert.deepEqual(v2.effectiveSlots(offered,'2026-10-16','a'),[[240,600],[960,1380]]);
+offered.days.push({user_id:'a',work_date:'2026-10-16',status:'unavailable',slots:[],revision:1});
+assert.deepEqual(v2.effectiveSlots(offered,'2026-10-16','a'),[]);
+console.log('PASS snow V2 calendar: recurrence, multiple intervals, unconfirmed distinction, date-exception override');

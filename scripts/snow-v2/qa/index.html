@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Snö & halka – isolerad QA</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      const session = await fetch("/__snow-qa-session").then((r) => r.json());
+      localStorage.setItem("sb-127-auth-token", JSON.stringify(session));
+      await import("./app.tsx");
+    </script>
+  </body>
+</html>

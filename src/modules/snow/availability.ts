@@ -1,5 +1,8 @@
 export type AvailabilityStatus =
-  "available" | "partial" | "unavailable" | "unknown";
+  | "available"
+  | "partial"
+  | "unavailable"
+  | "unknown";
 export type Slot = [number, number];
 export interface AvailabilityDay {
   user_id: string;
@@ -10,6 +13,13 @@ export interface AvailabilityDay {
   updated_by: string;
 }
 export interface SnowAvailabilitySnapshot {
+  base_patterns?: { user_id: string; weekday: number; slots: Slot[] }[];
+  confirmed_weeks?: {
+    user_id: string;
+    week_start: string;
+    available: boolean;
+    current: boolean;
+  }[];
   people: { id: string; name: string }[];
   days: AvailabilityDay[];
   shifts: {
@@ -91,6 +101,47 @@ export function dutySlots(
     .map((s) => shiftSlot(date, s.starts_at, s.ends_at))
     .filter((s): s is Slot => s !== null);
 }
+export function availabilityRow(
+  data: SnowAvailabilitySnapshot,
+  date: string,
+  user: string,
+): AvailabilityDay | undefined {
+  const exact = data.days.find(
+    (d) => d.user_id === user && d.work_date === date,
+  );
+  if (exact) return exact;
+  const pattern = data.base_patterns?.find(
+    (p) =>
+      p.user_id === user &&
+      p.weekday === ((new Date(date + "T12:00:00Z").getUTCDay() + 6) % 7) + 1,
+  );
+  return pattern
+    ? {
+        user_id: user,
+        work_date: date,
+        status: pattern.slots.length ? "partial" : "unavailable",
+        slots: pattern.slots,
+        revision: 0,
+        updated_by: user,
+      }
+    : undefined;
+}
+export function confirmedAvailability(
+  data: SnowAvailabilitySnapshot,
+  date: string,
+  user: string,
+) {
+  return (
+    data.base_patterns === undefined ||
+    !!data.confirmed_weeks?.some(
+      (c) =>
+        c.user_id === user &&
+        c.week_start === weekStart(date) &&
+        c.available &&
+        c.current,
+    )
+  );
+}
 export function effectiveSlots(
   data: SnowAvailabilitySnapshot,
   date: string,
@@ -102,9 +153,10 @@ export function effectiveSlots(
     )
   )
     return [];
-  const entry = data.days.find(
-    (d) => d.user_id === user && d.work_date === date,
-  );
+  if (!confirmedAvailability(data, date, user)) return [];
+  const entry = availabilityRow(data, date, user);
+  if (data.base_patterns !== undefined)
+    return entry && entry.status !== "unavailable" ? entry.slots : [];
   if (entry && entry.status !== "unknown")
     return entry.status === "unavailable" ? [] : entry.slots;
   return dutySlots(data, date, user);
@@ -131,6 +183,13 @@ export function capacitySegments(
   const result: {
     start: number;
     end: number;
+    base_patterns?: { user_id: string; weekday: number; slots: Slot[] }[];
+    confirmed_weeks?: {
+      user_id: string;
+      week_start: string;
+      available: boolean;
+      current: boolean;
+    }[];
     people: { id: string; name: string }[];
   }[] = [];
   for (let i = 0; i < points.length - 1; i++) {

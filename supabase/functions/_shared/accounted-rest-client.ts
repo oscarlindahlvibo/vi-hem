@@ -8,8 +8,10 @@
 //   - Auth: `Authorization: Bearer gnubok_sk_...`
 //   - Idempotency-Key header required on invoice/customer/webhook POSTs.
 //     Accounted replays the cached response for a repeated key+body, so a
-//     retried request after a network failure is always safe to resend
-//     with the SAME key.
+//     cache has a 24-hour TTL and is best-effort (verified 2026-10-27).
+//     An unknown write outcome requires reconciliation, not an unconditional
+//     retry guarantee. Snow billing holds its source reservation and uses GET
+//     to reconcile a matching remote draft before marking it created.
 //   - Dry-run: either `?dry_run=true` or `X-Dry-Run: true`. A dry-run
 //     response is never cached under the idempotency key, so it can be
 //     safely retried before the real (non-dry-run) call.
