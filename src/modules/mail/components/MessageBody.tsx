@@ -42,7 +42,19 @@ export function MessageBody({ message, accountId, allowRemoteImages, onBlocked }
     if (avail > 0 && need > avail + 1) d.body.style.zoom = String(Math.max(0.35, avail / need));
     const h = Math.max(d.documentElement.scrollHeight, d.body.scrollHeight); setHeight(Math.min(Math.max(h + 2, 40), 20000));
   };
-  const observer = useRef<ResizeObserver | null>(null);
-  useEffect(() => () => observer.current?.disconnect(), []);
-  return <iframe ref={ref} title={`Meddelande: ${message.subject}`} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerPolicy="no-referrer" srcDoc={srcDoc} onLoad={() => { fit(); observer.current?.disconnect(); const body = ref.current?.contentDocument?.body; if (body && 'ResizeObserver' in window) { observer.current = new ResizeObserver(() => fit()); observer.current.observe(body); observer.current.observe(ref.current!.contentDocument!.documentElement); } const d = ref.current?.contentDocument; const el = ref.current; if (d && el) d.addEventListener('keydown', (e) => { if (e.metaKey || e.ctrlKey || e.altKey) return; el.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, shiftKey: e.shiftKey, bubbles: true, cancelable: true })); }); }} style={{ height: height || 1, visibility: height ? 'visible' : 'hidden' }} className="block w-full max-w-full border-0 bg-white" />;
+  const observer = useRef<ResizeObserver | null>(null); const observedDoc = useRef<Document | null>(null);
+  // Kopplar mätning och tangentvidarebefordran till iframens nuvarande dokument. Anropas både från onLoad och av en kort vaktmästare
+  // (stora mejl kan byta dokument efter första load-händelsen, och då stod iframen kvar dold på 1 px).
+  const attach = () => {
+    const el = ref.current; const d = el?.contentDocument; if (!el || !d?.body || observedDoc.current === d) return;
+    observedDoc.current = d; observer.current?.disconnect(); fit();
+    if ('ResizeObserver' in window) { observer.current = new ResizeObserver(() => fit()); observer.current.observe(d.body); observer.current.observe(d.documentElement); }
+    d.addEventListener('keydown', (e) => { if (e.metaKey || e.ctrlKey || e.altKey) return; el.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, shiftKey: e.shiftKey, bubbles: true, cancelable: true })); });
+  };
+  useEffect(() => {
+    observedDoc.current = null; let n = 0;
+    const t = window.setInterval(() => { attach(); const d = ref.current?.contentDocument; if (observedDoc.current && observedDoc.current === d && d?.readyState === 'complete') { fit(); if (++n > 3) window.clearInterval(t); } else if (++n > 80) window.clearInterval(t); }, 100);
+    return () => { window.clearInterval(t); observer.current?.disconnect(); };
+  }, [srcDoc]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <iframe ref={ref} title={`Meddelande: ${message.subject}`} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerPolicy="no-referrer" srcDoc={srcDoc} onLoad={attach} style={{ height: height || 1, visibility: height ? 'visible' : 'hidden' }} className="block w-full max-w-full border-0 bg-white" />;
 }
