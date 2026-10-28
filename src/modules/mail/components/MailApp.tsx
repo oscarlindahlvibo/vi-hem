@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Archive, ArrowLeft, ChevronDown, Clock, Inbox, Loader2, Mail, MailOpen, Menu, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowLeft, ChevronDown, Clock, Inbox, Loader2, Mail, MailOpen, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { ThreadList, threadKey, type RowAction } from './ThreadList';
 import { ThreadView, type LoadedThread, type ReplyMode } from './ThreadView';
@@ -36,7 +36,11 @@ function MailShell({ onNavigate, openThread }: { onNavigate: (page: string) => v
   const [scope, setScope] = useState('all'); const [folder, setFolder] = useState<Folder>('inbox'); const [labelId, setLabelId] = useState<string | undefined>();
   const [query, setQuery] = useState(''); const [draftQuery, setDraftQuery] = useState('');
   const [selected, setSelected] = useState<ThreadSummary | null>(null); const [checked, setChecked] = useState<Set<string>>(new Set()); const [focusKey, setFocusKey] = useState<string | null>(null);
-  const [panel, setPanel] = useState<'mail' | 'settings' | 'admin'>('mail'); const [drawer, setDrawer] = useState(false); const [side, setSide] = useState(false); const [helpOpen, setHelpOpen] = useState(false);
+  const [panel, setPanel] = useState<'mail' | 'settings' | 'admin'>('mail'); const [drawer, setDrawer] = useState(false); const [side, setSide] = useState(false);
+  // Fokusläge (iPad/dator): döljer VI-HEMs meny och e-postens mappmeny. Läsläge: själva mejlet tar hela ytan.
+  const [focus, setFocus] = useState(() => { try { return localStorage.getItem('vihem-mail-focus') === '1'; } catch { return false; } }); const [wide, setWide] = useState(false);
+  const toggleFocus = () => setFocus((f) => { const n = !f; try { localStorage.setItem('vihem-mail-focus', n ? '1' : '0'); } catch { /* ignoreras */ } return n; });
+  const [helpOpen, setHelpOpen] = useState(false);
   const [compose, setCompose] = useState<{ key: number; account: MailAccount; seed: ComposeSeed } | null>(null); const [snoozeFor, setSnoozeFor] = useState<ThreadSummary[] | null>(null); const [reloadKey, setReloadKey] = useState(0);
   // E-postytan fyller skärmen och scrollar internt: lås sidans egen scroll så man inte råkar dra hela sidan (särskilt på mobil).
   useEffect(() => {
@@ -48,10 +52,12 @@ function MailShell({ onNavigate, openThread }: { onNavigate: (page: string) => v
   useEffect(() => { if (!overlayOpen) return; document.documentElement.setAttribute('data-overlay-open', 'true'); return () => document.documentElement.removeAttribute('data-overlay-open'); }, [overlayOpen]);
   // På mobil/iPad-liggande utan sidomeny får e-post hela skärmen: bottenmenyn döljs medan e-post är öppet och höjden mäts mot visningsytan.
   const shellRef = useRef<HTMLDivElement>(null);
+  const focusOn = focus || wide;
   useEffect(() => {
     document.documentElement.setAttribute('data-mail-fullscreen', 'true');
     const fit = () => {
       const el = shellRef.current; if (!el) return;
+      if (focusOn && window.innerWidth >= 768) { el.style.cssText = 'position:fixed;inset:0;margin:0;z-index:40;height:auto;min-height:0;border-radius:0;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)'; return; }
       if (window.innerWidth >= 1024) { el.style.cssText = ''; return; }
       // Fast placering under sidhuvudet: oberoende av sidans scroll (iOS Safari scrollar annars hela sidan och lämnar tomrum).
       const header = document.querySelector('.vihem-mobile-header'); const top = Math.ceil(header?.getBoundingClientRect().bottom ?? 64);
@@ -59,7 +65,7 @@ function MailShell({ onNavigate, openThread }: { onNavigate: (page: string) => v
     };
     fit(); window.addEventListener('resize', fit); window.visualViewport?.addEventListener('resize', fit); const t = window.setTimeout(fit, 300);
     return () => { document.documentElement.removeAttribute('data-mail-fullscreen'); window.removeEventListener('resize', fit); window.visualViewport?.removeEventListener('resize', fit); window.clearTimeout(t); };
-  }, [panel]);
+  }, [panel, focusOn]);
   const composeKey = useRef(1); const searchRef = useRef<HTMLInputElement>(null); const loadedThread = useRef<LoadedThread | null>(null);
 
   const loadBoot = useCallback(async () => {
@@ -187,25 +193,26 @@ function MailShell({ onNavigate, openThread }: { onNavigate: (page: string) => v
 
   return (
     <div ref={shellRef} className="relative -mx-4 -mt-3 flex min-h-[26rem] overflow-hidden rounded-none border-y border-slate-200 bg-white shadow-sm sm:mx-0 sm:mt-0 sm:rounded-2xl sm:border lg:h-[calc(100dvh-3.5rem)]">
-      <div className="hidden w-60 shrink-0 border-r border-slate-200 bg-slate-50/50 lg:block">{sidebar}</div>
+      <div className={`${focusOn ? 'hidden' : 'hidden lg:block'} w-60 shrink-0 border-r border-slate-200 bg-slate-50/50`}>{sidebar}</div>
       {drawer && <div className="fixed inset-0 z-[90] lg:hidden"><button aria-label="Stäng meny" className="absolute inset-0 bg-black/40" onClick={() => setDrawer(false)} /><div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-white pt-[env(safe-area-inset-top)] shadow-2xl">{sidebar}</div></div>}
       {panel === 'settings' && <Suspense fallback={<Loading />}><MailSettings prefs={boot.prefs} accounts={accounts} templates={templates} isAdmin={boot.is_org_admin} onClose={() => setPanel('mail')} onPrefs={(p) => setBoot({ ...boot, prefs: { ...boot.prefs, ...p } })} onTemplates={setTemplates} /></Suspense>}
       {panel === 'admin' && <Suspense fallback={<Loading />}><AdminMailboxes onClose={() => { setPanel('mail'); void loadBoot(); clearListCache(); }} currentUserId={boot.user.id} /></Suspense>}
       {panel === 'mail' && <>
-        <section className={`${selected ? 'hidden md:flex' : 'flex'} min-w-0 flex-1 flex-col border-r border-slate-200 md:w-[22rem] md:flex-none xl:w-[26rem]`} aria-label="Meddelandelista">
+        <section className={`${selected ? (wide ? 'hidden' : 'hidden md:flex') : 'flex'} min-w-0 flex-1 flex-col border-r border-slate-200 md:w-[22rem] md:flex-none xl:w-[26rem]`} aria-label="Meddelandelista">
           <div className="flex items-center gap-2 border-b border-slate-200 p-2">
-            <button type="button" onClick={() => onNavigate('dashboard')} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" aria-label="Tillbaka till VI-HEM"><ArrowLeft className="h-5 w-5" /></button>
+            <button type="button" onClick={() => onNavigate('dashboard')} className={`rounded-lg p-2 text-slate-600 hover:bg-slate-100 ${focusOn ? '' : 'lg:hidden'}`} aria-label="Tillbaka till VI-HEM"><ArrowLeft className="h-5 w-5" /></button>
             <form className="relative min-w-0 flex-1" onSubmit={(e) => { e.preventDefault(); submitSearch(draftQuery); }} role="search"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input ref={searchRef} value={draftQuery} onChange={(e) => setDraftQuery(e.target.value)} placeholder="Sök i e-post (from:, has:attachment …)" aria-label="Sök i e-post" className="w-full rounded-xl border-0 bg-slate-100 py-2 pl-9 pr-8 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500" onKeyDown={(e) => { if (e.key === 'Escape') { setDraftQuery(''); if (folder === 'search') goFolder('inbox'); (e.target as HTMLElement).blur(); } }} />
               {draftQuery && <button type="button" aria-label="Rensa sökning" onClick={() => { setDraftQuery(''); if (folder === 'search') goFolder('inbox'); }} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-slate-700"><X className="h-4 w-4" /></button>}</form>
             <button type="button" onClick={() => { clearListCache(); void list.refresh(); }} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100" aria-label="Uppdatera" title="Uppdatera"><RefreshCw className={`h-4 w-4 ${list.loading ? 'animate-spin' : ''}`} /></button>
-            <button type="button" onClick={() => window.dispatchEvent(new Event('vihem-open-main-menu'))} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" aria-label="Öppna huvudmenyn"><Menu className="h-5 w-5" /></button>
+            <button type="button" onClick={toggleFocus} className={`hidden rounded-lg p-2 hover:bg-slate-100 md:block ${focus ? 'bg-blue-50 text-blue-700' : 'text-slate-600'}`} title={focus ? 'Visa menyer' : 'Fokusläge: dölj menyerna'} aria-label={focus ? 'Visa menyer' : 'Fokusläge: dölj menyerna'} aria-pressed={focus}>{focus ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}</button>
+            <button type="button" onClick={() => window.dispatchEvent(new Event('vihem-open-main-menu'))} className={`rounded-lg p-2 text-slate-600 hover:bg-slate-100 ${focusOn ? 'hidden' : 'lg:hidden'}`} aria-label="Öppna huvudmenyn"><Menu className="h-5 w-5" /></button>
           </div>
           {checkedThreads.length > 0 ? <div className="flex items-center gap-1 border-b border-blue-100 bg-blue-50 px-3 py-1.5 text-sm"><span className="mr-auto font-bold text-blue-900">{checkedThreads.length} valda</span>
             <button className="rounded-lg p-2 text-blue-900 hover:bg-blue-100" aria-label="Arkivera valda" onClick={() => void modify(checkedThreads, 'archive')}><Archive className="h-4 w-4" /></button><button className="rounded-lg p-2 text-blue-900 hover:bg-blue-100" aria-label="Radera valda" onClick={() => void modify(checkedThreads, 'trash')}><Trash2 className="h-4 w-4" /></button>
             <button className="rounded-lg p-2 text-blue-900 hover:bg-blue-100" aria-label="Markera som lästa" onClick={() => void modify(checkedThreads, 'read')}><MailOpen className="h-4 w-4" /></button><button className="rounded-lg p-2 text-blue-900 hover:bg-blue-100" aria-label="Snooza valda" onClick={() => setSnoozeFor(checkedThreads)}><Clock className="h-4 w-4" /></button>
             <button className="rounded-lg p-2 text-blue-900 hover:bg-blue-100" aria-label="Avmarkera" onClick={() => setChecked(new Set())}><X className="h-4 w-4" /></button></div>
-            : <div className="flex items-center justify-between px-4 py-2 text-xs text-slate-500"><button type="button" onClick={() => setDrawer(true)} className="inline-flex items-center gap-1 font-bold text-slate-800 lg:pointer-events-none" aria-label="Byt mapp eller brevlåda">{folder === 'label' ? labelsForScope.find((l) => l.id === labelId)?.name : folder === 'search' ? `Sökning: ${query}` : FOLDER_TITLES[folder]}{list.unread > 0 && folder === 'inbox' ? ` · ${list.unread} olästa` : ''}<ChevronDown className="h-4 w-4 lg:hidden" /></button><span>{scope === 'all' && accounts.length > 1 ? 'Samlad' : effective[0]?.email}</span></div>}
+            : <div className="flex items-center justify-between px-4 py-2 text-xs text-slate-500"><button type="button" onClick={() => setDrawer(true)} className={`inline-flex items-center gap-1 font-bold text-slate-800 ${focusOn ? '' : 'lg:pointer-events-none'}`} aria-label="Byt mapp eller brevlåda">{folder === 'label' ? labelsForScope.find((l) => l.id === labelId)?.name : folder === 'search' ? `Sökning: ${query}` : FOLDER_TITLES[folder]}{list.unread > 0 && folder === 'inbox' ? ` · ${list.unread} olästa` : ''}<ChevronDown className={`h-4 w-4 ${focusOn ? '' : 'lg:hidden'}`} /></button><span>{scope === 'all' && accounts.length > 1 ? 'Samlad' : effective[0]?.email}</span></div>}
           {(authFailed || list.errors.length > 0) && <div className="mx-3 mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" role="alert">{authFailed?.error ?? list.errors.map((e) => `${accountOf(e.account_id)?.email ?? ''}: ${e.error}`).join(' · ')}</div>}
           <ThreadList threads={visible} accounts={accounts} ownEmails={effective.flatMap(ownFor)} selectedKey={selected ? threadKey(selected) : null} checked={checked} focusKey={focusKey} showAccount={scope === 'all' && accounts.length > 1} folder={folder} loading={list.loading} loadingMore={list.loadingMore} hasMore={list.hasMore} error={list.error}
             onOpen={(t) => { setSelected(t); setFocusKey(threadKey(t)); if (t.draft) { void openDraft(t); } }} onCheck={(t) => setChecked((s) => { const n = new Set(s); const k = threadKey(t); if (n.has(k)) n.delete(k); else n.add(k); return n; })} onAction={onRowAction} onLoadMore={list.loadMore} onRetry={() => void list.refresh()} />
@@ -213,7 +220,7 @@ function MailShell({ onNavigate, openThread }: { onNavigate: (page: string) => v
         <section className={`${selected ? 'flex' : 'hidden md:flex'} min-h-0 min-w-0 flex-1 bg-white`} aria-label="Meddelande">
           {selected && selectedAccount && !selected.draft ? <>
             <ThreadView key={threadKey(selected)} account={selectedAccount} threadId={selected.id} ownEmails={ownEmails} remoteImages={boot.prefs.load_remote_images} organisationId={boot.user.organisation_id} userId={boot.user.id} reloadKey={reloadKey} onLoaded={(t) => { loadedThread.current = t; }}
-              onBack={() => setSelected(null)} onAction={(op) => void modify([selected], op)} onSnooze={() => setSnoozeFor([selected])} onReply={(m, t, msg) => void startReply(m, t, msg)} sideOpen={side} onToggleSide={() => setSide((s) => !s)} />
+              onBack={() => { setSelected(null); setWide(false); }} onAction={(op) => void modify([selected], op)} onSnooze={() => setSnoozeFor([selected])} onReply={(m, t, msg) => void startReply(m, t, msg)} sideOpen={side} onToggleSide={() => setSide((s) => !s)} wide={wide} onToggleWide={() => setWide((w) => !w)} />
             {side && <div className="fixed inset-y-0 right-0 z-40 w-[22rem] max-w-[92vw] border-l border-slate-200 bg-white shadow-2xl xl:static xl:z-auto xl:w-80 xl:shrink-0 xl:shadow-none"><ThreadSidePanel account={selectedAccount} threadId={selected.id} subject={selected.subject} replying={Boolean(compose)} onNavigate={onNavigate} onCreateWorkOrder={createWorkOrder} onClose={() => setSide(false)} /></div>}
           </> : <div className="flex flex-1 flex-col items-center justify-center gap-2 text-slate-400"><Inbox className="h-10 w-10" /><p className="text-sm">Välj ett meddelande att läsa</p><button onClick={() => setHelpOpen(true)} className="text-xs font-semibold text-slate-500 underline">Kortkommandon (?)</button></div>}
         </section>

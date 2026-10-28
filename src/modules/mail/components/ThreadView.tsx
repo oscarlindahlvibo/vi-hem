@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, ArrowLeft, Clock, Download, FileDown, Forward, ImageOff, Loader2, Mail, MailOpen, Paperclip, PanelRight, Reply, ReplyAll, Star, Trash2, AlertTriangle, ChevronDown } from 'lucide-react';
+import { Archive, ArrowLeft, Clock, Download, FileDown, Forward, ImageOff, Loader2, Mail, MailOpen, Paperclip, Maximize2, Minimize2, PanelRight, Reply, ReplyAll, Star, Trash2, AlertTriangle, ChevronDown } from 'lucide-react';
 import { MessageBody } from './MessageBody';
 import { downloadAttachment, previewAttachment, saveAttachmentToDocuments } from './attachments';
 import { mailApi, MailApiError } from '../lib/api';
@@ -11,13 +11,13 @@ export interface LoadedThread { id: string; subject: string; messages: ParsedMes
 export type ReplyMode = 'reply' | 'replyAll' | 'forward';
 interface Props {
   account: MailAccount; threadId: string; ownEmails: string[]; remoteImages: 'never' | 'ask' | 'always'; organisationId: string; userId: string; trusted?: boolean;
-  onBack: () => void; onAction: (op: string) => void; onSnooze: () => void; onReply: (mode: ReplyMode, thread: LoadedThread, message: ParsedMessage) => void; onLoaded?: (t: LoadedThread) => void; sideOpen?: boolean; onToggleSide?: () => void; reloadKey?: number;
+  onBack: () => void; onAction: (op: string) => void; onSnooze: () => void; onReply: (mode: ReplyMode, thread: LoadedThread, message: ParsedMessage) => void; onLoaded?: (t: LoadedThread) => void; sideOpen?: boolean; onToggleSide?: () => void; wide?: boolean; onToggleWide?: () => void; reloadKey?: number;
 }
 
 const Person = ({ a }: { a: { name: string; email: string } }) => <span title={a.email}>{displayName(a)}</span>;
 
 /** Trådvy: alla meddelanden i tråden (senaste öppet), säker HTML-rendering, bilagor, svara/svara alla/vidarebefordra samt trådåtgärder. */
-export function ThreadView({ account, threadId, ownEmails, remoteImages, organisationId, userId, onBack, onAction, onSnooze, onReply, onLoaded, sideOpen, onToggleSide, reloadKey }: Props) {
+export function ThreadView({ account, threadId, ownEmails, remoteImages, organisationId, userId, onBack, onAction, onSnooze, onReply, onLoaded, sideOpen, onToggleSide, wide, onToggleWide, reloadKey }: Props) {
   const toast = useToasts();
   const [thread, setThread] = useState<LoadedThread | null>(null); const [error, setError] = useState(''); const [open, setOpen] = useState<Set<string>>(new Set()); const [allowed, setAllowed] = useState<Set<string>>(new Set()); const [blocked, setBlocked] = useState<Record<string, number>>({});
   const [busyAtt, setBusyAtt] = useState(''); const topRef = useRef<HTMLDivElement>(null); const canManage = account.levels.manage; const canSend = account.levels.send;
@@ -57,6 +57,7 @@ export function ThreadView({ account, threadId, ownEmails, remoteImages, organis
         <button type="button" disabled={!canManage} onClick={onSnooze} className={iconBtn} title="Snooza (b)" aria-label="Snooza"><Clock className="h-[18px] w-[18px]" /></button>
         <button type="button" disabled={!canManage} onClick={() => act(starred ? 'unstar' : 'star')} className={`${iconBtn} ${starred ? '!text-amber-500' : ''}`} title="Stjärnmarkera (s)" aria-label={starred ? 'Ta bort stjärna' : 'Stjärnmarkera'} aria-pressed={starred}><Star className={`h-[18px] w-[18px] ${starred ? 'fill-current' : ''}`} /></button>
         <div className="flex-1" />
+        {onToggleWide && <button type="button" onClick={onToggleWide} className={`${iconBtn} hidden md:block ${wide ? 'bg-blue-50 !text-blue-700' : ''}`} title={wide ? 'Visa listan igen' : 'Läs i helskärm'} aria-label={wide ? 'Visa listan igen' : 'Läs i helskärm'} aria-pressed={wide}>{wide ? <Minimize2 className="h-[18px] w-[18px]" /> : <Maximize2 className="h-[18px] w-[18px]" />}</button>}
         {onToggleSide && <button type="button" onClick={onToggleSide} className={`${iconBtn} ${sideOpen ? 'bg-blue-50 !text-blue-700' : ''}`} title="Ärende och kopplingar" aria-label="Visa ärende och kopplingar" aria-pressed={sideOpen}><PanelRight className="h-[18px] w-[18px]" /></button>}
       </div>
       <div ref={topRef} className="min-h-0 min-w-0 flex-1 touch-pan-y overflow-y-auto overflow-x-hidden overscroll-contain [-webkit-overflow-scrolling:touch]">
