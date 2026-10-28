@@ -62,7 +62,7 @@ function MailShell({ onNavigate, openThread }: { onNavigate: (page: string) => v
     document.documentElement.setAttribute('data-mail-fullscreen', 'true');
     const fit = () => {
       const el = shellRef.current; if (!el) return;
-      if (focusOn && window.innerWidth >= 768) { el.style.cssText = 'position:fixed;inset:0;margin:0;z-index:40;height:auto;min-height:0;border-radius:0;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)'; return; }
+      if (portal || (focusOn && window.innerWidth >= 768)) { el.style.cssText = 'position:fixed;inset:0;margin:0;z-index:40;height:auto;min-height:0;border-radius:0;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)'; return; }
       if (window.innerWidth >= 1024) { el.style.cssText = ''; return; }
       // Fast placering under sidhuvudet: oberoende av sidans scroll (iOS Safari scrollar annars hela sidan och lämnar tomrum).
       const header = document.querySelector('.vihem-mobile-header'); const top = Math.ceil(header?.getBoundingClientRect().bottom ?? 64);
@@ -70,7 +70,7 @@ function MailShell({ onNavigate, openThread }: { onNavigate: (page: string) => v
     };
     fit(); window.addEventListener('resize', fit); window.visualViewport?.addEventListener('resize', fit); const t = window.setTimeout(fit, 300);
     return () => { document.documentElement.removeAttribute('data-mail-fullscreen'); window.removeEventListener('resize', fit); window.visualViewport?.removeEventListener('resize', fit); window.clearTimeout(t); };
-  }, [panel, focusOn]);
+  }, [panel, focusOn, portal]);
   const composeKey = useRef(1); const searchRef = useRef<HTMLInputElement>(null); const loadedThread = useRef<LoadedThread | null>(null);
 
   const loadBoot = useCallback(async () => {
