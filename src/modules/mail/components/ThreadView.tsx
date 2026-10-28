@@ -59,7 +59,7 @@ export function ThreadView({ account, threadId, ownEmails, remoteImages, organis
         <div className="flex-1" />
         {onToggleSide && <button type="button" onClick={onToggleSide} className={`${iconBtn} ${sideOpen ? 'bg-blue-50 !text-blue-700' : ''}`} title="Ärende och kopplingar" aria-label="Visa ärende och kopplingar" aria-pressed={sideOpen}><PanelRight className="h-[18px] w-[18px]" /></button>}
       </div>
-      <div ref={topRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+      <div ref={topRef} className="min-h-0 min-w-0 flex-1 touch-pan-y overflow-y-auto overflow-x-hidden overscroll-contain [-webkit-overflow-scrolling:touch]">
         <div className="mx-auto w-full min-w-0 max-w-3xl px-4 py-5 sm:px-6">
           <h1 className="text-xl font-bold leading-snug text-slate-900 sm:text-2xl">{thread.subject || '(inget ämne)'}</h1>
           <p className="mt-1 text-xs text-slate-500">{msgs.length} {msgs.length === 1 ? 'meddelande' : 'meddelanden'} · {account.email}</p>

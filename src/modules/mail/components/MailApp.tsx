@@ -210,7 +210,7 @@ function MailShell({ onNavigate, openThread }: { onNavigate: (page: string) => v
           <ThreadList threads={visible} accounts={accounts} ownEmails={effective.flatMap(ownFor)} selectedKey={selected ? threadKey(selected) : null} checked={checked} focusKey={focusKey} showAccount={scope === 'all' && accounts.length > 1} folder={folder} loading={list.loading} loadingMore={list.loadingMore} hasMore={list.hasMore} error={list.error}
             onOpen={(t) => { setSelected(t); setFocusKey(threadKey(t)); if (t.draft) { void openDraft(t); } }} onCheck={(t) => setChecked((s) => { const n = new Set(s); const k = threadKey(t); if (n.has(k)) n.delete(k); else n.add(k); return n; })} onAction={onRowAction} onLoadMore={list.loadMore} onRetry={() => void list.refresh()} />
         </section>
-        <section className={`${selected ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 bg-white`} aria-label="Meddelande">
+        <section className={`${selected ? 'flex' : 'hidden md:flex'} min-h-0 min-w-0 flex-1 bg-white`} aria-label="Meddelande">
           {selected && selectedAccount && !selected.draft ? <>
             <ThreadView key={threadKey(selected)} account={selectedAccount} threadId={selected.id} ownEmails={ownEmails} remoteImages={boot.prefs.load_remote_images} organisationId={boot.user.organisation_id} userId={boot.user.id} reloadKey={reloadKey} onLoaded={(t) => { loadedThread.current = t; }}
               onBack={() => setSelected(null)} onAction={(op) => void modify([selected], op)} onSnooze={() => setSnoozeFor([selected])} onReply={(m, t, msg) => void startReply(m, t, msg)} sideOpen={side} onToggleSide={() => setSide((s) => !s)} />

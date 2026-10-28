@@ -31,7 +31,7 @@ export function MessageBody({ message, accountId, allowRemoteImages, onBlocked }
     const raw = message.html || textToHtml(message.text || '');
     const { html, blockedImages } = sanitizeEmailHtml(raw, { allowRemoteImages, cidMap });
     const csp = `default-src 'none'; img-src data: blob: ${allowRemoteImages ? 'https: http:' : ''}; style-src 'unsafe-inline'; font-src data:`;
-    const doc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>html,body{margin:0;padding:0}body{font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1e293b;word-wrap:break-word;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}a{color:#1d4ed8}blockquote{margin:0 0 0 .6em;padding-left:.8em;border-left:2px solid #cbd5e1;color:#475569}details>summary{display:inline-block;cursor:pointer;padding:0 8px;border-radius:6px;background:#e2e8f0;color:#475569;line-height:1.2;margin:6px 0;list-style:none}pre{white-space:pre-wrap}</style></head><body>${collapseQuotes(html)}</body></html>`;
+    const doc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>html,body{margin:0;padding:0;overflow:hidden}body{font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1e293b;word-wrap:break-word;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}a{color:#1d4ed8}blockquote{margin:0 0 0 .6em;padding-left:.8em;border-left:2px solid #cbd5e1;color:#475569}details>summary{display:inline-block;cursor:pointer;padding:0 8px;border-radius:6px;background:#e2e8f0;color:#475569;line-height:1.2;margin:6px 0;list-style:none}pre{white-space:pre-wrap}</style></head><body>${collapseQuotes(html)}</body></html>`;
     return { srcDoc: doc, blocked: blockedImages };
   }, [message.id, message.html, message.text, allowRemoteImages, cidMap]);
   useEffect(() => { onBlocked?.(blocked); }, [blocked]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -40,7 +40,7 @@ export function MessageBody({ message, accountId, allowRemoteImages, onBlocked }
     const el = ref.current; const d = el?.contentDocument; if (!el || !d?.body) return;
     d.body.style.zoom = ''; const avail = el.clientWidth; const need = Math.max(d.documentElement.scrollWidth, d.body.scrollWidth);
     if (avail > 0 && need > avail + 1) d.body.style.zoom = String(Math.max(0.35, avail / need));
-    const h = Math.max(d.documentElement.scrollHeight, d.body.scrollHeight); setHeight(Math.min(Math.max(h + 2, 40), 20000));
+    const h = Math.max(d.documentElement.scrollHeight, d.body.scrollHeight); setHeight(Math.min(Math.max(h + 4, 40), 20000));
   };
   const observer = useRef<ResizeObserver | null>(null); const observedDoc = useRef<Document | null>(null);
   // Kopplar mätning och tangentvidarebefordran till iframens nuvarande dokument. Anropas både från onLoad och av en kort vaktmästare
@@ -56,5 +56,5 @@ export function MessageBody({ message, accountId, allowRemoteImages, onBlocked }
     const t = window.setInterval(() => { attach(); const d = ref.current?.contentDocument; if (observedDoc.current && observedDoc.current === d && d?.readyState === 'complete') { fit(); if (++n > 3) window.clearInterval(t); } else if (++n > 80) window.clearInterval(t); }, 100);
     return () => { window.clearInterval(t); observer.current?.disconnect(); };
   }, [srcDoc]); // eslint-disable-line react-hooks/exhaustive-deps
-  return <iframe ref={ref} title={`Meddelande: ${message.subject}`} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerPolicy="no-referrer" srcDoc={srcDoc} onLoad={attach} style={{ height: height || 1, visibility: height ? 'visible' : 'hidden' }} className="block w-full max-w-full border-0 bg-white" />;
+  return <iframe ref={ref} scrolling="no" title={`Meddelande: ${message.subject}`} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerPolicy="no-referrer" srcDoc={srcDoc} onLoad={attach} style={{ height: height || 1, visibility: height ? 'visible' : 'hidden' }} className="block w-full max-w-full border-0 bg-white" />;
 }
