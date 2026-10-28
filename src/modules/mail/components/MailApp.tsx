@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Archive, ArrowLeft, ChevronDown, Clock, Inbox, Loader2, Mail, MailOpen, Menu, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { Sidebar } from './Sidebar';
 import { ThreadList, threadKey, type RowAction } from './ThreadList';
 import { ThreadView, type LoadedThread, type ReplyMode } from './ThreadView';
@@ -191,7 +192,7 @@ function MailShell({ onNavigate, openThread }: { onNavigate: (page: string) => v
   const sidebar = <Sidebar accounts={accounts} scope={scope} onScope={(s) => { setScope(s); setSelected(null); setChecked(new Set()); }} folder={folder} labelId={labelId} onFolder={goFolder} labels={labelsForScope} unread={unread} canCompose={accounts.some((a) => a.levels.send)}
     onCompose={() => openCompose(undefined)} onSettings={() => setPanel('settings')} onAdmin={boot.is_org_admin ? () => setPanel('admin') : undefined} onNavigate={() => setDrawer(false)} />;
 
-  return (
+  const view = (
     <div ref={shellRef} className="relative -mx-4 -mt-3 flex min-h-[26rem] overflow-hidden rounded-none border-y border-slate-200 bg-white shadow-sm sm:mx-0 sm:mt-0 sm:rounded-2xl sm:border lg:h-[calc(100dvh-3.5rem)]">
       <div className={`${focusOn ? 'hidden' : 'hidden lg:block'} w-60 shrink-0 border-r border-slate-200 bg-slate-50/50`}>{sidebar}</div>
       {drawer && <div className="fixed inset-0 z-[90] lg:hidden"><button aria-label="Stäng meny" className="absolute inset-0 bg-black/40" onClick={() => setDrawer(false)} /><div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-white pt-[env(safe-area-inset-top)] shadow-2xl">{sidebar}</div></div>}
@@ -231,6 +232,8 @@ function MailShell({ onNavigate, openThread }: { onNavigate: (page: string) => v
       {helpOpen && <HelpDialog onClose={() => setHelpOpen(false)} />}
     </div>
   );
+  // I appen (WKWebView) är #root en fast scrollyta med momentum; mejlytan ligger därför direkt under body så att listan och mejlet får egen touch-scroll.
+  return document.documentElement.classList.contains('vihem-native-shell') ? createPortal(view, document.body) : view;
 
   async function openDraft(t: ThreadSummary) {
     const account = accountOf(t.account_id); if (!account) return;
