@@ -1,6 +1,5 @@
-import { Capacitor } from '@capacitor/core';
 import { supabase } from '../../../lib/supabase';
-import { saveOrShareFile } from '../../../lib/utils';
+import { beginFileDelivery, deliverFile } from '../../../platform';
 import { base64UrlToBlob, mailApi } from '../lib/api';
 import type { MailAttachment } from '../lib/types';
 
@@ -8,18 +7,12 @@ export async function fetchAttachmentBlob(accountId: string, a: MailAttachment):
   const r = await mailApi<{ data: string }>('attachment_get', { account_id: accountId, message_id: a.messageId, attachment_id: a.id });
   return base64UrlToBlob(r.data, a.mimeType);
 }
-// WKWebView ignorerar <a download> och window.open på blob:-adresser, så i appen går bilagor via Filesystem + delningsbladet.
-const nativeName = (a: MailAttachment) => (a.filename || 'bilaga').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').slice(0, 120);
 export async function downloadAttachment(accountId: string, a: MailAttachment) {
-  const blob = await fetchAttachmentBlob(accountId, a);
-  if (Capacitor.isNativePlatform()) { await saveOrShareFile(blob, nativeName(a)); return; }
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a'); link.href = url; link.download = a.filename || 'bilaga'; document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  await deliverFile(await fetchAttachmentBlob(accountId, a), a.filename || 'bilaga', { mode: 'save' });
 }
 export async function previewAttachment(accountId: string, a: MailAttachment) {
-  const blob = await fetchAttachmentBlob(accountId, a);
-  if (Capacitor.isNativePlatform()) { await saveOrShareFile(blob, nativeName(a)); return; }
-  const url = URL.createObjectURL(blob); window.open(url, '_blank', 'noopener'); window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
+  const delivery = beginFileDelivery('open');
+  try { await delivery.deliver(await fetchAttachmentBlob(accountId, a), a.filename || 'bilaga'); } catch (e) { delivery.cancel(); throw e; }
 }
 const safeName = (s: string) => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 100) || 'bilaga';
 
