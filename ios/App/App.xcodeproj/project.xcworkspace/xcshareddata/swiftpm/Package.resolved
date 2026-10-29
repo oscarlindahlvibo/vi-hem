@@ -18,6 +18,15 @@
         "revision" : "0d81e26e828ff9582807e2339112cedf2e0fab85",
         "version" : "1.1.2"
       }
+    },
+    {
+      "identity" : "ion-ios-fileviewer",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ionic-team/ion-ios-fileviewer.git",
+      "state" : {
+        "revision" : "61c77a99659c53326993ddfa4c0e263aa124b9b8",
+        "version" : "2.0.0"
+      }
     }
   ],
   "version" : 3
