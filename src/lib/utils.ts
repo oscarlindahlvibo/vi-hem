@@ -1,8 +1,6 @@
 import type { CustomerProjectStatus } from '../types';
 import { useEffect } from 'react';
-import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
+import { deliverFile } from '../platform';
 import type { MRCategory, MRPriority, MRStatus, WOPriority, WOStatus, TimeCategory, TimeEntryType, Role } from '../types';
 
 // Same phone check useBankIdFlow uses internally to auto-pick the
@@ -512,39 +510,9 @@ export function useScrollLock(active: boolean) {
   }, [active]);
 }
 
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(String(reader.result).split(',')[1] || '');
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-/**
- * Saves/opens a file for the user. On the web this is a normal browser
- * download (a blob: URL + a clicked <a download>). WKWebView doesn't
- * support that -- <a download> on a blob: URL is silently a no-op there,
- * which is why file attachments (e.g. invoices in Epost-underlag) never
- * opened in the native app despite working fine in a browser. On native,
- * writes the file to the Filesystem cache and opens the native Share
- * sheet instead, so the user can save it to Files, open it in another
- * app, print it, etc.
- */
+/** Behålls för äldre anropare; ny kod använder deliverFile/beginFileDelivery i src/platform. */
 export async function saveOrShareFile(blob: Blob, filename: string): Promise<void> {
-  if (!Capacitor.isNativePlatform()) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-    return;
-  }
-
-  const base64 = await blobToBase64(blob);
-  const { uri } = await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Cache });
-  await Share.share({ url: uri, title: filename });
+  await deliverFile(blob, filename, { mode: 'save' });
 }
 
 // ─── time tracking: break/lunch shared display logic ──────────────────────
