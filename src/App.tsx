@@ -20,7 +20,7 @@ import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { hasUnsavedForms } from './lib/unsavedForms';
 import { Button, Modal, LoadingPage } from './components/ui';
 import { supabase } from './lib/supabase';
-import { registerNativePush, unregisterNativePush, syncNativeBadge, addPushNavigationListener } from './lib/nativePush';
+import { registerNativePush, unregisterNativePush, syncNativeBadge, addPushNavigationListener } from './platform';
 import { scrollAppTo } from './lib/utils';
 
 import { TenantDashboard } from './pages/TenantDashboard';

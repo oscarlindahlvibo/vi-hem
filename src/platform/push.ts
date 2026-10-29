@@ -1,34 +1,34 @@
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications, type Token, type ActionPerformed } from '@capacitor/push-notifications';
 import { Badge } from '@capawesome/capacitor-badge';
-import { supabase } from './supabase';
+import { supabase } from '../lib/supabase';
 
 let listenersRegistered = false;
 let activeContext: { userId: string; organisationId: string } | null = null;
 
-// Tapping a delivered push should land the user on whatever the
-// notification is about (vihem-send-push includes the notification's own
-// `link` in the push payload's data). App.tsx isn't mounted yet the moment
-// a cold-start tap is reported, so queue the link until something is
-// listening; addPushNavigationListener replays it once the app subscribes.
-let pendingPushLink: string | null = null;
-let pushNavigationListener: ((link: string) => void) | null = null;
-
-function handlePushLink(link: string | undefined) {
-  if (!link) return;
-  if (pushNavigationListener) pushNavigationListener(link);
-  else pendingPushLink = link;
+/**
+ * Länkar från tryckta pushnotiser. App.tsx är inte monterad när en kallstartstryckning rapporteras, så länken köas tills någon lyssnar
+ * och spelas upp för den första prenumeranten. Flera prenumeranter får varje länk; ingen ersätter en annan.
+ */
+export function createPushLinks() {
+  const listeners = new Set<(link: string) => void>();
+  let pending: string[] = [];
+  return {
+    emit(link: string | undefined) {
+      if (!link) return;
+      if (listeners.size === 0) { pending.push(link); return; }
+      for (const l of [...listeners]) l(link);
+    },
+    subscribe(listener: (link: string) => void): () => void {
+      listeners.add(listener);
+      if (pending.length) { const queued = pending; pending = []; for (const link of queued) listener(link); }
+      return () => { listeners.delete(listener); };
+    },
+  };
 }
 
-export function addPushNavigationListener(listener: (link: string) => void): () => void {
-  pushNavigationListener = listener;
-  if (pendingPushLink) {
-    const link = pendingPushLink;
-    pendingPushLink = null;
-    listener(link);
-  }
-  return () => { if (pushNavigationListener === listener) pushNavigationListener = null; };
-}
+const pushLinks = createPushLinks();
+export const addPushNavigationListener = pushLinks.subscribe;
 
 export async function registerNativePush(userId: string, organisationId: string | null) {
   if (!Capacitor.isNativePlatform() || !organisationId) return;
@@ -48,7 +48,7 @@ export async function registerNativePush(userId: string, organisationId: string 
       console.warn('Native push registration failed:', error);
     });
     await PushNotifications.addListener('pushNotificationActionPerformed', (action: ActionPerformed) => {
-      handlePushLink(action.notification?.data?.link);
+      pushLinks.emit(action.notification?.data?.link);
     });
     listenersRegistered = true;
   }

@@ -8,9 +8,12 @@ import { pathToFileURL } from 'node:url';
 mkdirSync('node_modules/.cache', { recursive: true });
 const dir = mkdtempSync(path.join(path.resolve('node_modules/.cache'), 'platform-check-'));
 const out = path.join(dir, 'bundle.mjs');
-const stub = { name: 'stub-capacitor', setup(b) { b.onResolve({ filter: /^@capacitor\// }, (a) => ({ path: a.path, namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const Capacitor={isNativePlatform:()=>false};export const Filesystem={};export const Directory={Cache:"CACHE"};export const Share={};', loader: 'js' })); } };
+const stub = { name: 'stub-capacitor', setup(b) { b.onResolve({ filter: /^@(capacitor|capawesome)\/|\/supabase$/ }, (a) => ({ path: a.path, namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const Capacitor={isNativePlatform:()=>false};export const Filesystem={};export const Directory={Cache:"CACHE"};export const Share={};export const PushNotifications={};export const Badge={};export const supabase={};', loader: 'js' })); } };
 await build({ entryPoints: ['src/platform/files.ts'], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error', plugins: [stub] });
 const m = await import(pathToFileURL(out).href);
+const outPush = path.join(dir, 'push.mjs');
+await build({ entryPoints: ['src/platform/push.ts'], bundle: true, format: 'esm', platform: 'node', outfile: outPush, logLevel: 'error', plugins: [stub] });
+const push = await import(pathToFileURL(outPush).href);
 let n = 0; const ok = (name) => console.log(`ok ${++n} - ${name}`);
 
 function fake({ native = false, popupBlocked = false } = {}) {
@@ -55,6 +58,12 @@ assert.equal(m.safeFilename('a/b\\c:d*e?.pdf'), 'a-b-c-d-e-.pdf'); assert.equal(
   assert.deepEqual(log.hrefs, ['https://x/y.pdf']); assert.equal(log.urls.length, 0); d.cancel(); assert.equal(log.closed, 0); ok('openUrl navigerar den förbeställda fliken och cancel stänger den inte efteråt'); }
 { const { files, log } = fake({ popupBlocked: true }); files.beginFileDelivery('open').openUrl('https://x/y.pdf');
   assert.deepEqual(log.urls, ['https://x/y.pdf']); ok('openUrl utan förbeställd flik öppnar via adaptern'); }
+
+{ const links = push.createPushLinks(); links.emit('mail/a/t1'); links.emit(undefined); const got = []; const off = links.subscribe((l) => got.push(['A', l]));
+  assert.deepEqual(got, [['A', 'mail/a/t1']]); ok('push: länk från kallstart köas och spelas upp för första lyssnaren (tomma länkar ignoreras)');
+  const got2 = []; links.subscribe((l) => got2.push(l)); links.emit('chat/x'); assert.deepEqual(got, [['A', 'mail/a/t1'], ['A', 'chat/x']]); assert.deepEqual(got2, ['chat/x']); ok('push: en andra lyssnare ersätter inte den första');
+  off(); links.emit('mail/b/t2'); assert.deepEqual(got2, ['chat/x', 'mail/b/t2']); ok('push: avregistrerad lyssnare får inga fler länkar');
+  const l2 = push.createPushLinks(); const g = []; const o = l2.subscribe((l) => g.push(l)); o(); l2.emit('x'); const late = []; l2.subscribe((l) => late.push(l)); assert.deepEqual(late, ['x']); ok('push: länk som kommer mellan avregistrering och ny prenumeration går inte förlorad'); }
 
 rmSync(dir, { recursive: true, force: true });
 console.log(`\nALLA ${n} PLATTFORMSKONTROLLER GODKÄNDA`);
