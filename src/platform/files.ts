@@ -8,6 +8,8 @@ export type FileMode = 'open' | 'save';
 /** Ett pågående leveransförsök. Skapas innan filen hämtas så att webbläsarens popup-spärr tillåter det nya fliken. */
 export interface FileDelivery {
   deliver(blob: Blob, filename: string): Promise<void>;
+  /** För filer som redan har en adress (signerad länk, Drive): öppnar den i den förbeställda fliken. */
+  openUrl(url: string): void;
   cancel(): void;
 }
 
@@ -18,6 +20,7 @@ export interface FileEnv {
   isNative(): boolean;
   share(blob: Blob, filename: string): Promise<void>;
   openWindow(): PreopenedWindow | null;
+  openUrl(url: string): void;
   download(url: string, filename: string): void;
   createUrl(blob: Blob): string;
   revokeUrl(url: string): void;
@@ -49,6 +52,7 @@ export const browserFileEnv: FileEnv = {
     await Share.share({ url: uri, title: filename });
   },
   openWindow: () => { const w = window.open('', '_blank'); if (w) w.opener = null; return w; },
+  openUrl: (url) => { window.open(url, '_blank', 'noopener,noreferrer'); },
   download: (url, filename) => { const a = document.createElement('a'); a.href = url; a.download = filename; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); },
   createUrl: (blob) => URL.createObjectURL(blob),
   revokeUrl: (url) => URL.revokeObjectURL(url),
@@ -62,6 +66,7 @@ export function createFiles(env: FileEnv) {
     let done = false;
     return {
       cancel() { if (!done) { done = true; win?.close(); } },
+      openUrl(url) { if (done) return; done = true; if (win) win.location.href = url; else env.openUrl(url); },
       async deliver(blob, rawName) {
         if (done) return; done = true;
         const filename = safeFilename(rawName);

@@ -1,7 +1,6 @@
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { inspectionFile, driveReference } from '../lib/inspections/archive';
 import React, { useState, useEffect, useCallback } from 'react';
-import { Capacitor } from '@capacitor/core';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -18,7 +17,8 @@ import {
   SearchInput,
   Tabs,
 } from '../components/ui';
-import { formatDate, saveOrShareFile, DOCUMENT_CATEGORY_LABELS, DOCUMENT_CONTRACT_STATUS_LABELS, DOCUMENT_TYPE_LABELS } from '../lib/utils';
+import { beginFileDelivery } from '../platform';
+import { formatDate, DOCUMENT_CATEGORY_LABELS, DOCUMENT_CONTRACT_STATUS_LABELS, DOCUMENT_TYPE_LABELS } from '../lib/utils';
 import { Document, Profile, Property } from '../types';
 import { FileText, Download, Upload, Trash2, FolderOpen } from 'lucide-react';
 
@@ -294,6 +294,8 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
   const downloadDocument = async (doc: Document) => {
     if(openingId)return;
     setOpeningId(doc.id);setOpenError('');
+    // Fliken öppnas redan vid klicket (popup-spärr); finally stänger den om ingen gren använde den.
+    const delivery = beginFileDelivery('open');
     try {
       if (doc.document_type === 'inspection') {
         const { data: archived, error } = await supabase.from('vihem_inspection_file_jobs').select('id').eq('document_id', doc.id).eq('state', 'verified').maybeSingle();
@@ -302,13 +304,12 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
         if (archived) {
           const data = await inspectionFile(driveReference(archived.id));
           const blob = new Blob([data], { type: 'application/pdf' });
-          if (Capacitor.isNativePlatform()) await saveOrShareFile(blob, doc.file_name || doc.title);
-          else { const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.target = '_blank'; link.rel = 'noopener'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000); }
+          await delivery.deliver(blob, doc.file_name || doc.title);
           return;
         }
       }
       if ((doc as Document & { drive_web_url?: string }).drive_web_url) {
-        window.open((doc as Document & { drive_web_url: string }).drive_web_url, '_blank', 'noopener,noreferrer');
+        delivery.openUrl((doc as Document & { drive_web_url: string }).drive_web_url);
         return;
       }
       if (doc.storage_bucket && doc.storage_path) {
@@ -317,7 +318,7 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
           .createSignedUrl(doc.storage_path, 60 * 10);
         if (error) throw error;
         if (data?.signedUrl) {
-          window.open(data.signedUrl, '_blank');
+          delivery.openUrl(data.signedUrl);
           return;
         }
       }
@@ -331,25 +332,15 @@ export function DocumentsPage({ onNavigate: _onNavigate }: DocumentsPageProps) {
           const response = await fetch(doc.file_url);
           if (!response.ok) throw new Error('Dokumentet kunde inte läsas.');
           const blob = await response.blob();
-          if (Capacitor.isNativePlatform()) {
-            await saveOrShareFile(blob, doc.file_name || doc.title);
-          } else {
-            const blobUrl = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = blobUrl;
-            link.target = '_blank';
-            link.rel = 'noopener';
-            link.click();
-            window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-          }
+          await delivery.deliver(blob, doc.file_name || doc.title);
         } else {
-          window.open(doc.file_url, '_blank');
+          delivery.openUrl(doc.file_url);
         }
       }
     } catch (error) {
       console.error('Error opening document:', error);
       setOpenError('Dokumentet kunde inte öppnas. Försök igen eller kontakta administratören.');
-    } finally {setOpeningId(null);}
+    } finally {delivery.cancel();setOpeningId(null);}
   };
 
   const deleteDocument = async (doc: Document) => {
