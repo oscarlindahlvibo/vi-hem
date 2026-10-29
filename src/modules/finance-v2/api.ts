@@ -426,9 +426,8 @@ export async function listMyRentInvoices(): Promise<AccountedInvoiceLink[]> {
 /**
  * Fetches the invoice PDF via vihem-accounted-tenant-invoices (the Accounted
  * API key never reaches the browser) and returns the raw Blob. The caller
- * decides how to present it -- window.open on a blob: URL works fine on the
- * web, but not in the native app's WKWebView (see saveOrShareFile in
- * lib/utils.ts), so callers should branch on Capacitor.isNativePlatform().
+ * decides how to present it, via beginFileDelivery/deliverFile in
+ * src/platform (which handles the native app and the web).
  */
 export async function fetchMyInvoicePdfBlob(invoiceLinkId: string): Promise<Blob> {
   const { data: { session } } = await supabase.auth.getSession();

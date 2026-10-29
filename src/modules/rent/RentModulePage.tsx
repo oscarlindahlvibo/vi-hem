@@ -1,11 +1,11 @@
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Capacitor } from '@capacitor/core';
 import { Building2, Users, SlidersHorizontal, CalendarClock, RefreshCw, Plus, FileText, ArrowLeft } from 'lucide-react';
 import { Badge, Button, Card, EmptyState, Input, LoadingPage, Modal, PageHeader, Select } from '../../components/ui';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { formatDate, saveOrShareFile } from '../../lib/utils';
+import { formatDate } from '../../lib/utils';
+import { beginFileDelivery } from '../../platform';
 import { createOrGetRentBillingRun, createRentBillingInvoices, updateBillingAdjustmentStatus } from '../finance-v2/api';
 import { loadRentCompanies, loadRentOverview, saveRentChange, cancelRentChange, getRentInvoicePdf, loadInvoiceCustomers } from './api';
 import { rentMoney as formatCurrency } from './money';
@@ -139,14 +139,10 @@ export function RentModulePage({ initialTab = 'billing', onNavigate }: { initial
   const openInvoice = async (id: string, number: string, accounted: boolean) => {
     if (!ready) return;
     setOpenInvoiceId(id); setError('');
-    // Open during the click to avoid Safari blocking a tab after async fetch.
-    const win = !Capacitor.isNativePlatform() ? window.open('', '_blank') : null;
-    if (win) win.opener = null;
-    try {
-      const blob = await getRentInvoicePdf(companyId, id, accounted);
-      if (Capacitor.isNativePlatform()) await saveOrShareFile(blob, `faktura-${number}.pdf`);
-      else { const url = URL.createObjectURL(blob); if (win) win.location.href = url; else await saveOrShareFile(blob, `faktura-${number}.pdf`); setTimeout(() => URL.revokeObjectURL(url), 60_000); }
-    } catch (err) { win?.close(); setError(errorText(err)); }
+    // Fliken öppnas redan vid klicket så att Safari inte blockerar den efter den asynkrona hämtningen.
+    const delivery = beginFileDelivery('open');
+    try { await delivery.deliver(await getRentInvoicePdf(companyId, id, accounted), `faktura-${number}.pdf`); }
+    catch (err) { delivery.cancel(); setError(errorText(err)); }
     finally { setOpenInvoiceId(''); }
   };
   const handleSaveChange = async (event: React.FormEvent) => {

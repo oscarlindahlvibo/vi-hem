@@ -10,9 +10,9 @@ import { betaExternalRestricted, betaInvoiceNotice } from '../lib/betaCapabiliti
 // up here -- there is no fallback to legacy vihem_invoices, since that path
 // isn't linked to a tenant the way vihem_accounted_invoice_links is.
 import { useCallback, useEffect, useState, useMemo } from 'react';
-import { Capacitor } from '@capacitor/core';
 import { Badge, Card, EmptyState, LoadingPage, PageHeader, Button, SearchInput, Tabs } from '../components/ui';
-import { formatCurrency, formatDate, saveOrShareFile } from '../lib/utils';
+import { formatCurrency, formatDate } from '../lib/utils';
+import { beginFileDelivery } from '../platform';
 import { fetchMyInvoicePdfBlob, listMyRentInvoices } from '../modules/finance-v2/api';
 import type { AccountedInvoiceLink } from '../modules/finance-v2/types';
 import { FileText, Receipt } from 'lucide-react';
@@ -69,18 +69,11 @@ export function TenantInvoicesPage() {
     if(openingId)return;
     setOpeningId(invoiceId);
     setError('');setFailedPdf(null);
+    const delivery = beginFileDelivery('open');
     try {
-      const blob = await fetchMyInvoicePdfBlob(invoiceId);
-      if (Capacitor.isNativePlatform()) {
-        await saveOrShareFile(blob, `faktura-${invoiceNumber}.pdf`);
-      } else {
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank', 'noopener,noreferrer');
-        // Revoke after a delay rather than immediately: the new tab needs
-        // the blob: URL to still be valid while it loads the PDF.
-        setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      }
+      await delivery.deliver(await fetchMyInvoicePdfBlob(invoiceId), `faktura-${invoiceNumber}.pdf`);
     } catch (err) {
+      delivery.cancel();
       setError('Fakturan kunde inte öppnas. Försök igen.');setFailedPdf({id:invoiceId,number:invoiceNumber});
     } finally {
       setOpeningId(null);

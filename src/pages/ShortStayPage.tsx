@@ -8,7 +8,8 @@ import {
 import { supabase } from '../lib/supabase';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useAuth } from '../contexts/AuthContext';
-import { formatDateTime, saveOrShareFile } from '../lib/utils';
+import { formatDateTime } from '../lib/utils';
+import { deliverFile } from '../platform';
 import { defaultShortStayCompany, makeShortStayReceiptPdf, type ReceiptPdfInput } from '../lib/shortStayReceipt';
 import { Capacitor } from '@capacitor/core';
 import { getShortStayChannelMeta } from '../lib/shortStayChannels';
@@ -1430,7 +1431,7 @@ export function ShortStayPage({ onNavigate }: ShortStayPageProps) {
         const file=new File([blob],receiptPreview.filename,{type:'application/pdf'});
         if (!navigator.canShare?.({files:[file]})) throw new Error('Din webbläsare kan inte dela PDF-filer. Spara PDF och bifoga den i ditt mejl.');
         await navigator.share({files:[file],title:receiptPreview.pdf.title});
-      } else { await saveOrShareFile(blob,receiptPreview.filename); }
+      } else { await deliverFile(blob,receiptPreview.filename,{mode:'save'}); }
     } catch(failure) {
       if (!(failure instanceof Error && failure.name==='AbortError')) setReceiptExportError(failure instanceof Error?failure.message:'Kunde inte skapa PDF. Försök igen.');
     } finally {setReceiptExporting(false);}

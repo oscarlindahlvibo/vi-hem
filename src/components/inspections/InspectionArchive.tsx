@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FileText, RefreshCw, Download } from 'lucide-react';
-import { Capacitor } from '@capacitor/core';
 import { supabase } from '../../lib/supabase';
 import { inspectionFile, driveReference, retryInspectionArchive } from '../../lib/inspections/archive';
-import { saveOrShareFile } from '../../lib/utils';
+import { deliverFile } from '../../platform';
 import { Button } from '../ui';
 type ArchiveFile = { id: string; kind: string; filename: string; state: string; byte_size: number; version: number; created_at: string };
 export function InspectionArchive({ inspection, canRetry }: { inspection: string; canRetry: boolean }) {
@@ -18,8 +17,7 @@ export function InspectionArchive({ inspection, canRetry }: { inspection: string
   try {
    const response = await inspectionFile(driveReference(file.id));
    const blob = new Blob([response], { type: file.kind === 'protocol' ? 'application/pdf' : 'image/jpeg' });
-   if (Capacitor.isNativePlatform()) await saveOrShareFile(blob, file.filename);
-   else { const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = file.filename; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000); }
+   await deliverFile(blob, file.filename, { mode: 'save' });
   } catch { setError('Filen kunde inte öppnas. Kontrollera anslutningen och försök igen.'); }
   finally { setBusy(''); }
  }
