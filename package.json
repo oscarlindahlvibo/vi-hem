@@ -52,6 +52,7 @@
     "@capacitor/browser": "^8.0.4",
     "@capacitor/cli": "^8.5.0",
     "@capacitor/core": "^8.5.0",
+    "@capacitor/file-viewer": "^2.0.4",
     "@capacitor/filesystem": "^8.1.3",
     "@capacitor/ios": "^8.5.0",
     "@capacitor/push-notifications": "^8.1.2",

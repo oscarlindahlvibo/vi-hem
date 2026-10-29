@@ -70,7 +70,7 @@ function MailShell({ onNavigate, openThread }: { onNavigate: (page: string) => v
     };
     fit(); window.addEventListener('resize', fit); window.visualViewport?.addEventListener('resize', fit); const t = window.setTimeout(fit, 300);
     return () => { document.documentElement.removeAttribute('data-mail-fullscreen'); window.removeEventListener('resize', fit); window.visualViewport?.removeEventListener('resize', fit); window.clearTimeout(t); };
-  }, [panel, focusOn, portal]);
+  }, [panel, focusOn, portal, boot !== null]);
   const composeKey = useRef(1); const searchRef = useRef<HTMLInputElement>(null); const loadedThread = useRef<LoadedThread | null>(null);
 
   const loadBoot = useCallback(async () => {

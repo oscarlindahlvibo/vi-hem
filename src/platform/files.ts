@@ -1,8 +1,9 @@
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { FileViewer } from '@capacitor/file-viewer';
 
-/** `open`: användaren vill titta på filen. `save`: användaren vill ha den med sig. I appen blir båda delningsbladet. */
+/** `open`: användaren vill titta på filen (i appen iOS förhandsvisning med egen delaknapp). `save`: användaren vill ha den med sig (delningsbladet). */
 export type FileMode = 'open' | 'save';
 
 /** Ett pågående leveransförsök. Skapas innan filen hämtas så att webbläsarens popup-spärr tillåter det nya fliken. */
@@ -19,6 +20,7 @@ interface PreopenedWindow { opener: unknown; location: { href: string }; close()
 export interface FileEnv {
   isNative(): boolean;
   share(blob: Blob, filename: string): Promise<void>;
+  preview(blob: Blob, filename: string): Promise<void>;
   openWindow(): PreopenedWindow | null;
   openUrl(url: string): void;
   download(url: string, filename: string): void;
@@ -51,6 +53,10 @@ export const browserFileEnv: FileEnv = {
     const { uri } = await Filesystem.writeFile({ path: filename, data: await blobToBase64(blob), directory: Directory.Cache });
     await Share.share({ url: uri, title: filename });
   },
+  preview: async (blob, filename) => {
+    const { uri } = await Filesystem.writeFile({ path: filename, data: await blobToBase64(blob), directory: Directory.Cache });
+    await FileViewer.openDocumentFromLocalPath({ path: uri });
+  },
   openWindow: () => { const w = window.open('', '_blank'); if (w) w.opener = null; return w; },
   openUrl: (url) => { window.open(url, '_blank', 'noopener,noreferrer'); },
   download: (url, filename) => { const a = document.createElement('a'); a.href = url; a.download = filename; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); },
@@ -70,7 +76,12 @@ export function createFiles(env: FileEnv) {
       async deliver(blob, rawName) {
         if (done) return; done = true;
         const filename = safeFilename(rawName);
-        if (native) { await env.share(blob, filename); return; }
+        if (native) {
+          if (mode === 'save') { await env.share(blob, filename); return; }
+          // Förhandsvisningen kan avvisa filtyper den inte känner igen; då är delningsbladet en säker reträtt.
+          try { await env.preview(blob, filename); } catch { await env.share(blob, filename); }
+          return;
+        }
         const url = env.createUrl(blob);
         try {
           if (win && VIEWABLE.test(blob.type)) win.location.href = url;

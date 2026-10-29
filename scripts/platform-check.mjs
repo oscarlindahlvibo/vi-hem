@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 mkdirSync('node_modules/.cache', { recursive: true });
 const dir = mkdtempSync(path.join(path.resolve('node_modules/.cache'), 'platform-check-'));
 const out = path.join(dir, 'bundle.mjs');
-const stub = { name: 'stub-capacitor', setup(b) { b.onResolve({ filter: /^@(capacitor|capawesome)\/|\/supabase$/ }, (a) => ({ path: a.path, namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const Capacitor={isNativePlatform:()=>false};export const Filesystem={};export const Directory={Cache:"CACHE"};export const Share={};export const PushNotifications={};export const Badge={};export const supabase={};', loader: 'js' })); } };
+const stub = { name: 'stub-capacitor', setup(b) { b.onResolve({ filter: /^@(capacitor|capawesome)\/|\/supabase$/ }, (a) => ({ path: a.path, namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const Capacitor={isNativePlatform:()=>false};export const Filesystem={};export const Directory={Cache:"CACHE"};export const Share={};export const FileViewer={};export const PushNotifications={};export const Badge={};export const supabase={};', loader: 'js' })); } };
 await build({ entryPoints: ['src/platform/files.ts'], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error', plugins: [stub] });
 const m = await import(pathToFileURL(out).href);
 const outPush = path.join(dir, 'push.mjs');
@@ -16,11 +16,12 @@ await build({ entryPoints: ['src/platform/push.ts'], bundle: true, format: 'esm'
 const push = await import(pathToFileURL(outPush).href);
 let n = 0; const ok = (name) => console.log(`ok ${++n} - ${name}`);
 
-function fake({ native = false, popupBlocked = false } = {}) {
-  const log = { shared: [], downloads: [], opened: 0, closed: 0, hrefs: [], urls: [], revoked: [], timers: [] };
+function fake({ native = false, popupBlocked = false, failPreview = false } = {}) {
+  const log = { shared: [], previewed: [], downloads: [], opened: 0, closed: 0, hrefs: [], urls: [], revoked: [], timers: [] };
   const env = {
     isNative: () => native,
     share: async (_b, name) => { log.shared.push(name); },
+    preview: async (_b, name) => { if (failPreview) throw new Error('x'); log.previewed.push(name); },
     openWindow: () => { if (popupBlocked) return null; log.opened++; return { opener: 1, location: { set href(v) { log.hrefs.push(v); } }, close: () => { log.closed++; } }; },
     openUrl: (u) => { log.urls.push(u); },
     download: (url, name) => { log.downloads.push([url, name]); },
@@ -34,7 +35,9 @@ const xlsx = new Blob(['x'], { type: 'application/octet-stream' });
 assert.equal(m.safeFilename('a/b\\c:d*e?.pdf'), 'a-b-c-d-e-.pdf'); assert.equal(m.safeFilename(''), 'fil'); assert.equal(m.safeFilename('...'), 'fil'); assert.equal(m.safeFilename('x'.repeat(300)).length, 120); ok('filnamn tvättas');
 
 { const { files, log } = fake({ native: true }); await files.deliverFile(pdf, 'a/b.pdf', { mode: 'open' }); await files.deliverFile(pdf, 'c.pdf');
-  assert.deepEqual(log.shared, ['a-b.pdf', 'c.pdf']); assert.equal(log.opened, 0); assert.equal(log.downloads.length, 0); ok('appen: open och save går båda via delningsbladet'); }
+  assert.deepEqual(log.previewed, ['a-b.pdf']); assert.deepEqual(log.shared, ['c.pdf']); assert.equal(log.opened, 0); assert.equal(log.downloads.length, 0); ok('appen: open ger förhandsvisning, save ger delningsbladet'); }
+{ const { files, log } = fake({ native: true, failPreview: true }); await files.deliverFile(pdf, 'x.dwg', { mode: 'open' });
+  assert.deepEqual(log.shared, ['x.dwg']); ok('appen: misslyckad förhandsvisning faller tillbaka på delningsbladet'); }
 
 { const { files, log } = fake(); const d = files.beginFileDelivery('open'); assert.equal(log.opened, 1); await d.deliver(pdf, 'f.pdf');
   assert.deepEqual(log.hrefs, ['blob:x']); assert.equal(log.downloads.length, 0); ok('webben: open pre-öppnar fliken innan filen hämtats och visar PDF där'); }
